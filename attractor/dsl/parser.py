@@ -1,0 +1,385 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import re
+from typing import Dict, List, Optional
+
+from .models import (
+    DURATION_UNITS,
+    DotAttribute,
+    DotEdge,
+    DotGraph,
+    DotNode,
+    DotValueType,
+    Duration,
+    parse_typed_value,
+)
+
+
+NODE_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+class DotParseError(ValueError):
+    def __init__(self, message: str, line: int):
+        super().__init__(f"line {line}: {message}")
+        self.line = line
+
+
+@dataclass
+class Token:
+    kind: str
+    value: str
+    line: int
+
+
+@dataclass
+class _Scope:
+    node_defaults: Dict[str, DotAttribute] = field(default_factory=dict)
+    edge_defaults: Dict[str, DotAttribute] = field(default_factory=dict)
+
+    def child(self) -> "_Scope":
+        return _Scope(
+            node_defaults=dict(self.node_defaults),
+            edge_defaults=dict(self.edge_defaults),
+        )
+
+
+def parse_dot(source: str) -> DotGraph:
+    tokens = _tokenize(source)
+    parser = _Parser(tokens)
+    graph = parser.parse_graph()
+    parser.expect("EOF")
+    return graph
+
+
+class _Parser:
+    def __init__(self, tokens: List[Token]):
+        self.tokens = tokens
+        self.pos = 0
+
+    def current(self) -> Token:
+        return self.tokens[self.pos]
+
+    def peek(self, n: int = 1) -> Token:
+        return self.tokens[self.pos + n]
+
+    def advance(self) -> Token:
+        tok = self.current()
+        self.pos += 1
+        return tok
+
+    def accept(self, kind: str, value: Optional[str] = None) -> Optional[Token]:
+        tok = self.current()
+        if tok.kind != kind:
+            return None
+        if value is not None and tok.value != value:
+            return None
+        self.pos += 1
+        return tok
+
+    def expect(self, kind: str, value: Optional[str] = None) -> Token:
+        tok = self.current()
+        if tok.kind != kind:
+            raise DotParseError(f"expected {kind}, got {tok.kind}", tok.line)
+        if value is not None and tok.value != value:
+            raise DotParseError(f"expected {value}, got {tok.value}", tok.line)
+        self.pos += 1
+        return tok
+
+    def parse_graph(self) -> DotGraph:
+        first = self.current()
+        if first.kind == "IDENT" and first.value == "strict":
+            raise DotParseError("strict modifier is not supported", first.line)
+
+        self.expect("IDENT", "digraph")
+        graph_id_tok = self.expect("IDENT")
+        graph = DotGraph(graph_id=graph_id_tok.value)
+        self.expect("LBRACE")
+
+        scope = _Scope()
+        while not self.accept("RBRACE"):
+            self.parse_statement(graph, scope)
+            self.accept("SEMI")
+
+        return graph
+
+    def parse_statement(self, graph: DotGraph, scope: _Scope) -> None:
+        tok = self.current()
+
+        if tok.kind == "IDENT" and tok.value == "subgraph":
+            self.advance()
+            # Optional subgraph id.
+            if self.current().kind == "IDENT":
+                self.advance()
+            self.expect("LBRACE")
+            child_scope = scope.child()
+            while not self.accept("RBRACE"):
+                self.parse_statement(graph, child_scope)
+                self.accept("SEMI")
+            return
+
+        if tok.kind == "IDENT" and tok.value == "graph" and self.peek().kind == "LBRACKET":
+            self.advance()
+            attrs = self.parse_attr_block()
+            graph.graph_attrs.update(attrs)
+            return
+
+        if tok.kind == "IDENT" and tok.value == "node" and self.peek().kind == "LBRACKET":
+            self.advance()
+            scope.node_defaults.update(self.parse_attr_block())
+            return
+
+        if tok.kind == "IDENT" and tok.value == "edge" and self.peek().kind == "LBRACKET":
+            self.advance()
+            scope.edge_defaults.update(self.parse_attr_block())
+            return
+
+        if tok.kind == "IDENT" and self.peek().kind == "EQ":
+            key_tok = self.advance()
+            self.expect("EQ")
+            value, value_type, line = self.parse_value()
+            graph.graph_attrs[key_tok.value] = DotAttribute(
+                key=key_tok.value,
+                value=value,
+                value_type=value_type,
+                line=line,
+            )
+            return
+
+        if tok.kind == "IDENT":
+            self.parse_node_or_edge(graph, scope)
+            return
+
+        raise DotParseError(f"unexpected token {tok.kind}:{tok.value}", tok.line)
+
+    def parse_node_or_edge(self, graph: DotGraph, scope: _Scope) -> None:
+        first = self.expect("IDENT")
+        self._validate_node_id(first)
+
+        if self.accept("ARROW"):
+            chain_ids = [first]
+            next_tok = self.expect("IDENT")
+            self._validate_node_id(next_tok)
+            chain_ids.append(next_tok)
+            while self.accept("ARROW"):
+                next_tok = self.expect("IDENT")
+                self._validate_node_id(next_tok)
+                chain_ids.append(next_tok)
+
+            stmt_attrs = self.parse_attr_block() if self.current().kind == "LBRACKET" else {}
+            effective = dict(scope.edge_defaults)
+            effective.update(stmt_attrs)
+
+            for idx in range(len(chain_ids) - 1):
+                src = chain_ids[idx]
+                dst = chain_ids[idx + 1]
+                graph.edges.append(
+                    DotEdge(
+                        source=src.value,
+                        target=dst.value,
+                        attrs=dict(effective),
+                        line=src.line,
+                    )
+                )
+            return
+
+        stmt_attrs = self.parse_attr_block() if self.current().kind == "LBRACKET" else {}
+        effective = dict(scope.node_defaults)
+        effective.update(stmt_attrs)
+
+        existing = graph.nodes.get(first.value)
+        if existing:
+            merged = dict(existing.attrs)
+            merged.update(effective)
+            existing.attrs = merged
+            return
+
+        graph.nodes[first.value] = DotNode(node_id=first.value, attrs=effective, line=first.line)
+
+    def parse_attr_block(self) -> Dict[str, DotAttribute]:
+        self.expect("LBRACKET")
+        attrs: Dict[str, DotAttribute] = {}
+
+        if self.accept("RBRACKET"):
+            return attrs
+
+        while True:
+            key_tok = self.expect("IDENT")
+            self.expect("EQ")
+            value, value_type, value_line = self.parse_value()
+            attrs[key_tok.value] = DotAttribute(
+                key=key_tok.value,
+                value=value,
+                value_type=value_type,
+                line=value_line,
+            )
+
+            if self.accept("RBRACKET"):
+                break
+            if not self.accept("COMMA"):
+                tok = self.current()
+                raise DotParseError("commas are required between attributes", tok.line)
+
+        return attrs
+
+    def parse_value(self) -> tuple[object, DotValueType, int]:
+        tok = self.current()
+
+        if tok.kind == "INT" and self.peek().kind == "IDENT" and self.peek().value in DURATION_UNITS:
+            int_tok = self.advance()
+            unit_tok = self.advance()
+            raw = f"{int_tok.value}{unit_tok.value}"
+            return Duration(raw=raw, value=int(int_tok.value), unit=unit_tok.value), DotValueType.DURATION, int_tok.line
+
+        if tok.kind in {"STRING", "INT", "FLOAT", "IDENT"}:
+            val_tok = self.advance()
+            if val_tok.kind == "IDENT":
+                lowered = val_tok.value.lower()
+                if lowered in {"true", "false"}:
+                    value, value_type = parse_typed_value(val_tok.value, val_tok.kind)
+                    return value, value_type, val_tok.line
+                # Bare identifiers are accepted as string-like enums (e.g. rankdir=LR).
+                return val_tok.value, DotValueType.STRING, val_tok.line
+
+            value, value_type = parse_typed_value(val_tok.value, val_tok.kind)
+            return value, value_type, val_tok.line
+
+        raise DotParseError(f"invalid value token {tok.kind}:{tok.value}", tok.line)
+
+    def _validate_node_id(self, token: Token) -> None:
+        if not NODE_ID_RE.match(token.value):
+            raise DotParseError(
+                f"invalid node id '{token.value}', must match [A-Za-z_][A-Za-z0-9_]*",
+                token.line,
+            )
+
+
+def _tokenize(source: str) -> List[Token]:
+    tokens: List[Token] = []
+    i = 0
+    line = 1
+    n = len(source)
+
+    while i < n:
+        ch = source[i]
+
+        # Whitespace
+        if ch in " \t\r":
+            i += 1
+            continue
+        if ch == "\n":
+            line += 1
+            i += 1
+            continue
+
+        # Line comments: // ...
+        if ch == "/" and i + 1 < n and source[i + 1] == "/":
+            i += 2
+            while i < n and source[i] != "\n":
+                i += 1
+            continue
+
+        # Block comments: /* ... */
+        if ch == "/" and i + 1 < n and source[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (source[i] == "*" and source[i + 1] == "/"):
+                if source[i] == "\n":
+                    line += 1
+                i += 1
+            if i + 1 >= n:
+                raise DotParseError("unterminated block comment", line)
+            i += 2
+            continue
+
+        # Operators / punctuation
+        if ch == "-" and i + 1 < n and source[i + 1] == ">":
+            tokens.append(Token("ARROW", "->", line))
+            i += 2
+            continue
+
+        if ch == "-" and i + 1 < n and source[i + 1] == "-":
+            raise DotParseError("undirected edges ('--') are not supported", line)
+
+        punct = {
+            "{": "LBRACE",
+            "}": "RBRACE",
+            "[": "LBRACKET",
+            "]": "RBRACKET",
+            ",": "COMMA",
+            ";": "SEMI",
+            "=": "EQ",
+        }
+        if ch in punct:
+            tokens.append(Token(punct[ch], ch, line))
+            i += 1
+            continue
+
+        # String literal
+        if ch == '"':
+            start_line = line
+            i += 1
+            value_chars: List[str] = []
+            while i < n:
+                c = source[i]
+                if c == "\\":
+                    if i + 1 >= n:
+                        raise DotParseError("unterminated escape sequence", start_line)
+                    esc = source[i + 1]
+                    mapping = {
+                        '"': '"',
+                        "n": "\n",
+                        "t": "\t",
+                        "\\": "\\",
+                    }
+                    if esc not in mapping:
+                        raise DotParseError(f"unsupported escape \\{esc}", line)
+                    value_chars.append(mapping[esc])
+                    i += 2
+                    continue
+                if c == '"':
+                    i += 1
+                    break
+                if c == "\n":
+                    line += 1
+                value_chars.append(c)
+                i += 1
+            else:
+                raise DotParseError("unterminated string literal", start_line)
+
+            tokens.append(Token("STRING", "".join(value_chars), start_line))
+            continue
+
+        # Number: int/float with optional leading sign
+        if ch.isdigit() or (
+            ch == "-" and i + 1 < n and source[i + 1].isdigit()
+        ):
+            start = i
+            start_line = line
+            i += 1
+            while i < n and source[i].isdigit():
+                i += 1
+
+            if i < n and source[i] == ".":
+                i += 1
+                if i >= n or not source[i].isdigit():
+                    raise DotParseError("invalid float literal", start_line)
+                while i < n and source[i].isdigit():
+                    i += 1
+                tokens.append(Token("FLOAT", source[start:i], start_line))
+            else:
+                tokens.append(Token("INT", source[start:i], start_line))
+            continue
+
+        # Identifier / qualified identifier
+        if ch.isalpha() or ch == "_":
+            start = i
+            i += 1
+            while i < n and (source[i].isalnum() or source[i] in "_."):
+                i += 1
+            tokens.append(Token("IDENT", source[start:i], line))
+            continue
+
+        raise DotParseError(f"unexpected character '{ch}'", line)
+
+    tokens.append(Token("EOF", "", line))
+    return tokens
