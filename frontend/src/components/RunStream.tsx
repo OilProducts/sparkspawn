@@ -15,6 +15,7 @@ export function RunStream() {
     const setNodeStatus = useStore((state) => state.setNodeStatus)
     const setHumanGate = useStore((state) => state.setHumanGate)
     const clearHumanGate = useStore((state) => state.clearHumanGate)
+    const resetNodeStatuses = useStore((state) => state.resetNodeStatuses)
     const humanGate = useStore((state) => state.humanGate)
 
     useEffect(() => {
@@ -47,6 +48,10 @@ export function RunStream() {
                         flowName: data.flow_name,
                     })
                 }
+                if (data.type === 'run_meta') {
+                    resetNodeStatuses()
+                    clearHumanGate()
+                }
             } catch {
                 // ignore malformed events
             }
@@ -55,7 +60,7 @@ export function RunStream() {
         return () => {
             ws.close()
         }
-    }, [addLog, setNodeStatus, setHumanGate, clearHumanGate, humanGate])
+    }, [addLog, setNodeStatus, setHumanGate, clearHumanGate, resetNodeStatuses, humanGate])
 
     return null
 }
