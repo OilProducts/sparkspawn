@@ -31,7 +31,7 @@ Open question: None (node-expanding panel chosen).
 2. Live node status updates during execution. **DONE**
 DoD: Nodes reflect running/success/fail based on `/ws` state messages, and UI resets appropriately between runs.
 
-3. Edge attributes: display and editing.
+3. Edge attributes: display and editing. **DONE**
 DoD: User can view edge attributes (label/condition/weight/etc.) and edit them if required; changes persist to DOT; selection is obvious.
 Open question: None (edge attributes are editable).
 
