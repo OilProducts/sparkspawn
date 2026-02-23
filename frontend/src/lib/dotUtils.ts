@@ -25,7 +25,7 @@ export function generateDot(flowName: string, nodes: Node[], edges: Edge[]): str
         const shapeValue = typeof n.data.shape === 'string' ? n.data.shape : '';
         const promptValue = typeof n.data.prompt === 'string' ? n.data.prompt : '';
 
-        const label = `label="${escapeDotString(labelValue)}"`;
+        const label = `"${escapeDotString(labelValue)}"`;
         const shape = shapeValue ? `shape=${formatAttrValue(shapeValue)}` : '';
         const prompt = promptValue ? `prompt="${escapeDotString(promptValue)}"` : '';
 

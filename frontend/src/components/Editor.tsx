@@ -42,6 +42,10 @@ interface PreviewResponse {
     }
 }
 
+function normalizeLegacyDot(content: string): string {
+    return content.replace(/\blabel=label=/g, 'label=');
+}
+
 export function Editor() {
     const { activeFlow, viewMode, setSelectedNodeId } = useStore();
     const [nodes, setNodes] = useNodesState<Node>([]);
@@ -64,10 +68,19 @@ export function Editor() {
         fetch(`/api/flows/${activeFlow}`)
             .then((res) => res.json())
             .then((data) => {
+                const normalizedContent = normalizeLegacyDot(data.content);
+                if (normalizedContent !== data.content) {
+                    fetch('/api/flows', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: activeFlow, content: normalizedContent }),
+                    }).catch(console.error);
+                }
+
                 return fetch('/preview', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ flow_content: data.content }),
+                    body: JSON.stringify({ flow_content: normalizedContent }),
                 });
             })
             .then((res) => res.json())
