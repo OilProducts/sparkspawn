@@ -35,7 +35,7 @@ DoD: Nodes reflect running/success/fail based on `/ws` state messages, and UI re
 DoD: User can view edge attributes (label/condition/weight/etc.) and edit them if required; changes persist to DOT; selection is obvious.
 Open question: None (edge attributes are editable).
 
-4. Graph settings drawer inside canvas.
+4. Graph settings drawer inside canvas. **DONE**
 DoD: A graph-scoped settings drawer exists inside the canvas top bar, containing model/path inputs and graph-level attributes (goal, label, stylesheet, retry targets, default retry, default fidelity).
 
 5. Advanced node attributes UI.
