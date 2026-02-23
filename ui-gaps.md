@@ -6,8 +6,8 @@ This file captures UI features implied by `attractor-spec.md` that are not yet i
 The UI currently covers basic node editing, flow loading/saving, and run initiation. Several spec-backed features are missing or only partially represented.
 
 **Decisions Captured From User**
-1. Human gate UI should be indicated in the flow list and in the graph during execution. Likely node expansion, but still undecided between expansion vs modal.
-2. Edge attributes may be edit-or-view depending on whether humans need to set them. Needs clarification.
+1. Human gate UI should be indicated in the flow list and in the graph during execution. Use a node-expanding panel for input.
+2. Edge attributes are user-editable.
 3. Graph-level settings should live in a top-bar drawer within the graph canvas, not the app shell. Model + path inputs should move there.
 4. Advanced node fields should be behind a toggle in the node edit interface.
 5. Validation feedback should be inline annotations.
@@ -26,14 +26,14 @@ The UI currently covers basic node editing, flow loading/saving, and run initiat
 1. Human gate UI end-to-end.
 DoD: Flow list shows a clear human-input-needed indicator; executing graph highlights/expands the gate node; user can choose an option; selection routes execution; handler no longer auto-approves for active UI runs.
 Notes: Requires a UI surface for questions and a backend delivery/answer path.
-Open question: Node-expanding editor vs modal overlay for prompt/choices.
+Open question: None (node-expanding panel chosen).
 
 2. Live node status updates during execution.
 DoD: Nodes reflect running/success/fail based on `/ws` state messages, and UI resets appropriately between runs.
 
 3. Edge attributes: display and editing.
 DoD: User can view edge attributes (label/condition/weight/etc.) and edit them if required; changes persist to DOT; selection is obvious.
-Open question: Are these human-editable or read-only display?
+Open question: None (edge attributes are editable).
 
 4. Graph settings drawer inside canvas.
 DoD: A graph-scoped settings drawer exists inside the canvas top bar, containing model/path inputs and graph-level attributes (goal, label, stylesheet, retry targets, default retry, default fidelity).
@@ -49,7 +49,7 @@ DoD: Run/Pause/Resume/Cancel controls appear inside the canvas footer; controls 
 
 8. Manager loop handler (`house`) UI exposure.
 DoD: If handler exists, UI allows selecting `house` (manager loop) with required fields; if not, remove it from UI options and document as not supported.
-Open question: Should we build the UI now or defer until handler exists?
+Open question: Defer manager loop (`house`) UI until handler exists.
 
 9. Model stylesheet editing/inspection.
 DoD: UI for viewing/editing `model_stylesheet` with basic lint feedback; stylesheet persists to DOT graph attributes.
