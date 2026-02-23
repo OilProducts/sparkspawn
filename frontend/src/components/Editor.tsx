@@ -231,7 +231,7 @@ export function Editor() {
         if (previewTimer.current) {
             window.clearTimeout(previewTimer.current);
         }
-        previewTimer.current = window.setTimeout(() => requestPreview(dot), 250);
+        previewTimer.current = window.setTimeout(() => requestPreview(dot), 600);
 
         return () => {
             if (previewTimer.current) {

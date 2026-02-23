@@ -1,7 +1,7 @@
 import { useStore } from "@/store"
 import { FilePlus, Trash2 } from "lucide-react"
-import { useEffect, useState } from "react"
-import { useReactFlow, type Edge, type Node } from "@xyflow/react"
+import { useEffect, useRef, useState } from "react"
+import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } from "@xyflow/react"
 import { generateDot } from "@/lib/dotUtils"
 
 export function Sidebar() {
@@ -12,6 +12,9 @@ export function Sidebar() {
     const [flows, setFlows] = useState<string[]>([])
     const [showAdvanced, setShowAdvanced] = useState(false)
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
+    const nodes = useReactFlowStore((state) => state.nodes)
+    const edges = useReactFlowStore((state) => state.edges)
+    const saveTimer = useRef<number | null>(null)
 
     const loadFlows = () => {
         fetch('/api/flows')
@@ -60,6 +63,23 @@ export function Sidebar() {
         await loadFlows();
     };
 
+    const scheduleSave = (nextNodes: Node[], nextEdges: Edge[]) => {
+        if (!activeFlow) return
+
+        if (saveTimer.current) {
+            window.clearTimeout(saveTimer.current)
+        }
+
+        saveTimer.current = window.setTimeout(() => {
+            const dot = generateDot(activeFlow, nextNodes, nextEdges, graphAttrs)
+            fetch('/api/flows', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: activeFlow, content: dot })
+            }).catch(console.error)
+        }, 600)
+    }
+
     const handlePropertyChange = (key: string, value: string | boolean) => {
         if (!selectedNodeId || !activeFlow) return;
 
@@ -74,21 +94,13 @@ export function Sidebar() {
             return newNodes;
         });
 
-        // Auto-save
-        setTimeout(() => {
-            if (newNodes.length > 0) {
-                const dot = generateDot(activeFlow, newNodes, getEdges(), graphAttrs);
-                fetch('/api/flows', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: activeFlow, content: dot })
-                });
-            }
-        }, 100);
+        if (newNodes.length > 0) {
+            scheduleSave(newNodes, getEdges());
+        }
     }
 
-    const selectedNode = getNodes().find(n => n.id === selectedNodeId);
-    const selectedEdge = getEdges().find(e => e.id === selectedEdgeId);
+    const selectedNode = nodes.find(n => n.id === selectedNodeId);
+    const selectedEdge = edges.find(e => e.id === selectedEdgeId);
     const isTrue = (value: unknown) => value === true || value === 'true';
     const autoTab = selectedEdgeId ? 'edge' : selectedNodeId ? 'edit' : tab;
     const activeTab = viewMode === 'execution' ? 'flows' : autoTab;
@@ -110,16 +122,9 @@ export function Sidebar() {
             return newEdges;
         });
 
-        setTimeout(() => {
-            if (newEdges.length > 0) {
-                const dot = generateDot(activeFlow, getNodes(), newEdges, graphAttrs);
-                fetch('/api/flows', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: activeFlow, content: dot })
-                });
-            }
-        }, 100);
+        if (newEdges.length > 0) {
+            scheduleSave(getNodes(), newEdges);
+        }
     };
 
     return (
