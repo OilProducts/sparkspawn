@@ -111,7 +111,6 @@
   .react-flow__edge.flow-edge.selected .react-flow__edge-path {
     stroke: hsl(var(--primary));
     stroke-width: 4;
-    stroke-dasharray: 8 5;
     opacity: 1;
     filter: drop-shadow(0 0 7px hsl(var(--primary) / 0.6));
   }
