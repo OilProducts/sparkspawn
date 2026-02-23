@@ -163,6 +163,7 @@ export function Editor() {
         <div className="flow-surface w-full h-full relative">
             <ReactFlow
                 className="flow-canvas"
+                style={{ background: 'transparent' }}
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={onNodesChange}

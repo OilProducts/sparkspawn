@@ -102,17 +102,18 @@
 @layer components {
   .flow-surface {
     background:
-      radial-gradient(circle at 20% 10%, hsl(var(--accent) / 0.16), transparent 38%),
-      radial-gradient(circle at 85% 90%, hsl(var(--secondary) / 0.2), transparent 42%),
-      hsl(var(--background));
+      radial-gradient(circle at 20% 10%, hsl(var(--accent) / 0.14), transparent 40%),
+      radial-gradient(circle at 85% 90%, hsl(var(--primary) / 0.12), transparent 44%),
+      linear-gradient(to bottom, hsl(var(--secondary) / 0.92), hsl(var(--muted) / 0.92));
   }
 
-  .flow-canvas .react-flow__renderer {
-    background: linear-gradient(
-      to bottom,
-      hsl(var(--background) / 0.82),
-      hsl(var(--background) / 0.92)
-    );
+  .flow-canvas .react-flow__pane {
+    background: transparent;
+  }
+
+  .flow-canvas .react-flow__renderer,
+  .flow-canvas .react-flow__viewport {
+    background: transparent;
   }
 
   .flow-canvas .react-flow__background path {
