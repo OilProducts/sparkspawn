@@ -8,7 +8,7 @@ The UI currently covers basic node editing, flow loading/saving, and run initiat
 **Decisions Captured From User**
 1. Human gate UI should be indicated in the flow list and in the graph during execution. Use a node-expanding panel for input.
 2. Edge attributes are user-editable.
-3. Graph-level settings should live in a top-bar drawer within the graph canvas, not the app shell. Model + path inputs should move there.
+3. Graph-level settings should live in a top-bar drawer within the graph canvas, not the app shell. Model + path inputs should move there. Implementation is deferred by request unless explicitly revisited.
 4. Advanced node fields should be behind a toggle in the node edit interface.
 5. Validation feedback should be inline annotations.
 6. Run/Pause/Resume/Cancel controls should live in a footer inside the graph canvas.
@@ -35,10 +35,10 @@ DoD: Nodes reflect running/success/fail based on `/ws` state messages, and UI re
 DoD: User can view edge attributes (label/condition/weight/etc.) and edit them if required; changes persist to DOT; selection is obvious.
 Open question: None (edge attributes are editable).
 
-4. Graph settings drawer inside canvas. **DONE**
-DoD: A graph-scoped settings drawer exists inside the canvas top bar, containing model/path inputs and graph-level attributes (goal, label, stylesheet, retry targets, default retry, default fidelity).
+4. Graph settings drawer inside canvas. **DONE** (user requested deferral of further work)
+DoD: A graph-scoped settings drawer exists inside the canvas top bar, containing model/path inputs and graph-level attributes (goal, label, stylesheet, retry targets, default retry, default fidelity). Further changes are deferred until requested.
 
-5. Advanced node attributes UI.
+5. Advanced node attributes UI. **DONE**
 DoD: Node editor includes a collapsed Advanced section for `type`, `max_retries`, `goal_gate`, `retry_target`, `fallback_retry_target`, `fidelity`, `thread_id`, `class`, `timeout`, `llm_model`, `llm_provider`, `reasoning_effort`, `auto_status`, `allow_partial`.
 
 6. Inline validation and diagnostics.
