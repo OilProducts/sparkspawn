@@ -41,7 +41,7 @@ DoD: A graph-scoped settings drawer exists inside the canvas top bar, containing
 5. Advanced node attributes UI. **DONE**
 DoD: Node editor includes a collapsed Advanced section for `type`, `max_retries`, `goal_gate`, `retry_target`, `fallback_retry_target`, `fidelity`, `thread_id`, `class`, `timeout`, `llm_model`, `llm_provider`, `reasoning_effort`, `auto_status`, `allow_partial`.
 
-6. Inline validation and diagnostics.
+6. Inline validation and diagnostics. **DONE**
 DoD: Parse/validation errors from `/preview` surface inline on nodes/edges (badges + list), and block execution when errors exist.
 
 7. Run controls in canvas footer.
