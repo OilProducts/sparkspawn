@@ -20,8 +20,8 @@ import { generateDot } from '@/lib/dotUtils';
 const nodeTypes = {
     customTask: TaskNode,
 };
-const EDGE_STYLE = { stroke: 'hsl(var(--border))', strokeWidth: 2 };
 const EDGE_TYPE: Edge['type'] = 'bezier';
+const EDGE_CLASS = 'flow-edge';
 
 interface PreviewNode {
     id: string
@@ -100,7 +100,7 @@ export function Editor() {
                     source: e.from,
                     target: e.to,
                     type: EDGE_TYPE,
-                    style: EDGE_STYLE,
+                    className: EDGE_CLASS,
                 }));
 
                 setNodes(rfNodes);
@@ -169,7 +169,7 @@ export function Editor() {
                 onConnect={onConnect}
                 onSelectionChange={onSelectionChange}
                 nodeTypes={nodeTypes}
-                defaultEdgeOptions={{ type: EDGE_TYPE, style: EDGE_STYLE }}
+                defaultEdgeOptions={{ type: EDGE_TYPE, className: EDGE_CLASS }}
                 elevateEdgesOnSelect
                 fitView
                 colorMode="dark"
