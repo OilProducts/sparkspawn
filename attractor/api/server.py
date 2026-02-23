@@ -296,7 +296,19 @@ def _graph_payload(graph) -> dict:
             }
             for n in graph.nodes.values()
         ],
-        "edges": [{"from": e.source, "to": e.target} for e in graph.edges],
+        "edges": [
+            {
+                "from": e.source,
+                "to": e.target,
+                "label": _attr_value(e.attrs, "label"),
+                "condition": _attr_value(e.attrs, "condition"),
+                "weight": _attr_value(e.attrs, "weight"),
+                "fidelity": _attr_value(e.attrs, "fidelity"),
+                "thread_id": _attr_value(e.attrs, "thread_id"),
+                "loop_restart": _attr_value(e.attrs, "loop_restart"),
+            }
+            for e in graph.edges
+        ],
     }
 
 

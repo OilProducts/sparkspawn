@@ -1,13 +1,13 @@
 import { useStore } from "@/store"
 import { FilePlus, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useReactFlow, type Node } from "@xyflow/react"
+import { useReactFlow, type Edge, type Node } from "@xyflow/react"
 import { generateDot } from "@/lib/dotUtils"
 
 export function Sidebar() {
-    const { viewMode, activeFlow, setActiveFlow, selectedNodeId } = useStore()
+    const { viewMode, activeFlow, setActiveFlow, selectedNodeId, selectedEdgeId } = useStore()
     const humanGate = useStore((state) => state.humanGate)
-    const [tab, setTab] = useState<'flows' | 'edit'>('flows')
+    const [tab, setTab] = useState<'flows' | 'edit' | 'edge'>('flows')
     const [flows, setFlows] = useState<string[]>([])
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
 
@@ -86,7 +86,38 @@ export function Sidebar() {
     }
 
     const selectedNode = getNodes().find(n => n.id === selectedNodeId);
-    const activeTab = viewMode === 'execution' ? 'flows' : tab;
+    const selectedEdge = getEdges().find(e => e.id === selectedEdgeId);
+    const autoTab = selectedEdgeId ? 'edge' : selectedNodeId ? 'edit' : tab;
+    const activeTab = viewMode === 'execution' ? 'flows' : autoTab;
+
+    const handleEdgePropertyChange = (key: string, value: string | boolean) => {
+        if (!selectedEdgeId || !activeFlow) return;
+
+        let newEdges: Edge[] = [];
+        setEdges((eds) => {
+            newEdges = eds.map((edge) => {
+                if (edge.id !== selectedEdgeId) return edge;
+                const nextData = { ...(edge.data || {}), [key]: value };
+                return {
+                    ...edge,
+                    data: nextData,
+                    label: key === 'label' ? String(value) : edge.label,
+                };
+            });
+            return newEdges;
+        });
+
+        setTimeout(() => {
+            if (newEdges.length > 0) {
+                const dot = generateDot(activeFlow, getNodes(), newEdges);
+                fetch('/api/flows', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: activeFlow, content: dot })
+                });
+            }
+        }, 100);
+    };
 
     return (
         <nav className="w-72 border-r bg-background flex flex-col shrink-0 overflow-hidden z-40">
@@ -106,6 +137,14 @@ export function Sidebar() {
                             }`}
                     >
                         Node
+                    </button>
+                    <button
+                        onClick={() => setTab('edge')}
+                        disabled={viewMode === 'execution'}
+                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex-1 disabled:opacity-50 disabled:cursor-not-allowed ${activeTab === 'edge' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                            }`}
+                    >
+                        Edge
                     </button>
                 </div>
             </div>
@@ -251,6 +290,79 @@ export function Sidebar() {
                                     </div>
                                 </>
                             )}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {activeTab === 'edge' && (
+                <div className="flex-1 flex flex-col overflow-hidden">
+                    <div className="px-5 py-2">
+                        <h2 className="font-semibold text-sm tracking-tight">Edge Properties</h2>
+                    </div>
+
+                    {!selectedEdge ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center px-6 text-muted-foreground p-4">
+                            <p className="text-sm">Select an edge on the canvas to inspect and edit its properties.</p>
+                        </div>
+                    ) : (
+                        <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-5">
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium">Label</label>
+                                <input
+                                    value={(selectedEdge.data?.label as string) || ''}
+                                    onChange={(e) => handleEdgePropertyChange('label', e.target.value)}
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    placeholder="e.g. Approve"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium">Condition</label>
+                                <input
+                                    value={(selectedEdge.data?.condition as string) || ''}
+                                    onChange={(e) => handleEdgePropertyChange('condition', e.target.value)}
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    placeholder='e.g. outcome = "success"'
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium">Weight</label>
+                                <input
+                                    value={(selectedEdge.data?.weight as number | string | undefined) ?? ''}
+                                    onChange={(e) => handleEdgePropertyChange('weight', e.target.value)}
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    placeholder="0"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium">Fidelity</label>
+                                <input
+                                    value={(selectedEdge.data?.fidelity as string) || ''}
+                                    onChange={(e) => handleEdgePropertyChange('fidelity', e.target.value)}
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    placeholder="full | truncate | compact | summary:low"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium">Thread ID</label>
+                                <input
+                                    value={(selectedEdge.data?.thread_id as string) || ''}
+                                    onChange={(e) => handleEdgePropertyChange('thread_id', e.target.value)}
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    id="edge-loop-restart"
+                                    type="checkbox"
+                                    checked={Boolean(selectedEdge.data?.loop_restart)}
+                                    onChange={(e) => handleEdgePropertyChange('loop_restart', e.target.checked)}
+                                    className="h-4 w-4 rounded border border-input"
+                                />
+                                <label htmlFor="edge-loop-restart" className="text-sm font-medium">
+                                    Loop Restart
+                                </label>
+                            </div>
                         </div>
                     )}
                 </div>

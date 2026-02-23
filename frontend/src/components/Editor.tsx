@@ -37,6 +37,12 @@ interface PreviewNode {
 interface PreviewEdge {
     from: string
     to: string
+    label?: string
+    condition?: string
+    weight?: number | string
+    fidelity?: string
+    thread_id?: string
+    loop_restart?: boolean | string
 }
 
 interface PreviewResponse {
@@ -51,7 +57,7 @@ function normalizeLegacyDot(content: string): string {
 }
 
 export function Editor() {
-    const { activeFlow, viewMode, setSelectedNodeId } = useStore();
+    const { activeFlow, viewMode, setSelectedNodeId, setSelectedEdgeId } = useStore();
     const nodeStatuses = useStore((state) => state.nodeStatuses);
     const [nodes, setNodes] = useNodesState<Node>([]);
     const [edges, setEdges] = useEdgesState<Edge>([]);
@@ -115,6 +121,15 @@ export function Editor() {
                     target: e.to,
                     type: EDGE_TYPE,
                     className: EDGE_CLASS,
+                    label: e.label,
+                    data: {
+                        label: e.label ?? '',
+                        condition: e.condition ?? '',
+                        weight: e.weight ?? '',
+                        fidelity: e.fidelity ?? '',
+                        thread_id: e.thread_id ?? '',
+                        loop_restart: e.loop_restart ?? false,
+                    },
                 }));
 
                 setNodes(rfNodes);
@@ -168,10 +183,12 @@ export function Editor() {
         });
     }, [activeFlow, edges, setNodes, saveFlow]);
 
-    const onSelectionChange = useCallback(({ nodes }: OnSelectionChangeParams) => {
+    const onSelectionChange = useCallback(({ nodes, edges }: OnSelectionChangeParams) => {
         const selectedNode = nodes.find(n => n.selected);
+        const selectedEdge = edges.find(e => e.selected);
         setSelectedNodeId(selectedNode ? selectedNode.id : null);
-    }, [setSelectedNodeId]);
+        setSelectedEdgeId(selectedEdge ? selectedEdge.id : null);
+    }, [setSelectedEdgeId, setSelectedNodeId]);
 
     useEffect(() => {
         setNodes((currentNodes) => currentNodes.map((node) => {

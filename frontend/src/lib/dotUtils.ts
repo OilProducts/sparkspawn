@@ -53,7 +53,30 @@ export function generateDot(flowName: string, nodes: Node[], edges: Edge[]): str
     });
 
     edges.forEach(e => {
-        dot += `  ${e.source} -> ${e.target};\n`;
+        const edgeData = (e.data || {}) as Record<string, unknown>;
+        const labelValue = typeof edgeData.label === 'string' ? edgeData.label : '';
+        const conditionValue = typeof edgeData.condition === 'string' ? edgeData.condition : '';
+        const weightValue = typeof edgeData.weight === 'string' || typeof edgeData.weight === 'number'
+            ? edgeData.weight
+            : '';
+        const fidelityValue = typeof edgeData.fidelity === 'string' ? edgeData.fidelity : '';
+        const threadIdValue = typeof edgeData.thread_id === 'string' ? edgeData.thread_id : '';
+        const loopRestartValue = edgeData.loop_restart === true || edgeData.loop_restart === 'true';
+
+        const edgeAttrs = [
+            labelValue ? `label="${escapeDotString(labelValue)}"` : '',
+            conditionValue ? `condition="${escapeDotString(conditionValue)}"` : '',
+            _formatIntAttr('weight', weightValue),
+            fidelityValue ? `fidelity=${formatAttrValue(fidelityValue)}` : '',
+            threadIdValue ? `thread_id="${escapeDotString(threadIdValue)}"` : '',
+            loopRestartValue ? `loop_restart=true` : '',
+        ].filter(Boolean).join(', ');
+
+        if (edgeAttrs) {
+            dot += `  ${e.source} -> ${e.target} [${edgeAttrs}];\n`;
+        } else {
+            dot += `  ${e.source} -> ${e.target};\n`;
+        }
     });
 
     dot += `}\n`;

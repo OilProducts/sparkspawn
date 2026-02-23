@@ -29,6 +29,8 @@ interface AppState {
     setActiveFlow: (flow: string | null) => void
     selectedNodeId: string | null
     setSelectedNodeId: (id: string | null) => void
+    selectedEdgeId: string | null
+    setSelectedEdgeId: (id: string | null) => void
 
     logs: LogEntry[]
     addLog: (entry: LogEntry) => void
@@ -50,6 +52,8 @@ export const useStore = create<AppState>((set) => ({
     setActiveFlow: (flow) => set({ activeFlow: flow }),
     selectedNodeId: null,
     setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+    selectedEdgeId: null,
+    setSelectedEdgeId: (id) => set({ selectedEdgeId: id }),
 
     logs: [],
     addLog: (entry) => set((state) => ({ logs: [...state.logs, entry] })),
