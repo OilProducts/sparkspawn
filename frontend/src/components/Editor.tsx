@@ -170,6 +170,7 @@ export function Editor() {
                 onSelectionChange={onSelectionChange}
                 nodeTypes={nodeTypes}
                 defaultEdgeOptions={{ type: EDGE_TYPE, style: EDGE_STYLE }}
+                elevateEdgesOnSelect
                 fitView
                 colorMode="dark"
                 minZoom={0.1}
