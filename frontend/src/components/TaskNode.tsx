@@ -22,6 +22,31 @@ export function TaskNode({ id, data, selected }: NodeProps) {
     const [draftMaxParallel, setDraftMaxParallel] = useState<string>(
         data.max_parallel !== undefined ? String(data.max_parallel) : '4'
     );
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [draftType, setDraftType] = useState<string>((data.type as string) || '');
+    const [draftMaxRetries, setDraftMaxRetries] = useState<string>(
+        data.max_retries !== undefined ? String(data.max_retries) : ''
+    );
+    const [draftGoalGate, setDraftGoalGate] = useState<boolean>(
+        data.goal_gate === true || data.goal_gate === 'true'
+    );
+    const [draftRetryTarget, setDraftRetryTarget] = useState<string>((data.retry_target as string) || '');
+    const [draftFallbackRetryTarget, setDraftFallbackRetryTarget] = useState<string>(
+        (data.fallback_retry_target as string) || ''
+    );
+    const [draftFidelity, setDraftFidelity] = useState<string>((data.fidelity as string) || '');
+    const [draftThreadId, setDraftThreadId] = useState<string>((data.thread_id as string) || '');
+    const [draftClassName, setDraftClassName] = useState<string>((data.class as string) || '');
+    const [draftTimeout, setDraftTimeout] = useState<string>((data.timeout as string) || '');
+    const [draftLlmModel, setDraftLlmModel] = useState<string>((data.llm_model as string) || '');
+    const [draftLlmProvider, setDraftLlmProvider] = useState<string>((data.llm_provider as string) || '');
+    const [draftReasoningEffort, setDraftReasoningEffort] = useState<string>((data.reasoning_effort as string) || '');
+    const [draftAutoStatus, setDraftAutoStatus] = useState<boolean>(
+        data.auto_status === true || data.auto_status === 'true'
+    );
+    const [draftAllowPartial, setDraftAllowPartial] = useState<boolean>(
+        data.allow_partial === true || data.allow_partial === 'true'
+    );
     const status = (data.status as string) || 'idle';
 
     useEffect(() => {
@@ -90,6 +115,20 @@ export function TaskNode({ id, data, selected }: NodeProps) {
         setDraftJoinPolicy((data.join_policy as string) || 'wait_all');
         setDraftErrorPolicy((data.error_policy as string) || 'continue');
         setDraftMaxParallel(data.max_parallel !== undefined ? String(data.max_parallel) : '4');
+        setDraftType((data.type as string) || '');
+        setDraftMaxRetries(data.max_retries !== undefined ? String(data.max_retries) : '');
+        setDraftGoalGate(data.goal_gate === true || data.goal_gate === 'true');
+        setDraftRetryTarget((data.retry_target as string) || '');
+        setDraftFallbackRetryTarget((data.fallback_retry_target as string) || '');
+        setDraftFidelity((data.fidelity as string) || '');
+        setDraftThreadId((data.thread_id as string) || '');
+        setDraftClassName((data.class as string) || '');
+        setDraftTimeout((data.timeout as string) || '');
+        setDraftLlmModel((data.llm_model as string) || '');
+        setDraftLlmProvider((data.llm_provider as string) || '');
+        setDraftReasoningEffort((data.reasoning_effort as string) || '');
+        setDraftAutoStatus(data.auto_status === true || data.auto_status === 'true');
+        setDraftAllowPartial(data.allow_partial === true || data.allow_partial === 'true');
         setIsEditingDetails(true);
     };
 
@@ -105,6 +144,20 @@ export function TaskNode({ id, data, selected }: NodeProps) {
             join_policy: draftJoinPolicy,
             error_policy: draftErrorPolicy,
             max_parallel: draftMaxParallel,
+            type: draftType,
+            max_retries: draftMaxRetries,
+            goal_gate: draftGoalGate,
+            retry_target: draftRetryTarget,
+            fallback_retry_target: draftFallbackRetryTarget,
+            fidelity: draftFidelity,
+            thread_id: draftThreadId,
+            class: draftClassName,
+            timeout: draftTimeout,
+            llm_model: draftLlmModel,
+            llm_provider: draftLlmProvider,
+            reasoning_effort: draftReasoningEffort,
+            auto_status: draftAutoStatus,
+            allow_partial: draftAllowPartial,
         });
         setIsEditingDetails(false);
     };
@@ -249,6 +302,145 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                     />
                                 </div>
                             </>
+                        )}
+                        <button
+                            onClick={() => setShowAdvanced((prev) => !prev)}
+                            className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                        >
+                            {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
+                        </button>
+                        {showAdvanced && (
+                            <div className="space-y-2 pt-1">
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Handler Type</label>
+                                    <input
+                                        value={draftType}
+                                        onChange={(event) => setDraftType(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        placeholder="optional override"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-foreground">Max Retries</label>
+                                        <input
+                                            value={draftMaxRetries}
+                                            onChange={(event) => setDraftMaxRetries(event.target.value)}
+                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-foreground">Timeout</label>
+                                        <input
+                                            value={draftTimeout}
+                                            onChange={(event) => setDraftTimeout(event.target.value)}
+                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            placeholder="900s"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        id={`goal-gate-${id}`}
+                                        type="checkbox"
+                                        checked={draftGoalGate}
+                                        onChange={(event) => setDraftGoalGate(event.target.checked)}
+                                        className="h-4 w-4 rounded border border-input"
+                                    />
+                                    <label htmlFor={`goal-gate-${id}`} className="text-xs font-medium">
+                                        Goal Gate
+                                    </label>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Retry Target</label>
+                                    <input
+                                        value={draftRetryTarget}
+                                        onChange={(event) => setDraftRetryTarget(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Fallback Retry Target</label>
+                                    <input
+                                        value={draftFallbackRetryTarget}
+                                        onChange={(event) => setDraftFallbackRetryTarget(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-foreground">Fidelity</label>
+                                        <input
+                                            value={draftFidelity}
+                                            onChange={(event) => setDraftFidelity(event.target.value)}
+                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-foreground">Thread ID</label>
+                                        <input
+                                            value={draftThreadId}
+                                            onChange={(event) => setDraftThreadId(event.target.value)}
+                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Class</label>
+                                    <input
+                                        value={draftClassName}
+                                        onChange={(event) => setDraftClassName(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-foreground">LLM Model</label>
+                                        <input
+                                            value={draftLlmModel}
+                                            onChange={(event) => setDraftLlmModel(event.target.value)}
+                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-foreground">LLM Provider</label>
+                                        <input
+                                            value={draftLlmProvider}
+                                            onChange={(event) => setDraftLlmProvider(event.target.value)}
+                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Reasoning Effort</label>
+                                    <input
+                                        value={draftReasoningEffort}
+                                        onChange={(event) => setDraftReasoningEffort(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        placeholder="high"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <label className="flex items-center gap-2 text-xs font-medium">
+                                        <input
+                                            type="checkbox"
+                                            checked={draftAutoStatus}
+                                            onChange={(event) => setDraftAutoStatus(event.target.checked)}
+                                            className="h-4 w-4 rounded border border-input"
+                                        />
+                                        Auto Status
+                                    </label>
+                                    <label className="flex items-center gap-2 text-xs font-medium">
+                                        <input
+                                            type="checkbox"
+                                            checked={draftAllowPartial}
+                                            onChange={(event) => setDraftAllowPartial(event.target.checked)}
+                                            className="h-4 w-4 rounded border border-input"
+                                        />
+                                        Allow Partial
+                                    </label>
+                                </div>
+                            </div>
                         )}
                     </div>
                     <div className="mt-3 flex items-center justify-end gap-2">

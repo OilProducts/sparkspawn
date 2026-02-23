@@ -10,6 +10,7 @@ export function Sidebar() {
     const graphAttrs = useStore((state) => state.graphAttrs)
     const [tab, setTab] = useState<'flows' | 'edit' | 'edge'>('flows')
     const [flows, setFlows] = useState<string[]>([])
+    const [showAdvanced, setShowAdvanced] = useState(false)
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
 
     const loadFlows = () => {
@@ -59,7 +60,7 @@ export function Sidebar() {
         await loadFlows();
     };
 
-    const handlePropertyChange = (key: string, value: string) => {
+    const handlePropertyChange = (key: string, value: string | boolean) => {
         if (!selectedNodeId || !activeFlow) return;
 
         let newNodes: Node[] = [];
@@ -88,6 +89,7 @@ export function Sidebar() {
 
     const selectedNode = getNodes().find(n => n.id === selectedNodeId);
     const selectedEdge = getEdges().find(e => e.id === selectedEdgeId);
+    const isTrue = (value: unknown) => value === true || value === 'true';
     const autoTab = selectedEdgeId ? 'edge' : selectedNodeId ? 'edit' : tab;
     const activeTab = viewMode === 'execution' ? 'flows' : autoTab;
 
@@ -290,6 +292,146 @@ export function Sidebar() {
                                         />
                                     </div>
                                 </>
+                            )}
+                            <button
+                                onClick={() => setShowAdvanced((prev) => !prev)}
+                                className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                            >
+                                {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
+                            </button>
+                            {showAdvanced && (
+                                <div className="space-y-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-medium">Handler Type</label>
+                                        <input
+                                            value={(selectedNode?.data?.type as string) || ''}
+                                            onChange={(e) => handlePropertyChange('type', e.target.value)}
+                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            placeholder="optional override"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">Max Retries</label>
+                                            <input
+                                                value={(selectedNode?.data?.max_retries as number | string | undefined) ?? ''}
+                                                onChange={(e) => handlePropertyChange('max_retries', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">Timeout</label>
+                                            <input
+                                                value={(selectedNode?.data?.timeout as string) || ''}
+                                                onChange={(e) => handlePropertyChange('timeout', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                placeholder="900s"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            id={`goal-gate-${selectedNodeId}`}
+                                            type="checkbox"
+                                            checked={isTrue(selectedNode?.data?.goal_gate)}
+                                            onChange={(e) => handlePropertyChange('goal_gate', e.target.checked)}
+                                            className="h-4 w-4 rounded border border-input"
+                                        />
+                                        <label htmlFor={`goal-gate-${selectedNodeId}`} className="text-sm font-medium">
+                                            Goal Gate
+                                        </label>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-medium">Retry Target</label>
+                                        <input
+                                            value={(selectedNode?.data?.retry_target as string) || ''}
+                                            onChange={(e) => handlePropertyChange('retry_target', e.target.value)}
+                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-medium">Fallback Retry Target</label>
+                                        <input
+                                            value={(selectedNode?.data?.fallback_retry_target as string) || ''}
+                                            onChange={(e) => handlePropertyChange('fallback_retry_target', e.target.value)}
+                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">Fidelity</label>
+                                            <input
+                                                value={(selectedNode?.data?.fidelity as string) || ''}
+                                                onChange={(e) => handlePropertyChange('fidelity', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                placeholder="full"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">Thread ID</label>
+                                            <input
+                                                value={(selectedNode?.data?.thread_id as string) || ''}
+                                                onChange={(e) => handlePropertyChange('thread_id', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-medium">Class</label>
+                                        <input
+                                            value={(selectedNode?.data?.class as string) || ''}
+                                            onChange={(e) => handlePropertyChange('class', e.target.value)}
+                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">LLM Model</label>
+                                            <input
+                                                value={(selectedNode?.data?.llm_model as string) || ''}
+                                                onChange={(e) => handlePropertyChange('llm_model', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">LLM Provider</label>
+                                            <input
+                                                value={(selectedNode?.data?.llm_provider as string) || ''}
+                                                onChange={(e) => handlePropertyChange('llm_provider', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-medium">Reasoning Effort</label>
+                                        <input
+                                            value={(selectedNode?.data?.reasoning_effort as string) || ''}
+                                            onChange={(e) => handlePropertyChange('reasoning_effort', e.target.value)}
+                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            placeholder="high"
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <label className="flex items-center gap-2 text-sm font-medium">
+                                            <input
+                                                type="checkbox"
+                                                checked={isTrue(selectedNode?.data?.auto_status)}
+                                                onChange={(e) => handlePropertyChange('auto_status', e.target.checked)}
+                                                className="h-4 w-4 rounded border border-input"
+                                            />
+                                            Auto Status
+                                        </label>
+                                        <label className="flex items-center gap-2 text-sm font-medium">
+                                            <input
+                                                type="checkbox"
+                                                checked={isTrue(selectedNode?.data?.allow_partial)}
+                                                onChange={(e) => handlePropertyChange('allow_partial', e.target.checked)}
+                                                className="h-4 w-4 rounded border border-input"
+                                            />
+                                            Allow Partial
+                                        </label>
+                                    </div>
+                                </div>
                             )}
                         </div>
                     )}

@@ -33,6 +33,20 @@ interface PreviewNode {
     join_policy?: string
     error_policy?: string
     max_parallel?: number | string
+    type?: string
+    max_retries?: number | string
+    goal_gate?: boolean | string
+    retry_target?: string
+    fallback_retry_target?: string
+    fidelity?: string
+    thread_id?: string
+    class?: string
+    timeout?: string
+    llm_model?: string
+    llm_provider?: string
+    reasoning_effort?: string
+    auto_status?: boolean | string
+    allow_partial?: boolean | string
 }
 
 interface PreviewEdge {
@@ -127,6 +141,20 @@ export function Editor() {
                         join_policy: n.join_policy ?? 'wait_all',
                         error_policy: n.error_policy ?? 'continue',
                         max_parallel: n.max_parallel ?? 4,
+                        type: n.type ?? '',
+                        max_retries: n.max_retries ?? '',
+                        goal_gate: n.goal_gate ?? false,
+                        retry_target: n.retry_target ?? '',
+                        fallback_retry_target: n.fallback_retry_target ?? '',
+                        fidelity: n.fidelity ?? '',
+                        thread_id: n.thread_id ?? '',
+                        class: n.class ?? '',
+                        timeout: n.timeout ?? '',
+                        llm_model: n.llm_model ?? '',
+                        llm_provider: n.llm_provider ?? '',
+                        reasoning_effort: n.reasoning_effort ?? '',
+                        auto_status: n.auto_status ?? false,
+                        allow_partial: n.allow_partial ?? false,
                         status: 'idle'
                     },
                 }));

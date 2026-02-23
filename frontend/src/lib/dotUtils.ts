@@ -50,6 +50,24 @@ export function generateDot(
         const maxParallelValue = typeof n.data.max_parallel === 'string' || typeof n.data.max_parallel === 'number'
             ? n.data.max_parallel
             : '';
+        const typeValue = typeof n.data.type === 'string' ? n.data.type : '';
+        const maxRetriesValue = typeof n.data.max_retries === 'string' || typeof n.data.max_retries === 'number'
+            ? n.data.max_retries
+            : '';
+        const goalGateValue = n.data.goal_gate === true || n.data.goal_gate === 'true';
+        const retryTargetValue = typeof n.data.retry_target === 'string' ? n.data.retry_target : '';
+        const fallbackRetryTargetValue = typeof n.data.fallback_retry_target === 'string'
+            ? n.data.fallback_retry_target
+            : '';
+        const fidelityValue = typeof n.data.fidelity === 'string' ? n.data.fidelity : '';
+        const threadIdValue = typeof n.data.thread_id === 'string' ? n.data.thread_id : '';
+        const classValue = typeof n.data.class === 'string' ? n.data.class : '';
+        const timeoutValue = typeof n.data.timeout === 'string' ? n.data.timeout : '';
+        const llmModelValue = typeof n.data.llm_model === 'string' ? n.data.llm_model : '';
+        const llmProviderValue = typeof n.data.llm_provider === 'string' ? n.data.llm_provider : '';
+        const reasoningEffortValue = typeof n.data.reasoning_effort === 'string' ? n.data.reasoning_effort : '';
+        const autoStatusValue = n.data.auto_status === true || n.data.auto_status === 'true';
+        const allowPartialValue = n.data.allow_partial === true || n.data.allow_partial === 'true';
 
         const label = `"${escapeDotString(labelValue)}"`;
         const shape = shapeValue ? `shape=${formatAttrValue(shapeValue)}` : '';
@@ -66,7 +84,21 @@ export function generateDot(
             toolCommand,
             joinPolicy,
             errorPolicy,
-            maxParallel
+            maxParallel,
+            typeValue ? `type=${formatAttrValue(typeValue)}` : '',
+            _formatIntAttr('max_retries', maxRetriesValue),
+            goalGateValue ? `goal_gate=true` : '',
+            retryTargetValue ? `retry_target=${formatAttrValue(retryTargetValue)}` : '',
+            fallbackRetryTargetValue ? `fallback_retry_target=${formatAttrValue(fallbackRetryTargetValue)}` : '',
+            fidelityValue ? `fidelity=${formatAttrValue(fidelityValue)}` : '',
+            threadIdValue ? `thread_id="${escapeDotString(threadIdValue)}"` : '',
+            classValue ? `class="${escapeDotString(classValue)}"` : '',
+            timeoutValue ? _formatDurationAttr('timeout', timeoutValue) : '',
+            llmModelValue ? `llm_model=${formatAttrValue(llmModelValue)}` : '',
+            llmProviderValue ? `llm_provider=${formatAttrValue(llmProviderValue)}` : '',
+            reasoningEffortValue ? `reasoning_effort=${formatAttrValue(reasoningEffortValue)}` : '',
+            autoStatusValue ? `auto_status=true` : '',
+            allowPartialValue ? `allow_partial=true` : ''
         ].filter(Boolean).join(', ');
 
         dot += `  ${n.id} [${attrs}];\n`;
@@ -113,4 +145,13 @@ function _formatIntAttr(key: string, value: string | number): string {
 function _formatGraphAttr(key: string, value?: string): string {
     if (!value) return "";
     return `${key}="${escapeDotString(value)}"`;
+}
+
+function _formatDurationAttr(key: string, value: string): string {
+    const trimmed = value.trim();
+    if (trimmed === "") return "";
+    if (/^\d+(ms|s|m|h|d)$/.test(trimmed)) {
+        return `${key}=${trimmed}`;
+    }
+    return `${key}="${escapeDotString(trimmed)}"`;
 }
