@@ -174,7 +174,7 @@ export function Editor() {
                 defaultEdgeOptions={{ type: EDGE_TYPE, className: EDGE_CLASS }}
                 elevateEdgesOnSelect
                 fitView
-                colorMode="dark"
+                colorMode="light"
                 minZoom={0.1}
                 maxZoom={1.5}
             >
