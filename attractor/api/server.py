@@ -186,8 +186,25 @@ async def get_status():
 
 
 def _graph_payload(graph) -> dict:
+    def _attr_value(attrs: Dict[str, object], key: str, default: Optional[object] = None):
+        attr = attrs.get(key)
+        if attr is None:
+            return default
+        value = getattr(attr, "value", default)
+        if hasattr(value, "raw"):
+            return value.raw
+        return value
+
     return {
-        "nodes": [{"id": n.node_id, "label": n.node_id} for n in graph.nodes.values()],
+        "nodes": [
+            {
+                "id": n.node_id,
+                "label": _attr_value(n.attrs, "label", n.node_id),
+                "shape": _attr_value(n.attrs, "shape"),
+                "prompt": _attr_value(n.attrs, "prompt"),
+            }
+            for n in graph.nodes.values()
+        ],
         "edges": [{"from": e.source, "to": e.target} for e in graph.edges],
     }
 
