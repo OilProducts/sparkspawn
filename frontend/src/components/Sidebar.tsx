@@ -16,6 +16,8 @@ export function Sidebar() {
     const nodes = useReactFlowStore((state) => state.nodes)
     const edges = useReactFlowStore((state) => state.edges)
     const saveTimer = useRef<number | null>(null)
+    const promptNodeRef = useRef<string | null>(null)
+    const promptRef = useRef<HTMLTextAreaElement | null>(null)
 
     const loadFlows = () => {
         fetch('/api/flows')
@@ -81,13 +83,13 @@ export function Sidebar() {
         }, 600)
     }
 
-    const handlePropertyChange = (key: string, value: string | boolean) => {
-        if (!selectedNodeId || !activeFlow) return;
+    const updateNodeProperty = (nodeId: string, key: string, value: string | boolean) => {
+        if (!activeFlow) return;
 
         let newNodes: Node[] = [];
         setNodes(nds => {
             newNodes = nds.map(node => {
-                if (node.id === selectedNodeId) {
+                if (node.id === nodeId) {
                     return { ...node, data: { ...node.data, [key]: value } };
                 }
                 return node;
@@ -98,6 +100,11 @@ export function Sidebar() {
         if (newNodes.length > 0) {
             scheduleSave(newNodes, getEdges());
         }
+    }
+
+    const handlePropertyChange = (key: string, value: string | boolean) => {
+        if (!selectedNodeId) return;
+        updateNodeProperty(selectedNodeId, key, value)
     }
 
     const selectedNode = nodes.find(n => n.id === selectedNodeId);
@@ -127,6 +134,13 @@ export function Sidebar() {
             scheduleSave(getNodes(), newEdges);
         }
     };
+
+    const commitPrompt = () => {
+        const nodeId = promptNodeRef.current ?? selectedNodeId
+        if (!nodeId) return
+        const value = promptRef.current?.value ?? ''
+        updateNodeProperty(nodeId, 'prompt', value)
+    }
 
     return (
         <nav className="w-72 border-r bg-background flex flex-col shrink-0 overflow-hidden z-40">
@@ -245,10 +259,17 @@ export function Sidebar() {
                             <div className="space-y-1.5 flex flex-col h-48">
                                 <label className="text-sm font-medium">Prompt Instruction</label>
                                 <textarea
-                                    value={(selectedNode?.data?.prompt as string) || ''}
-                                    onChange={(e) => handlePropertyChange('prompt', e.target.value)}
-                                    onFocus={() => setSuppressPreview(true)}
-                                    onBlur={() => setSuppressPreview(false)}
+                                    key={selectedNodeId ?? 'prompt'}
+                                    ref={promptRef}
+                                    defaultValue={(selectedNode?.data?.prompt as string) || ''}
+                                    onFocus={() => {
+                                        setSuppressPreview(true)
+                                        promptNodeRef.current = selectedNodeId
+                                    }}
+                                    onBlur={() => {
+                                        setSuppressPreview(false)
+                                        commitPrompt()
+                                    }}
                                     className="flex flex-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
                                     placeholder="Enter system prompt instructions..."
                                 />
