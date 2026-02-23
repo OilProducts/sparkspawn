@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
     ReactFlow,
     MiniMap,
@@ -13,15 +13,20 @@ import {
 import type { Connection, Edge, EdgeChange, Node, NodeChange, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useStore } from '@/store';
+import { useStore, type DiagnosticEntry } from '@/store';
 import { TaskNode } from './TaskNode';
 import { GraphSettings } from './GraphSettings';
+import { ValidationEdge } from './ValidationEdge';
+import { ValidationPanel } from './ValidationPanel';
 import { generateDot } from '@/lib/dotUtils';
 
 const nodeTypes = {
     customTask: TaskNode,
 };
-const EDGE_TYPE: Edge['type'] = 'bezier';
+const edgeTypes = {
+    validation: ValidationEdge,
+};
+const EDGE_TYPE: Edge['type'] = 'validation';
 const EDGE_CLASS = 'flow-edge';
 
 interface PreviewNode {
@@ -61,6 +66,7 @@ interface PreviewEdge {
 }
 
 interface PreviewResponse {
+    status?: string
     graph?: {
         nodes: PreviewNode[]
         edges: PreviewEdge[]
@@ -74,6 +80,8 @@ interface PreviewResponse {
             default_fidelity?: string
         }
     }
+    diagnostics?: DiagnosticEntry[]
+    errors?: DiagnosticEntry[]
 }
 
 function normalizeLegacyDot(content: string): string {
@@ -85,8 +93,12 @@ export function Editor() {
     const nodeStatuses = useStore((state) => state.nodeStatuses);
     const graphAttrs = useStore((state) => state.graphAttrs);
     const setGraphAttrs = useStore((state) => state.setGraphAttrs);
+    const setDiagnostics = useStore((state) => state.setDiagnostics);
+    const clearDiagnostics = useStore((state) => state.clearDiagnostics);
     const [nodes, setNodes] = useNodesState<Node>([]);
     const [edges, setEdges] = useEdgesState<Edge>([]);
+    const hydratedRef = useRef(false);
+    const previewTimer = useRef<number | null>(null);
 
     const saveFlow = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
         if (!activeFlow) return;
@@ -100,7 +112,14 @@ export function Editor() {
 
     // Auto-load and sync with Backend Preview
     useEffect(() => {
-        if (!activeFlow) return;
+        hydratedRef.current = false;
+        if (!activeFlow) {
+            setNodes([]);
+            setEdges([]);
+            clearDiagnostics();
+            return;
+        }
+        clearDiagnostics();
 
         fetch(`/api/flows/${activeFlow}`)
             .then((res) => res.json())
@@ -122,6 +141,12 @@ export function Editor() {
             })
             .then((res) => res.json())
             .then((preview: PreviewResponse) => {
+                if (preview.diagnostics) {
+                    setDiagnostics(preview.diagnostics);
+                } else {
+                    clearDiagnostics();
+                }
+
                 if (!preview.graph) return;
 
                 if (preview.graph.graph_attrs) {
@@ -178,9 +203,42 @@ export function Editor() {
 
                 setNodes(rfNodes);
                 setEdges(rfEdges);
+                hydratedRef.current = true;
             })
             .catch(console.error);
-    }, [activeFlow, setNodes, setEdges, setGraphAttrs]);
+    }, [activeFlow, setNodes, setEdges, setGraphAttrs, setDiagnostics, clearDiagnostics]);
+
+    const requestPreview = useCallback((dot: string) => {
+        fetch('/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ flow_content: dot }),
+        })
+            .then((res) => res.json())
+            .then((preview: PreviewResponse) => {
+                if (preview.diagnostics) {
+                    setDiagnostics(preview.diagnostics);
+                } else {
+                    clearDiagnostics();
+                }
+            })
+            .catch(console.error);
+    }, [setDiagnostics, clearDiagnostics]);
+
+    useEffect(() => {
+        if (!activeFlow || !hydratedRef.current || viewMode === 'execution') return;
+        const dot = generateDot(activeFlow, nodes, edges, graphAttrs);
+        if (previewTimer.current) {
+            window.clearTimeout(previewTimer.current);
+        }
+        previewTimer.current = window.setTimeout(() => requestPreview(dot), 250);
+
+        return () => {
+            if (previewTimer.current) {
+                window.clearTimeout(previewTimer.current);
+            }
+        };
+    }, [activeFlow, nodes, edges, graphAttrs, viewMode, requestPreview]);
 
     // Handle new connections via UI
     const onNodesChange = useCallback((changes: NodeChange<Node>[]) => {
@@ -256,6 +314,7 @@ export function Editor() {
                 onConnect={onConnect}
                 onSelectionChange={onSelectionChange}
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
                 defaultEdgeOptions={{ type: EDGE_TYPE, className: EDGE_CLASS }}
                 elevateEdgesOnSelect
                 fitView
@@ -284,6 +343,7 @@ export function Editor() {
             )}
 
             {activeFlow && <GraphSettings />}
+            {activeFlow && <ValidationPanel />}
         </div>
     );
 }

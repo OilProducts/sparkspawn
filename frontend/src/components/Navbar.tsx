@@ -6,10 +6,11 @@ export function Navbar() {
     const { viewMode, setViewMode, activeFlow } = useStore()
     const model = useStore((state) => state.model)
     const workingDir = useStore((state) => state.workingDir)
+    const hasValidationErrors = useStore((state) => state.hasValidationErrors)
     const [isRunning, setIsRunning] = useState(false)
 
     const runPipeline = async () => {
-        if (!activeFlow || isRunning) return
+        if (!activeFlow || isRunning || hasValidationErrors) return
         setIsRunning(true)
 
         try {
@@ -72,7 +73,8 @@ export function Navbar() {
             <div className="flex items-center gap-4">
                 <button
                     onClick={runPipeline}
-                    disabled={!activeFlow || isRunning}
+                    disabled={!activeFlow || isRunning || hasValidationErrors}
+                    title={hasValidationErrors ? 'Fix validation errors before running.' : undefined}
                     className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2"
                 >
                     <Play className="w-4 h-4" />

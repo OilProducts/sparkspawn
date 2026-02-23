@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Dict, Iterable, List, Set
 
-from .models import Diagnostic, DiagnosticSeverity, DotGraph, DotNode
+from .models import Diagnostic, DiagnosticSeverity, DotEdge, DotGraph, DotNode
 
 
 VALID_FIDELITY = {
@@ -25,24 +25,48 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
     exit_nodes = _find_exit_nodes(graph)
 
     if len(start_nodes) != 1:
-        diagnostics.append(
-            Diagnostic(
-                rule_id="start_node",
-                severity=DiagnosticSeverity.ERROR,
-                message=f"pipeline must have exactly one start node, found {len(start_nodes)}",
-                line=start_nodes[0].line if start_nodes else 0,
+        if not start_nodes:
+            diagnostics.append(
+                Diagnostic(
+                    rule_id="start_node",
+                    severity=DiagnosticSeverity.ERROR,
+                    message="pipeline must have exactly one start node, found 0",
+                    line=0,
+                )
             )
-        )
+        else:
+            for node in start_nodes:
+                diagnostics.append(
+                    Diagnostic(
+                        rule_id="start_node",
+                        severity=DiagnosticSeverity.ERROR,
+                        message=f"pipeline must have exactly one start node, found {len(start_nodes)}",
+                        line=node.line,
+                        node_id=node.node_id,
+                    )
+                )
 
     if len(exit_nodes) != 1:
-        diagnostics.append(
-            Diagnostic(
-                rule_id="terminal_node",
-                severity=DiagnosticSeverity.ERROR,
-                message=f"pipeline must have exactly one exit node, found {len(exit_nodes)}",
-                line=exit_nodes[0].line if exit_nodes else 0,
+        if not exit_nodes:
+            diagnostics.append(
+                Diagnostic(
+                    rule_id="terminal_node",
+                    severity=DiagnosticSeverity.ERROR,
+                    message="pipeline must have exactly one exit node, found 0",
+                    line=0,
+                )
             )
-        )
+        else:
+            for node in exit_nodes:
+                diagnostics.append(
+                    Diagnostic(
+                        rule_id="terminal_node",
+                        severity=DiagnosticSeverity.ERROR,
+                        message=f"pipeline must have exactly one exit node, found {len(exit_nodes)}",
+                        line=node.line,
+                        node_id=node.node_id,
+                    )
+                )
 
     # Edge targets and start/exit in/out checks.
     in_degree: Dict[str, int] = {node_id: 0 for node_id in graph.nodes}
@@ -56,6 +80,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
                     severity=DiagnosticSeverity.ERROR,
                     message=f"edge source '{edge.source}' does not reference an existing node",
                     line=edge.line,
+                    edge=(edge.source, edge.target),
                 )
             )
         if edge.target not in graph.nodes:
@@ -65,6 +90,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
                     severity=DiagnosticSeverity.ERROR,
                     message=f"edge target '{edge.target}' does not reference an existing node",
                     line=edge.line,
+                    edge=(edge.source, edge.target),
                 )
             )
 
@@ -73,7 +99,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
         if edge.target in in_degree:
             in_degree[edge.target] += 1
 
-        diagnostics.extend(_validate_edge_condition(edge.attrs.get("condition"), edge.line))
+        diagnostics.extend(_validate_edge_condition(edge.attrs.get("condition"), edge))
 
     if len(start_nodes) == 1:
         start = start_nodes[0]
@@ -84,6 +110,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
                     severity=DiagnosticSeverity.ERROR,
                     message=f"start node '{start.node_id}' must have no incoming edges",
                     line=start.line,
+                    node_id=start.node_id,
                 )
             )
 
@@ -95,6 +122,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
                     severity=DiagnosticSeverity.ERROR,
                     message=f"exit node '{exit_node.node_id}' must have no outgoing edges",
                     line=exit_node.line,
+                    node_id=exit_node.node_id,
                 )
             )
 
@@ -108,6 +136,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
                         severity=DiagnosticSeverity.ERROR,
                         message=f"node '{node_id}' is not reachable from start node",
                         line=node.line,
+                        node_id=node.node_id,
                     )
                 )
 
@@ -162,7 +191,7 @@ def _reachable_nodes(graph: DotGraph, start_id: str) -> Set[str]:
     return visited
 
 
-def _validate_edge_condition(condition_attr, line: int) -> List[Diagnostic]:
+def _validate_edge_condition(condition_attr, edge: DotEdge) -> List[Diagnostic]:
     diagnostics: List[Diagnostic] = []
     if not condition_attr:
         return diagnostics
@@ -174,7 +203,8 @@ def _validate_edge_condition(condition_attr, line: int) -> List[Diagnostic]:
                 rule_id="condition_syntax",
                 severity=DiagnosticSeverity.ERROR,
                 message="edge condition must be a string",
-                line=line,
+                line=edge.line,
+                edge=(edge.source, edge.target),
             )
         )
         return diagnostics
@@ -191,7 +221,8 @@ def _validate_edge_condition(condition_attr, line: int) -> List[Diagnostic]:
                     rule_id="condition_syntax",
                     severity=DiagnosticSeverity.ERROR,
                     message="empty condition clause is not allowed",
-                    line=line,
+                    line=edge.line,
+                    edge=(edge.source, edge.target),
                 )
             )
             continue
@@ -203,7 +234,8 @@ def _validate_edge_condition(condition_attr, line: int) -> List[Diagnostic]:
                     rule_id="condition_syntax",
                     severity=DiagnosticSeverity.ERROR,
                     message=f"invalid condition clause '{clause}'",
-                    line=line,
+                    line=edge.line,
+                    edge=(edge.source, edge.target),
                 )
             )
             continue
@@ -215,7 +247,8 @@ def _validate_edge_condition(condition_attr, line: int) -> List[Diagnostic]:
                     rule_id="condition_syntax",
                     severity=DiagnosticSeverity.ERROR,
                     message=f"invalid condition variable '{key}'",
-                    line=line,
+                    line=edge.line,
+                    edge=(edge.source, edge.target),
                 )
             )
 
@@ -254,6 +287,7 @@ def _validate_retry_targets(graph: DotGraph) -> List[Diagnostic]:
                         severity=DiagnosticSeverity.WARNING,
                         message=f"node '{node.node_id}' {key} references missing node '{target}'",
                         line=attr.line,
+                        node_id=node.node_id,
                     )
                 )
 
@@ -263,7 +297,7 @@ def _validate_retry_targets(graph: DotGraph) -> List[Diagnostic]:
 def _validate_fidelity_values(graph: DotGraph) -> List[Diagnostic]:
     diagnostics: List[Diagnostic] = []
 
-    def check_attr(rule_owner: str, attr, line: int):
+    def check_attr(rule_owner: str, attr, line: int, node_id: str | None = None, edge: tuple[str, str] | None = None):
         if not attr:
             return
         value = str(attr.value)
@@ -274,18 +308,29 @@ def _validate_fidelity_values(graph: DotGraph) -> List[Diagnostic]:
                     severity=DiagnosticSeverity.WARNING,
                     message=f"{rule_owner} fidelity '{value}' is not a recognized mode",
                     line=line,
+                    node_id=node_id,
+                    edge=edge,
                 )
             )
 
-    check_attr("graph", graph.graph_attrs.get("default_fidelity"), graph.graph_attrs.get("default_fidelity").line if graph.graph_attrs.get("default_fidelity") else 0)
+    check_attr(
+        "graph",
+        graph.graph_attrs.get("default_fidelity"),
+        graph.graph_attrs.get("default_fidelity").line if graph.graph_attrs.get("default_fidelity") else 0,
+    )
 
     for node in graph.nodes.values():
         attr = node.attrs.get("fidelity")
-        check_attr(f"node '{node.node_id}'", attr, attr.line if attr else node.line)
+        check_attr(f"node '{node.node_id}'", attr, attr.line if attr else node.line, node_id=node.node_id)
 
     for edge in graph.edges:
         attr = edge.attrs.get("fidelity")
-        check_attr(f"edge {edge.source}->{edge.target}", attr, attr.line if attr else edge.line)
+        check_attr(
+            f"edge {edge.source}->{edge.target}",
+            attr,
+            attr.line if attr else edge.line,
+            edge=(edge.source, edge.target),
+        )
 
     return diagnostics
 

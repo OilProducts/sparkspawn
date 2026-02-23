@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from attractor.dsl import DotParseError, DiagnosticSeverity, parse_dot, validate_graph
+from attractor.dsl import DotParseError, Diagnostic, DiagnosticSeverity, parse_dot, validate_graph
 from attractor.engine import Context, PipelineExecutor
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
@@ -335,12 +335,39 @@ def _graph_payload(graph) -> dict:
     }
 
 
+def _diagnostic_payload(diagnostic: Diagnostic) -> dict:
+    payload = {
+        "rule_id": diagnostic.rule_id,
+        "severity": diagnostic.severity.value,
+        "message": diagnostic.message,
+        "line": diagnostic.line,
+    }
+    if diagnostic.node_id is not None:
+        payload["node_id"] = diagnostic.node_id
+    if diagnostic.edge is not None:
+        payload["edge"] = list(diagnostic.edge)
+    if diagnostic.fix is not None:
+        payload["fix"] = diagnostic.fix
+    return payload
+
+
 @app.post("/preview")
 async def preview_pipeline(req: PreviewRequest):
     try:
         graph = parse_dot(req.flow_content)
     except DotParseError as exc:
-        return {"status": "parse_error", "error": str(exc)}
+        parse_diag = {
+            "rule_id": "parse_error",
+            "severity": DiagnosticSeverity.ERROR.value,
+            "message": str(exc),
+            "line": getattr(exc, "line", 0),
+        }
+        return {
+            "status": "parse_error",
+            "error": str(exc),
+            "diagnostics": [parse_diag],
+            "errors": [parse_diag],
+        }
 
     pipeline = TransformPipeline()
     pipeline.register(GoalVariableTransform())
@@ -353,14 +380,8 @@ async def preview_pipeline(req: PreviewRequest):
     payload = {
         "status": "ok" if not errors else "validation_error",
         "graph": _graph_payload(graph),
-        "errors": [
-            {
-                "rule_id": d.rule_id,
-                "message": d.message,
-                "line": d.line,
-            }
-            for d in errors
-        ],
+        "diagnostics": [_diagnostic_payload(d) for d in diagnostics],
+        "errors": [_diagnostic_payload(d) for d in errors],
     }
     return payload
 
@@ -373,7 +394,18 @@ async def run_pipeline(req: RunRequest):
         RUNTIME.status = "validation_error"
         RUNTIME.last_error = str(exc)
         await manager.broadcast({"type": "log", "msg": f"❌ Parse error: {exc}"})
-        return {"status": "validation_error", "error": str(exc)}
+        parse_diag = {
+            "rule_id": "parse_error",
+            "severity": DiagnosticSeverity.ERROR.value,
+            "message": str(exc),
+            "line": getattr(exc, "line", 0),
+        }
+        return {
+            "status": "validation_error",
+            "error": str(exc),
+            "diagnostics": [parse_diag],
+            "errors": [parse_diag],
+        }
 
     diagnostics = validate_graph(graph)
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
@@ -384,14 +416,8 @@ async def run_pipeline(req: RunRequest):
             await manager.broadcast({"type": "log", "msg": f"❌ {diag.rule_id}: {diag.message}"})
         return {
             "status": "validation_error",
-            "errors": [
-                {
-                    "rule_id": d.rule_id,
-                    "message": d.message,
-                    "line": d.line,
-                }
-                for d in errors
-            ],
+            "diagnostics": [_diagnostic_payload(d) for d in diagnostics],
+            "errors": [_diagnostic_payload(d) for d in errors],
         }
 
     pipeline = TransformPipeline()

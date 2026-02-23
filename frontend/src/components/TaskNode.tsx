@@ -7,6 +7,7 @@ export function TaskNode({ id, data, selected }: NodeProps) {
     const { activeFlow, viewMode } = useStore();
     const humanGate = useStore((state) => state.humanGate);
     const graphAttrs = useStore((state) => state.graphAttrs);
+    const nodeDiagnostics = useStore((state) => state.nodeDiagnostics);
     const { setNodes, getEdges } = useReactFlow();
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -48,6 +49,10 @@ export function TaskNode({ id, data, selected }: NodeProps) {
         data.allow_partial === true || data.allow_partial === 'true'
     );
     const status = (data.status as string) || 'idle';
+    const diagnosticsForNode = nodeDiagnostics[id] || [];
+    const diagnosticsCount = diagnosticsForNode.length;
+    const hasDiagnosticError = diagnosticsForNode.some((diag) => diag.severity === 'error');
+    const hasDiagnosticWarning = diagnosticsForNode.some((diag) => diag.severity === 'warning');
 
     useEffect(() => {
         if (isEditingLabel) {
@@ -178,14 +183,30 @@ export function TaskNode({ id, data, selected }: NodeProps) {
         >
             <Handle type="target" position={Position.Top} className="w-3 h-3 bg-muted-foreground border-border" />
 
-            {selected && viewMode === 'editor' && (
-                <button
-                    onClick={openDetailsEditor}
-                    className="absolute right-2 top-2 rounded border border-border bg-background/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                >
-                    Edit
-                </button>
-            )}
+            <div className="absolute right-2 top-2 flex flex-col items-end gap-1">
+                {selected && viewMode === 'editor' && (
+                    <button
+                        onClick={openDetailsEditor}
+                        className="rounded border border-border bg-background/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                    >
+                        Edit
+                    </button>
+                )}
+                {diagnosticsCount > 0 && (
+                    <div
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                            hasDiagnosticError
+                                ? 'bg-destructive/15 text-destructive'
+                                : hasDiagnosticWarning
+                                    ? 'bg-amber-500/15 text-amber-700'
+                                    : 'bg-sky-500/15 text-sky-700'
+                        }`}
+                        title={diagnosticsForNode.map((diag) => diag.message).join('\n')}
+                    >
+                        {diagnosticsCount} {hasDiagnosticError ? 'Error' : hasDiagnosticWarning ? 'Warn' : 'Info'}
+                    </div>
+                )}
+            </div>
             {isWaiting && (
                 <div className="absolute left-2 top-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                     Needs Input

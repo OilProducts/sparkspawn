@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 
 class DotValueType(str, Enum):
@@ -57,6 +57,7 @@ class DotGraph:
 class DiagnosticSeverity(str, Enum):
     ERROR = "error"
     WARNING = "warning"
+    INFO = "info"
 
 
 @dataclass
@@ -65,6 +66,9 @@ class Diagnostic:
     severity: DiagnosticSeverity
     message: str
     line: int = 0
+    node_id: Optional[str] = None
+    edge: Optional[Tuple[str, str]] = None
+    fix: Optional[str] = None
 
 
 DURATION_UNITS = {"ms", "s", "m", "h", "d"}

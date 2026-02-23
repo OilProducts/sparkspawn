@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export type ViewMode = 'editor' | 'execution'
 export type NodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'waiting'
+export type DiagnosticSeverity = 'error' | 'warning' | 'info'
 
 export interface HumanGateOption {
     label: string
@@ -30,6 +31,39 @@ export interface GraphAttrs {
     retry_target?: string
     fallback_retry_target?: string
     default_fidelity?: string
+}
+
+export interface DiagnosticEntry {
+    rule_id: string
+    severity: DiagnosticSeverity
+    message: string
+    line?: number
+    node_id?: string | null
+    edge?: [string, string] | null
+    fix?: string | null
+}
+
+const buildDiagnosticMaps = (diagnostics: DiagnosticEntry[]) => {
+    const nodeDiagnostics: Record<string, DiagnosticEntry[]> = {}
+    const edgeDiagnostics: Record<string, DiagnosticEntry[]> = {}
+
+    diagnostics.forEach((diag) => {
+        if (diag.node_id) {
+            if (!nodeDiagnostics[diag.node_id]) {
+                nodeDiagnostics[diag.node_id] = []
+            }
+            nodeDiagnostics[diag.node_id].push(diag)
+        }
+        if (diag.edge && diag.edge.length === 2) {
+            const key = `${diag.edge[0]}->${diag.edge[1]}`
+            if (!edgeDiagnostics[key]) {
+                edgeDiagnostics[key] = []
+            }
+            edgeDiagnostics[key].push(diag)
+        }
+    })
+
+    return { nodeDiagnostics, edgeDiagnostics }
 }
 
 interface AppState {
@@ -62,6 +96,13 @@ interface AppState {
     graphAttrs: GraphAttrs
     setGraphAttrs: (attrs: GraphAttrs) => void
     updateGraphAttr: (key: keyof GraphAttrs, value: string) => void
+
+    diagnostics: DiagnosticEntry[]
+    setDiagnostics: (diagnostics: DiagnosticEntry[]) => void
+    clearDiagnostics: () => void
+    nodeDiagnostics: Record<string, DiagnosticEntry[]>
+    edgeDiagnostics: Record<string, DiagnosticEntry[]>
+    hasValidationErrors: boolean
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -101,4 +142,26 @@ export const useStore = create<AppState>((set) => ({
                 [key]: value,
             },
         })),
+
+    diagnostics: [],
+    setDiagnostics: (diagnostics) =>
+        set(() => {
+            const { nodeDiagnostics, edgeDiagnostics } = buildDiagnosticMaps(diagnostics)
+            return {
+                diagnostics,
+                nodeDiagnostics,
+                edgeDiagnostics,
+                hasValidationErrors: diagnostics.some((diag) => diag.severity === 'error'),
+            }
+        }),
+    clearDiagnostics: () =>
+        set(() => ({
+            diagnostics: [],
+            nodeDiagnostics: {},
+            edgeDiagnostics: {},
+            hasValidationErrors: false,
+        })),
+    nodeDiagnostics: {},
+    edgeDiagnostics: {},
+    hasValidationErrors: false,
 }))
