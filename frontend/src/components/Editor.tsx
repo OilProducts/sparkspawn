@@ -20,6 +20,8 @@ import { generateDot } from '@/lib/dotUtils';
 const nodeTypes = {
     customTask: TaskNode,
 };
+const EDGE_STYLE = { stroke: 'hsl(var(--border))', strokeWidth: 2 };
+const EDGE_TYPE: Edge['type'] = 'bezier';
 
 interface PreviewNode {
     id: string
@@ -84,8 +86,8 @@ export function Editor() {
                     id: `e-${e.from}-${e.to}-${i}`,
                     source: e.from,
                     target: e.to,
-                    type: 'smoothstep',
-                    style: { stroke: 'hsl(var(--border))', strokeWidth: 2 },
+                    type: EDGE_TYPE,
+                    style: EDGE_STYLE,
                 }));
 
                 setNodes(rfNodes);
@@ -154,6 +156,7 @@ export function Editor() {
                 onConnect={onConnect}
                 onSelectionChange={onSelectionChange}
                 nodeTypes={nodeTypes}
+                defaultEdgeOptions={{ type: EDGE_TYPE, style: EDGE_STYLE }}
                 fitView
                 colorMode="dark"
                 minZoom={0.1}
