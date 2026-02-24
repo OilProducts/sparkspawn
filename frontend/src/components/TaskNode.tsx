@@ -183,35 +183,43 @@ export function TaskNode({ id, data, selected }: NodeProps) {
 
     const shapeStyle: CSSProperties = {};
     const shapeClasses: string[] = [];
+    let minHeightClass = '';
     let showComponentBars = false;
 
     switch (nodeShape) {
         case 'diamond':
             shapeStyle.clipPath = 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
             shapeClasses.push('rounded-none');
+            minHeightClass = 'min-h-[80px]';
             break;
         case 'Mdiamond':
             shapeStyle.clipPath = 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
             shapeClasses.push('rounded-none', 'border-double', 'border-[3px]');
+            minHeightClass = 'min-h-[80px]';
             break;
         case 'hexagon':
             shapeStyle.clipPath = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
             shapeClasses.push('rounded-none');
+            minHeightClass = 'min-h-[80px]';
             break;
         case 'parallelogram':
             shapeStyle.clipPath = 'polygon(10% 0%, 100% 0%, 90% 100%, 0% 100%)';
             shapeClasses.push('rounded-none');
+            minHeightClass = 'min-h-[80px]';
             break;
         case 'tripleoctagon':
             shapeStyle.clipPath = 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)';
             shapeClasses.push('rounded-none');
+            minHeightClass = 'min-h-[80px]';
             break;
         case 'component':
             shapeClasses.push('rounded-none', 'pl-8');
             showComponentBars = true;
+            minHeightClass = 'min-h-[80px]';
             break;
         case 'Msquare':
             shapeClasses.push('rounded-none', 'border-double', 'border-[3px]');
+            minHeightClass = 'min-h-[80px]';
             break;
         default:
             break;
@@ -255,7 +263,7 @@ export function TaskNode({ id, data, selected }: NodeProps) {
             )}
 
             <div
-                className={`flow-node__body bg-card/95 text-card-foreground shadow-sm rounded-md border p-4 min-w-[150px] relative ${borderColor} transition-[color,box-shadow,border-color,background-color] hover:shadow-md ${shapeClasses.join(' ')}`}
+                className={`flow-node__body bg-card/95 text-card-foreground shadow-sm rounded-md border p-4 min-w-[150px] relative ${borderColor} ${minHeightClass} transition-[color,box-shadow,border-color,background-color] hover:shadow-md ${shapeClasses.join(' ')}`}
                 style={shapeStyle}
                 data-shape={nodeShape}
             >
