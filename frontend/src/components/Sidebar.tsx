@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } from "@xyflow/react"
 import { generateDot } from "@/lib/dotUtils"
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
+import { getHandlerType, getNodeFieldVisibility } from "@/lib/nodeVisibility"
 
 export function Sidebar() {
     const { viewMode, activeFlow, setActiveFlow, selectedNodeId, selectedEdgeId } = useStore()
@@ -111,6 +112,11 @@ export function Sidebar() {
     const selectedNode = nodes.find(n => n.id === selectedNodeId);
     const selectedEdge = edges.find(e => e.id === selectedEdgeId);
     const isTrue = (value: unknown) => value === true || value === 'true';
+    const handlerType = getHandlerType(
+        (selectedNode?.data?.shape as string) || '',
+        (selectedNode?.data?.type as string) || ''
+    )
+    const visibility = getNodeFieldVisibility(handlerType)
     const autoTab = selectedEdgeId ? 'edge' : selectedNodeId ? 'edit' : tab;
     const activeTab = viewMode === 'execution' ? 'flows' : autoTab;
 
@@ -257,25 +263,27 @@ export function Sidebar() {
                                 </select>
                             </div>
 
-                            <div className="space-y-1.5 flex flex-col h-48">
-                                <label className="text-sm font-medium">Prompt Instruction</label>
-                                <textarea
-                                    key={selectedNodeId ?? 'prompt'}
-                                    ref={promptRef}
-                                    defaultValue={(selectedNode?.data?.prompt as string) || ''}
-                                    onFocus={() => {
-                                        setSuppressPreview(true)
-                                        promptNodeRef.current = selectedNodeId
-                                    }}
-                                    onBlur={() => {
-                                        setSuppressPreview(false)
-                                        commitPrompt()
-                                    }}
-                                    className="flex flex-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
-                                    placeholder="Enter system prompt instructions..."
-                                />
-                            </div>
-                            {(selectedNode?.data?.shape as string) === 'parallelogram' && (
+                            {visibility.showPrompt && (
+                                <div className="space-y-1.5 flex flex-col h-48">
+                                    <label className="text-sm font-medium">Prompt Instruction</label>
+                                    <textarea
+                                        key={selectedNodeId ?? 'prompt'}
+                                        ref={promptRef}
+                                        defaultValue={(selectedNode?.data?.prompt as string) || ''}
+                                        onFocus={() => {
+                                            setSuppressPreview(true)
+                                            promptNodeRef.current = selectedNodeId
+                                        }}
+                                        onBlur={() => {
+                                            setSuppressPreview(false)
+                                            commitPrompt()
+                                        }}
+                                        className="flex flex-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                                        placeholder="Enter system prompt instructions..."
+                                    />
+                                </div>
+                            )}
+                            {visibility.showToolCommand && (
                                 <div className="space-y-1.5">
                                     <label className="text-sm font-medium">Tool Command</label>
                                     <input
@@ -286,7 +294,7 @@ export function Sidebar() {
                                     />
                                 </div>
                             )}
-                            {(selectedNode?.data?.shape as string) === 'component' && (
+                            {visibility.showParallelOptions && (
                                 <>
                                     <div className="space-y-1.5">
                                         <label className="text-sm font-medium">Join Policy</label>
@@ -323,13 +331,15 @@ export function Sidebar() {
                                     </div>
                                 </>
                             )}
-                            <button
-                                onClick={() => setShowAdvanced((prev) => !prev)}
-                                className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                            >
-                                {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
-                            </button>
-                            {showAdvanced && (
+                            {visibility.showAdvanced && (
+                                <button
+                                    onClick={() => setShowAdvanced((prev) => !prev)}
+                                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                                >
+                                    {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
+                                </button>
+                            )}
+                            {visibility.showAdvanced && showAdvanced && (
                                 <div className="space-y-4">
                                     <div className="space-y-1.5">
                                         <label className="text-sm font-medium">Handler Type</label>
@@ -340,139 +350,149 @@ export function Sidebar() {
                                             placeholder="optional override"
                                         />
                                     </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Max Retries</label>
-                                            <input
-                                                value={(selectedNode?.data?.max_retries as number | string | undefined) ?? ''}
-                                                onChange={(e) => handlePropertyChange('max_retries', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            />
+                                    {visibility.showGeneralAdvanced && (
+                                        <>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium">Max Retries</label>
+                                                    <input
+                                                        value={(selectedNode?.data?.max_retries as number | string | undefined) ?? ''}
+                                                        onChange={(e) => handlePropertyChange('max_retries', e.target.value)}
+                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium">Timeout</label>
+                                                    <input
+                                                        value={(selectedNode?.data?.timeout as string) || ''}
+                                                        onChange={(e) => handlePropertyChange('timeout', e.target.value)}
+                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        placeholder="900s"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    id={`goal-gate-${selectedNodeId}`}
+                                                    type="checkbox"
+                                                    checked={isTrue(selectedNode?.data?.goal_gate)}
+                                                    onChange={(e) => handlePropertyChange('goal_gate', e.target.checked)}
+                                                    className="h-4 w-4 rounded border border-input"
+                                                />
+                                                <label htmlFor={`goal-gate-${selectedNodeId}`} className="text-sm font-medium">
+                                                    Goal Gate
+                                                </label>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-sm font-medium">Retry Target</label>
+                                                <input
+                                                    value={(selectedNode?.data?.retry_target as string) || ''}
+                                                    onChange={(e) => handlePropertyChange('retry_target', e.target.value)}
+                                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-sm font-medium">Fallback Retry Target</label>
+                                                <input
+                                                    value={(selectedNode?.data?.fallback_retry_target as string) || ''}
+                                                    onChange={(e) => handlePropertyChange('fallback_retry_target', e.target.value)}
+                                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium">Fidelity</label>
+                                                    <input
+                                                        value={(selectedNode?.data?.fidelity as string) || ''}
+                                                        onChange={(e) => handlePropertyChange('fidelity', e.target.value)}
+                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        placeholder="full"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium">Thread ID</label>
+                                                    <input
+                                                        value={(selectedNode?.data?.thread_id as string) || ''}
+                                                        onChange={(e) => handlePropertyChange('thread_id', e.target.value)}
+                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-sm font-medium">Class</label>
+                                                <input
+                                                    value={(selectedNode?.data?.class as string) || ''}
+                                                    onChange={(e) => handlePropertyChange('class', e.target.value)}
+                                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                            </div>
+                                        </>
+                                    )}
+                                    {visibility.showLlmSettings && (
+                                        <>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium">LLM Model</label>
+                                                    <input
+                                                        value={(selectedNode?.data?.llm_model as string) || ''}
+                                                        onChange={(e) => handlePropertyChange('llm_model', e.target.value)}
+                                                        list="llm-model-options-panel"
+                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    />
+                                                    <datalist id="llm-model-options-panel">
+                                                        {getModelSuggestions((selectedNode?.data?.llm_provider as string) || '').map((model) => (
+                                                            <option key={model} value={model} />
+                                                        ))}
+                                                    </datalist>
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium">LLM Provider</label>
+                                                    <input
+                                                        value={(selectedNode?.data?.llm_provider as string) || ''}
+                                                        onChange={(e) => handlePropertyChange('llm_provider', e.target.value)}
+                                                        list="llm-provider-options-panel"
+                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    />
+                                                    <datalist id="llm-provider-options-panel">
+                                                        {LLM_PROVIDER_OPTIONS.map((provider) => (
+                                                            <option key={provider} value={provider} />
+                                                        ))}
+                                                    </datalist>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-sm font-medium">Reasoning Effort</label>
+                                                <input
+                                                    value={(selectedNode?.data?.reasoning_effort as string) || ''}
+                                                    onChange={(e) => handlePropertyChange('reasoning_effort', e.target.value)}
+                                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    placeholder="high"
+                                                />
+                                            </div>
+                                        </>
+                                    )}
+                                    {visibility.showGeneralAdvanced && (
+                                        <div className="flex items-center gap-4">
+                                            <label className="flex items-center gap-2 text-sm font-medium">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isTrue(selectedNode?.data?.auto_status)}
+                                                    onChange={(e) => handlePropertyChange('auto_status', e.target.checked)}
+                                                    className="h-4 w-4 rounded border border-input"
+                                                />
+                                                Auto Status
+                                            </label>
+                                            <label className="flex items-center gap-2 text-sm font-medium">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isTrue(selectedNode?.data?.allow_partial)}
+                                                    onChange={(e) => handlePropertyChange('allow_partial', e.target.checked)}
+                                                    className="h-4 w-4 rounded border border-input"
+                                                />
+                                                Allow Partial
+                                            </label>
                                         </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Timeout</label>
-                                            <input
-                                                value={(selectedNode?.data?.timeout as string) || ''}
-                                                onChange={(e) => handlePropertyChange('timeout', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                placeholder="900s"
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            id={`goal-gate-${selectedNodeId}`}
-                                            type="checkbox"
-                                            checked={isTrue(selectedNode?.data?.goal_gate)}
-                                            onChange={(e) => handlePropertyChange('goal_gate', e.target.checked)}
-                                            className="h-4 w-4 rounded border border-input"
-                                        />
-                                        <label htmlFor={`goal-gate-${selectedNodeId}`} className="text-sm font-medium">
-                                            Goal Gate
-                                        </label>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium">Retry Target</label>
-                                        <input
-                                            value={(selectedNode?.data?.retry_target as string) || ''}
-                                            onChange={(e) => handlePropertyChange('retry_target', e.target.value)}
-                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium">Fallback Retry Target</label>
-                                        <input
-                                            value={(selectedNode?.data?.fallback_retry_target as string) || ''}
-                                            onChange={(e) => handlePropertyChange('fallback_retry_target', e.target.value)}
-                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Fidelity</label>
-                                            <input
-                                                value={(selectedNode?.data?.fidelity as string) || ''}
-                                                onChange={(e) => handlePropertyChange('fidelity', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                placeholder="full"
-                                            />
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Thread ID</label>
-                                            <input
-                                                value={(selectedNode?.data?.thread_id as string) || ''}
-                                                onChange={(e) => handlePropertyChange('thread_id', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium">Class</label>
-                                        <input
-                                            value={(selectedNode?.data?.class as string) || ''}
-                                            onChange={(e) => handlePropertyChange('class', e.target.value)}
-                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">LLM Model</label>
-                                            <input
-                                                value={(selectedNode?.data?.llm_model as string) || ''}
-                                                onChange={(e) => handlePropertyChange('llm_model', e.target.value)}
-                                                list="llm-model-options-panel"
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            />
-                                            <datalist id="llm-model-options-panel">
-                                                {getModelSuggestions((selectedNode?.data?.llm_provider as string) || '').map((model) => (
-                                                    <option key={model} value={model} />
-                                                ))}
-                                            </datalist>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">LLM Provider</label>
-                                            <input
-                                                value={(selectedNode?.data?.llm_provider as string) || ''}
-                                                onChange={(e) => handlePropertyChange('llm_provider', e.target.value)}
-                                                list="llm-provider-options-panel"
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            />
-                                            <datalist id="llm-provider-options-panel">
-                                                {LLM_PROVIDER_OPTIONS.map((provider) => (
-                                                    <option key={provider} value={provider} />
-                                                ))}
-                                            </datalist>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium">Reasoning Effort</label>
-                                        <input
-                                            value={(selectedNode?.data?.reasoning_effort as string) || ''}
-                                            onChange={(e) => handlePropertyChange('reasoning_effort', e.target.value)}
-                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            placeholder="high"
-                                        />
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                        <label className="flex items-center gap-2 text-sm font-medium">
-                                            <input
-                                                type="checkbox"
-                                                checked={isTrue(selectedNode?.data?.auto_status)}
-                                                onChange={(e) => handlePropertyChange('auto_status', e.target.checked)}
-                                                className="h-4 w-4 rounded border border-input"
-                                            />
-                                            Auto Status
-                                        </label>
-                                        <label className="flex items-center gap-2 text-sm font-medium">
-                                            <input
-                                                type="checkbox"
-                                                checked={isTrue(selectedNode?.data?.allow_partial)}
-                                                onChange={(e) => handlePropertyChange('allow_partial', e.target.checked)}
-                                                className="h-4 w-4 rounded border border-input"
-                                            />
-                                            Allow Partial
-                                        </label>
-                                    </div>
+                                    )}
                                 </div>
                             )}
                         </div>

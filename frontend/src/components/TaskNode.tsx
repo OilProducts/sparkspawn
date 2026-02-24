@@ -3,6 +3,7 @@ import { Handle, NodeToolbar, Position, type Node, type NodeProps, useReactFlow 
 import { useStore } from '@/store';
 import { generateDot } from '@/lib/dotUtils';
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions';
+import { getHandlerType, getNodeFieldVisibility } from '@/lib/nodeVisibility';
 
 export function TaskNode({ id, data, selected }: NodeProps) {
     const { activeFlow, viewMode } = useStore();
@@ -50,6 +51,8 @@ export function TaskNode({ id, data, selected }: NodeProps) {
         data.allow_partial === true || data.allow_partial === 'true'
     );
     const status = (data.status as string) || 'idle';
+    const handlerType = getHandlerType(draftShape, draftType);
+    const visibility = getNodeFieldVisibility(handlerType);
     const diagnosticsForNode = nodeDiagnostics[id] || [];
     const diagnosticsCount = diagnosticsForNode.length;
     const hasDiagnosticError = diagnosticsForNode.some((diag) => diag.severity === 'error');
@@ -268,15 +271,17 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                 <option value="Msquare">End Node</option>
                             </select>
                         </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-foreground">Prompt</label>
-                            <textarea
-                                value={draftPrompt}
-                                onChange={(event) => setDraftPrompt(event.target.value)}
-                                className="nodrag h-20 w-full resize-none rounded-md border border-input bg-background px-2 py-1 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            />
-                        </div>
-                        {draftShape === 'parallelogram' && (
+                        {visibility.showPrompt && (
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Prompt</label>
+                                <textarea
+                                    value={draftPrompt}
+                                    onChange={(event) => setDraftPrompt(event.target.value)}
+                                    className="nodrag h-20 w-full resize-none rounded-md border border-input bg-background px-2 py-1 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                        )}
+                        {visibility.showToolCommand && (
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-foreground">Tool Command</label>
                                 <input
@@ -287,7 +292,7 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                 />
                             </div>
                         )}
-                        {draftShape === 'component' && (
+                        {visibility.showParallelOptions && (
                             <>
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-foreground">Join Policy</label>
@@ -325,13 +330,15 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                 </div>
                             </>
                         )}
-                        <button
-                            onClick={() => setShowAdvanced((prev) => !prev)}
-                            className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                        >
-                            {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
-                        </button>
-                        {showAdvanced && (
+                        {visibility.showAdvanced && (
+                            <button
+                                onClick={() => setShowAdvanced((prev) => !prev)}
+                                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                            >
+                                {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
+                            </button>
+                        )}
+                        {visibility.showAdvanced && showAdvanced && (
                             <div className="space-y-2 pt-1">
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-foreground">Handler Type</label>
@@ -342,138 +349,148 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                         placeholder="optional override"
                                     />
                                 </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-foreground">Max Retries</label>
-                                        <input
-                                            value={draftMaxRetries}
-                                            onChange={(event) => setDraftMaxRetries(event.target.value)}
-                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
+                                {visibility.showGeneralAdvanced && (
+                                    <>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-foreground">Max Retries</label>
+                                                <input
+                                                    value={draftMaxRetries}
+                                                    onChange={(event) => setDraftMaxRetries(event.target.value)}
+                                                    className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-foreground">Timeout</label>
+                                                <input
+                                                    value={draftTimeout}
+                                                    onChange={(event) => setDraftTimeout(event.target.value)}
+                                                    className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    placeholder="900s"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                id={`goal-gate-${id}`}
+                                                type="checkbox"
+                                                checked={draftGoalGate}
+                                                onChange={(event) => setDraftGoalGate(event.target.checked)}
+                                                className="h-4 w-4 rounded border border-input"
+                                            />
+                                            <label htmlFor={`goal-gate-${id}`} className="text-xs font-medium">
+                                                Goal Gate
+                                            </label>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-foreground">Retry Target</label>
+                                            <input
+                                                value={draftRetryTarget}
+                                                onChange={(event) => setDraftRetryTarget(event.target.value)}
+                                                className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-foreground">Fallback Retry Target</label>
+                                            <input
+                                                value={draftFallbackRetryTarget}
+                                                onChange={(event) => setDraftFallbackRetryTarget(event.target.value)}
+                                                className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-foreground">Fidelity</label>
+                                                <input
+                                                    value={draftFidelity}
+                                                    onChange={(event) => setDraftFidelity(event.target.value)}
+                                                    className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-foreground">Thread ID</label>
+                                                <input
+                                                    value={draftThreadId}
+                                                    onChange={(event) => setDraftThreadId(event.target.value)}
+                                                    className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-foreground">Class</label>
+                                            <input
+                                                value={draftClassName}
+                                                onChange={(event) => setDraftClassName(event.target.value)}
+                                                className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                        </div>
+                                    </>
+                                )}
+                                {visibility.showLlmSettings && (
+                                    <>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-foreground">LLM Model</label>
+                                                <input
+                                                    value={draftLlmModel}
+                                                    onChange={(event) => setDraftLlmModel(event.target.value)}
+                                                    list={`llm-model-options-${id}`}
+                                                    className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                                <datalist id={`llm-model-options-${id}`}>
+                                                    {getModelSuggestions(draftLlmProvider).map((model) => (
+                                                        <option key={model} value={model} />
+                                                    ))}
+                                                </datalist>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-foreground">LLM Provider</label>
+                                                <input
+                                                    value={draftLlmProvider}
+                                                    onChange={(event) => setDraftLlmProvider(event.target.value)}
+                                                    list={`llm-provider-options-${id}`}
+                                                    className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                                <datalist id={`llm-provider-options-${id}`}>
+                                                    {LLM_PROVIDER_OPTIONS.map((provider) => (
+                                                        <option key={provider} value={provider} />
+                                                    ))}
+                                                </datalist>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-foreground">Reasoning Effort</label>
+                                            <input
+                                                value={draftReasoningEffort}
+                                                onChange={(event) => setDraftReasoningEffort(event.target.value)}
+                                                className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                placeholder="high"
+                                            />
+                                        </div>
+                                    </>
+                                )}
+                                {visibility.showGeneralAdvanced && (
+                                    <div className="flex items-center gap-4">
+                                        <label className="flex items-center gap-2 text-xs font-medium">
+                                            <input
+                                                type="checkbox"
+                                                checked={draftAutoStatus}
+                                                onChange={(event) => setDraftAutoStatus(event.target.checked)}
+                                                className="h-4 w-4 rounded border border-input"
+                                            />
+                                            Auto Status
+                                        </label>
+                                        <label className="flex items-center gap-2 text-xs font-medium">
+                                            <input
+                                                type="checkbox"
+                                                checked={draftAllowPartial}
+                                                onChange={(event) => setDraftAllowPartial(event.target.checked)}
+                                                className="h-4 w-4 rounded border border-input"
+                                            />
+                                            Allow Partial
+                                        </label>
                                     </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-foreground">Timeout</label>
-                                        <input
-                                            value={draftTimeout}
-                                            onChange={(event) => setDraftTimeout(event.target.value)}
-                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            placeholder="900s"
-                                        />
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        id={`goal-gate-${id}`}
-                                        type="checkbox"
-                                        checked={draftGoalGate}
-                                        onChange={(event) => setDraftGoalGate(event.target.checked)}
-                                        className="h-4 w-4 rounded border border-input"
-                                    />
-                                    <label htmlFor={`goal-gate-${id}`} className="text-xs font-medium">
-                                        Goal Gate
-                                    </label>
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-foreground">Retry Target</label>
-                                    <input
-                                        value={draftRetryTarget}
-                                        onChange={(event) => setDraftRetryTarget(event.target.value)}
-                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-foreground">Fallback Retry Target</label>
-                                    <input
-                                        value={draftFallbackRetryTarget}
-                                        onChange={(event) => setDraftFallbackRetryTarget(event.target.value)}
-                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    />
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-foreground">Fidelity</label>
-                                        <input
-                                            value={draftFidelity}
-                                            onChange={(event) => setDraftFidelity(event.target.value)}
-                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-foreground">Thread ID</label>
-                                        <input
-                                            value={draftThreadId}
-                                            onChange={(event) => setDraftThreadId(event.target.value)}
-                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                    </div>
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-foreground">Class</label>
-                                    <input
-                                        value={draftClassName}
-                                        onChange={(event) => setDraftClassName(event.target.value)}
-                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    />
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-foreground">LLM Model</label>
-                                        <input
-                                            value={draftLlmModel}
-                                            onChange={(event) => setDraftLlmModel(event.target.value)}
-                                            list={`llm-model-options-${id}`}
-                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                        <datalist id={`llm-model-options-${id}`}>
-                                            {getModelSuggestions(draftLlmProvider).map((model) => (
-                                                <option key={model} value={model} />
-                                            ))}
-                                        </datalist>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-foreground">LLM Provider</label>
-                                        <input
-                                            value={draftLlmProvider}
-                                            onChange={(event) => setDraftLlmProvider(event.target.value)}
-                                            list={`llm-provider-options-${id}`}
-                                            className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                        <datalist id={`llm-provider-options-${id}`}>
-                                            {LLM_PROVIDER_OPTIONS.map((provider) => (
-                                                <option key={provider} value={provider} />
-                                            ))}
-                                        </datalist>
-                                    </div>
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-foreground">Reasoning Effort</label>
-                                    <input
-                                        value={draftReasoningEffort}
-                                        onChange={(event) => setDraftReasoningEffort(event.target.value)}
-                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        placeholder="high"
-                                    />
-                                </div>
-                                <div className="flex items-center gap-4">
-                                    <label className="flex items-center gap-2 text-xs font-medium">
-                                        <input
-                                            type="checkbox"
-                                            checked={draftAutoStatus}
-                                            onChange={(event) => setDraftAutoStatus(event.target.checked)}
-                                            className="h-4 w-4 rounded border border-input"
-                                        />
-                                        Auto Status
-                                    </label>
-                                    <label className="flex items-center gap-2 text-xs font-medium">
-                                        <input
-                                            type="checkbox"
-                                            checked={draftAllowPartial}
-                                            onChange={(event) => setDraftAllowPartial(event.target.checked)}
-                                            className="h-4 w-4 rounded border border-input"
-                                        />
-                                        Allow Partial
-                                    </label>
-                                </div>
+                                )}
                             </div>
                         )}
                     </div>
