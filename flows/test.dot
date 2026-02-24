@@ -1,0 +1,7 @@
+digraph test {
+  start [label="Start", shape=Mdiamond, join_policy=wait_all, error_policy=continue, max_parallel=4];
+  end [label="End", shape=hexagon, join_policy=wait_all, error_policy=continue, max_parallel=4];
+  node_9053 [label="Init project.", shape=box, prompt="Initialize a python/fastapi project.", join_policy=wait_all, error_policy=continue, max_parallel=4];
+  start -> node_9053;
+  node_9053 -> end;
+}
