@@ -406,7 +406,7 @@ export function Editor() {
                 onSelectionChange={onSelectionChange}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
-                defaultEdgeOptions={{ type: EDGE_TYPE, className: EDGE_CLASS }}
+                defaultEdgeOptions={{ type: EDGE_TYPE, className: EDGE_CLASS, interactionWidth: 16 }}
                 elevateEdgesOnSelect
                 fitView
                 colorMode="light"

@@ -64,7 +64,7 @@ export function ValidationEdge({
 
     return (
         <>
-            <BaseEdge path={edgePath} markerEnd={markerEnd} style={edgeStyle} />
+            <BaseEdge path={edgePath} markerEnd={markerEnd} style={edgeStyle} interactionWidth={16} />
             {diagnosticsForEdge.length > 0 && (
                 <EdgeLabelRenderer>
                     <div
