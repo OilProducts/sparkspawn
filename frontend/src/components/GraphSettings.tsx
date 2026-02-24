@@ -37,7 +37,7 @@ export function GraphSettings() {
     }, [activeFlow, graphAttrs, getNodes, getEdges])
 
     return (
-        <div className="absolute right-4 top-4 z-20">
+        <div className="absolute right-4 top-4 z-20 flex flex-col items-end">
             <button
                 onClick={() => setIsOpen((open) => !open)}
                 className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background/90 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground shadow-sm hover:text-foreground"
