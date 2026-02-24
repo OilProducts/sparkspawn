@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ReactFlow,
     MiniMap,
@@ -100,6 +100,8 @@ export function Editor() {
     const [edges, setEdges] = useEdgesState<Edge>([]);
     const hydratedRef = useRef(false);
     const previewTimer = useRef<number | null>(null);
+    const saveTimer = useRef<number | null>(null);
+    const [isDragging, setIsDragging] = useState(false);
 
     const saveFlow = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
         if (!activeFlow) return;
@@ -110,6 +112,16 @@ export function Editor() {
             body: JSON.stringify({ name: activeFlow, content: dot }),
         }).catch(console.error);
     }, [activeFlow, graphAttrs]);
+
+    const scheduleSave = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
+        if (!activeFlow) return;
+        if (saveTimer.current) {
+            window.clearTimeout(saveTimer.current);
+        }
+        saveTimer.current = window.setTimeout(() => {
+            saveFlow(nextNodes, nextEdges);
+        }, 250);
+    }, [activeFlow, saveFlow]);
 
     // Auto-load and sync with Backend Preview
     useEffect(() => {
@@ -227,7 +239,7 @@ export function Editor() {
     }, [setDiagnostics, clearDiagnostics]);
 
     useEffect(() => {
-        if (!activeFlow || !hydratedRef.current || viewMode === 'execution' || suppressPreview) return;
+        if (!activeFlow || !hydratedRef.current || viewMode === 'execution' || suppressPreview || isDragging) return;
         const dot = generateDot(activeFlow, nodes, edges, graphAttrs);
         if (previewTimer.current) {
             window.clearTimeout(previewTimer.current);
@@ -239,34 +251,62 @@ export function Editor() {
                 window.clearTimeout(previewTimer.current);
             }
         };
-    }, [activeFlow, nodes, edges, graphAttrs, viewMode, requestPreview, suppressPreview]);
+    }, [activeFlow, nodes, edges, graphAttrs, viewMode, requestPreview, suppressPreview, isDragging]);
 
     // Handle new connections via UI
     const onNodesChange = useCallback((changes: NodeChange<Node>[]) => {
         setNodes((currentNodes) => {
             const updatedNodes = applyNodeChanges(changes, currentNodes);
-            saveFlow(updatedNodes, edges);
+            const draggingNow = changes.some(
+                (change) => change.type === 'position' && (change as { dragging?: boolean }).dragging
+            );
+            const draggingStopped = changes.some(
+                (change) => change.type === 'position' && (change as { dragging?: boolean }).dragging === false
+            );
+            if (draggingNow) {
+                setIsDragging(true);
+            } else if (draggingStopped) {
+                setIsDragging(false);
+            }
+
+            const shouldSave = changes.some((change) => {
+                if (change.type === 'select') return false;
+                if (change.type === 'position') {
+                    return !(change as { dragging?: boolean }).dragging;
+                }
+                if (change.type === 'dimensions') {
+                    return !(change as { resizing?: boolean }).resizing;
+                }
+                return true;
+            });
+
+            if (shouldSave) {
+                scheduleSave(updatedNodes, edges);
+            }
             return updatedNodes;
         });
-    }, [setNodes, saveFlow, edges]);
+    }, [setNodes, scheduleSave, edges]);
 
     const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
         setEdges((currentEdges) => {
             const updatedEdges = applyEdgeChanges(changes, currentEdges);
-            saveFlow(nodes, updatedEdges);
+            const shouldSave = changes.some((change) => change.type !== 'select');
+            if (shouldSave) {
+                scheduleSave(nodes, updatedEdges);
+            }
             return updatedEdges;
         });
-    }, [setEdges, saveFlow, nodes]);
+    }, [setEdges, scheduleSave, nodes]);
 
     const onConnect = useCallback(
         (params: Connection | Edge) => {
             setEdges((currentEdges) => {
                 const newEdges = addEdge(params, currentEdges);
-                saveFlow(nodes, newEdges);
+                scheduleSave(nodes, newEdges);
                 return newEdges;
             });
         },
-        [setEdges, saveFlow, nodes],
+        [setEdges, scheduleSave, nodes],
     );
 
     const onAddNode = useCallback(() => {
@@ -281,10 +321,10 @@ export function Editor() {
 
         setNodes(nds => {
             const newNodes = [...nds, newNode];
-            saveFlow(newNodes, edges);
+            scheduleSave(newNodes, edges);
             return newNodes;
         });
-    }, [activeFlow, edges, setNodes, saveFlow]);
+    }, [activeFlow, edges, setNodes, scheduleSave]);
 
     const onSelectionChange = useCallback(({ nodes, edges }: OnSelectionChangeParams) => {
         const selectedNode = nodes.find(n => n.selected);
