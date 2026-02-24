@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Handle, NodeToolbar, Position, type Node, type NodeProps, useReactFlow } from '@xyflow/react';
 import { useStore } from '@/store';
 import { generateDot } from '@/lib/dotUtils';
@@ -181,49 +181,71 @@ export function TaskNode({ id, data, selected }: NodeProps) {
     if (isWaiting) borderColor = 'border-amber-500 ring-2 ring-amber-500/40 ring-offset-2 ring-offset-background';
     else if (selected) borderColor = 'border-foreground ring-1 ring-ring ring-offset-2 ring-offset-background';
 
-    const shapeStyle: CSSProperties = {};
     const shapeClasses: string[] = [];
     let minHeightClass = '';
     let showComponentBars = false;
 
     switch (nodeShape) {
         case 'diamond':
-            shapeStyle.clipPath = 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
             shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[80px]';
+            minHeightClass = 'min-h-[110px] min-w-[220px]';
             break;
         case 'Mdiamond':
-            shapeStyle.clipPath = 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
-            shapeClasses.push('rounded-none', 'border-double', 'border-[3px]');
-            minHeightClass = 'min-h-[80px]';
+            shapeClasses.push('rounded-none');
+            minHeightClass = 'min-h-[110px] min-w-[220px]';
             break;
         case 'hexagon':
-            shapeStyle.clipPath = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
             shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[80px]';
+            minHeightClass = 'min-h-[110px] min-w-[220px]';
             break;
         case 'parallelogram':
-            shapeStyle.clipPath = 'polygon(10% 0%, 100% 0%, 90% 100%, 0% 100%)';
             shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[80px]';
+            minHeightClass = 'min-h-[110px] min-w-[220px]';
             break;
         case 'tripleoctagon':
-            shapeStyle.clipPath = 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)';
             shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[80px]';
+            minHeightClass = 'min-h-[110px] min-w-[220px]';
             break;
         case 'component':
             shapeClasses.push('rounded-none', 'pl-8');
             showComponentBars = true;
-            minHeightClass = 'min-h-[80px]';
+            minHeightClass = 'min-h-[110px] min-w-[220px]';
             break;
         case 'Msquare':
-            shapeClasses.push('rounded-none', 'border-double', 'border-[3px]');
-            minHeightClass = 'min-h-[80px]';
+            shapeClasses.push('rounded-none');
+            minHeightClass = 'min-h-[110px] min-w-[220px]';
             break;
         default:
             break;
     }
+
+    const isSvgShape = nodeShape !== 'box';
+    const svgWidth = 220;
+    const svgHeight = 110;
+    const svgStrokeWidth = nodeShape === 'Mdiamond' || nodeShape === 'Msquare' ? 3 : 2;
+    const svgFill = 'hsl(var(--card) / 0.95)';
+    const svgStroke = `hsl(var(--border))`;
+    const svgStrokeInner =
+        nodeShape === 'Mdiamond' || nodeShape === 'Msquare' ? `hsl(var(--border))` : '';
+    const svgPathForShape = () => {
+        switch (nodeShape) {
+            case 'diamond':
+            case 'Mdiamond':
+                return 'M110 6 L214 55 L110 104 L6 55 Z';
+            case 'hexagon':
+                return 'M55 6 H165 L214 55 L165 104 H55 L6 55 Z';
+            case 'parallelogram':
+                return 'M30 6 H214 L190 104 H6 Z';
+            case 'tripleoctagon':
+                return 'M65 6 H155 L214 35 V75 L155 104 H65 L6 75 V35 Z';
+            case 'component':
+                return 'M6 6 H214 V104 H6 Z';
+            case 'Msquare':
+                return 'M6 6 H214 V104 H6 Z';
+            default:
+                return '';
+        }
+    };
 
     return (
         <div
@@ -264,16 +286,40 @@ export function TaskNode({ id, data, selected }: NodeProps) {
 
             <div
                 className={`flow-node__body bg-card/95 text-card-foreground shadow-sm rounded-md border p-4 min-w-[150px] relative ${borderColor} ${minHeightClass} transition-[color,box-shadow,border-color,background-color] hover:shadow-md ${shapeClasses.join(' ')}`}
-                style={shapeStyle}
                 data-shape={nodeShape}
             >
+                {isSvgShape && (
+                    <svg
+                        width={svgWidth}
+                        height={svgHeight}
+                        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+                        className="pointer-events-none absolute left-1/2 top-1/2 h-[110px] w-[220px] -translate-x-1/2 -translate-y-1/2 text-border"
+                        aria-hidden
+                    >
+                        <path
+                            d={svgPathForShape()}
+                            fill={svgFill}
+                            stroke={svgStroke}
+                            strokeWidth={svgStrokeWidth}
+                        />
+                        {svgStrokeInner && (
+                            <path
+                                d={svgPathForShape()}
+                                fill="none"
+                                stroke={svgStrokeInner}
+                                strokeWidth={1}
+                                transform="translate(0.5 0.5) scale(0.985)"
+                            />
+                        )}
+                    </svg>
+                )}
                 {showComponentBars && (
                     <span
                         aria-hidden
                         className="pointer-events-none absolute left-2 top-2 bottom-2 w-2 border-l-2 border-r-2 border-border/60"
                     />
                 )}
-                <div className="flex flex-col gap-1 items-center justify-center">
+                <div className="relative flex flex-col gap-1 items-center justify-center">
                 {isEditingLabel ? (
                     <input
                         ref={inputRef}
