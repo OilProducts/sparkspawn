@@ -51,8 +51,6 @@ export function TaskNode({ id, data, selected }: NodeProps) {
         data.allow_partial === true || data.allow_partial === 'true'
     );
     const status = (data.status as string) || 'idle';
-    const nodeShape = (data.shape as string) || 'box';
-    const isBoxShape = nodeShape === 'box';
     const handlerType = getHandlerType(draftShape, draftType);
     const visibility = getNodeFieldVisibility(handlerType);
     const diagnosticsForNode = nodeDiagnostics[id] || [];
@@ -182,88 +180,14 @@ export function TaskNode({ id, data, selected }: NodeProps) {
     if (isWaiting) borderColor = 'border-amber-500 ring-2 ring-amber-500/40 ring-offset-2 ring-offset-background';
     else if (selected) borderColor = 'border-foreground ring-1 ring-ring ring-offset-2 ring-offset-background';
 
-    const shapeClasses: string[] = [];
-    let minHeightClass = '';
-    let showComponentBars = false;
-
-    switch (nodeShape) {
-        case 'diamond':
-            shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[110px] min-w-[220px]';
-            break;
-        case 'Mdiamond':
-            shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[110px] min-w-[220px]';
-            break;
-        case 'hexagon':
-            shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[110px] min-w-[220px]';
-            break;
-        case 'parallelogram':
-            shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[110px] min-w-[220px]';
-            break;
-        case 'tripleoctagon':
-            shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[110px] min-w-[220px]';
-            break;
-        case 'component':
-            shapeClasses.push('rounded-none', 'pl-8');
-            showComponentBars = true;
-            minHeightClass = 'min-h-[110px] min-w-[220px]';
-            break;
-        case 'Msquare':
-            shapeClasses.push('rounded-none');
-            minHeightClass = 'min-h-[110px] min-w-[220px]';
-            break;
-        default:
-            break;
-    }
-
-    const isSvgShape = nodeShape !== 'box';
-    const svgWidth = 220;
-    const svgHeight = 110;
-    const svgStrokeWidth = nodeShape === 'Mdiamond' || nodeShape === 'Msquare' ? 3 : 2;
-    const svgFill = 'hsl(var(--card) / 0.95)';
-    const svgStroke = (() => {
-        if (status === 'success') return 'hsl(142 76% 36%)';
-        if (status === 'failed') return 'hsl(var(--destructive))';
-        if (status === 'running') return 'hsl(var(--primary))';
-        if (isWaiting) return 'hsl(38 92% 50%)';
-        if (selected) return 'hsl(var(--foreground))';
-        return 'hsl(var(--border))';
-    })();
-    const svgStrokeInner =
-        nodeShape === 'Mdiamond' || nodeShape === 'Msquare' ? svgStroke : '';
-    const svgShadow = 'drop-shadow(0 1px 2px hsl(240 10% 4% / 0.24))';
-    const svgPathForShape = () => {
-        switch (nodeShape) {
-            case 'diamond':
-            case 'Mdiamond':
-                return 'M110 6 L214 55 L110 104 L6 55 Z';
-            case 'hexagon':
-                return 'M55 6 H165 L214 55 L165 104 H55 L6 55 Z';
-            case 'parallelogram':
-                return 'M30 6 H214 L190 104 H6 Z';
-            case 'tripleoctagon':
-                return 'M65 6 H155 L214 35 V75 L155 104 H65 L6 75 V35 Z';
-            case 'component':
-                return 'M6 6 H214 V104 H6 Z';
-            case 'Msquare':
-                return 'M6 6 H214 V104 H6 Z';
-            default:
-                return '';
-        }
-    };
-
     return (
         <div
             onDoubleClick={startEditLabel}
-            className="flow-node relative"
+            className={`bg-card/95 text-card-foreground shadow-sm rounded-md border p-4 min-w-[150px] relative ${borderColor} transition-[color,box-shadow,border-color,background-color] hover:shadow-md`}
         >
             <Handle type="target" position={Position.Top} className="w-3 h-3 bg-muted-foreground border-border" />
 
-            <div className="absolute right-2 top-2 z-10 flex flex-col items-end gap-1">
+            <div className="absolute right-2 top-2 flex flex-col items-end gap-1">
                 {selected && viewMode === 'editor' && (
                     <button
                         onClick={openDetailsEditor}
@@ -288,48 +212,12 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                 )}
             </div>
             {isWaiting && (
-                <div className="absolute left-2 top-2 z-10 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                <div className="absolute left-2 top-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                     Needs Input
                 </div>
             )}
 
-            <div
-                className={`flow-node__body text-card-foreground p-4 min-w-[150px] relative ${minHeightClass} transition-[color,box-shadow,border-color,background-color] ${isBoxShape ? `bg-card/95 shadow-sm border rounded-md ${borderColor} hover:shadow-md` : 'bg-transparent border-0 shadow-none'} ${shapeClasses.join(' ')}`}
-                data-shape={nodeShape}
-            >
-                {isSvgShape && (
-                    <svg
-                        width={svgWidth}
-                        height={svgHeight}
-                        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-                        className="pointer-events-none absolute left-1/2 top-1/2 h-[110px] w-[220px] -translate-x-1/2 -translate-y-1/2 text-border"
-                        aria-hidden
-                    >
-                        <path
-                            d={svgPathForShape()}
-                            fill={svgFill}
-                            stroke={svgStroke}
-                            strokeWidth={svgStrokeWidth}
-                            style={{ filter: svgShadow }}
-                        />
-                        {svgStrokeInner && (
-                            <path
-                                d={svgPathForShape()}
-                                fill="none"
-                                stroke={svgStrokeInner}
-                                strokeWidth={1}
-                                transform="translate(2 2) scale(0.96)"
-                            />
-                        )}
-                    </svg>
-                )}
-                {showComponentBars && (
-                    <span
-                        aria-hidden
-                        className="pointer-events-none absolute left-2 top-2 bottom-2 w-2 border-l-2 border-r-2 border-border/60"
-                    />
-                )}
-                <div className="relative flex flex-col gap-1 items-center justify-center">
+            <div className="flex flex-col gap-1 items-center justify-center">
                 {isEditingLabel ? (
                     <input
                         ref={inputRef}
@@ -352,7 +240,6 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                         {status}
                     </span>
                 )}
-                </div>
             </div>
 
             <Handle type="source" position={Position.Bottom} className="w-3 h-3 bg-muted-foreground border-border" />
