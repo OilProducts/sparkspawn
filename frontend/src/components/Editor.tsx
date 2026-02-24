@@ -29,6 +29,7 @@ const edgeTypes = {
 };
 const EDGE_TYPE: Edge['type'] = 'validation';
 const EDGE_CLASS = 'flow-edge';
+const EDGE_INTERACTION_WIDTH = 16;
 const elk = new ELK();
 
 const DEFAULT_NODE_WIDTH = 220;
@@ -247,6 +248,7 @@ export function Editor() {
                     target: e.to,
                     type: EDGE_TYPE,
                     className: EDGE_CLASS,
+                    interactionWidth: EDGE_INTERACTION_WIDTH,
                     label: e.label,
                     data: {
                         label: e.label ?? '',
@@ -351,7 +353,10 @@ export function Editor() {
     const onConnect = useCallback(
         (params: Connection | Edge) => {
             setEdges((currentEdges) => {
-                const newEdges = addEdge(params, currentEdges);
+                const newEdges = addEdge(
+                    { ...params, type: EDGE_TYPE, interactionWidth: EDGE_INTERACTION_WIDTH },
+                    currentEdges
+                );
                 scheduleSave(nodes, newEdges);
                 return newEdges;
             });
@@ -406,7 +411,11 @@ export function Editor() {
                 onSelectionChange={onSelectionChange}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
-                defaultEdgeOptions={{ type: EDGE_TYPE, className: EDGE_CLASS, interactionWidth: 16 }}
+                defaultEdgeOptions={{
+                    type: EDGE_TYPE,
+                    className: EDGE_CLASS,
+                    interactionWidth: EDGE_INTERACTION_WIDTH,
+                }}
                 elevateEdgesOnSelect
                 fitView
                 colorMode="light"
