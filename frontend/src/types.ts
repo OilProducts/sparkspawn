@@ -1,4 +1,4 @@
-export type ViewMode = 'editor' | 'execution' | 'settings';
+export type ViewMode = 'editor' | 'execution' | 'settings' | 'runs';
 
 export interface AttractorState {
     viewMode: ViewMode;

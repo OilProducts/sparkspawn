@@ -6,10 +6,11 @@ import threading
 import uuid
 import os
 import shutil
+import re
 from datetime import datetime
 from pathlib import Path
 import subprocess
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -177,6 +178,161 @@ class RuntimeState:
 RUNTIME = RuntimeState(last_completed_nodes=[])
 
 
+@dataclass
+class RunRecord:
+    run_id: str
+    flow_name: str
+    status: str
+    result: Optional[str]
+    working_directory: str
+    model: str
+    started_at: str
+    ended_at: Optional[str] = None
+    last_error: str = ""
+    token_usage: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "run_id": self.run_id,
+            "flow_name": self.flow_name,
+            "status": self.status,
+            "result": self.result,
+            "working_directory": self.working_directory,
+            "model": self.model,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "last_error": self.last_error,
+            "token_usage": self.token_usage,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "RunRecord":
+        return cls(
+            run_id=str(data.get("run_id", "")),
+            flow_name=str(data.get("flow_name", "")),
+            status=str(data.get("status", "unknown")),
+            result=data.get("result") if data.get("result") is not None else None,
+            working_directory=str(data.get("working_directory", "")),
+            model=str(data.get("model", "")),
+            started_at=str(data.get("started_at", "")),
+            ended_at=data.get("ended_at") if data.get("ended_at") is not None else None,
+            last_error=str(data.get("last_error", "")),
+            token_usage=int(data["token_usage"]) if data.get("token_usage") is not None else None,
+        )
+
+
+RUNS_INDEX_PATH = PROJECT_ROOT / "attractor.runs.json"
+RUN_HISTORY_LOCK = threading.Lock()
+RUN_HISTORY: Dict[str, RunRecord] = {}
+RUN_ORDER: List[str] = []
+
+
+def _load_run_history() -> None:
+    if not RUNS_INDEX_PATH.exists():
+        return
+    try:
+        with RUNS_INDEX_PATH.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        runs = payload.get("runs", []) if isinstance(payload, dict) else []
+        for entry in runs:
+            record = RunRecord.from_dict(entry)
+            if record.run_id:
+                RUN_HISTORY[record.run_id] = record
+                RUN_ORDER.append(record.run_id)
+    except Exception:
+        pass
+
+
+def _save_run_history() -> None:
+    try:
+        with RUNS_INDEX_PATH.open("w", encoding="utf-8") as f:
+            json.dump(
+                {"runs": [_run.to_dict() for _run in _ordered_runs()]},
+                f,
+                indent=2,
+                sort_keys=True,
+            )
+    except Exception:
+        pass
+
+
+def _ordered_runs() -> List[RunRecord]:
+    records = []
+    for run_id in RUN_ORDER:
+        record = RUN_HISTORY.get(run_id)
+        if record:
+            records.append(record)
+    return records
+
+
+def _record_run_start(run_id: str, flow_name: str, working_directory: str, model: str) -> None:
+    record = RunRecord(
+        run_id=run_id,
+        flow_name=flow_name,
+        status="running",
+        result=None,
+        working_directory=working_directory,
+        model=model,
+        started_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    )
+    with RUN_HISTORY_LOCK:
+        RUN_HISTORY[run_id] = record
+        if run_id in RUN_ORDER:
+            RUN_ORDER.remove(run_id)
+        RUN_ORDER.insert(0, run_id)
+        _save_run_history()
+
+
+TOKEN_LINE_RE = re.compile(r"tokens used\\s*[:=]?\\s*(\\d[\\d,]*)", re.IGNORECASE)
+TOKEN_NUMBER_ONLY_RE = re.compile(r"^\\d[\\d,]*$")
+
+
+def _extract_token_usage(working_directory: str, run_id: str) -> Optional[int]:
+    run_log_path = (
+        Path(working_directory)
+        / ".attractor"
+        / "runs"
+        / run_id
+        / "run.log"
+    )
+    if not run_log_path.exists():
+        return None
+    try:
+        lines = run_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return None
+    total = 0
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        match = TOKEN_LINE_RE.search(line)
+        if match:
+            total += int(match.group(1).replace(",", ""))
+        elif line.lower() == "tokens used" and index + 1 < len(lines):
+            next_line = lines[index + 1].strip()
+            if TOKEN_NUMBER_ONLY_RE.match(next_line):
+                total += int(next_line.replace(",", ""))
+                index += 1
+        index += 1
+    return total if total > 0 else None
+
+
+def _record_run_end(run_id: str, status: str, last_error: str = "") -> None:
+    with RUN_HISTORY_LOCK:
+        record = RUN_HISTORY.get(run_id)
+        if not record:
+            return
+        record.status = status
+        record.result = status
+        record.ended_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        record.last_error = last_error
+        record.token_usage = _extract_token_usage(record.working_directory, run_id)
+        _save_run_history()
+
+
+_load_run_history()
+
+
 def _append_runtime_log(message: str) -> None:
     if not RUNTIME.last_working_directory or not RUNTIME.last_run_id:
         return
@@ -329,6 +485,13 @@ async def get_status():
         "last_flow_name": RUNTIME.last_flow_name,
         "last_run_id": RUNTIME.last_run_id,
     }
+
+
+@app.get("/runs")
+async def list_runs():
+    with RUN_HISTORY_LOCK:
+        runs = [_run.to_dict() for _run in _ordered_runs()]
+    return {"runs": runs}
 
 
 def _graph_payload(graph) -> dict:
@@ -551,6 +714,8 @@ async def run_pipeline(req: RunRequest):
     RUNTIME.last_flow_name = flow_name
     RUNTIME.last_run_id = run_id
 
+    _record_run_start(run_id, flow_name, working_dir, display_model)
+
     await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
 
     await manager.broadcast(
@@ -584,6 +749,7 @@ async def run_pipeline(req: RunRequest):
             RUNTIME.status = result.status
             RUNTIME.last_completed_nodes = result.completed_nodes
             emit({"type": "runtime", "status": RUNTIME.status})
+            _record_run_end(run_id, result.status)
             await broadcast_log(f"Pipeline {result.status}")
         except Exception as exc:  # noqa: BLE001
             import traceback
@@ -591,6 +757,7 @@ async def run_pipeline(req: RunRequest):
             RUNTIME.status = "failed"
             RUNTIME.last_error = str(exc)
             emit({"type": "runtime", "status": RUNTIME.status})
+            _record_run_end(run_id, "failed", str(exc))
             await broadcast_log(f"⚠️ Pipeline Aborted: {exc}")
         finally:
             RUN_CONTROL.reset()
