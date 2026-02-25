@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type ViewMode = 'editor' | 'execution'
+export type ViewMode = 'editor' | 'execution' | 'settings'
 export type NodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'waiting'
 export type DiagnosticSeverity = 'error' | 'warning' | 'info'
 
