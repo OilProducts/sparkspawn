@@ -1,6 +1,6 @@
 import { useStore } from "@/store"
 import { FilePlus, Trash2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } from "@xyflow/react"
 import { generateDot } from "@/lib/dotUtils"
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
@@ -12,7 +12,6 @@ export function Sidebar() {
     const graphAttrs = useStore((state) => state.graphAttrs)
     const uiDefaults = useStore((state) => state.uiDefaults)
     const setSuppressPreview = useStore((state) => state.setSuppressPreview)
-    const [tab, setTab] = useState<'flows' | 'edit' | 'edge'>('flows')
     const [flows, setFlows] = useState<string[]>([])
     const [showAdvanced, setShowAdvanced] = useState(false)
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
@@ -126,7 +125,7 @@ export function Sidebar() {
         (selectedNode?.data?.type as string) || ''
     )
     const visibility = getNodeFieldVisibility(handlerType)
-    const autoTab = selectedEdgeId ? 'edge' : selectedNodeId ? 'edit' : tab;
+    const autoTab = selectedEdgeId ? 'edge' : selectedNodeId ? 'edit' : 'flows';
     const activeTab = viewMode !== 'editor' ? 'flows' : autoTab;
 
     const handleEdgePropertyChange = (key: string, value: string | boolean) => {
@@ -162,29 +161,24 @@ export function Sidebar() {
         <nav className="w-72 border-r bg-background flex flex-col shrink-0 overflow-hidden z-40">
             <div className="flex p-4 pb-2">
                 <div className="inline-flex h-9 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground w-full">
-                    <button
-                        onClick={() => setTab('flows')}
-                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex-1 ${activeTab === 'flows' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                    <div
+                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-sm font-medium ring-offset-background transition-all flex-1 ${activeTab === 'flows' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
                             }`}
                     >
                         Flows
-                    </button>
-                    <button
-                        onClick={() => setTab('edit')}
-                        disabled={viewMode !== 'editor'}
-                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex-1 disabled:opacity-50 disabled:cursor-not-allowed ${activeTab === 'edit' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                    </div>
+                    <div
+                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-sm font-medium ring-offset-background transition-all flex-1 ${activeTab === 'edit' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
                             }`}
                     >
                         Node
-                    </button>
-                    <button
-                        onClick={() => setTab('edge')}
-                        disabled={viewMode !== 'editor'}
-                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex-1 disabled:opacity-50 disabled:cursor-not-allowed ${activeTab === 'edge' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                    </div>
+                    <div
+                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-sm font-medium ring-offset-background transition-all flex-1 ${activeTab === 'edge' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
                             }`}
                     >
                         Edge
-                    </button>
+                    </div>
                 </div>
             </div>
 
