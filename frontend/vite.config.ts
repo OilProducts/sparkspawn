@@ -21,6 +21,10 @@ export default defineConfig({
       '/api': backendUrl,
       '/run': backendUrl,
       '/preview': backendUrl,
+      '/status': backendUrl,
+      '/pause': backendUrl,
+      '/abort': backendUrl,
+      '/human': backendUrl,
       '/ws': {
         target: wsUrl,
         ws: true,
