@@ -14,6 +14,7 @@ from .routing import select_next_edge
 
 
 RunnerFn = Callable[[str, str, Context], Outcome]
+ControlFn = Callable[[], Optional[str]]
 NODE_OUTCOMES_KEY = "_attractor.node_outcomes"
 
 
@@ -34,11 +35,13 @@ class PipelineExecutor:
         runner: RunnerFn,
         logs_root: Optional[str] = None,
         checkpoint_file: Optional[str] = None,
+        control: Optional[ControlFn] = None,
     ):
         self.graph = graph
         self.runner = runner
         self.logs_root = Path(logs_root) if logs_root else None
         self.checkpoint_path = Path(checkpoint_file) if checkpoint_file else None
+        self.control = control
 
     def run(
         self,
@@ -71,6 +74,37 @@ class PipelineExecutor:
 
         steps = 0
         while True:
+            action = self._poll_control()
+            if action == "abort":
+                self._save_checkpoint(
+                    current_node=current,
+                    completed_nodes=completed,
+                    context=ctx,
+                    retry_counts=retry_counts,
+                )
+                return PipelineResult(
+                    status="aborted",
+                    current_node=current,
+                    completed_nodes=completed,
+                    context=dict(ctx.values),
+                    node_outcomes=outcomes,
+                    failure_reason="aborted_by_user",
+                )
+            if action == "pause":
+                self._save_checkpoint(
+                    current_node=current,
+                    completed_nodes=completed,
+                    context=ctx,
+                    retry_counts=retry_counts,
+                )
+                return PipelineResult(
+                    status="paused",
+                    current_node=current,
+                    completed_nodes=completed,
+                    context=dict(ctx.values),
+                    node_outcomes=outcomes,
+                )
+
             if self._is_exit_node(current):
                 gates_ok, failed_gate_node = self._check_goal_gates(ctx)
                 if gates_ok:
@@ -180,6 +214,25 @@ class PipelineExecutor:
         stop_nodes = set(stop_nodes or [])
 
         while True:
+            action = self._poll_control()
+            if action == "abort":
+                return PipelineResult(
+                    status="aborted",
+                    current_node=current,
+                    completed_nodes=completed,
+                    context=dict(ctx.values),
+                    node_outcomes=outcomes,
+                    failure_reason="aborted_by_user",
+                )
+            if action == "pause":
+                return PipelineResult(
+                    status="paused",
+                    current_node=current,
+                    completed_nodes=completed,
+                    context=dict(ctx.values),
+                    node_outcomes=outcomes,
+                )
+
             if current in stop_nodes:
                 return PipelineResult(
                     status="success",
@@ -263,6 +316,14 @@ class PipelineExecutor:
             retry_counts=dict(retry_counts),
         )
         save_checkpoint(self.checkpoint_path, checkpoint)
+
+    def _poll_control(self) -> Optional[str]:
+        if not self.control:
+            return None
+        try:
+            return self.control()
+        except Exception:
+            return None
 
     def _write_stage_artifacts(self, node_id: str, prompt: str, outcome: Outcome) -> None:
         if not self.logs_root:

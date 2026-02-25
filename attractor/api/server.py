@@ -57,6 +57,34 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+class ExecutionControl:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._pause_requested = False
+        self._abort_requested = False
+
+    def reset(self) -> None:
+        with self._lock:
+            self._pause_requested = False
+            self._abort_requested = False
+
+    def request_pause(self) -> None:
+        with self._lock:
+            self._pause_requested = True
+
+    def request_abort(self) -> None:
+        with self._lock:
+            self._abort_requested = True
+
+    def poll(self) -> Optional[str]:
+        with self._lock:
+            if self._abort_requested:
+                return "abort"
+            if self._pause_requested:
+                return "pause"
+        return None
+
+
 class HumanGateBroker:
     def __init__(self):
         self._lock = threading.Lock()
@@ -117,6 +145,7 @@ class HumanGateBroker:
 
 
 HUMAN_BROKER = HumanGateBroker()
+RUN_CONTROL = ExecutionControl()
 
 
 class WebInterviewer(Interviewer):
@@ -476,11 +505,14 @@ async def run_pipeline(req: RunRequest):
     goal_attr = graph.graph_attrs.get("goal")
     context = Context(values={"graph.goal": str(goal_attr.value) if goal_attr else ""})
 
+    RUN_CONTROL.reset()
     RUNTIME.status = "running"
     RUNTIME.last_error = ""
     RUNTIME.last_working_directory = working_dir
     RUNTIME.last_model = display_model
     RUNTIME.last_flow_name = flow_name
+
+    await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
 
     await manager.broadcast(
         {
@@ -505,6 +537,7 @@ async def run_pipeline(req: RunRequest):
                 runner,
                 logs_root=logs_root,
                 checkpoint_file=checkpoint_file,
+                control=RUN_CONTROL.poll,
             )
             result = await asyncio.to_thread(
                 executor.run,
@@ -513,16 +546,43 @@ async def run_pipeline(req: RunRequest):
             )
             RUNTIME.status = result.status
             RUNTIME.last_completed_nodes = result.completed_nodes
+            emit({"type": "runtime", "status": RUNTIME.status})
             await manager.broadcast({"type": "log", "msg": f"Pipeline {result.status}"})
         except Exception as exc:  # noqa: BLE001
             import traceback
             traceback.print_exc()
             RUNTIME.status = "failed"
             RUNTIME.last_error = str(exc)
+            emit({"type": "runtime", "status": RUNTIME.status})
             await manager.broadcast({"type": "log", "msg": f"⚠️ Pipeline Aborted: {exc}"})
+        finally:
+            RUN_CONTROL.reset()
 
     asyncio.create_task(_run())
     return {"status": "started", "working_directory": working_dir, "model": display_model}
+
+
+@app.post("/pause")
+async def pause_pipeline():
+    if RUNTIME.status not in {"running", "pause_requested"}:
+        return {"status": "ignored", "runtime": RUNTIME.status}
+    RUN_CONTROL.request_pause()
+    RUNTIME.status = "pause_requested"
+    await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
+    await manager.broadcast({"type": "log", "msg": "[System] Pause requested. Will pause after current node."})
+    return {"status": "pause_requested"}
+
+
+@app.post("/abort")
+async def abort_pipeline():
+    if RUNTIME.status not in {"running", "pause_requested"}:
+        return {"status": "ignored", "runtime": RUNTIME.status}
+    RUN_CONTROL.request_abort()
+    RUNTIME.status = "abort_requested"
+    RUNTIME.last_error = "aborted_by_user"
+    await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
+    await manager.broadcast({"type": "log", "msg": "[System] Abort requested. Stopping after current node."})
+    return {"status": "abort_requested"}
 
 
 @app.post("/reset")

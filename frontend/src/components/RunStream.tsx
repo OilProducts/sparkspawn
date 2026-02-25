@@ -17,8 +17,18 @@ export function RunStream() {
     const clearHumanGate = useStore((state) => state.clearHumanGate)
     const resetNodeStatuses = useStore((state) => state.resetNodeStatuses)
     const humanGate = useStore((state) => state.humanGate)
+    const setRuntimeStatus = useStore((state) => state.setRuntimeStatus)
 
     useEffect(() => {
+        fetch('/status')
+            .then((res) => res.json())
+            .then((data) => {
+                if (data?.status) {
+                    setRuntimeStatus(data.status)
+                }
+            })
+            .catch(() => null)
+
         const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
         const ws = new WebSocket(`${wsProtocol}://${window.location.host}/ws`)
 
@@ -51,6 +61,10 @@ export function RunStream() {
                 if (data.type === 'run_meta') {
                     resetNodeStatuses()
                     clearHumanGate()
+                    setRuntimeStatus('running')
+                }
+                if (data.type === 'runtime' && data.status) {
+                    setRuntimeStatus(data.status)
                 }
             } catch {
                 // ignore malformed events
@@ -60,7 +74,15 @@ export function RunStream() {
         return () => {
             ws.close()
         }
-    }, [addLog, setNodeStatus, setHumanGate, clearHumanGate, resetNodeStatuses, humanGate])
+    }, [
+        addLog,
+        setNodeStatus,
+        setHumanGate,
+        clearHumanGate,
+        resetNodeStatuses,
+        humanGate,
+        setRuntimeStatus,
+    ])
 
     return null
 }

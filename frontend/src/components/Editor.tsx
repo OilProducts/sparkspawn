@@ -19,6 +19,7 @@ import { TaskNode } from './TaskNode';
 import { GraphSettings } from './GraphSettings';
 import { ValidationEdge } from './ValidationEdge';
 import { ValidationPanel } from './ValidationPanel';
+import { ExecutionControls } from './ExecutionControls';
 import { generateDot } from '@/lib/dotUtils';
 
 const nodeTypes = {
@@ -480,6 +481,7 @@ export function Editor() {
 
             {activeFlow && <GraphSettings />}
             {activeFlow && <ValidationPanel />}
+            <ExecutionControls />
         </div>
     );
 }

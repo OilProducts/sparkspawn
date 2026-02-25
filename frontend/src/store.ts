@@ -3,6 +3,16 @@ import { create } from 'zustand'
 export type ViewMode = 'editor' | 'execution' | 'settings'
 export type NodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'waiting'
 export type DiagnosticSeverity = 'error' | 'warning' | 'info'
+export type RuntimeStatus =
+    | 'idle'
+    | 'running'
+    | 'paused'
+    | 'pause_requested'
+    | 'abort_requested'
+    | 'aborted'
+    | 'failed'
+    | 'validation_error'
+    | 'success'
 
 export interface HumanGateOption {
     label: string
@@ -123,6 +133,9 @@ interface AppState {
     addLog: (entry: LogEntry) => void
     clearLogs: () => void
 
+    runtimeStatus: RuntimeStatus
+    setRuntimeStatus: (status: RuntimeStatus) => void
+
     nodeStatuses: Record<string, NodeStatus>
     setNodeStatus: (nodeId: string, status: NodeStatus) => void
     resetNodeStatuses: () => void
@@ -167,6 +180,9 @@ export const useStore = create<AppState>((set) => ({
     logs: [],
     addLog: (entry) => set((state) => ({ logs: [...state.logs, entry] })),
     clearLogs: () => set({ logs: [] }),
+
+    runtimeStatus: 'idle',
+    setRuntimeStatus: (status) => set({ runtimeStatus: status }),
 
     nodeStatuses: {},
     setNodeStatus: (nodeId, status) =>
