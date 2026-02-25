@@ -239,7 +239,16 @@ class LocalCodexCliBackend(CodergenBackend):
         self.model = model
 
     def run(self, node_id: str, prompt: str, context: Context) -> bool:
-        cmd = ["codex", "exec"]
+        cmd = [
+            "codex",
+            "exec",
+            "-C",
+            self.working_dir,
+            "-c",
+            'sandbox_mode="workspace-write"',
+            "-c",
+            'sandbox_workspace_write.writable_roots=["/app","/tmp","/codex-home"]',
+        ]
         if self.model:
             cmd.extend(["-m", self.model])
         cmd.append(prompt)
