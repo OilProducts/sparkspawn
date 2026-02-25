@@ -11,10 +11,14 @@ services:
       - HOME=/codex-home
       - XDG_CONFIG_HOME=/codex-home/.config
       - XDG_DATA_HOME=/codex-home/.local/share
+      - OPENAI_API_KEY
+      - OPENAI_ORG
+      - OPENAI_PROJECT
     command: uvicorn attractor.api.server:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - .:/app
       - codex_home:/codex-home
+      - ${HOME}/.codex:/codex-home/.codex:ro
 
   frontend:
     build:
