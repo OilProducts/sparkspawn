@@ -49,7 +49,7 @@ export function GraphSettings() {
                 Graph Settings
             </button>
             {isOpen && (
-                <div className="mt-2 w-80 rounded-md border border-border bg-card p-4 shadow-lg">
+                <div className="mt-2 w-80 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-md border border-border bg-card p-4 shadow-lg">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Run Configuration
                     </div>
