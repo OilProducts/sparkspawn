@@ -37,11 +37,12 @@ These attributes live in the DOT `graph [ ... ]` block and are persisted with th
 
 When a new node is created in the UI:
 
-1. If flow-level `ui_default_*` values are present, the editor **prefers** them.
-2. Otherwise, the editor **falls back** to the global defaults.
-3. The editor **may prefill** node LLM fields using the resolved defaults.
-4. The editor **may persist** these values into the node’s explicit attributes when saving.
-5. The engine **must ignore** `ui_default_*` attributes; they are UI-only metadata.
+1. On **flow creation**, the editor **may snapshot** the global defaults into `ui_default_*`.
+2. If a flow lacks `ui_default_*`, the editor **may seed** them once from the current global defaults.
+3. New nodes use the **flow snapshot** as their default.
+4. Global defaults **do not retroactively update** existing flows.
+5. The editor **may persist** these values into the node’s explicit attributes when saving.
+6. The engine **must ignore** `ui_default_*` attributes; they are UI-only metadata.
 
 ### 1.5 Interaction With Core Spec
 
