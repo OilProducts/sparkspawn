@@ -18,7 +18,7 @@ services:
     volumes:
       - .:/app
       - codex_home:/codex-home
-      - ${HOME}/.codex:/codex-home/.codex:ro
+      - ${HOME}/.codex:/codex-home/.codex
 
   frontend:
     build:
