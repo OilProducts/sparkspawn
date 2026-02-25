@@ -2,3 +2,4 @@ agent-notes.md
 __pycache__/
 *.pyc
 .attractor/
+codex-app-server.schema/

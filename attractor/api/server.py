@@ -8,6 +8,8 @@ import uuid
 import os
 import shutil
 import re
+import selectors
+import time
 from datetime import datetime
 from pathlib import Path
 import subprocess
@@ -414,6 +416,265 @@ class LocalCodexCliBackend(CodergenBackend):
         return proc.returncode == 0
 
 
+class LocalCodexAppServerBackend(CodergenBackend):
+    def __init__(self, working_dir: str, emit, model: Optional[str] = None):
+        self.working_dir = working_dir
+        self.emit = emit
+        self.model = model
+
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        timeout: Optional[float] = None,
+    ) -> bool:
+        cmd = ["codex", "app-server"]
+        deadline = time.time() + timeout if timeout else None
+        agent_chunks: list[str] = []
+        command_chunks: list[str] = []
+        last_token_total: Optional[int] = None
+        turn_status: Optional[str] = None
+        turn_error: Optional[str] = None
+
+        def log_line(message: str) -> None:
+            if message:
+                self.emit({"type": "log", "msg": f"[{node_id}] {message}"})
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=self.working_dir,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except FileNotFoundError:
+            log_line("codex app-server not found on PATH")
+            return False
+
+        selector = selectors.DefaultSelector()
+        if proc.stdout is not None:
+            selector.register(proc.stdout, selectors.EVENT_READ)
+
+        def send_json(payload: dict) -> None:
+            if proc.stdin is None:
+                return
+            proc.stdin.write(json.dumps(payload) + "\n")
+            proc.stdin.flush()
+
+        request_id = 0
+
+        def send_request(method: str, params: Optional[dict]) -> int:
+            nonlocal request_id
+            request_id += 1
+            payload = {"jsonrpc": "2.0", "id": request_id, "method": method}
+            if params is not None:
+                payload["params"] = params
+            send_json(payload)
+            return request_id
+
+        def send_response(req_id: object, result: Optional[dict] = None, error: Optional[dict] = None) -> None:
+            payload = {"jsonrpc": "2.0", "id": req_id}
+            if error is not None:
+                payload["error"] = error
+            else:
+                payload["result"] = result or {}
+            send_json(payload)
+
+        def read_line(wait: float) -> Optional[str]:
+            if proc.stdout is None:
+                return None
+            if wait < 0:
+                wait = 0
+            events = selector.select(timeout=wait)
+            if not events:
+                return None
+            line = proc.stdout.readline()
+            if not line:
+                return None
+            return line.rstrip("\n")
+
+        def handle_server_request(message: dict) -> None:
+            method = message.get("method")
+            req_id = message.get("id")
+            if method == "item/commandExecution/requestApproval":
+                send_response(req_id, {"decision": "acceptForSession"})
+                return
+            if method == "item/fileChange/requestApproval":
+                send_response(req_id, {"decision": "acceptForSession"})
+                return
+            send_response(req_id, error={"code": -32000, "message": f"Unsupported request: {method}"})
+
+        def handle_notification(message: dict) -> None:
+            nonlocal last_token_total, turn_status, turn_error
+            method = message.get("method")
+            params = message.get("params") or {}
+            if method == "item/agentMessage/delta":
+                delta = params.get("delta") or ""
+                if delta:
+                    agent_chunks.append(delta)
+                return
+            if method == "codex/event/agent_message_delta":
+                delta = (params.get("msg") or {}).get("delta") or ""
+                if delta:
+                    agent_chunks.append(delta)
+                return
+            if method == "codex/event/agent_message":
+                msg = (params.get("msg") or {}).get("message")
+                if msg:
+                    agent_chunks.clear()
+                    agent_chunks.append(msg)
+                return
+            if method == "item/commandExecution/outputDelta":
+                delta = params.get("delta") or ""
+                if delta:
+                    command_chunks.append(delta)
+                return
+            if method == "thread/tokenUsage/updated":
+                token_usage = params.get("tokenUsage") or {}
+                total_tokens = (token_usage.get("total") or {}).get("totalTokens")
+                if isinstance(total_tokens, int):
+                    last_token_total = total_tokens
+                return
+            if method == "codex/event/token_count":
+                info = (params.get("msg") or {}).get("info") or {}
+                total_tokens = (info.get("total_token_usage") or {}).get("total_tokens")
+                if isinstance(total_tokens, int):
+                    last_token_total = total_tokens
+                return
+            if method == "error":
+                turn_status = "failed"
+                turn_error = (params.get("message") or "App server error")
+                return
+            if method == "turn/completed":
+                turn = params.get("turn") or {}
+                turn_status = turn.get("status")
+                if turn_status == "failed":
+                    err = turn.get("error") or {}
+                    turn_error = err.get("message") or turn_error
+
+        def wait_for_response(target_id: int) -> Optional[dict]:
+            while True:
+                if deadline is not None and time.time() > deadline:
+                    return None
+                line = read_line(0.1)
+                if line is None:
+                    if proc.poll() is not None:
+                        return None
+                    continue
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    log_line(line)
+                    continue
+                if "id" in message and "method" in message:
+                    handle_server_request(message)
+                    continue
+                if message.get("id") == target_id:
+                    return message
+                if "method" in message:
+                    handle_notification(message)
+
+        def wait_for_turn_completion() -> bool:
+            while True:
+                if deadline is not None and time.time() > deadline:
+                    return False
+                line = read_line(0.1)
+                if line is None:
+                    if proc.poll() is not None:
+                        return False
+                    continue
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    log_line(line)
+                    continue
+                if "id" in message and "method" in message:
+                    handle_server_request(message)
+                    continue
+                if "method" in message:
+                    handle_notification(message)
+                    if message.get("method") == "turn/completed":
+                        return True
+
+        try:
+            init_id = send_request(
+                "initialize",
+                {"clientInfo": {"name": "sparkspawn", "version": "0.1"}},
+            )
+            init_response = wait_for_response(init_id)
+            if not init_response or init_response.get("error"):
+                log_line("app-server initialize failed")
+                return False
+
+            thread_params = {
+                "cwd": self.working_dir,
+                "sandbox": "danger-full-access",
+                "ephemeral": True,
+            }
+            if self.model:
+                thread_params["model"] = self.model
+            thread_id = send_request("thread/start", thread_params)
+            thread_response = wait_for_response(thread_id)
+            if not thread_response or thread_response.get("error"):
+                log_line("app-server thread/start failed")
+                return False
+            thread = (thread_response.get("result") or {}).get("thread") or {}
+            thread_uuid = thread.get("id")
+            if not thread_uuid:
+                log_line("app-server thread/start did not return thread id")
+                return False
+
+            turn_params = {
+                "threadId": thread_uuid,
+                "input": [{"type": "text", "text": prompt}],
+                "approvalPolicy": "never",
+                "sandboxPolicy": {"type": "dangerFullAccess"},
+                "cwd": self.working_dir,
+            }
+            if self.model:
+                turn_params["model"] = self.model
+            turn_request_id = send_request("turn/start", turn_params)
+            turn_response = wait_for_response(turn_request_id)
+            if not turn_response or turn_response.get("error"):
+                log_line("app-server turn/start failed")
+                return False
+
+            completed = wait_for_turn_completion()
+            if not completed:
+                log_line("app-server turn timed out or exited early")
+                return False
+
+            if turn_status and turn_status != "completed":
+                if turn_error:
+                    log_line(turn_error)
+                return False
+
+            agent_text = "".join(agent_chunks).strip()
+            if agent_text:
+                log_line(agent_text)
+            command_text = "".join(command_chunks).strip()
+            if command_text:
+                log_line(command_text)
+            if last_token_total is not None:
+                log_line(f"tokens used: {last_token_total}")
+            return True
+        finally:
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+            except Exception:
+                pass
+
+
 class BroadcastingRunner:
     def __init__(self, delegate, emit):
         self.delegate = delegate
@@ -735,7 +996,7 @@ async def run_pipeline(req: RunRequest):
             "error": "Unsupported backend. This build requires backend='codex'.",
         }
 
-    backend: CodergenBackend = LocalCodexCliBackend(
+    backend: CodergenBackend = LocalCodexAppServerBackend(
         working_dir,
         emit,
         model=selected_model or None,
