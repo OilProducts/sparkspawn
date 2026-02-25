@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import threading
 import uuid
 import os
+import shutil
 from pathlib import Path
 import subprocess
 from typing import Callable, Dict, Optional
@@ -169,6 +170,7 @@ class RuntimeState:
     last_model: str = ""
     last_completed_nodes: list[str] = None
     last_flow_name: str = ""
+    last_run_id: str = ""
 
 
 RUNTIME = RuntimeState(last_completed_nodes=[])
@@ -298,6 +300,7 @@ async def get_status():
         "last_model": RUNTIME.last_model,
         "last_completed_nodes": RUNTIME.last_completed_nodes,
         "last_flow_name": RUNTIME.last_flow_name,
+        "last_run_id": RUNTIME.last_run_id,
     }
 
 
@@ -462,6 +465,7 @@ async def run_pipeline(req: RunRequest):
     selected_model = (req.model or "").strip()
     flow_name = (req.flow_name or "").strip()
     display_model = selected_model or "codex default (config/profile)"
+    run_id = uuid.uuid4().hex
 
     await manager.broadcast(
         {
@@ -499,8 +503,9 @@ async def run_pipeline(req: RunRequest):
     )
     runner = BroadcastingRunner(HandlerRunner(graph, registry), emit)
 
-    checkpoint_file = str(Path(working_dir) / "attractor.state.json")
-    logs_root = str(Path(working_dir) / ".attractor" / "logs")
+    run_root = Path(working_dir) / ".attractor" / "runs" / run_id
+    checkpoint_file = str(run_root / "state.json")
+    logs_root = str(run_root / "logs")
 
     goal_attr = graph.graph_attrs.get("goal")
     context = Context(values={"graph.goal": str(goal_attr.value) if goal_attr else ""})
@@ -511,6 +516,7 @@ async def run_pipeline(req: RunRequest):
     RUNTIME.last_working_directory = working_dir
     RUNTIME.last_model = display_model
     RUNTIME.last_flow_name = flow_name
+    RUNTIME.last_run_id = run_id
 
     await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
 
@@ -520,12 +526,13 @@ async def run_pipeline(req: RunRequest):
             "working_directory": working_dir,
             "model": display_model,
             "flow_name": flow_name,
+            "run_id": run_id,
         }
     )
     await manager.broadcast(
         {
             "type": "log",
-            "msg": f"[System] Launching in {working_dir} with model: {display_model}",
+            "msg": f"[System] Launching run {run_id} in {working_dir} with model: {display_model}",
         }
     )
 
@@ -559,7 +566,12 @@ async def run_pipeline(req: RunRequest):
             RUN_CONTROL.reset()
 
     asyncio.create_task(_run())
-    return {"status": "started", "working_directory": working_dir, "model": display_model}
+    return {
+        "status": "started",
+        "working_directory": working_dir,
+        "model": display_model,
+        "run_id": run_id,
+    }
 
 
 @app.post("/pause")
@@ -587,9 +599,9 @@ async def abort_pipeline():
 
 @app.post("/reset")
 async def reset_checkpoint(req: ResetRequest):
-    target_state = Path(req.working_directory).resolve() / "attractor.state.json"
-    if target_state.exists():
-        target_state.unlink()
+    run_root = Path(req.working_directory).resolve() / ".attractor" / "runs"
+    if run_root.exists():
+        shutil.rmtree(run_root, ignore_errors=True)
     return {"status": "reset"}
 
 
