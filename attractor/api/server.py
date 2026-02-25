@@ -6,6 +6,7 @@ import threading
 import uuid
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 import subprocess
 from typing import Callable, Dict, Optional
@@ -174,6 +175,25 @@ class RuntimeState:
 
 
 RUNTIME = RuntimeState(last_completed_nodes=[])
+
+
+def _append_runtime_log(message: str) -> None:
+    if not RUNTIME.last_working_directory or not RUNTIME.last_run_id:
+        return
+    run_log_path = (
+        Path(RUNTIME.last_working_directory)
+        / ".attractor"
+        / "runs"
+        / RUNTIME.last_run_id
+        / "run.log"
+    )
+    try:
+        run_log_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        with run_log_path.open("a", encoding="utf-8") as f:
+            f.write(f"[{timestamp} UTC] {message}\n")
+    except Exception:
+        pass
 
 
 class RunRequest(BaseModel):
@@ -476,7 +496,13 @@ async def run_pipeline(req: RunRequest):
 
     loop = asyncio.get_running_loop()
 
+    async def broadcast_log(message: str) -> None:
+        _append_runtime_log(message)
+        await manager.broadcast({"type": "log", "msg": message})
+
     def emit(message: dict):
+        if message.get("type") == "log":
+            _append_runtime_log(str(message.get("msg", "")))
         asyncio.run_coroutine_threadsafe(manager.broadcast(message), loop)
 
     if req.backend != "codex":
@@ -529,11 +555,8 @@ async def run_pipeline(req: RunRequest):
             "run_id": run_id,
         }
     )
-    await manager.broadcast(
-        {
-            "type": "log",
-            "msg": f"[System] Launching run {run_id} in {working_dir} with model: {display_model}",
-        }
+    await broadcast_log(
+        f"[System] Launching run {run_id} in {working_dir} with model: {display_model}"
     )
 
     async def _run():
@@ -554,14 +577,14 @@ async def run_pipeline(req: RunRequest):
             RUNTIME.status = result.status
             RUNTIME.last_completed_nodes = result.completed_nodes
             emit({"type": "runtime", "status": RUNTIME.status})
-            await manager.broadcast({"type": "log", "msg": f"Pipeline {result.status}"})
+            await broadcast_log(f"Pipeline {result.status}")
         except Exception as exc:  # noqa: BLE001
             import traceback
             traceback.print_exc()
             RUNTIME.status = "failed"
             RUNTIME.last_error = str(exc)
             emit({"type": "runtime", "status": RUNTIME.status})
-            await manager.broadcast({"type": "log", "msg": f"⚠️ Pipeline Aborted: {exc}"})
+            await broadcast_log(f"⚠️ Pipeline Aborted: {exc}")
         finally:
             RUN_CONTROL.reset()
 
@@ -581,6 +604,7 @@ async def pause_pipeline():
     RUN_CONTROL.request_pause()
     RUNTIME.status = "pause_requested"
     await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
+    _append_runtime_log("[System] Pause requested. Will pause after current node.")
     await manager.broadcast({"type": "log", "msg": "[System] Pause requested. Will pause after current node."})
     return {"status": "pause_requested"}
 
@@ -593,6 +617,7 @@ async def abort_pipeline():
     RUNTIME.status = "abort_requested"
     RUNTIME.last_error = "aborted_by_user"
     await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
+    _append_runtime_log("[System] Abort requested. Stopping after current node.")
     await manager.broadcast({"type": "log", "msg": "[System] Abort requested. Stopping after current node."})
     return {"status": "abort_requested"}
 
