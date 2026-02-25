@@ -376,7 +376,14 @@ class LocalCodexCliBackend(CodergenBackend):
         self.emit = emit
         self.model = model
 
-    def run(self, node_id: str, prompt: str, context: Context) -> bool:
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        timeout: Optional[float] = None,
+    ) -> bool:
         cmd = [
             "codex",
             "exec",
@@ -388,12 +395,17 @@ class LocalCodexCliBackend(CodergenBackend):
         if self.model:
             cmd.extend(["-m", self.model])
         cmd.append(prompt)
-        proc = subprocess.run(
-            cmd,
-            cwd=self.working_dir,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=self.working_dir,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            self.emit({"type": "log", "msg": f"[{node_id}] timeout after {timeout}s"})
+            return False
         if proc.stdout.strip():
             self.emit({"type": "log", "msg": f"[{node_id}] {proc.stdout.strip()}"})
         if proc.stderr.strip():

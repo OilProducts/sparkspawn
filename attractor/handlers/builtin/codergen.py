@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from attractor.dsl.models import Duration
+
 from attractor.engine.outcome import Outcome, OutcomeStatus
 
 from ..base import CodergenBackend, HandlerRuntime
@@ -19,7 +21,8 @@ class CodergenHandler:
                 notes="codergen handler completed without backend",
             )
 
-        ok = self.backend.run(runtime.node_id, prompt, runtime.context)
+        timeout = _to_seconds(runtime.node_attrs.get("timeout"))
+        ok = self.backend.run(runtime.node_id, prompt, runtime.context, timeout=timeout)
         if ok:
             return Outcome(status=OutcomeStatus.SUCCESS, notes="codergen backend success")
         return Outcome(status=OutcomeStatus.FAIL, failure_reason="codergen backend failure")
@@ -28,3 +31,27 @@ class CodergenHandler:
 def _expand_goal(prompt: str, context) -> str:
     goal = context.get("graph.goal", "")
     return prompt.replace("$goal", str(goal))
+
+
+def _to_seconds(attr) -> float | None:
+    if not attr:
+        return None
+    value = attr.value
+    if isinstance(value, Duration):
+        unit = value.unit
+        if unit == "ms":
+            return value.value / 1000
+        if unit == "s":
+            return value.value
+        if unit == "m":
+            return value.value * 60
+        if unit == "h":
+            return value.value * 3600
+        if unit == "d":
+            return value.value * 86400
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Protocol
+from typing import Callable, Dict, List, Optional, Protocol
 
 from attractor.dsl.models import DotAttribute, DotEdge, DotGraph
 from attractor.engine.context import Context
@@ -9,7 +9,14 @@ from attractor.engine.outcome import Outcome
 
 
 class CodergenBackend(Protocol):
-    def run(self, node_id: str, prompt: str, context: Context) -> bool:
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        timeout: Optional[float] = None,
+    ) -> bool:
         ...
 
 
