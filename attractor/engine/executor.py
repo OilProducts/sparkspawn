@@ -56,12 +56,18 @@ class PipelineExecutor:
         if resume and self.checkpoint_path:
             checkpoint = load_checkpoint(self.checkpoint_path)
             if checkpoint:
-                current = checkpoint.current_node or current
-                completed = list(checkpoint.completed_nodes)
-                retry_counts = dict(checkpoint.retry_counts)
-                restored_context = dict(checkpoint.context)
-                restored_context.update(ctx.values)
-                ctx = Context(values=restored_context)
+                candidate = checkpoint.current_node or current
+                if candidate in self.graph.nodes:
+                    current = candidate
+                    completed = [node for node in checkpoint.completed_nodes if node in self.graph.nodes]
+                    retry_counts = {
+                        node_id: count
+                        for node_id, count in checkpoint.retry_counts.items()
+                        if node_id in self.graph.nodes
+                    }
+                    restored_context = dict(checkpoint.context)
+                    restored_context.update(ctx.values)
+                    ctx = Context(values=restored_context)
 
         steps = 0
         while True:
