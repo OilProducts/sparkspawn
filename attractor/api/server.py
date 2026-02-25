@@ -221,48 +221,39 @@ class RunRecord:
         )
 
 
-RUNS_INDEX_PATH = PROJECT_ROOT / "attractor.runs.json"
 RUN_HISTORY_LOCK = threading.Lock()
-RUN_HISTORY: Dict[str, RunRecord] = {}
-RUN_ORDER: List[str] = []
 
 
-def _load_run_history() -> None:
-    if not RUNS_INDEX_PATH.exists():
-        return
+def _run_root(working_directory: str, run_id: str) -> Path:
+    return Path(working_directory) / ".attractor" / "runs" / run_id
+
+
+def _run_meta_path(working_directory: str, run_id: str) -> Path:
+    return _run_root(working_directory, run_id) / "run.json"
+
+
+def _write_run_meta(record: RunRecord) -> None:
+    run_meta_path = _run_meta_path(record.working_directory, record.run_id)
     try:
-        with RUNS_INDEX_PATH.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-        runs = payload.get("runs", []) if isinstance(payload, dict) else []
-        for entry in runs:
-            record = RunRecord.from_dict(entry)
-            if record.run_id:
-                RUN_HISTORY[record.run_id] = record
-                RUN_ORDER.append(record.run_id)
+        run_meta_path.parent.mkdir(parents=True, exist_ok=True)
+        with run_meta_path.open("w", encoding="utf-8") as f:
+            json.dump(record.to_dict(), f, indent=2, sort_keys=True)
     except Exception:
         pass
 
 
-def _save_run_history() -> None:
+def _read_run_meta(path: Path) -> Optional[RunRecord]:
     try:
-        with RUNS_INDEX_PATH.open("w", encoding="utf-8") as f:
-            json.dump(
-                {"runs": [_run.to_dict() for _run in _ordered_runs()]},
-                f,
-                indent=2,
-                sort_keys=True,
-            )
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return RunRecord.from_dict(payload)
     except Exception:
-        pass
+        return None
 
 
-def _ordered_runs() -> List[RunRecord]:
-    records = []
-    for run_id in RUN_ORDER:
-        record = RUN_HISTORY.get(run_id)
-        if record:
-            records.append(record)
-    return records
+def _normalize_run_status(status: str) -> str:
+    if status == "fail":
+        return "failed"
+    return status
 
 
 def _record_run_start(run_id: str, flow_name: str, working_directory: str, model: str) -> None:
@@ -276,11 +267,7 @@ def _record_run_start(run_id: str, flow_name: str, working_directory: str, model
         started_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
     )
     with RUN_HISTORY_LOCK:
-        RUN_HISTORY[run_id] = record
-        if run_id in RUN_ORDER:
-            RUN_ORDER.remove(run_id)
-        RUN_ORDER.insert(0, run_id)
-        _save_run_history()
+        _write_run_meta(record)
 
 
 TOKEN_LINE_RE = re.compile(r"tokens used\\s*[:=]?\\s*(\\d[\\d,]*)", re.IGNORECASE)
@@ -317,20 +304,26 @@ def _extract_token_usage(working_directory: str, run_id: str) -> Optional[int]:
     return total if total > 0 else None
 
 
-def _record_run_end(run_id: str, status: str, last_error: str = "") -> None:
+def _record_run_end(run_id: str, working_directory: str, status: str, last_error: str = "") -> None:
+    normalized_status = _normalize_run_status(status)
     with RUN_HISTORY_LOCK:
-        record = RUN_HISTORY.get(run_id)
+        record = _read_run_meta(_run_meta_path(working_directory, run_id))
         if not record:
-            return
-        record.status = status
-        record.result = status
+            record = RunRecord(
+                run_id=run_id,
+                flow_name="",
+                status=normalized_status,
+                result=normalized_status,
+                working_directory=working_directory,
+                model="",
+                started_at="",
+            )
+        record.status = normalized_status
+        record.result = normalized_status
         record.ended_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
         record.last_error = last_error
-        record.token_usage = _extract_token_usage(record.working_directory, run_id)
-        _save_run_history()
-
-
-_load_run_history()
+        record.token_usage = _extract_token_usage(working_directory, run_id)
+        _write_run_meta(record)
 
 
 def _append_runtime_log(message: str) -> None:
@@ -488,10 +481,63 @@ async def get_status():
 
 
 @app.get("/runs")
-async def list_runs():
-    with RUN_HISTORY_LOCK:
-        runs = [_run.to_dict() for _run in _ordered_runs()]
-    return {"runs": runs}
+async def list_runs(working_directory: Optional[str] = None):
+    working_dir = (working_directory or RUNTIME.last_working_directory or "").strip()
+    if not working_dir:
+        return {"runs": []}
+    runs_root = Path(working_dir) / ".attractor" / "runs"
+    if not runs_root.exists():
+        return {"runs": []}
+
+    records: List[RunRecord] = []
+    for run_dir in runs_root.iterdir():
+        if not run_dir.is_dir():
+            continue
+        meta_path = run_dir / "run.json"
+        record = _read_run_meta(meta_path)
+        if record:
+            records.append(record)
+            continue
+
+        run_id = run_dir.name
+        record = RunRecord(
+            run_id=run_id,
+            flow_name="",
+            status="unknown",
+            result=None,
+            working_directory=working_dir,
+            model="",
+            started_at="",
+        )
+        run_log_path = run_dir / "run.log"
+        if run_log_path.exists():
+            record.token_usage = _extract_token_usage(working_dir, run_id)
+            try:
+                lines = run_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except Exception:
+                lines = []
+            if lines:
+                first_line = lines[0]
+                timestamp_match = re.search(r"^\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) UTC\\]", first_line)
+                if timestamp_match:
+                    record.started_at = f\"{timestamp_match.group(1).replace(' ', 'T')}Z\"
+                for line in reversed(lines):
+                    status_match = re.search(r\"Pipeline\\s+(\\w+)\", line)
+                    if status_match:
+                        record.status = _normalize_run_status(status_match.group(1))
+                        record.result = record.status
+                        break
+                last_line = lines[-1]
+                last_timestamp = re.search(r\"^\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) UTC\\]\", last_line)
+                if last_timestamp:
+                    record.ended_at = f\"{last_timestamp.group(1).replace(' ', 'T')}Z\"
+        records.append(record)
+
+    def _sort_key(item: RunRecord) -> str:
+        return item.started_at or item.ended_at or ""
+
+    records.sort(key=_sort_key, reverse=True)
+    return {"runs": [record.to_dict() for record in records]}
 
 
 def _graph_payload(graph) -> dict:
@@ -749,7 +795,7 @@ async def run_pipeline(req: RunRequest):
             RUNTIME.status = result.status
             RUNTIME.last_completed_nodes = result.completed_nodes
             emit({"type": "runtime", "status": RUNTIME.status})
-            _record_run_end(run_id, result.status)
+            _record_run_end(run_id, working_dir, result.status)
             await broadcast_log(f"Pipeline {result.status}")
         except Exception as exc:  # noqa: BLE001
             import traceback
@@ -757,7 +803,7 @@ async def run_pipeline(req: RunRequest):
             RUNTIME.status = "failed"
             RUNTIME.last_error = str(exc)
             emit({"type": "runtime", "status": RUNTIME.status})
-            _record_run_end(run_id, "failed", str(exc))
+            _record_run_end(run_id, working_dir, "failed", str(exc))
             await broadcast_log(f"⚠️ Pipeline Aborted: {exc}")
         finally:
             RUN_CONTROL.reset()

@@ -19,6 +19,7 @@ const STATUS_STYLES: Record<string, string> = {
     running: 'bg-sky-500/15 text-sky-700',
     success: 'bg-green-500/15 text-green-700',
     failed: 'bg-destructive/15 text-destructive',
+    fail: 'bg-destructive/15 text-destructive',
     aborted: 'bg-amber-500/15 text-amber-700',
     paused: 'bg-amber-500/15 text-amber-700',
     pause_requested: 'bg-amber-500/15 text-amber-700',
