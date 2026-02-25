@@ -1,6 +1,6 @@
 import { useStore } from "@/store"
 import { FilePlus, Trash2 } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } from "@xyflow/react"
 import { generateDot } from "@/lib/dotUtils"
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
