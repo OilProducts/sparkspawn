@@ -189,7 +189,7 @@ export function GraphSettings() {
                     </div>
 
                     <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        UI Defaults (Flow)
+                        UI Defaults (Flow Snapshot)
                     </div>
                     <div className="mt-3 space-y-3">
                         <div className="space-y-1">
@@ -199,7 +199,7 @@ export function GraphSettings() {
                                 onChange={(event) => updateGraphAttr('ui_default_llm_provider', event.target.value)}
                                 list="flow-llm-provider-options"
                                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                placeholder={uiDefaults.llm_provider ? `Global: ${uiDefaults.llm_provider}` : 'Uses global default'}
+                                placeholder={uiDefaults.llm_provider ? `Snapshot: ${uiDefaults.llm_provider}` : 'Snapshot of global default'}
                             />
                             <datalist id="flow-llm-provider-options">
                                 {LLM_PROVIDER_OPTIONS.map((provider) => (
@@ -214,7 +214,7 @@ export function GraphSettings() {
                                 onChange={(event) => updateGraphAttr('ui_default_llm_model', event.target.value)}
                                 list="flow-llm-model-options"
                                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                placeholder={uiDefaults.llm_model ? `Global: ${uiDefaults.llm_model}` : 'Uses global default'}
+                                placeholder={uiDefaults.llm_model ? `Snapshot: ${uiDefaults.llm_model}` : 'Snapshot of global default'}
                             />
                             <datalist id="flow-llm-model-options">
                                 {getModelSuggestions(flowProviderFallback).map((modelOption) => (
@@ -234,6 +234,19 @@ export function GraphSettings() {
                                 <option value="medium">Medium</option>
                                 <option value="high">High</option>
                             </select>
+                        </div>
+                        <div className="flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    updateGraphAttr('ui_default_llm_provider', uiDefaults.llm_provider);
+                                    updateGraphAttr('ui_default_llm_model', uiDefaults.llm_model);
+                                    updateGraphAttr('ui_default_reasoning_effort', uiDefaults.reasoning_effort);
+                                }}
+                                className="h-8 rounded-md border border-border px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                            >
+                                Reset From Global
+                            </button>
                         </div>
                     </div>
                 </div>

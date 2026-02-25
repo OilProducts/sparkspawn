@@ -212,7 +212,19 @@ export function Editor() {
                 if (!preview.graph) return;
 
                 if (preview.graph.graph_attrs) {
-                    setGraphAttrs(preview.graph.graph_attrs)
+                    const nextGraphAttrs = { ...preview.graph.graph_attrs }
+                    const shouldSeed = (value?: string | null) =>
+                        value === undefined || value === null || value === ''
+                    if (shouldSeed(nextGraphAttrs.ui_default_llm_model) && uiDefaults.llm_model) {
+                        nextGraphAttrs.ui_default_llm_model = uiDefaults.llm_model
+                    }
+                    if (shouldSeed(nextGraphAttrs.ui_default_llm_provider) && uiDefaults.llm_provider) {
+                        nextGraphAttrs.ui_default_llm_provider = uiDefaults.llm_provider
+                    }
+                    if (shouldSeed(nextGraphAttrs.ui_default_reasoning_effort) && uiDefaults.reasoning_effort) {
+                        nextGraphAttrs.ui_default_reasoning_effort = uiDefaults.reasoning_effort
+                    }
+                    setGraphAttrs(nextGraphAttrs)
                 }
 
                 // Convert Preview JSON graph to ReactFlow format
@@ -275,7 +287,17 @@ export function Editor() {
                 hydratedRef.current = true;
             })
             .catch(console.error);
-    }, [activeFlow, setNodes, setEdges, setGraphAttrs, setDiagnostics, clearDiagnostics]);
+    }, [
+        activeFlow,
+        setNodes,
+        setEdges,
+        setGraphAttrs,
+        setDiagnostics,
+        clearDiagnostics,
+        uiDefaults.llm_model,
+        uiDefaults.llm_provider,
+        uiDefaults.reasoning_effort,
+    ]);
 
     const requestPreview = useCallback((dot: string) => {
         fetch('/preview', {
