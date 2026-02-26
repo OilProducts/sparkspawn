@@ -19,34 +19,45 @@ class AutoApproveInterviewer(Interviewer):
 
 class ConsoleInterviewer(Interviewer):
     def ask(self, question: Question) -> Answer:
-        print(question.title)
-        print(question.prompt)
-        if question.options:
-            for idx, option in enumerate(question.options, 1):
-                print(f"{idx}. {option.label}")
+        print(f"[?] {question.text}")
 
-        raw = input("> ").strip()
+        if question.type == QuestionType.MULTIPLE_CHOICE:
+            for option in question.options:
+                print(f"  [{option.key}] {option.label}")
+            response = input("Select: ").strip()
+            return _match_option(response, question.options)
 
-        if question.question_type == QuestionType.FREE_TEXT:
-            return Answer(text=raw)
+        if question.type in {QuestionType.YES_NO, QuestionType.CONFIRMATION}:
+            response = input("[Y/N]: ").strip().lower()
+            return Answer(value=AnswerValue.YES if response == "y" else AnswerValue.NO)
 
-        if question.question_type == QuestionType.MULTI_SELECT:
-            picks = []
-            if raw:
-                for token in raw.split(","):
-                    token = token.strip()
-                    if token.isdigit():
-                        idx = int(token)
-                        if 1 <= idx <= len(question.options):
-                            picks.append(question.options[idx - 1].value)
-            return Answer(selected_values=picks)
+        if question.type == QuestionType.FREEFORM:
+            return Answer(text=input("> ").strip())
 
-        if question.options and raw.isdigit():
-            idx = int(raw)
-            if 1 <= idx <= len(question.options):
-                return Answer(selected_values=[question.options[idx - 1].value])
+        return Answer(text=input("> ").strip())
 
-        return Answer(text=raw)
+
+def _match_option(response: str, options) -> Answer:
+    token = response.strip()
+    if not token:
+        return Answer()
+
+    if token.isdigit():
+        idx = int(token)
+        if 1 <= idx <= len(options):
+            selected = options[idx - 1]
+            return Answer(value=selected.key, selected_option=selected)
+
+    normalized = token.lower()
+    for option in options:
+        if option.key and option.key.lower() == normalized:
+            return Answer(value=option.key, selected_option=option)
+        if option.value and option.value.lower() == normalized:
+            return Answer(value=option.key, selected_option=option)
+        if option.label and option.label.lower() == normalized:
+            return Answer(value=option.key, selected_option=option)
+
+    return Answer(text=token)
 
 
 class CallbackInterviewer(Interviewer):

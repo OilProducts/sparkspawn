@@ -56,6 +56,43 @@ class TestInterviewerImplementations:
         assert answer.value == "A"
         assert answer.selected_option == first
 
+    def test_console_interviewer_multiple_choice_matches_option_key_case_insensitive(self):
+        question = Question(
+            text="Pick one",
+            type=QuestionType.MULTIPLE_CHOICE,
+            options=[QuestionOption(label="Alpha", value="alpha", key="A"), QuestionOption(label="Beta", value="beta", key="B")],
+        )
+
+        with patch("builtins.input", return_value="b"):
+            answer = ConsoleInterviewer().ask(question)
+
+        assert answer.value == "B"
+        assert answer.selected_option == question.options[1]
+
+    def test_console_interviewer_yes_no_maps_y_to_yes(self):
+        question = Question(text="Proceed?", type=QuestionType.YES_NO)
+
+        with patch("builtins.input", return_value="Y"):
+            answer = ConsoleInterviewer().ask(question)
+
+        assert answer.value == AnswerValue.YES.value
+
+    def test_console_interviewer_yes_no_maps_non_yes_to_no(self):
+        question = Question(text="Proceed?", type=QuestionType.YES_NO)
+
+        with patch("builtins.input", return_value="n"):
+            answer = ConsoleInterviewer().ask(question)
+
+        assert answer.value == AnswerValue.NO.value
+
+    def test_console_interviewer_freeform_returns_text(self):
+        question = Question(text="Why?", type=QuestionType.FREEFORM)
+
+        with patch("builtins.input", return_value="because"):
+            answer = ConsoleInterviewer().ask(question)
+
+        assert answer.text == "because"
+
     def test_callback_interviewer(self):
         interviewer = CallbackInterviewer(lambda q: Answer(selected_values=["x"]))
         answer = interviewer.ask(Question(title="T", prompt="P", question_type=QuestionType.CONFIRMATION))

@@ -285,7 +285,7 @@ Status key:
 
 ### 6.4 Built-In Interviewer Implementations
 - [x] [6.4-01] Implement `AutoApproveInterviewer` behavior for yes/no and multiple-choice.
-- [ ] [6.4-02] Implement `ConsoleInterviewer` input handling and option matching.
+- [x] [6.4-02] Implement `ConsoleInterviewer` input handling and option matching.
 - [ ] [6.4-03] Implement `CallbackInterviewer` delegation path.
 - [ ] [6.4-04] Implement `QueueInterviewer` deterministic dequeue behavior.
 - [ ] [6.4-05] Implement `RecordingInterviewer` wrapper and durable recording storage.
