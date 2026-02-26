@@ -173,7 +173,7 @@ class TestDotValidator:
 
         assert self._errors(diagnostics) == []
 
-    def test_shape_start_takes_precedence_over_start_id_fallback(self):
+    def test_shape_start_and_start_id_are_both_counted_for_cardinality(self):
         dot = """
         digraph G {
             entry [shape=Mdiamond]
@@ -188,7 +188,7 @@ class TestDotValidator:
         diagnostics = validate_graph(graph)
         error_rules = {d.rule_id for d in self._errors(diagnostics)}
 
-        assert "start_node" not in error_rules
+        assert "start_node" in error_rules
 
     def test_shape_exit_takes_precedence_over_end_id_fallback(self):
         dot = """

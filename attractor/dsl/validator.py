@@ -166,15 +166,12 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
 
 
 def _find_start_nodes(graph: DotGraph) -> List[DotNode]:
-    shape_nodes: List[DotNode] = []
-    fallback_nodes: List[DotNode] = []
+    start_nodes: List[DotNode] = []
     for node in graph.nodes.values():
         shape = _attr_str(node.attrs, "shape")
-        if shape == "Mdiamond":
-            shape_nodes.append(node)
-        elif node.node_id in {"start", "Start"}:
-            fallback_nodes.append(node)
-    return shape_nodes or fallback_nodes
+        if shape == "Mdiamond" or node.node_id in {"start", "Start"}:
+            start_nodes.append(node)
+    return start_nodes
 
 
 def _find_exit_nodes(graph: DotGraph) -> List[DotNode]:

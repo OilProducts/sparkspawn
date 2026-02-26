@@ -303,7 +303,7 @@ Status key:
 - [x] [7.1-03] Preserve WARNING/INFO diagnostics in API responses and UI surfaces.
 
 ### 7.2 Built-In Lint Rules
-- [ ] [7.2-01] Implement `start_node` rule.
+- [x] [7.2-01] Implement `start_node` rule.
 - [ ] [7.2-02] Implement `terminal_node` rule.
 - [ ] [7.2-03] Implement `reachability` rule.
 - [ ] [7.2-04] Implement `edge_target_exists` rule.
