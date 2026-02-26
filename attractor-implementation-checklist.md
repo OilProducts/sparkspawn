@@ -194,7 +194,7 @@ Status key:
 - [x] [4.5-05] Return simulation response when backend is absent.
 
 #### CodergenBackend Interface
-- [ ] [4.5b-01] Define backend interface returning `String | Outcome` for a stage invocation.
+- [x] [4.5b-01] Define backend interface returning `String | Outcome` for a stage invocation.
 - [ ] [4.5b-02] Add adapter tests for multiple backend implementations.
 
 ### 4.6 Wait For Human Handler

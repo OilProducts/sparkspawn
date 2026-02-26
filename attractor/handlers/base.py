@@ -18,7 +18,7 @@ class CodergenBackend(Protocol):
         context: Context,
         *,
         timeout: Optional[float] = None,
-    ) -> bool:
+    ) -> str | Outcome:
         ...
 
 

@@ -3,6 +3,7 @@ import time
 import json
 from pathlib import Path
 import tempfile
+from typing import get_args, get_type_hints
 
 import pytest
 
@@ -172,6 +173,11 @@ class _FalseyInterviewer(Interviewer):
 
 
 class TestBuiltInHandlers:
+    def test_codergen_backend_protocol_returns_text_or_outcome(self):
+        hints = get_type_hints(CodergenBackend.run)
+        return_type = hints["return"]
+        assert set(get_args(return_type)) == {str, Outcome}
+
     def test_codergen_backend_protocol_is_structural(self):
         class _AltBackend:
             def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
