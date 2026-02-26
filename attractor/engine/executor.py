@@ -479,6 +479,12 @@ class PipelineExecutor:
                         outcome=outcome.status.value,
                     )
                 completed.append(node.node_id)
+                self._save_checkpoint(
+                    current_node=node.node_id,
+                    completed_nodes=completed,
+                    context=ctx,
+                    retry_counts=retry_counts,
+                )
                 outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
                 routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
                 next_edge = self._select_route_edge(node.node_id, outgoing, routing_outcome, ctx)

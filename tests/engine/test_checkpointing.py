@@ -6,6 +6,7 @@ import pytest
 
 from attractor.dsl import parse_dot
 from attractor.engine import load_checkpoint
+import attractor.engine.executor as executor_module
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
@@ -257,3 +258,40 @@ class TestCheckpointAndArtifacts:
         assert run_from_result.status == "success"
         assert runner.closed == 1
         assert control.closed == 1
+
+    def test_run_from_saves_checkpoint_after_each_stage_with_current_node_and_completed_list(self, monkeypatch):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box]
+                done [shape=Msquare]
+                start -> plan
+                plan -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_file = Path(tmp) / "attractor.state.json"
+            snapshots: list[tuple[str, list[str]]] = []
+            original_save_checkpoint = executor_module.save_checkpoint
+
+            def capture_checkpoint(path: Path, checkpoint):
+                snapshots.append((checkpoint.current_node, list(checkpoint.completed_nodes)))
+                original_save_checkpoint(path, checkpoint)
+
+            monkeypatch.setattr(executor_module, "save_checkpoint", capture_checkpoint)
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                return Outcome(status=OutcomeStatus.SUCCESS, notes=node_id)
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                checkpoint_file=str(checkpoint_file),
+            ).run_from("start", Context())
+
+            assert result.status == "success"
+            assert ("start", ["start"]) in snapshots
+            assert ("plan", ["start", "plan"]) in snapshots
