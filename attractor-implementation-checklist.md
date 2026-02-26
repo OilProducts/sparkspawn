@@ -300,7 +300,6 @@ Status key:
 
 ### 7.1 Diagnostic Model
 - [x] [7.1-01] Implement diagnostic structure with rule/severity/message/node/edge/fix fields.
-- [ ] [7.1-02] Block execution when any ERROR diagnostic exists.
 - [ ] [7.1-03] Preserve WARNING/INFO diagnostics in API responses and UI surfaces.
 
 ### 7.2 Built-In Lint Rules
@@ -565,3 +564,4 @@ Status key:
 - [ ] [4.9-04] Publish selected candidate via `parallel.fan_in.*` context keys. Deferred because `FanInHandler.execute` already sets `parallel.fan_in.best_id` and `parallel.fan_in.best_outcome`, and tests assert both keys in `tests/handlers/test_handlers.py`, so this is checklist state drift.
 - [ ] [4.12-01] Document and support custom handler registration by type string. Deferred because type-string registration is already implemented in `HandlerRegistry.register` and exercised by custom-type resolution coverage (`tests/handlers/test_handlers.py`, `tests/integration/test_parity_matrix.py`), so this is checklist state drift.
 - [ ] [5.4-02] Implement fidelity precedence: edge -> target node -> graph default -> `compact`. Deferred because `PipelineExecutor._resolve_runtime_fidelity` already enforces this precedence (including `compact` fallback), and executor fidelity tests already cover edge/node/graph precedence, so this is checklist state drift.
+- [ ] [7.1-02] Block execution when any ERROR diagnostic exists. Deferred because pipeline start already aborts on error-severity diagnostics in `attractor/api/server.py::_start_pipeline`, so this is checklist state drift.
