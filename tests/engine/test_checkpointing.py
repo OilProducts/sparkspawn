@@ -173,13 +173,13 @@ class TestCheckpointAndArtifacts:
             assert checkpoint.current_node == "plan"
             assert checkpoint.completed_nodes == ["start", "plan"]
 
-    def test_finalize_persists_checkpoint_and_failure_event_on_runner_exception(self):
+    def test_finalize_persists_checkpoint_and_failure_event_when_runner_exception_becomes_fail_outcome(self):
         graph = parse_dot(
             """
             digraph G {
-                start [shape=Mdiamond]
+                start [shape=Mdiamond, max_retries=0]
                 done [shape=Msquare]
-                start -> done
+                start -> done [condition="outcome=success"]
             }
             """
         )
@@ -198,13 +198,14 @@ class TestCheckpointAndArtifacts:
                 on_event=events.append,
             )
 
-            with pytest.raises(RuntimeError, match="runner exploded"):
+            with pytest.raises(RuntimeError, match="no eligible outgoing edge"):
                 executor.run(Context())
 
             checkpoint = load_checkpoint(checkpoint_file)
             assert checkpoint is not None
             assert checkpoint.current_node == "start"
-            assert checkpoint.completed_nodes == []
+            assert checkpoint.completed_nodes == ["start"]
+            assert checkpoint.context["outcome"] == "fail"
 
             event_types = [event["type"] for event in events]
             assert "CheckpointSaved" in event_types

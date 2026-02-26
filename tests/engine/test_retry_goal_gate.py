@@ -352,3 +352,35 @@ class TestRetryAndGoalGate:
 
         with pytest.raises(RuntimeError, match="Stage 'task' has no eligible outgoing edge"):
             PipelineExecutor(graph, runner).run(Context())
+
+    def test_handler_exception_retries_then_persists_fail_outcome_for_fail_routing(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box, max_retries=1]
+                fix [shape=box]
+                done [shape=Msquare]
+                start -> task
+                task -> done [condition="outcome=success"]
+                task -> fix [condition="outcome=fail"]
+                fix -> done
+            }
+            """
+        )
+
+        calls = {"task": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "task":
+                calls["task"] += 1
+                raise RuntimeError("transient backend outage")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "success"
+        assert calls["task"] == 2
+        assert result.node_outcomes["task"].status is OutcomeStatus.FAIL
+        assert result.node_outcomes["task"].failure_reason == "transient backend outage"
+        assert "fix" in result.completed_nodes

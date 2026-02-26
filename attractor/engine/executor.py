@@ -192,8 +192,7 @@ class PipelineExecutor:
                 prior_status = self._context_outcome_status(ctx)
                 prompt = self._prompt_for_node(node.node_id)
                 self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
-                raw_outcome = self.runner(node.node_id, prompt, ctx)
-                outcome = self._normalize_outcome(node.node_id, raw_outcome)
+                outcome = self._execute_node_handler(node.node_id, prompt, ctx)
                 outcomes[node.node_id] = outcome
 
                 ctx.set("outcome", outcome.status.value)
@@ -426,8 +425,7 @@ class PipelineExecutor:
                 prior_status = self._context_outcome_status(ctx)
                 prompt = self._prompt_for_node(node.node_id)
                 self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
-                raw_outcome = self.runner(node.node_id, prompt, ctx)
-                outcome = self._normalize_outcome(node.node_id, raw_outcome)
+                outcome = self._execute_node_handler(node.node_id, prompt, ctx)
                 outcomes[node.node_id] = outcome
 
                 ctx.set("outcome", outcome.status.value)
@@ -711,6 +709,16 @@ class PipelineExecutor:
             )
 
         return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler returned no outcome")
+
+    def _execute_node_handler(self, node_id: str, prompt: str, context: Context) -> Outcome:
+        try:
+            raw_outcome = self.runner(node_id, prompt, context)
+        except Exception as exc:
+            return Outcome(
+                status=OutcomeStatus.FAIL,
+                failure_reason=str(exc) or exc.__class__.__name__,
+            )
+        return self._normalize_outcome(node_id, raw_outcome)
 
     def _is_start_node(self, node_id: str) -> bool:
         if self._shape_start_nodes:
