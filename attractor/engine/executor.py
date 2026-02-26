@@ -681,6 +681,8 @@ class PipelineExecutor:
                 retry_counts=retry_counts,
             )
 
+        self._emit_event("PipelineStarted", current_node=restart_node, resumed=False, restarted=True)
+
     def _rotate_logs_root_for_restart(self) -> None:
         if not self._base_logs_root:
             return

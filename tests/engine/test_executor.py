@@ -105,6 +105,36 @@ class TestExecutor:
             assert not (restart_logs_root / "start").exists()
             assert not (restart_logs_root / "loop").exists()
 
+    def test_loop_restart_emits_fresh_pipeline_started_event(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                loop [shape=box]
+                work [shape=box]
+                done [shape=Msquare]
+
+                start -> loop
+                loop -> work [loop_restart=true]
+                work -> done
+            }
+            """
+        )
+        events = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
+
+        started_nodes = [
+            str(event.get("current_node"))
+            for event in events
+            if event.get("type") == "PipelineStarted"
+        ]
+        assert result.status == "success"
+        assert started_nodes == ["start", "work"]
+
     def test_executor_resolves_runtime_thread_id_from_node_attr_for_full_fidelity(self):
         graph = parse_dot(
             """
