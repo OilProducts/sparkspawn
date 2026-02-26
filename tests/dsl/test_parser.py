@@ -59,6 +59,36 @@ line2"]
         assert isinstance(timeout.value, Duration)
         assert timeout.value.raw == "250ms"
 
+    def test_parses_duration_units_and_normalizes_representation(self):
+        dot = """
+        digraph DurationUnits {
+            node_a [
+                timeout_ms=+0250ms,
+                timeout_s=0900s,
+                timeout_m=15m,
+                timeout_h=2h,
+                timeout_d=1d
+            ]
+        }
+        """
+        graph = parse_dot(dot)
+        attrs = graph.nodes["node_a"].attrs
+
+        expected = {
+            "timeout_ms": (250, "ms", "250ms"),
+            "timeout_s": (900, "s", "900s"),
+            "timeout_m": (15, "m", "15m"),
+            "timeout_h": (2, "h", "2h"),
+            "timeout_d": (1, "d", "1d"),
+        }
+        for key, (number, unit, raw) in expected.items():
+            attr = attrs[key]
+            assert attr.value_type == DotValueType.DURATION
+            assert isinstance(attr.value, Duration)
+            assert attr.value.value == number
+            assert attr.value.unit == unit
+            assert attr.value.raw == raw
+
     def test_parses_only_lowercase_boolean_literals_as_boolean_type(self):
         dot = """
         digraph BooleanLiterals {

@@ -254,8 +254,9 @@ class _Parser:
         if tok.kind == "INT" and self.peek().kind == "IDENT" and self.peek().value in DURATION_UNITS:
             int_tok = self.advance()
             unit_tok = self.advance()
-            raw = f"{int_tok.value}{unit_tok.value}"
-            return Duration(raw=raw, value=int(int_tok.value), unit=unit_tok.value), DotValueType.DURATION, int_tok.line
+            numeric_value = int(int_tok.value)
+            raw = f"{numeric_value}{unit_tok.value}"
+            return Duration(raw=raw, value=numeric_value, unit=unit_tok.value), DotValueType.DURATION, int_tok.line
 
         if tok.kind in {"STRING", "INT", "FLOAT", "IDENT"}:
             val_tok = self.advance()

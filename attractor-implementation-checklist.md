@@ -60,7 +60,7 @@ Status key:
 ### 2.4 Value Types
 - [x] [2.4-01] Parse quoted strings with escapes (`\\n`, `\\t`, escaped quotes, escaped backslash).
 - [x] [2.4-03] Parse booleans as typed values.
-- [ ] [2.4-04] Parse durations with units (`ms|s|m|h|d`) and normalize representation.
+- [x] [2.4-04] Parse durations with units (`ms|s|m|h|d`) and normalize representation.
 
 ### 2.5 Graph-Level Attributes
 - [ ] [2.5-01] Implement `goal` extraction and mirror to context key `graph.goal`.
