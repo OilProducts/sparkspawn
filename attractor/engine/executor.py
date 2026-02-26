@@ -913,7 +913,14 @@ class PipelineExecutor:
 
         allow_partial_attr = self.graph.nodes[node_id].attrs.get("allow_partial")
         if not allow_partial_attr or not _to_bool(allow_partial_attr.value):
-            return outcome
+            return Outcome(
+                status=OutcomeStatus.FAIL,
+                preferred_label=outcome.preferred_label,
+                suggested_next_ids=list(outcome.suggested_next_ids),
+                context_updates=dict(outcome.context_updates),
+                failure_reason="max retries exceeded",
+                notes=outcome.notes,
+            )
 
         return Outcome(
             status=OutcomeStatus.PARTIAL_SUCCESS,

@@ -118,6 +118,38 @@ class TestRetryAndGoalGate:
         assert calls["task"] == 2
         assert result.node_outcomes["task"].status is OutcomeStatus.PARTIAL_SUCCESS
 
+    def test_retry_exhaustion_uses_max_retries_plus_one_attempts_then_routes_fail(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box, max_retries=2]
+                fix [shape=box]
+                done [shape=Msquare]
+                start -> task
+                task -> done [condition="outcome=success"]
+                task -> fix [condition="outcome=fail"]
+                fix -> done
+            }
+            """
+        )
+
+        calls = {"task": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "task":
+                calls["task"] += 1
+                return Outcome(status=OutcomeStatus.RETRY, failure_reason="temporary")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "success"
+        assert calls["task"] == 3
+        assert result.route_trace == ["start", "task", "fix", "done"]
+        assert result.node_outcomes["task"].status is OutcomeStatus.FAIL
+        assert result.node_outcomes["task"].failure_reason == "max retries exceeded"
+
     def test_fail_status_retries_for_max_retries_budget(self):
         graph = parse_dot(
             """

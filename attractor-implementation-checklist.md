@@ -145,7 +145,7 @@ Status key:
 - [x] [3.4-04] Fail run when no valid retry target exists.
 
 ### 3.5 Retry Logic
-- [ ] [3.5-01] Build max attempts from `max_retries` + 1 semantics.
+- [x] [3.5-01] Build max attempts from `max_retries` + 1 semantics.
 - [ ] [3.5-02] Retry on `RETRY` outcomes and retryable exceptions until attempts exhausted.
 - [ ] [3.5-03] Reset retry counter on success/partial success.
 - [ ] [3.5-04] Honor `allow_partial=true` conversion after retry exhaustion.
