@@ -90,7 +90,6 @@ Status key:
 
 ### 2.8 Shape-to-Handler-Type Mapping
 - [x] [2.8-01] Implement canonical shape->type mapping exactly as specified.
-- [ ] [2.8-02] Ensure explicit `type` attribute overrides shape mapping.
 - [ ] [2.8-03] Add mapping coverage tests for all listed shapes (`Mdiamond`, `Msquare`, `box`, `hexagon`, `diamond`, `component`, `tripleoctagon`, `parallelogram`, `house`).
 
 ### 2.9 Chained Edges
@@ -561,6 +560,7 @@ Status key:
 
 ## Deferred Tasks
 - [ ] [2.6-02] Resolve `type` override before shape-based handler mapping. Deferred because `HandlerRegistry.resolve_handler_type` already checks explicit `type` before shape mapping and tests already cover this precedence (`tests/handlers/test_handlers.py`), so this is checklist state drift.
+- [ ] [2.8-02] Ensure explicit `type` attribute overrides shape mapping. Deferred because explicit `type` precedence is already implemented in `HandlerRegistry.resolve_handler_type` and validated by `tests/handlers/test_handlers.py::test_registry_resolution_by_shape_and_type`, so this is checklist state drift.
 - [ ] [2.3-05] Accept optional statement semicolons. Deferred because parser behavior is already implemented and covered by existing tests (`tests/dsl/test_parser.py`), so this is checklist state drift rather than a code gap.
 - [ ] [2.4-02] Parse signed integers and floats. Deferred because signed integer/float parsing is already implemented in `attractor/dsl/parser.py` and exercised by parser tests, so this item is currently non-actionable checklist drift.
 - [ ] [2.7-01] Implement edge `label` for preferred-label routing. Deferred because preferred-label edge routing is already implemented in `attractor/engine/routing.py` and covered by `tests/engine/test_routing.py::test_preferred_label_then_suggested_ids`, so this is checklist state drift.
