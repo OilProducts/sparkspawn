@@ -120,6 +120,35 @@ class TestExecutor:
         assert result.context.get("needs_fix") == "true"
         assert calls[1][1] == "plan"
 
+    def test_conditional_node_routes_using_prior_stage_outcome(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box]
+                gate [shape=diamond]
+                fix [shape=box]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> gate
+                gate -> done [condition="outcome=success"]
+                gate -> fix [condition="outcome=fail"]
+                fix -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "plan":
+                return Outcome(status=OutcomeStatus.FAIL)
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "success"
+        assert result.route_trace == ["start", "plan", "gate", "fix", "done"]
+
     def test_executor_requires_single_start(self):
         graph = parse_dot(
             """

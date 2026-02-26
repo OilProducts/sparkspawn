@@ -145,3 +145,17 @@ class TestBuiltInHandlers:
         outcome = runner("plugin_stage", "", Context())
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.notes == "plugin:plugin_stage"
+
+    def test_conditional_handler_is_noop_success(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                gate [shape=diamond]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("gate", "", Context(values={"outcome": "fail"}))
+        assert outcome.status == OutcomeStatus.SUCCESS

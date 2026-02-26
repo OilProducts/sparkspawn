@@ -9,7 +9,7 @@ from attractor.dsl.models import DotGraph
 
 from .checkpoint import Checkpoint, load_checkpoint, save_checkpoint
 from .context import Context
-from .outcome import Outcome
+from .outcome import Outcome, OutcomeStatus
 from .routing import select_next_edge
 
 
@@ -152,6 +152,7 @@ class PipelineExecutor:
                 )
 
             node = self.graph.nodes[current]
+            prior_status = self._context_outcome_status(ctx)
             prompt = self._prompt_for_node(node.node_id)
             outcome = self.runner(node.node_id, prompt, ctx)
             outcomes[node.node_id] = outcome
@@ -185,7 +186,8 @@ class PipelineExecutor:
                 retry_counts=retry_counts,
             )
             outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
-            next_edge = select_next_edge(outgoing, outcome, ctx)
+            routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
+            next_edge = select_next_edge(outgoing, routing_outcome, ctx)
             if not next_edge and outcome.status.value == "fail":
                 route = self._resolve_failure_retry_target(node.node_id)
                 if route:
@@ -275,6 +277,7 @@ class PipelineExecutor:
                 )
 
             node = self.graph.nodes[current]
+            prior_status = self._context_outcome_status(ctx)
             prompt = self._prompt_for_node(node.node_id)
             outcome = self.runner(node.node_id, prompt, ctx)
             outcomes[node.node_id] = outcome
@@ -296,7 +299,8 @@ class PipelineExecutor:
 
             completed.append(node.node_id)
             outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
-            next_edge = select_next_edge(outgoing, outcome, ctx)
+            routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
+            next_edge = select_next_edge(outgoing, routing_outcome, ctx)
             if not next_edge and outcome.status.value == "fail":
                 route = self._resolve_failure_retry_target(node.node_id)
                 if route:
@@ -391,6 +395,41 @@ class PipelineExecutor:
         if self._shape_exit_nodes:
             return node_id in self._shape_exit_nodes
         return node_id in {"exit", "end", "Exit", "End"}
+
+    def _is_conditional_node(self, node_id: str) -> bool:
+        node = self.graph.nodes[node_id]
+        explicit = node.attrs.get("type")
+        if explicit and str(explicit.value).strip():
+            return str(explicit.value).strip() == "conditional"
+        shape = node.attrs.get("shape")
+        return bool(shape and str(shape.value) == "diamond")
+
+    def _context_outcome_status(self, context: Context) -> Optional[OutcomeStatus]:
+        value = context.get("outcome", "")
+        if isinstance(value, OutcomeStatus):
+            return value
+        text = str(value).strip().lower()
+        try:
+            return OutcomeStatus(text)
+        except ValueError:
+            return None
+
+    def _routing_outcome(
+        self,
+        node_id: str,
+        outcome: Outcome,
+        prior_status: Optional[OutcomeStatus],
+    ) -> Outcome:
+        if not prior_status or not self._is_conditional_node(node_id):
+            return outcome
+        return Outcome(
+            status=prior_status,
+            preferred_label=outcome.preferred_label,
+            suggested_next_ids=list(outcome.suggested_next_ids),
+            context_updates=dict(outcome.context_updates),
+            failure_reason=outcome.failure_reason,
+            notes=outcome.notes,
+        )
 
     def _node_ids_for_shape(self, shape: str) -> set[str]:
         matches: set[str] = set()
