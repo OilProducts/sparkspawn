@@ -8,7 +8,7 @@ from .implementations import (
     QueueInterviewer,
     RecordingInterviewer,
 )
-from .models import Answer, Question, QuestionOption, QuestionType
+from .models import Answer, AnswerValue, Question, QuestionOption, QuestionType
 
 __all__ = [
     "Interviewer",
@@ -18,6 +18,7 @@ __all__ = [
     "QueueInterviewer",
     "RecordingInterviewer",
     "Answer",
+    "AnswerValue",
     "Question",
     "QuestionOption",
     "QuestionType",

@@ -1,4 +1,4 @@
-from attractor.interviewer import Answer, Question, QuestionOption, QuestionType
+from attractor.interviewer import Answer, AnswerValue, Question, QuestionOption, QuestionType
 
 
 def test_question_supports_full_payload_fields():
@@ -107,3 +107,10 @@ def test_answer_supports_spec_payload_fields():
     assert answer.value == "A"
     assert answer.selected_option == option
     assert answer.text == "looks good"
+
+
+def test_answer_supports_spec_answer_values():
+    assert Answer(value=AnswerValue.YES).value == "YES"
+    assert Answer(value=AnswerValue.NO).value == "NO"
+    assert Answer(value=AnswerValue.SKIPPED).value == "SKIPPED"
+    assert Answer(value=AnswerValue.TIMEOUT).value == "TIMEOUT"

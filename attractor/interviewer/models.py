@@ -18,6 +18,13 @@ class QuestionType(str, Enum):
     CONFIRM = CONFIRMATION
 
 
+class AnswerValue(str, Enum):
+    YES = "YES"
+    NO = "NO"
+    SKIPPED = "SKIPPED"
+    TIMEOUT = "TIMEOUT"
+
+
 @dataclass
 class QuestionOption:
     label: str
@@ -98,12 +105,14 @@ class Answer:
 
     def __init__(
         self,
-        value: str = "",
+        value: str | AnswerValue = "",
         selected_option: QuestionOption | None = None,
         text: str = "",
         *,
         selected_values: List[str] | None = None,
     ) -> None:
+        if isinstance(value, AnswerValue):
+            value = value.value
         self.selected_option = selected_option
         self.text = text
         normalized = [str(item).strip() for item in (selected_values or []) if str(item).strip()]

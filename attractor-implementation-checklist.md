@@ -281,7 +281,7 @@ Status key:
 
 ### 6.3 Answer Model
 - [x] [6.3-01] Implement answer payload (`value`, `selected_option`, `text`).
-- [ ] [6.3-02] Support `YES/NO/SKIPPED/TIMEOUT` answer values.
+- [x] [6.3-02] Support `YES/NO/SKIPPED/TIMEOUT` answer values.
 
 ### 6.4 Built-In Interviewer Implementations
 - [ ] [6.4-01] Implement `AutoApproveInterviewer` behavior for yes/no and multiple-choice.
