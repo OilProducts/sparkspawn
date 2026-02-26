@@ -195,6 +195,15 @@ class TestDotParser:
         with pytest.raises(DotParseError):
             parse_dot(dot)
 
+    def test_rejects_trailing_comma_in_attribute_block(self):
+        dot = """
+        digraph Bad {
+            a [shape=box,]
+        }
+        """
+        with pytest.raises(DotParseError, match="trailing comma is not allowed in attribute blocks"):
+            parse_dot(dot)
+
     def test_parse_qualified_attribute_keys(self):
         dot = """
         digraph Qualified {

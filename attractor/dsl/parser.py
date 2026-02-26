@@ -243,6 +243,8 @@ class _Parser:
             if not self.accept("COMMA"):
                 tok = self.current()
                 raise DotParseError("commas are required between attributes", tok.line)
+            if self.current().kind == "RBRACKET":
+                raise DotParseError("trailing comma is not allowed in attribute blocks", self.current().line)
 
         return attrs
 
