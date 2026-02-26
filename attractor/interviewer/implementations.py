@@ -64,3 +64,14 @@ class QueueInterviewer(Interviewer):
         if not self._answers:
             return Answer()
         return self._answers.popleft()
+
+
+class RecordingInterviewer(Interviewer):
+    def __init__(self, inner: Interviewer):
+        self.inner = inner
+        self.recordings: list[tuple[Question, Answer]] = []
+
+    def ask(self, question: Question) -> Answer:
+        answer = self.inner.ask(question)
+        self.recordings.append((question, answer))
+        return answer

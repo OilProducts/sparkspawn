@@ -273,7 +273,7 @@ Status key:
 
 ### 6.1 Interviewer Interface
 - [x] [6.1-01] Implement `ask`, `ask_multiple`, and `inform` interface contract.
-- [ ] [6.1-02] Add adapter compatibility tests for all built-in interviewer variants.
+- [x] [6.1-02] Add adapter compatibility tests for all built-in interviewer variants.
 
 ### 6.2 Question Model
 - [ ] [6.2-01] Implement full question payload (`text`, `type`, `options`, `default`, `timeout_seconds`, `stage`, `metadata`).

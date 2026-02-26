@@ -1,12 +1,16 @@
+from unittest.mock import patch
+
 from attractor.interviewer import (
     Answer,
     AutoApproveInterviewer,
     CallbackInterviewer,
+    ConsoleInterviewer,
     Interviewer,
     Question,
     QuestionOption,
     QuestionType,
     QueueInterviewer,
+    RecordingInterviewer,
 )
 
 
@@ -54,3 +58,29 @@ class TestInterviewerImplementations:
         a2 = interviewer.ask(Question(title="2", prompt="2", question_type=QuestionType.FREE_TEXT))
         assert a1.selected_values == ["first"]
         assert a2.text == "second"
+
+    def test_builtin_interviewer_variants_satisfy_adapter_contracts(self):
+        question = Question(
+            title="Pick",
+            prompt="Choose one",
+            question_type=QuestionType.SINGLE_SELECT,
+            options=[QuestionOption(label="A", value="a"), QuestionOption(label="B", value="b")],
+        )
+        with patch("builtins.input", side_effect=["1", "1"]):
+            interviewer_variants = [
+                AutoApproveInterviewer(),
+                CallbackInterviewer(lambda _: Answer(selected_values=["cb"])),
+                ConsoleInterviewer(),
+                QueueInterviewer([Answer(selected_values=["queued"]), Answer(selected_values=["queued-2"])]),
+                RecordingInterviewer(
+                    QueueInterviewer([Answer(selected_values=["recorded"]), Answer(selected_values=["recorded-2"])])
+                ),
+            ]
+
+            for interviewer in interviewer_variants:
+                answer = interviewer.ask(question)
+                assert isinstance(answer, Answer)
+                answers = interviewer.ask_multiple([question])
+                assert len(answers) == 1
+                assert isinstance(answers[0], Answer)
+                assert interviewer.inform("heads up", "review") is None

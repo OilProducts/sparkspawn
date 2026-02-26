@@ -6,6 +6,7 @@ from .implementations import (
     CallbackInterviewer,
     ConsoleInterviewer,
     QueueInterviewer,
+    RecordingInterviewer,
 )
 from .models import Answer, Question, QuestionOption, QuestionType
 
@@ -15,6 +16,7 @@ __all__ = [
     "CallbackInterviewer",
     "ConsoleInterviewer",
     "QueueInterviewer",
+    "RecordingInterviewer",
     "Answer",
     "Question",
     "QuestionOption",
