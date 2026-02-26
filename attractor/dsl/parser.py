@@ -52,7 +52,8 @@ def parse_dot(source: str) -> DotGraph:
     while parser.accept("SEMI"):
         pass
     trailing = parser.current()
-    if trailing.kind == "IDENT" and trailing.value in {"digraph", "graph", "strict"}:
+    trailing_lower = trailing.value.lower() if trailing.kind == "IDENT" else ""
+    if trailing_lower in {"digraph", "graph", "strict"}:
         raise DotParseError("multiple graph declarations are not supported", trailing.line)
     parser.expect("EOF")
     return graph
@@ -94,9 +95,10 @@ class _Parser:
 
     def parse_graph(self) -> DotGraph:
         first = self.current()
-        if first.kind == "IDENT" and first.value == "strict":
+        first_lower = first.value.lower() if first.kind == "IDENT" else ""
+        if first_lower == "strict":
             raise DotParseError("strict modifier is not supported", first.line)
-        if first.kind == "IDENT" and first.value == "graph":
+        if first_lower == "graph":
             raise DotParseError("undirected graph declarations are not supported", first.line)
 
         self.expect("IDENT", "digraph")

@@ -222,6 +222,15 @@ class TestDotParser:
         with pytest.raises(DotParseError, match="undirected graph declarations are not supported"):
             parse_dot(dot)
 
+    def test_reject_undirected_graph_declaration_case_insensitive(self):
+        dot = """
+        GRAPH Bad {
+            a -> b
+        }
+        """
+        with pytest.raises(DotParseError, match="undirected graph declarations are not supported"):
+            parse_dot(dot)
+
     def test_reject_multiple_graph_declarations(self):
         dot = """
         digraph One {
@@ -246,9 +255,30 @@ class TestDotParser:
         with pytest.raises(DotParseError, match="multiple graph declarations are not supported"):
             parse_dot(dot)
 
+    def test_reject_multiple_graph_declarations_with_uppercase_keyword(self):
+        dot = """
+        digraph One {
+            a -> b
+        }
+        DIGRAPH Two {
+            c -> d
+        }
+        """
+        with pytest.raises(DotParseError, match="multiple graph declarations are not supported"):
+            parse_dot(dot)
+
     def test_reject_strict_graph_modifier(self):
         dot = """
         strict digraph G {
+            a -> b
+        }
+        """
+        with pytest.raises(DotParseError, match="strict modifier is not supported"):
+            parse_dot(dot)
+
+    def test_reject_strict_graph_modifier_case_insensitive(self):
+        dot = """
+        STRICT digraph G {
             a -> b
         }
         """
