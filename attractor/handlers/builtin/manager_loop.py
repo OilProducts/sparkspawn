@@ -4,6 +4,8 @@ import re
 import time
 
 from attractor.dsl.models import DotAttribute, Duration
+from attractor.engine.conditions import evaluate_condition
+from attractor.engine.context import Context
 from attractor.engine.outcome import Outcome, OutcomeStatus
 
 from ..base import HandlerRuntime
@@ -13,9 +15,30 @@ class ManagerLoopHandler:
     def execute(self, runtime: HandlerRuntime) -> Outcome:
         poll_interval = _poll_interval_seconds(runtime.node_attrs.get("manager.poll_interval"))
         max_cycles = _max_cycles(runtime.node_attrs.get("manager.max_cycles"))
-        for _ in range(max_cycles):
-            if poll_interval > 0:
+        stop_condition = _stop_condition(runtime.node_attrs.get("manager.stop_condition"))
+        actions = _manager_actions(runtime.node_attrs.get("manager.actions"))
+        steer_cooldown = _steer_cooldown_seconds(runtime.node_attrs.get("manager.steer_cooldown"))
+        last_steer_at: float | None = None
+
+        for cycle in range(1, max_cycles + 1):
+            if "observe" in actions:
+                _ingest_child_telemetry(runtime.context, runtime.node_id, cycle)
+
+            now = time.monotonic()
+            if "steer" in actions and _steer_cooldown_elapsed(
+                now,
+                last_steer_at=last_steer_at,
+                cooldown_seconds=steer_cooldown,
+            ):
+                _steer_child(runtime.context, runtime.node_id, cycle)
+                last_steer_at = now
+
+            if stop_condition and _stop_condition_met(stop_condition, runtime.context):
+                return Outcome(status=OutcomeStatus.SUCCESS, notes="Stop condition satisfied")
+
+            if "wait" in actions and poll_interval > 0:
                 time.sleep(poll_interval)
+
         return Outcome(
             status=OutcomeStatus.FAIL,
             failure_reason="Max cycles exceeded",
@@ -51,6 +74,49 @@ def _max_cycles(attr: DotAttribute | None) -> int:
         return max(0, int(str(value).strip()))
     except ValueError:
         return 1000
+
+
+def _steer_cooldown_seconds(attr: DotAttribute | None) -> float:
+    if attr is None:
+        return 0.0
+    return _poll_interval_seconds(attr)
+
+
+def _steer_cooldown_elapsed(now: float, *, last_steer_at: float | None, cooldown_seconds: float) -> bool:
+    if cooldown_seconds <= 0 or last_steer_at is None:
+        return True
+    return now - last_steer_at >= cooldown_seconds
+
+
+def _manager_actions(attr: DotAttribute | None) -> set[str]:
+    if attr is None:
+        return {"observe", "wait"}
+
+    raw = str(attr.value).strip()
+    if raw == "":
+        return set()
+
+    actions = {token.strip().lower() for token in raw.split(",")}
+    return {action for action in actions if action in {"observe", "steer", "wait"}}
+
+
+def _stop_condition(attr: DotAttribute | None) -> str:
+    if attr is None:
+        return ""
+    return str(attr.value).strip()
+
+
+def _stop_condition_met(stop_condition: str, context: Context) -> bool:
+    probe = Outcome(status=OutcomeStatus.SUCCESS)
+    return evaluate_condition(stop_condition, probe, context)
+
+
+def _ingest_child_telemetry(context: Context, node_id: str, cycle: int) -> None:
+    del context, node_id, cycle
+
+
+def _steer_child(context: Context, node_id: str, cycle: int) -> None:
+    del context, node_id, cycle
 
 
 def _parse_duration_string(raw: str, default: float) -> float:

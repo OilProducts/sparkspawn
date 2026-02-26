@@ -378,6 +378,103 @@ class TestBuiltInHandlers:
         assert outcome.failure_reason == "Max cycles exceeded"
         assert sleep_calls == pytest.approx([0.025, 0.025, 0.025])
 
+    def test_manager_loop_observe_and_steer_actions_skip_wait_when_wait_not_enabled(self, monkeypatch):
+        observed = []
+        steered = []
+        sleep_calls = []
+
+        def _fake_observe(context: Context, node_id: str, cycle: int) -> None:
+            observed.append((node_id, cycle, dict(context.values)))
+
+        def _fake_steer(context: Context, node_id: str, cycle: int) -> None:
+            steered.append((node_id, cycle, dict(context.values)))
+
+        def _fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop._ingest_child_telemetry", _fake_observe)
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop._steer_child", _fake_steer)
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop.time.sleep", _fake_sleep)
+
+        graph = parse_dot(
+            """
+            digraph G {
+                manager [shape=house, manager.poll_interval=25ms, manager.max_cycles=2, manager.actions="observe,steer"]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+        outcome = runner("manager", "", Context(values={"context.stack.child.status": "running"}))
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason == "Max cycles exceeded"
+        assert [entry[:2] for entry in observed] == [("manager", 1), ("manager", 2)]
+        assert [entry[:2] for entry in steered] == [("manager", 1), ("manager", 2)]
+        assert sleep_calls == []
+
+    def test_manager_loop_steer_action_honors_cooldown(self, monkeypatch):
+        steered = []
+        clock = iter([0.0, 1.0, 2.0])
+
+        def _fake_steer(context: Context, node_id: str, cycle: int) -> None:
+            steered.append((node_id, cycle, dict(context.values)))
+
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop._steer_child", _fake_steer)
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop.time.monotonic", lambda: next(clock))
+        graph = parse_dot(
+            """
+            digraph G {
+                manager [
+                    shape=house,
+                    manager.poll_interval=0ms,
+                    manager.max_cycles=3,
+                    manager.actions="steer",
+                    manager.steer_cooldown=2s
+                ]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("manager", "", Context())
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason == "Max cycles exceeded"
+        assert [entry[:2] for entry in steered] == [("manager", 1), ("manager", 3)]
+
+    def test_manager_loop_stop_condition_returns_success_when_satisfied(self, monkeypatch):
+        def _fake_observe(context: Context, node_id: str, cycle: int) -> None:
+            del node_id, cycle
+            context.set("context.stack.child.ready", True)
+
+        def _fake_sleep(seconds: float) -> None:
+            raise AssertionError(f"unexpected wait call: {seconds}")
+
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop._ingest_child_telemetry", _fake_observe)
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop.time.sleep", _fake_sleep)
+        graph = parse_dot(
+            """
+            digraph G {
+                manager [
+                    shape=house,
+                    manager.poll_interval=25ms,
+                    manager.max_cycles=5,
+                    manager.actions="observe,wait",
+                    manager.stop_condition="context.stack.child.ready=true"
+                ]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("manager", "", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.notes == "Stop condition satisfied"
+
     def test_codergen_handler_calls_backend(self):
         graph = parse_dot(
             """
