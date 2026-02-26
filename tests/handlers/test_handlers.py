@@ -1,5 +1,6 @@
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
+from attractor.engine.outcome import Outcome
 from attractor.engine.outcome import OutcomeStatus
 from attractor.handlers import HandlerRunner, build_default_registry
 
@@ -12,6 +13,11 @@ class _StubBackend:
     def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
         self.calls.append((node_id, prompt, dict(context.values)))
         return self.ok
+
+
+class _PluginHandler:
+    def run(self, runtime):
+        return Outcome(status=OutcomeStatus.SUCCESS, notes=f"plugin:{runtime.node_id}")
 
 
 class TestBuiltInHandlers:
@@ -90,3 +96,20 @@ class TestBuiltInHandlers:
         outcome = runner("tool_node", "", Context())
         assert outcome.status == OutcomeStatus.SUCCESS
         assert "hello" in outcome.notes
+
+    def test_registry_allows_plugin_injection_via_builder(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                plugin_stage [shape=box, type="custom.plugin"]
+            }
+            """
+        )
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={"custom.plugin": _PluginHandler()},
+        )
+        runner = HandlerRunner(graph, registry)
+        outcome = runner("plugin_stage", "", Context())
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.notes == "plugin:plugin_stage"

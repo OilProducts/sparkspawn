@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Mapping, Optional
 
 from attractor.interviewer import AutoApproveInterviewer, Interviewer
 
-from .base import CodergenBackend
+from .base import CodergenBackend, Handler
 from .builtin import (
     CodergenHandler,
     ConditionalHandler,
@@ -22,6 +22,7 @@ def build_default_registry(
     *,
     codergen_backend: Optional[CodergenBackend] = None,
     interviewer: Optional[Interviewer] = None,
+    extra_handlers: Optional[Mapping[str, Handler]] = None,
 ) -> HandlerRegistry:
     interviewer = interviewer or AutoApproveInterviewer()
     registry = HandlerRegistry()
@@ -33,4 +34,7 @@ def build_default_registry(
     registry.register("parallel", ParallelHandler())
     registry.register("parallel.fan_in", FanInHandler())
     registry.register("tool", ToolHandler())
+    if extra_handlers:
+        for handler_type, handler in extra_handlers.items():
+            registry.register(handler_type, handler)
     return registry
