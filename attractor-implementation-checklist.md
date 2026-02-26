@@ -256,7 +256,7 @@ Status key:
 ### 5.4 Context Fidelity
 - [x] [5.4-01] Implement supported fidelity modes (`full`, `truncate`, `compact`, `summary:low`, `summary:medium`, `summary:high`).
 - [x] [5.4-03] Implement thread-key resolution precedence for `full` fidelity.
-- [ ] [5.4-04] Verify session reuse/isolation behavior with thread keys.
+- [x] [5.4-04] Verify session reuse/isolation behavior with thread keys.
 
 ### 5.5 Artifact Store
 - [ ] [5.5-01] Implement artifact registry with metadata (`ArtifactInfo`) and typed retrieval.

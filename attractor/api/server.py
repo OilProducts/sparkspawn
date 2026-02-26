@@ -592,10 +592,39 @@ class LocalCodexCliBackend(CodergenBackend):
 
 
 class LocalCodexAppServerBackend(CodergenBackend):
+    RUNTIME_THREAD_ID_KEY = "_attractor.runtime.thread_id"
+
     def __init__(self, working_dir: str, emit, model: Optional[str] = None):
         self.working_dir = working_dir
         self.emit = emit
         self.model = model
+        self._session_threads_by_key: dict[str, str] = {}
+        self._session_threads_lock = threading.Lock()
+
+    def _runtime_thread_key(self, context: Context) -> str:
+        value = context.get(self.RUNTIME_THREAD_ID_KEY, "")
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _resolve_session_thread_id(
+        self,
+        thread_key: str,
+        start_thread: Callable[[], str | None],
+    ) -> str | None:
+        normalized_key = thread_key.strip()
+        if not normalized_key:
+            return start_thread()
+
+        with self._session_threads_lock:
+            cached = self._session_threads_by_key.get(normalized_key)
+            if cached:
+                return cached
+            created = start_thread()
+            if not created:
+                return None
+            self._session_threads_by_key[normalized_key] = created
+            return created
 
     def run(
         self,
@@ -788,21 +817,28 @@ class LocalCodexAppServerBackend(CodergenBackend):
             if not init_response or init_response.get("error"):
                 return fail("app-server initialize failed")
 
-            thread_params = {
-                "cwd": self.working_dir,
-                "sandbox": "danger-full-access",
-                "ephemeral": True,
-            }
-            if self.model:
-                thread_params["model"] = self.model
-            thread_id = send_request("thread/start", thread_params)
-            thread_response = wait_for_response(thread_id)
-            if not thread_response or thread_response.get("error"):
-                return fail("app-server thread/start failed")
-            thread = (thread_response.get("result") or {}).get("thread") or {}
-            thread_uuid = thread.get("id")
+            def start_thread() -> str | None:
+                thread_params = {
+                    "cwd": self.working_dir,
+                    "sandbox": "danger-full-access",
+                    "ephemeral": True,
+                }
+                if self.model:
+                    thread_params["model"] = self.model
+                thread_request_id = send_request("thread/start", thread_params)
+                thread_response = wait_for_response(thread_request_id)
+                if not thread_response or thread_response.get("error"):
+                    return None
+                thread = (thread_response.get("result") or {}).get("thread") or {}
+                thread_uuid = thread.get("id")
+                if not thread_uuid:
+                    return None
+                return str(thread_uuid)
+
+            thread_key = self._runtime_thread_key(context)
+            thread_uuid = self._resolve_session_thread_id(thread_key, start_thread)
             if not thread_uuid:
-                return fail("app-server thread/start did not return thread id")
+                return fail("app-server thread/start failed")
 
             turn_params = {
                 "threadId": thread_uuid,

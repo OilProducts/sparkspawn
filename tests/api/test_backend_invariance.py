@@ -201,3 +201,56 @@ def test_local_codex_app_server_backend_missing_binary_returns_fail_outcome_and_
     assert result.status == OutcomeStatus.FAIL
     assert result.failure_reason == "codex app-server not found on PATH"
     assert events[-1] == {"type": "log", "msg": "[plan] codex app-server not found on PATH"}
+
+
+def test_local_codex_app_server_backend_reuses_session_for_same_thread_key(tmp_path: Path) -> None:
+    backend = server.LocalCodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
+    created: list[str] = []
+
+    def _start_thread() -> str:
+        thread_id = f"thread-{len(created) + 1}"
+        created.append(thread_id)
+        return thread_id
+
+    first = backend._resolve_session_thread_id("loop-a", _start_thread)
+    second = backend._resolve_session_thread_id("loop-a", _start_thread)
+
+    assert first == "thread-1"
+    assert second == "thread-1"
+    assert created == ["thread-1"]
+
+
+def test_local_codex_app_server_backend_isolates_sessions_for_different_thread_keys(
+    tmp_path: Path,
+) -> None:
+    backend = server.LocalCodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
+    created: list[str] = []
+
+    def _start_thread() -> str:
+        thread_id = f"thread-{len(created) + 1}"
+        created.append(thread_id)
+        return thread_id
+
+    first = backend._resolve_session_thread_id("loop-a", _start_thread)
+    second = backend._resolve_session_thread_id("loop-b", _start_thread)
+
+    assert first == "thread-1"
+    assert second == "thread-2"
+    assert created == ["thread-1", "thread-2"]
+
+
+def test_local_codex_app_server_backend_does_not_cache_empty_thread_key(tmp_path: Path) -> None:
+    backend = server.LocalCodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
+    created: list[str] = []
+
+    def _start_thread() -> str:
+        thread_id = f"thread-{len(created) + 1}"
+        created.append(thread_id)
+        return thread_id
+
+    first = backend._resolve_session_thread_id("", _start_thread)
+    second = backend._resolve_session_thread_id("", _start_thread)
+
+    assert first == "thread-1"
+    assert second == "thread-2"
+    assert created == ["thread-1", "thread-2"]
