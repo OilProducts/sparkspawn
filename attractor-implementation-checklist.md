@@ -259,7 +259,7 @@ Status key:
 - [x] [5.4-04] Verify session reuse/isolation behavior with thread keys.
 
 ### 5.5 Artifact Store
-- [ ] [5.5-01] Implement artifact registry with metadata (`ArtifactInfo`) and typed retrieval.
+- [x] [5.5-01] Implement artifact registry with metadata (`ArtifactInfo`) and typed retrieval.
 - [ ] [5.5-02] Implement file-backing threshold behavior (default 100KB).
 - [ ] [5.5-03] Implement `store`, `retrieve`, `has`, `list`, `remove`, `clear`.
 

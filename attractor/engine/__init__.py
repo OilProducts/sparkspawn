@@ -1,6 +1,7 @@
 """Execution engine primitives."""
 
 from .conditions import evaluate_condition
+from .artifacts import ArtifactInfo, ArtifactStore
 from .checkpoint import Checkpoint, load_checkpoint, save_checkpoint
 from .context import Context
 from .executor import PipelineExecutor, PipelineResult
@@ -9,6 +10,8 @@ from .routing import select_next_edge
 
 __all__ = [
     "Checkpoint",
+    "ArtifactInfo",
+    "ArtifactStore",
     "evaluate_condition",
     "Context",
     "load_checkpoint",
