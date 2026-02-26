@@ -343,7 +343,7 @@ class TestBuiltInHandlers:
         graph = parse_dot(
             """
             digraph G {
-                manager [shape=house]
+                manager [shape=house, manager.max_cycles=1, manager.poll_interval=0ms]
             }
             """
         )
@@ -353,7 +353,30 @@ class TestBuiltInHandlers:
         assert registry.resolve_handler_type(graph.nodes["manager"]) == "stack.manager_loop"
         outcome = runner("manager", "", Context())
         assert outcome.status == OutcomeStatus.FAIL
-        assert "not implemented" in outcome.failure_reason
+        assert "Max cycles exceeded" in outcome.failure_reason
+
+    def test_manager_loop_uses_configured_poll_interval_and_max_cycles(self, monkeypatch):
+        sleep_calls = []
+
+        def _fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop.time.sleep", _fake_sleep)
+        graph = parse_dot(
+            """
+            digraph G {
+                manager [shape=house, manager.poll_interval=25ms, manager.max_cycles=3]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("manager", "", Context())
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason == "Max cycles exceeded"
+        assert sleep_calls == pytest.approx([0.025, 0.025, 0.025])
 
     def test_codergen_handler_calls_backend(self):
         graph = parse_dot(
