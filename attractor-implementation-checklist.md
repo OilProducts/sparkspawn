@@ -154,7 +154,7 @@ Status key:
 - [x] [3.6-01] Implement retry policy object (`max_attempts`, backoff config, `should_retry`).
 - [x] [3.6-02] Implement delay formula with cap and optional jitter.
 - [x] [3.6-03] Implement preset policies (`none`, `standard`, `aggressive`, `linear`, `patient`).
-- [ ] [3.6-04] Implement default retryability predicate by error class/status code.
+- [x] [3.6-04] Implement default retryability predicate by error class/status code.
 
 ### 3.7 Failure Routing
 - [ ] [3.7-01] Route fail outcomes to fail-edge (`condition="outcome=fail"`) when present.

@@ -2,7 +2,7 @@ import pytest
 
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
-from attractor.engine.executor import BackoffConfig, PipelineExecutor, RetryPolicy
+from attractor.engine.executor import BackoffConfig, PipelineExecutor, RetryPolicy, _is_retryable_exception
 from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
@@ -186,3 +186,31 @@ def test_retry_loop_uses_computed_delay_for_retry_event():
     assert len(retry_events) == 1
     assert retry_events[0]["attempt"] == 1
     assert retry_events[0]["delay"] == 250.0
+
+
+class _StatusCodeError(RuntimeError):
+    def __init__(self, code: int):
+        super().__init__("")
+        self.status_code = code
+
+
+class _RateLimitExceededError(RuntimeError):
+    pass
+
+
+class _ValidationError(RuntimeError):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (_StatusCodeError(429), True),
+        (_StatusCodeError(503), True),
+        (_StatusCodeError(401), False),
+        (_RateLimitExceededError(""), True),
+        (_ValidationError(""), False),
+    ],
+)
+def test_default_retryability_uses_error_class_and_status_code(error: Exception, expected: bool):
+    assert _is_retryable_exception(error) is expected

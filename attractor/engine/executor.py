@@ -1174,6 +1174,43 @@ def _is_outcome_fail_condition(condition: str) -> bool:
 
 
 def _is_retryable_exception(exc: Exception) -> bool:
+    status_code = _extract_status_code(exc)
+    if status_code in {400, 401, 403}:
+        return False
+    if status_code == 429:
+        return True
+    if status_code is not None and 500 <= status_code <= 599:
+        return True
+
+    class_name = exc.__class__.__name__.strip().lower()
+    non_retryable_class_tokens = (
+        "authentication",
+        "authorization",
+        "permission",
+        "forbidden",
+        "badrequest",
+        "validation",
+        "invalid",
+        "configuration",
+        "config",
+    )
+    if any(token in class_name for token in non_retryable_class_tokens):
+        return False
+
+    retryable_class_tokens = (
+        "ratelimit",
+        "timeout",
+        "network",
+        "connection",
+        "transient",
+        "temporary",
+        "unavailable",
+        "servererror",
+        "toomanyrequests",
+    )
+    if any(token in class_name for token in retryable_class_tokens):
+        return True
+
     text = f"{exc.__class__.__name__} {exc}".strip().lower()
 
     non_retryable_tokens = (
@@ -1183,6 +1220,7 @@ def _is_retryable_exception(exc: Exception) -> bool:
         "unauthorized",
         "forbidden",
         "bad request",
+        "badrequest",
         "validation",
         "invalid",
         "config",
@@ -1201,6 +1239,8 @@ def _is_retryable_exception(exc: Exception) -> bool:
         "network",
         "connection",
         "rate limit",
+        "ratelimit",
+        "too many requests",
         "429",
         "500",
         "502",
@@ -1211,3 +1251,31 @@ def _is_retryable_exception(exc: Exception) -> bool:
         "econn",
     )
     return any(token in text for token in retryable_tokens)
+
+
+def _extract_status_code(exc: Exception) -> int | None:
+    for key in ("status_code", "status", "http_status"):
+        parsed = _coerce_status_code(getattr(exc, key, None))
+        if parsed is not None:
+            return parsed
+
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+
+    for key in ("status_code", "status"):
+        parsed = _coerce_status_code(getattr(response, key, None))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _coerce_status_code(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
