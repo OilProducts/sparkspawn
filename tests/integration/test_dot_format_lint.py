@@ -1,35 +1,30 @@
 from __future__ import annotations
 
-from difflib import unified_diff
 from pathlib import Path
 
-from attractor.dsl.formatter import canonicalize_dot
+from attractor.dsl.dot_lint import find_dot_paths, find_non_canonical_dot_diffs
 
 
 def test_flows_are_canonical_dot() -> None:
     flows_dir = Path(__file__).resolve().parents[2] / "flows"
-    dot_paths = sorted(flows_dir.glob("*.dot"))
+    dot_paths = find_dot_paths(flows_dir)
 
     assert dot_paths, "expected at least one .dot file under flows/"
-
-    non_canonical: list[str] = []
-
-    for path in dot_paths:
-        source = path.read_text(encoding="utf-8")
-        canonical = canonicalize_dot(source)
-        normalized_source = source if source.endswith("\n") else f"{source}\n"
-        if normalized_source != canonical:
-            diff = "".join(
-                unified_diff(
-                    normalized_source.splitlines(keepends=True),
-                    canonical.splitlines(keepends=True),
-                    fromfile=f"{path} (current)",
-                    tofile=f"{path} (canonical)",
-                )
-            )
-            non_canonical.append(diff)
+    non_canonical = find_non_canonical_dot_diffs(dot_paths)
 
     assert not non_canonical, "non-canonical .dot files detected:\n" + "\n".join(non_canonical)
+
+
+def test_find_dot_paths_recurses_into_subdirectories(tmp_path: Path) -> None:
+    top = tmp_path / "top.dot"
+    nested = tmp_path / "nested" / "child.dot"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    top.write_text("digraph G { a -> b; }\n", encoding="utf-8")
+    nested.write_text("digraph G { b -> c; }\n", encoding="utf-8")
+
+    found = find_dot_paths(tmp_path)
+
+    assert found == [nested, top]
 
 
 def test_justfile_exposes_dot_lint_recipe() -> None:

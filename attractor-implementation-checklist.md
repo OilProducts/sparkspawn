@@ -21,7 +21,7 @@ Status key:
 ### 1.2 Why DOT Syntax
 - [x] [1.2-01] Restrict ingestion to DOT `digraph` workflows and reject unsupported DOT features.
 - [x] [1.2-02] Add visualization export path (DOT -> Graphviz render artifact) for operator inspection.
-- [ ] [1.2-03] Validate `.dot` files are diff-friendly in CI (format/lint check with stable ordering).
+- [x] [1.2-03] Validate `.dot` files are diff-friendly in CI (format/lint check with stable ordering).
 
 ### 1.3 Design Principles
 - [ ] [1.3-01] Enforce declarative execution model: engine chooses runtime flow from graph + outcomes.
