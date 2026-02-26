@@ -100,6 +100,26 @@ class TestRouting:
         edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
         assert edge.target == "b"
 
+    def test_lexical_tiebreak_is_based_on_target_id_not_source(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                a [shape=box]
+                z [shape=box]
+                done [shape=Msquare]
+
+                a -> done [weight=5]
+                z -> done [weight=5]
+            }
+            """
+        )
+        # Intentionally reverse insertion order to ensure source does not affect tie-breaking.
+        z_edge = next(e for e in graph.edges if e.source == "z")
+        a_edge = next(e for e in graph.edges if e.source == "a")
+        outcome = Outcome(status=OutcomeStatus.SUCCESS)
+        edge = select_next_edge([z_edge, a_edge], outcome, Context())
+        assert edge.source == "z"
+
     def test_condition_candidate_evaluation_ignores_whitespace_only_conditions(self):
         graph = parse_dot(
             """

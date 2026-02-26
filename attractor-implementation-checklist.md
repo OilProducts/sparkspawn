@@ -135,7 +135,7 @@ Status key:
 ### 3.3 Edge Selection Algorithm
 - [x] [3.3-01] Implement condition-pass candidate evaluation.
 - [x] [3.3-03] Implement `suggested_next_ids` matching fallback.
-- [ ] [3.3-05] Implement lexical tiebreaker by target node ID.
+- [x] [3.3-05] Implement lexical tiebreaker by target node ID.
 - [ ] [3.3-06] Add deterministic routing tests that cover all five selection steps.
 
 ### 3.4 Goal Gate Enforcement

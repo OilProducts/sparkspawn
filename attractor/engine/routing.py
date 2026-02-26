@@ -49,7 +49,7 @@ def select_next_edge(edges: Iterable[DotEdge], outcome: Outcome, context: Contex
 def _best_by_weight_then_lexical(edges: list[DotEdge]) -> Optional[DotEdge]:
     if not edges:
         return None
-    return sorted(edges, key=lambda e: (-_attr_int(e, "weight", 0), e.target, e.source))[0]
+    return sorted(edges, key=lambda e: (-_attr_int(e, "weight", 0), e.target))[0]
 
 
 def _attr_str(edge: DotEdge, key: str) -> str:
