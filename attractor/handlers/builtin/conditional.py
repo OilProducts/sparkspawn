@@ -7,4 +7,4 @@ from ..base import HandlerRuntime
 
 class ConditionalHandler:
     def execute(self, runtime: HandlerRuntime) -> Outcome:
-        return Outcome(status=OutcomeStatus.SUCCESS, notes="conditional pass-through")
+        return Outcome(status=OutcomeStatus.SUCCESS)
