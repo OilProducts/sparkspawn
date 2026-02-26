@@ -49,7 +49,7 @@ Status key:
 - [x] [2.2-02] Support chained edge syntax (`A -> B -> C`) with optional trailing attr block.
 - [x] [2.2-03] Parse attribute blocks with comma-separated key/value pairs and qualified keys.
 - [x] [2.2-04] Support value lexing for string/integer/float/boolean/duration.
-- [ ] [2.2-05] Add parser tests for optional semicolons and mixed statement ordering.
+- [x] [2.2-05] Add parser tests for optional semicolons and mixed statement ordering.
 
 ### 2.3 Key Constraints
 - [ ] [2.3-01] Reject multiple graphs, undirected graphs, and `strict` graphs.

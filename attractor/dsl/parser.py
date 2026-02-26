@@ -105,9 +105,14 @@ class _Parser:
         self.expect("LBRACE")
 
         scope = _Scope()
-        while not self.accept("RBRACE"):
+        while True:
+            while self.accept("SEMI"):
+                pass
+            if self.accept("RBRACE"):
+                break
             self.parse_statement(graph, scope, in_subgraph=False)
-            self.accept("SEMI")
+            while self.accept("SEMI"):
+                pass
 
         return graph
 
@@ -121,9 +126,14 @@ class _Parser:
                 self.advance()
             self.expect("LBRACE")
             child_scope = scope.child()
-            while not self.accept("RBRACE"):
+            while True:
+                while self.accept("SEMI"):
+                    pass
+                if self.accept("RBRACE"):
+                    break
                 self.parse_statement(graph, child_scope, in_subgraph=True)
-                self.accept("SEMI")
+                while self.accept("SEMI"):
+                    pass
             return
 
         if tok.kind == "IDENT" and tok.value == "graph" and self.peek().kind == "LBRACKET":

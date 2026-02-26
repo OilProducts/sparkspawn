@@ -84,6 +84,49 @@ class TestDotParser:
         assert isinstance(plan_timeout.value, Duration)
         assert plan_timeout.value.raw == "900s"
 
+    def test_accepts_mixed_statement_ordering_without_semicolons(self):
+        dot = """
+        digraph MixedOrdering {
+            start [shape=Mdiamond]
+            edge [label="next"]
+            graph [goal="Ship"]
+            node [timeout=15m]
+            plan [prompt="Plan"]
+            rankdir=LR
+            done [shape=Msquare]
+            start -> plan
+            plan -> done
+        }
+        """
+        graph = parse_dot(dot)
+
+        assert graph.graph_attrs["goal"].value == "Ship"
+        assert graph.graph_attrs["rankdir"].value == "LR"
+        assert graph.nodes["plan"].attrs["timeout"].value.raw == "15m"
+        assert [edge.source for edge in graph.edges] == ["start", "plan"]
+        assert [edge.target for edge in graph.edges] == ["plan", "done"]
+        assert [edge.attrs["label"].value for edge in graph.edges] == ["next", "next"]
+
+    def test_accepts_consecutive_semicolons_between_statements(self):
+        dot = """
+        digraph ConsecutiveSemicolons {
+            graph [goal="Ship"];;
+            node [shape=box, timeout=900s];;
+            edge [label="next"];;
+            start [shape=Mdiamond];;
+            plan [prompt="Plan"];;
+            done [shape=Msquare];;
+            start -> plan;;
+            plan -> done;;
+        }
+        """
+        graph = parse_dot(dot)
+
+        assert graph.graph_attrs["goal"].value == "Ship"
+        assert graph.nodes["plan"].attrs["timeout"].value.raw == "900s"
+        assert len(graph.edges) == 2
+        assert [edge.attrs["label"].value for edge in graph.edges] == ["next", "next"]
+
     def test_parse_subgraph_scope_defaults(self):
         dot = """
         digraph Scoped {
