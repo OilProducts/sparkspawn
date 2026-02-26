@@ -237,6 +237,31 @@ line2"]
         graph.nodes["second"].attrs["llm_model"].value = "mutated"
         assert graph.nodes["third"].attrs["llm_model"].value == "gpt-5"
 
+    def test_edge_defaults_are_scoped_and_apply_to_subsequent_edge_declarations(self):
+        dot = """
+        digraph ScopedEdgeDefaults {
+            edge [label="outer", weight=1]
+            a -> b
+
+            subgraph cluster_inner {
+                edge [weight=9]
+                b -> c
+                c -> d
+            }
+
+            d -> e
+        }
+        """
+        graph = parse_dot(dot)
+
+        edge_attrs = [{k: v.value for k, v in edge.attrs.items()} for edge in graph.edges]
+        assert edge_attrs == [
+            {"label": "outer", "weight": 1},
+            {"label": "outer", "weight": 9},
+            {"label": "outer", "weight": 9},
+            {"label": "outer", "weight": 1},
+        ]
+
     def test_subgraph_attr_decl_does_not_override_graph_attrs(self):
         dot = """
         digraph Scoped {
