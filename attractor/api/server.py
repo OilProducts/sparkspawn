@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import threading
 import uuid
 import os
@@ -15,15 +15,14 @@ from pathlib import Path
 import subprocess
 from typing import Callable, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from attractor.dsl import DotParseError, Diagnostic, DiagnosticSeverity, parse_dot, validate_graph
 from attractor.engine import Context, PipelineExecutor
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
-from attractor.interviewer import AutoApproveInterviewer
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, Question
 from attractor.transforms import (
@@ -66,28 +65,20 @@ manager = ConnectionManager()
 class ExecutionControl:
     def __init__(self):
         self._lock = threading.Lock()
-        self._pause_requested = False
-        self._abort_requested = False
+        self._cancel_requested = False
 
     def reset(self) -> None:
         with self._lock:
-            self._pause_requested = False
-            self._abort_requested = False
+            self._cancel_requested = False
 
-    def request_pause(self) -> None:
+    def request_cancel(self) -> None:
         with self._lock:
-            self._pause_requested = True
-
-    def request_abort(self) -> None:
-        with self._lock:
-            self._abort_requested = True
+            self._cancel_requested = True
 
     def poll(self) -> Optional[str]:
         with self._lock:
-            if self._abort_requested:
+            if self._cancel_requested:
                 return "abort"
-            if self._pause_requested:
-                return "pause"
         return None
 
 
@@ -99,6 +90,7 @@ class HumanGateBroker:
     def request(
         self,
         question: Question,
+        run_id: str,
         node_id: str,
         flow_name: str,
         emit: Callable[[dict], None],
@@ -109,6 +101,13 @@ class HumanGateBroker:
             self._pending[gate_id] = {
                 "event": event,
                 "answer": None,
+                "run_id": run_id,
+                "node_id": node_id,
+                "flow_name": flow_name,
+                "prompt": question.prompt,
+                "options": [
+                    {"label": opt.label, "value": opt.value} for opt in question.options
+                ],
             }
 
         emit(
@@ -140,31 +139,114 @@ class HumanGateBroker:
             return Answer(selected_values=[str(selected)])
         return Answer()
 
-    def answer(self, gate_id: str, selected_value: str) -> bool:
+    def answer(self, run_id: str, gate_id: str, selected_value: str) -> bool:
         with self._lock:
             entry = self._pending.get(gate_id)
             if not entry:
+                return False
+            if str(entry.get("run_id", "")) != run_id:
                 return False
             entry["answer"] = selected_value
             entry["event"].set()
             return True
 
+    def list_for_run(self, run_id: str) -> List[Dict[str, object]]:
+        with self._lock:
+            payload: List[Dict[str, object]] = []
+            for gate_id, entry in self._pending.items():
+                if str(entry.get("run_id", "")) != run_id:
+                    continue
+                payload.append(
+                    {
+                        "question_id": gate_id,
+                        "run_id": str(entry.get("run_id", "")),
+                        "node_id": str(entry.get("node_id", "")),
+                        "flow_name": str(entry.get("flow_name", "")),
+                        "prompt": str(entry.get("prompt", "")),
+                        "options": list(entry.get("options") or []),
+                    }
+                )
+            return payload
+
 
 HUMAN_BROKER = HumanGateBroker()
-RUN_CONTROL = ExecutionControl()
 
 
 class WebInterviewer(Interviewer):
-    def __init__(self, broker: HumanGateBroker, emit: Callable[[dict], None], flow_name: str):
+    def __init__(
+        self,
+        broker: HumanGateBroker,
+        emit: Callable[[dict], None],
+        flow_name: str,
+        run_id: str,
+    ):
         self._broker = broker
         self._emit = emit
         self._flow_name = flow_name
+        self._run_id = run_id
 
     def ask(self, question: Question) -> Answer:
         node_id = str(question.metadata.get("node_id", "")).strip()
         if not node_id and question.title.lower().startswith("human gate:"):
             node_id = question.title.split(":", 1)[1].strip()
-        return self._broker.request(question, node_id, self._flow_name, self._emit)
+        return self._broker.request(question, self._run_id, node_id, self._flow_name, self._emit)
+
+
+class PipelineEventHub:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._history: Dict[str, List[dict]] = {}
+        self._subscribers: Dict[str, List[asyncio.Queue[dict]]] = {}
+        self._max_history = 500
+
+    async def publish(self, run_id: str, event: dict) -> None:
+        queues: List[asyncio.Queue[dict]] = []
+        with self._lock:
+            history = self._history.setdefault(run_id, [])
+            history.append(event)
+            if len(history) > self._max_history:
+                del history[:-self._max_history]
+            queues = list(self._subscribers.get(run_id, []))
+        for queue in queues:
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                continue
+
+    def history(self, run_id: str) -> List[dict]:
+        with self._lock:
+            return list(self._history.get(run_id, []))
+
+    def subscribe(self, run_id: str) -> asyncio.Queue[dict]:
+        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
+        with self._lock:
+            self._subscribers.setdefault(run_id, []).append(queue)
+        return queue
+
+    def unsubscribe(self, run_id: str, queue: asyncio.Queue[dict]) -> None:
+        with self._lock:
+            listeners = self._subscribers.get(run_id)
+            if not listeners:
+                return
+            if queue in listeners:
+                listeners.remove(queue)
+            if not listeners:
+                self._subscribers.pop(run_id, None)
+
+
+EVENT_HUB = PipelineEventHub()
+
+
+@dataclass
+class ActiveRun:
+    run_id: str
+    flow_name: str
+    working_directory: str
+    model: str
+    status: str = "running"
+    last_error: str = ""
+    completed_nodes: List[str] = field(default_factory=list)
+    control: ExecutionControl = field(default_factory=ExecutionControl)
 
 
 @dataclass
@@ -179,6 +261,8 @@ class RuntimeState:
 
 
 RUNTIME = RuntimeState(last_completed_nodes=[])
+ACTIVE_RUNS_LOCK = threading.Lock()
+ACTIVE_RUNS: Dict[str, ActiveRun] = {}
 
 
 @dataclass
@@ -324,10 +408,21 @@ def _record_run_end(run_id: str, working_directory: str, status: str, last_error
         _write_run_meta(record)
 
 
-def _append_runtime_log(message: str) -> None:
-    if not RUNTIME.last_run_id:
-        return
-    run_log_path = _run_root(RUNTIME.last_run_id) / "run.log"
+def _record_run_status(run_id: str, status: str, last_error: str = "") -> None:
+    normalized_status = _normalize_run_status(status)
+    with RUN_HISTORY_LOCK:
+        record = _read_run_meta(_run_meta_path(run_id))
+        if not record:
+            return
+        record.status = normalized_status
+        record.result = normalized_status
+        if last_error:
+            record.last_error = last_error
+        _write_run_meta(record)
+
+
+def _append_run_log(run_id: str, message: str) -> None:
+    run_log_path = _run_root(run_id) / "run.log"
     try:
         run_log_path.parent.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -337,7 +432,44 @@ def _append_runtime_log(message: str) -> None:
         pass
 
 
-class RunRequest(BaseModel):
+async def _publish_run_event(run_id: str, message: dict) -> None:
+    payload = dict(message)
+    payload.setdefault("run_id", run_id)
+    if payload.get("type") == "log":
+        _append_run_log(run_id, str(payload.get("msg", "")))
+    await manager.broadcast(payload)
+    await EVENT_HUB.publish(run_id, payload)
+
+
+def _set_active_run_status(run_id: str, status: str, *, last_error: Optional[str] = None) -> None:
+    with ACTIVE_RUNS_LOCK:
+        run = ACTIVE_RUNS.get(run_id)
+        if not run:
+            return
+        run.status = status
+        if last_error is not None:
+            run.last_error = last_error
+
+
+def _set_active_run_completed_nodes(run_id: str, completed_nodes: List[str]) -> None:
+    with ACTIVE_RUNS_LOCK:
+        run = ACTIVE_RUNS.get(run_id)
+        if not run:
+            return
+        run.completed_nodes = list(completed_nodes)
+
+
+def _get_active_run(run_id: str) -> Optional[ActiveRun]:
+    with ACTIVE_RUNS_LOCK:
+        return ACTIVE_RUNS.get(run_id)
+
+
+def _pop_active_run(run_id: str) -> Optional[ActiveRun]:
+    with ACTIVE_RUNS_LOCK:
+        return ACTIVE_RUNS.pop(run_id, None)
+
+
+class PipelineStartRequest(BaseModel):
     flow_content: str
     working_directory: str = "./workspace"
     backend: str = "codex"
@@ -359,7 +491,6 @@ class ResetRequest(BaseModel):
 
 
 class HumanAnswerRequest(BaseModel):
-    question_id: str
     selected_value: str
 
 
@@ -926,20 +1057,20 @@ async def preview_pipeline(req: PreviewRequest):
     return payload
 
 
-@app.post("/run")
-async def run_pipeline(req: RunRequest):
+async def _start_pipeline(req: PipelineStartRequest) -> dict:
     try:
         graph = parse_dot(req.flow_content)
     except DotParseError as exc:
         RUNTIME.status = "validation_error"
         RUNTIME.last_error = str(exc)
-        await manager.broadcast({"type": "log", "msg": f"❌ Parse error: {exc}"})
         parse_diag = {
             "rule_id": "parse_error",
             "severity": DiagnosticSeverity.ERROR.value,
             "message": str(exc),
             "line": getattr(exc, "line", 0),
         }
+        if RUNTIME.last_run_id:
+            await _publish_run_event(RUNTIME.last_run_id, {"type": "log", "msg": f"❌ Parse error: {exc}"})
         return {
             "status": "validation_error",
             "error": str(exc),
@@ -952,8 +1083,6 @@ async def run_pipeline(req: RunRequest):
     if errors:
         RUNTIME.status = "validation_error"
         RUNTIME.last_error = errors[0].message
-        for diag in errors:
-            await manager.broadcast({"type": "log", "msg": f"❌ {diag.rule_id}: {diag.message}"})
         return {
             "status": "validation_error",
             "diagnostics": [_diagnostic_payload(d) for d in diagnostics],
@@ -972,23 +1101,18 @@ async def run_pipeline(req: RunRequest):
     display_model = selected_model or "codex default (config/profile)"
     run_id = uuid.uuid4().hex
 
-    await manager.broadcast(
+    await _publish_run_event(
+        run_id,
         {
             "type": "graph",
             **_graph_payload(graph),
-        }
+        },
     )
 
     loop = asyncio.get_running_loop()
 
-    async def broadcast_log(message: str) -> None:
-        _append_runtime_log(message)
-        await manager.broadcast({"type": "log", "msg": message})
-
     def emit(message: dict):
-        if message.get("type") == "log":
-            _append_runtime_log(str(message.get("msg", "")))
-        asyncio.run_coroutine_threadsafe(manager.broadcast(message), loop)
+        asyncio.run_coroutine_threadsafe(_publish_run_event(run_id, message), loop)
 
     if req.backend != "codex":
         return {
@@ -1002,11 +1126,7 @@ async def run_pipeline(req: RunRequest):
         model=selected_model or None,
     )
 
-    interviewer: Interviewer
-    if manager.active_connections:
-        interviewer = WebInterviewer(HUMAN_BROKER, emit, flow_name)
-    else:
-        interviewer = AutoApproveInterviewer()
+    interviewer: Interviewer = WebInterviewer(HUMAN_BROKER, emit, flow_name, run_id)
 
     registry = build_default_registry(
         codergen_backend=backend,
@@ -1021,7 +1141,15 @@ async def run_pipeline(req: RunRequest):
     goal_attr = graph.graph_attrs.get("goal")
     context = Context(values={"graph.goal": str(goal_attr.value) if goal_attr else ""})
 
-    RUN_CONTROL.reset()
+    with ACTIVE_RUNS_LOCK:
+        ACTIVE_RUNS[run_id] = ActiveRun(
+            run_id=run_id,
+            flow_name=flow_name,
+            working_directory=working_dir,
+            model=display_model,
+            status="running",
+        )
+
     RUNTIME.status = "running"
     RUNTIME.last_error = ""
     RUNTIME.last_working_directory = working_dir
@@ -1031,84 +1159,166 @@ async def run_pipeline(req: RunRequest):
 
     _record_run_start(run_id, flow_name, working_dir, display_model)
 
-    await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
+    await _publish_run_event(run_id, {"type": "runtime", "status": RUNTIME.status})
 
-    await manager.broadcast(
+    await _publish_run_event(
+        run_id,
         {
             "type": "run_meta",
             "working_directory": working_dir,
             "model": display_model,
             "flow_name": flow_name,
             "run_id": run_id,
-        }
+        },
     )
-    await broadcast_log(
-        f"[System] Launching run {run_id} in {working_dir} with model: {display_model}"
+    await _publish_run_event(
+        run_id,
+        {
+            "type": "log",
+            "msg": f"[System] Launching run {run_id} in {working_dir} with model: {display_model}",
+        },
     )
 
     async def _run():
-        nonlocal context
         try:
+            active = _get_active_run(run_id)
+            control = active.control if active else ExecutionControl()
             executor = PipelineExecutor(
                 graph,
                 runner,
                 logs_root=logs_root,
                 checkpoint_file=checkpoint_file,
-                control=RUN_CONTROL.poll,
+                control=control.poll,
             )
             result = await asyncio.to_thread(
                 executor.run,
                 context,
                 resume=True,
             )
-            RUNTIME.status = result.status
+            final_status = _normalize_run_status(result.status)
+            _set_active_run_status(run_id, final_status)
+            _set_active_run_completed_nodes(run_id, result.completed_nodes)
+            RUNTIME.status = final_status
             RUNTIME.last_completed_nodes = result.completed_nodes
-            emit({"type": "runtime", "status": RUNTIME.status})
-            _record_run_end(run_id, working_dir, result.status)
-            await broadcast_log(f"Pipeline {result.status}")
+            await _publish_run_event(run_id, {"type": "runtime", "status": final_status})
+            _record_run_end(run_id, working_dir, final_status)
+            await _publish_run_event(run_id, {"type": "log", "msg": f"Pipeline {final_status}"})
         except Exception as exc:  # noqa: BLE001
             import traceback
             traceback.print_exc()
+            _set_active_run_status(run_id, "failed", last_error=str(exc))
             RUNTIME.status = "failed"
             RUNTIME.last_error = str(exc)
-            emit({"type": "runtime", "status": RUNTIME.status})
+            await _publish_run_event(run_id, {"type": "runtime", "status": "failed"})
             _record_run_end(run_id, working_dir, "failed", str(exc))
-            await broadcast_log(f"⚠️ Pipeline Aborted: {exc}")
+            await _publish_run_event(run_id, {"type": "log", "msg": f"⚠️ Pipeline Failed: {exc}"})
         finally:
-            RUN_CONTROL.reset()
+            _pop_active_run(run_id)
 
     asyncio.create_task(_run())
     return {
         "status": "started",
+        "pipeline_id": run_id,
+        "run_id": run_id,
         "working_directory": working_dir,
         "model": display_model,
-        "run_id": run_id,
     }
 
 
-@app.post("/pause")
-async def pause_pipeline():
-    if RUNTIME.status not in {"running", "pause_requested"}:
-        return {"status": "ignored", "runtime": RUNTIME.status}
-    RUN_CONTROL.request_pause()
-    RUNTIME.status = "pause_requested"
-    await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
-    _append_runtime_log("[System] Pause requested. Will pause after current node.")
-    await manager.broadcast({"type": "log", "msg": "[System] Pause requested. Will pause after current node."})
-    return {"status": "pause_requested"}
+@app.post("/pipelines")
+async def create_pipeline(req: PipelineStartRequest):
+    return await _start_pipeline(req)
 
 
-@app.post("/abort")
-async def abort_pipeline():
-    if RUNTIME.status not in {"running", "pause_requested"}:
-        return {"status": "ignored", "runtime": RUNTIME.status}
-    RUN_CONTROL.request_abort()
-    RUNTIME.status = "abort_requested"
-    RUNTIME.last_error = "aborted_by_user"
-    await manager.broadcast({"type": "runtime", "status": RUNTIME.status})
-    _append_runtime_log("[System] Abort requested. Stopping after current node.")
-    await manager.broadcast({"type": "log", "msg": "[System] Abort requested. Stopping after current node."})
-    return {"status": "abort_requested"}
+@app.get("/pipelines/{pipeline_id}")
+async def get_pipeline(pipeline_id: str):
+    active = _get_active_run(pipeline_id)
+    if active:
+        return {
+            "pipeline_id": pipeline_id,
+            "status": active.status,
+            "flow_name": active.flow_name,
+            "working_directory": active.working_directory,
+            "model": active.model,
+            "last_error": active.last_error,
+            "completed_nodes": active.completed_nodes,
+        }
+
+    record = _read_run_meta(_run_meta_path(pipeline_id))
+    if not record:
+        raise HTTPException(status_code=404, detail="Unknown pipeline")
+    return {
+        "pipeline_id": pipeline_id,
+        "status": record.status,
+        "flow_name": record.flow_name,
+        "working_directory": record.working_directory,
+        "model": record.model,
+        "last_error": record.last_error,
+        "completed_nodes": [],
+        "started_at": record.started_at,
+        "ended_at": record.ended_at,
+        "result": record.result,
+    }
+
+
+@app.get("/pipelines/{pipeline_id}/events")
+async def pipeline_events(pipeline_id: str, request: Request):
+    active = _get_active_run(pipeline_id)
+    existing = _read_run_meta(_run_meta_path(pipeline_id))
+    if not active and not existing and not EVENT_HUB.history(pipeline_id):
+        raise HTTPException(status_code=404, detail="Unknown pipeline")
+
+    queue = EVENT_HUB.subscribe(pipeline_id)
+    history = EVENT_HUB.history(pipeline_id)
+
+    async def stream():
+        try:
+            for event in history:
+                yield f"data: {json.dumps(event)}\n\n"
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            EVENT_HUB.unsubscribe(pipeline_id, queue)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.post("/pipelines/{pipeline_id}/cancel")
+async def cancel_pipeline(pipeline_id: str):
+    active = _get_active_run(pipeline_id)
+    if not active:
+        return {"status": "ignored", "pipeline_id": pipeline_id}
+    active.control.request_cancel()
+    _set_active_run_status(pipeline_id, "cancel_requested", last_error="cancel_requested_by_user")
+    _record_run_status(pipeline_id, "cancel_requested", "cancel_requested_by_user")
+    RUNTIME.status = "cancel_requested"
+    RUNTIME.last_error = "cancel_requested_by_user"
+    await _publish_run_event(pipeline_id, {"type": "runtime", "status": "cancel_requested"})
+    await _publish_run_event(
+        pipeline_id,
+        {"type": "log", "msg": "[System] Cancel requested. Stopping after current node."},
+    )
+    return {"status": "cancel_requested", "pipeline_id": pipeline_id}
+
+
+@app.get("/pipelines/{pipeline_id}/questions")
+async def list_pipeline_questions(pipeline_id: str):
+    return {"questions": HUMAN_BROKER.list_for_run(pipeline_id)}
+
+
+@app.post("/pipelines/{pipeline_id}/questions/{question_id}/answer")
+async def submit_pipeline_answer(pipeline_id: str, question_id: str, req: HumanAnswerRequest):
+    ok = HUMAN_BROKER.answer(pipeline_id, question_id, req.selected_value)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Unknown question for pipeline")
+    return {"status": "accepted", "pipeline_id": pipeline_id, "question_id": question_id}
 
 
 @app.post("/reset")
@@ -1116,14 +1326,6 @@ async def reset_checkpoint(req: ResetRequest):
     if RUNS_ROOT.exists():
         shutil.rmtree(RUNS_ROOT, ignore_errors=True)
     return {"status": "reset"}
-
-
-@app.post("/human/answer")
-async def submit_human_answer(req: HumanAnswerRequest):
-    ok = HUMAN_BROKER.answer(req.question_id, req.selected_value)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Unknown human gate request")
-    return {"status": "accepted"}
 
 
 @app.get("/api/flows")
