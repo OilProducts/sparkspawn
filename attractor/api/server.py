@@ -811,6 +811,23 @@ class LocalCodexAppServerBackend(CodergenBackend):
                 pass
 
 
+def _build_codergen_backend(
+    backend_name: str,
+    working_dir: str,
+    emit: Callable[[dict], None],
+    *,
+    model: Optional[str],
+) -> CodergenBackend:
+    normalized = backend_name.strip().lower().replace("_", "-")
+    if normalized in {"codex", "codex-app-server"}:
+        return LocalCodexAppServerBackend(working_dir, emit, model=model)
+    if normalized == "codex-cli":
+        return LocalCodexCliBackend(working_dir, emit, model=model)
+    raise ValueError(
+        "Unsupported backend. Supported backends: codex, codex-app-server, codex-cli."
+    )
+
+
 class BroadcastingRunner:
     def __init__(self, delegate, emit):
         self.delegate = delegate
@@ -1119,17 +1136,18 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
     def emit(message: dict):
         asyncio.run_coroutine_threadsafe(_publish_run_event(run_id, message), loop)
 
-    if req.backend != "codex":
+    try:
+        backend = _build_codergen_backend(
+            req.backend,
+            working_dir,
+            emit,
+            model=selected_model or None,
+        )
+    except ValueError as exc:
         return {
             "status": "validation_error",
-            "error": "Unsupported backend. This build requires backend='codex'.",
+            "error": str(exc),
         }
-
-    backend: CodergenBackend = LocalCodexAppServerBackend(
-        working_dir,
-        emit,
-        model=selected_model or None,
-    )
 
     interviewer: Interviewer = WebInterviewer(HUMAN_BROKER, emit, flow_name, run_id)
 
