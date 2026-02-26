@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import random
 from typing import Callable, Dict, List, Optional, Tuple
 
 from attractor.dsl.models import DotGraph
@@ -39,6 +40,14 @@ class BackoffConfig:
     backoff_factor: float = 2.0
     max_delay_ms: int = 60000
     jitter: bool = True
+
+    def delay_for_attempt(self, attempt: int) -> float:
+        normalized_attempt = max(1, attempt)
+        delay = float(self.initial_delay_ms) * (self.backoff_factor ** (normalized_attempt - 1))
+        delay = min(delay, float(self.max_delay_ms))
+        if self.jitter:
+            delay *= random.uniform(0.5, 1.5)
+        return delay
 
 
 def _default_should_retry_outcome(outcome: Outcome) -> bool:
@@ -237,12 +246,13 @@ class PipelineExecutor:
                 retries_so_far = retry_counts.get(node.node_id, 0)
                 if self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
+                    delay_ms = retry_policy.backoff.delay_for_attempt(retry_counts[node.node_id])
                     self._emit_event(
                         "StageRetrying",
                         node_id=node.node_id,
                         index=len(completed),
                         attempt=retry_counts[node.node_id],
-                        delay=0,
+                        delay=delay_ms,
                     )
                     self._save_checkpoint(
                         current_node=node.node_id,
@@ -505,12 +515,13 @@ class PipelineExecutor:
                 retries_so_far = retry_counts.get(node.node_id, 0)
                 if self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
+                    delay_ms = retry_policy.backoff.delay_for_attempt(retry_counts[node.node_id])
                     self._emit_event(
                         "StageRetrying",
                         node_id=node.node_id,
                         index=len(completed),
                         attempt=retry_counts[node.node_id],
-                        delay=0,
+                        delay=delay_ms,
                     )
                     continue
 

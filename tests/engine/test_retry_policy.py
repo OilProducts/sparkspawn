@@ -1,6 +1,6 @@
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
-from attractor.engine.executor import PipelineExecutor
+from attractor.engine.executor import BackoffConfig, PipelineExecutor, RetryPolicy
 from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
@@ -53,3 +53,75 @@ def test_retry_policy_should_retry_for_retry_and_retryable_fail():
     assert policy.should_retry(Outcome(status=OutcomeStatus.FAIL, retryable=True)) is True
     assert policy.should_retry(Outcome(status=OutcomeStatus.FAIL, retryable=False)) is False
     assert policy.should_retry(Outcome(status=OutcomeStatus.SUCCESS)) is False
+
+
+def test_backoff_delay_for_attempt_applies_exponential_growth_with_cap_when_no_jitter():
+    config = BackoffConfig(
+        initial_delay_ms=200,
+        backoff_factor=2.0,
+        max_delay_ms=700,
+        jitter=False,
+    )
+
+    assert config.delay_for_attempt(1) == 200.0
+    assert config.delay_for_attempt(2) == 400.0
+    assert config.delay_for_attempt(3) == 700.0
+    assert config.delay_for_attempt(4) == 700.0
+
+
+def test_backoff_delay_for_attempt_applies_jitter_after_cap(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _uniform(low: float, high: float) -> float:
+        captured["args"] = (low, high)
+        return 1.5
+
+    monkeypatch.setattr("attractor.engine.executor.random.uniform", _uniform)
+
+    config = BackoffConfig(
+        initial_delay_ms=500,
+        backoff_factor=3.0,
+        max_delay_ms=1000,
+        jitter=True,
+    )
+
+    assert config.delay_for_attempt(2) == 1500.0
+    assert captured["args"] == (0.5, 1.5)
+
+
+def test_retry_loop_uses_computed_delay_for_retry_event():
+    graph = parse_dot(
+        """
+        digraph G {
+            start [shape=Mdiamond]
+            task [shape=box, max_retries=1]
+            done [shape=Msquare]
+            start -> task
+            task -> done
+        }
+        """
+    )
+    events: list[dict[str, object]] = []
+    attempts = {"count": 0}
+
+    def _runner(node_id: str, prompt: str, context: Context) -> Outcome:
+        if node_id != "task":
+            return Outcome(status=OutcomeStatus.SUCCESS)
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return Outcome(status=OutcomeStatus.RETRY, failure_reason="try again")
+        return Outcome(status=OutcomeStatus.SUCCESS)
+
+    executor = PipelineExecutor(graph, _runner, on_event=events.append)
+    executor._retry_policy_for_node = lambda _node_id: RetryPolicy(  # type: ignore[method-assign]
+        max_attempts=2,
+        backoff=BackoffConfig(initial_delay_ms=250, backoff_factor=2.0, max_delay_ms=60000, jitter=False),
+    )
+
+    result = executor.run()
+
+    assert result.status == "success"
+    retry_events = [event for event in events if event["type"] == "StageRetrying"]
+    assert len(retry_events) == 1
+    assert retry_events[0]["attempt"] == 1
+    assert retry_events[0]["delay"] == 250.0

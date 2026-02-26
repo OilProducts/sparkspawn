@@ -152,7 +152,7 @@ Status key:
 
 ### 3.6 Retry Policy
 - [x] [3.6-01] Implement retry policy object (`max_attempts`, backoff config, `should_retry`).
-- [ ] [3.6-02] Implement delay formula with cap and optional jitter.
+- [x] [3.6-02] Implement delay formula with cap and optional jitter.
 - [ ] [3.6-03] Implement preset policies (`none`, `standard`, `aggressive`, `linear`, `patient`).
 - [ ] [3.6-04] Implement default retryability predicate by error class/status code.
 
