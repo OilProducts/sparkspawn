@@ -48,7 +48,10 @@ class ModelStylesheetTransform:
                     candidates[prop] = entry
 
         for prop, (_, _, value) in candidates.items():
-            if prop in node.attrs:
+            existing = node.attrs.get(prop)
+            # Preserve explicit node attributes from source; allow stylesheet
+            # to replace parser/default-injected placeholders (line == 0).
+            if existing is not None and existing.line > 0:
                 continue
             node.attrs[prop] = DotAttribute(
                 key=prop,

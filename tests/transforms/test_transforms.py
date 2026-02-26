@@ -154,6 +154,25 @@ class TestTransforms:
         assert graph.nodes["review"].attrs["llm_provider"].value == "openai"
         assert graph.nodes["review"].attrs["reasoning_effort"].value == "high"
 
+    def test_stylesheet_class_selector_applies_with_comma_separated_classes_after_defaults(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [model_stylesheet=".critical { llm_model: gpt-5.2; llm_provider: openai; }"]
+                start [shape=Mdiamond]
+                review [shape=box, class="code, critical"]
+                done [shape=Msquare]
+                start -> review -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        assert graph.nodes["review"].attrs["llm_model"].value == "gpt-5.2"
+        assert graph.nodes["review"].attrs["llm_provider"].value == "openai"
+
     def test_transform_pipeline_order(self):
         graph = parse_dot(
             """
