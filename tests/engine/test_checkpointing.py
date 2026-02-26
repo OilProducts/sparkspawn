@@ -252,6 +252,44 @@ class TestCheckpointAndArtifacts:
             assert resumed.completed_nodes == ["start", "plan", "review"]
             assert calls == ["review"]
 
+    def test_resume_degrades_first_stage_fidelity_after_full_checkpoint_hop(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [default_fidelity="full"]
+                start [shape=Mdiamond]
+                plan [shape=box, prompt="plan"]
+                review [shape=box, prompt="review"]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> review
+                review -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_file = Path(tmp) / "attractor.state.json"
+            seen_fidelity: list[str] = []
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                seen_fidelity.append(str(context.get("_attractor.runtime.fidelity", "")))
+                return Outcome(status=OutcomeStatus.SUCCESS, notes=node_id)
+
+            executor = PipelineExecutor(
+                graph,
+                runner,
+                checkpoint_file=str(checkpoint_file),
+            )
+
+            paused = executor.run(Context(), max_steps=1)
+            assert paused.status == "paused"
+
+            resumed = executor.run(Context(), resume=True)
+            assert resumed.status == "success"
+            assert seen_fidelity == ["full", "summary:high", "full"]
+
     def test_resume_restores_retry_counters_and_checkpoint_context_exactly(self):
         graph = parse_dot(
             """

@@ -146,6 +146,7 @@ class PipelineExecutor:
         current = self._resolve_start_node()
         incoming_edge: object | None = None
         route_trace: List[str] = [current]
+        degrade_resume_fidelity_once = False
         if resume and self.checkpoint_path:
             checkpoint = load_checkpoint(self.checkpoint_path)
             if checkpoint:
@@ -162,6 +163,9 @@ class PipelineExecutor:
                     ctx = Context(
                         values=dict(checkpoint.context),
                         logs=list(checkpoint.logs),
+                    )
+                    degrade_resume_fidelity_once = (
+                        str(checkpoint.context.get(RUNTIME_FIDELITY_KEY, "")).strip().lower() == "full"
                     )
                     if current in completed:
                         resumed_next = self._resolve_resume_next_edge(current, ctx)
@@ -266,6 +270,9 @@ class PipelineExecutor:
 
                 node = self.graph.nodes[current]
                 fidelity = self._resolve_runtime_fidelity(node.node_id, incoming_edge)
+                if degrade_resume_fidelity_once:
+                    fidelity = "summary:high"
+                    degrade_resume_fidelity_once = False
                 ctx.set(RUNTIME_FIDELITY_KEY, fidelity)
                 ctx.set(RUNTIME_THREAD_ID_KEY, self._resolve_runtime_thread_id(node.node_id, incoming_edge, fidelity))
                 prior_status = self._context_outcome_status(ctx)
