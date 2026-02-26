@@ -56,7 +56,6 @@ Status key:
 - [x] [2.3-02] Enforce node ID regex `[A-Za-z_][A-Za-z0-9_]*`.
 - [x] [2.3-03] Enforce comma separation inside attr blocks.
 - [x] [2.3-04] Strip `//` and `/* */` comments before parse.
-- [ ] [2.3-05] Accept optional statement semicolons.
 
 ### 2.4 Value Types
 - [ ] [2.4-01] Parse quoted strings with escapes (`\\n`, `\\t`, escaped quotes, escaped backslash).
@@ -561,3 +560,8 @@ Status key:
 - [ ] [RG-02] Every DoD matrix item (Section 11 + parity matrix) is linked to an automated test or explicit manual test record.
 - [ ] [RG-03] API contract matches Section 9.5 endpoints and SSE semantics.
 - [ ] [RG-04] Artifact directory and status file contract validations pass on integration smoke run.
+
+---
+
+## Deferred Tasks
+- [ ] [2.3-05] Accept optional statement semicolons. Deferred because parser behavior is already implemented and covered by existing tests (`tests/dsl/test_parser.py`), so this is checklist state drift rather than a code gap.
