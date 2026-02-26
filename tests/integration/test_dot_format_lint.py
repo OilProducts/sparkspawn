@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from attractor.dsl.dot_lint import find_dot_paths, find_non_canonical_dot_diffs
+from attractor.dsl.dot_lint import (
+    find_dot_paths,
+    find_non_canonical_dot_diffs,
+    find_start_node_lint_errors,
+)
 
 
 def test_flows_are_canonical_dot() -> None:
@@ -25,6 +29,20 @@ def test_find_dot_paths_recurses_into_subdirectories(tmp_path: Path) -> None:
     found = find_dot_paths(tmp_path)
 
     assert found == [nested, top]
+
+
+def test_lint_reports_start_node_cardinality_violations(tmp_path: Path) -> None:
+    missing_start = tmp_path / "missing_start.dot"
+    missing_start.write_text(
+        "digraph G { task [shape=box]; done [shape=Msquare]; task -> done; }\n",
+        encoding="utf-8",
+    )
+
+    errors = find_start_node_lint_errors([missing_start])
+
+    assert len(errors) == 1
+    assert "start_node" in errors[0]
+    assert "exactly one start node" in errors[0]
 
 
 def test_justfile_exposes_dot_lint_recipe() -> None:

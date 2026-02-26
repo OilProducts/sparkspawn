@@ -180,7 +180,7 @@ Status key:
 
 ### 4.3 Start Handler
 - [x] [4.3-01] Implement no-op start handler returning SUCCESS.
-- [ ] [4.3-02] Ensure lint enforces exactly one start node.
+- [x] [4.3-02] Ensure lint enforces exactly one start node.
 
 ### 4.4 Exit Handler
 - [ ] [4.4-01] Implement no-op exit handler returning SUCCESS.
