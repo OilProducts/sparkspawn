@@ -1,6 +1,7 @@
 import threading
 import time
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 from typing import get_args, get_type_hints
@@ -753,6 +754,28 @@ class TestBuiltInHandlers:
         outcome = runner("tool_node", "", Context())
         assert outcome.status == OutcomeStatus.SUCCESS
         assert "hello" in outcome.notes
+
+    def test_tool_handler_timeout_surfaces_command_context(self, monkeypatch):
+        graph = parse_dot(
+            """
+            digraph G {
+                tool_node [shape=parallelogram, tool_command="sleep 5", timeout=50ms]
+            }
+            """
+        )
+
+        def _raise_timeout(command, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs["timeout"])
+
+        monkeypatch.setattr("attractor.handlers.builtin.tool.subprocess.run", _raise_timeout)
+
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+        outcome = runner("tool_node", "", Context())
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert "timed out" in (outcome.failure_reason or "")
+        assert "sleep 5" in (outcome.failure_reason or "")
 
     def test_registry_allows_plugin_injection_via_builder(self):
         graph = parse_dot(

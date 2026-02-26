@@ -39,10 +39,11 @@ class ToolHandler:
                     "tool.exit_code": proc.returncode,
                 },
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
+            reason = str(exc) or "tool command timed out"
             return Outcome(
                 status=OutcomeStatus.FAIL,
-                failure_reason="tool command timed out",
+                failure_reason=reason,
                 context_updates={
                     "tool.output": "",
                     "tool.exit_code": -1,
