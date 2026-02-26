@@ -56,6 +56,28 @@ class TestRouting:
         edge_suggested = select_next_edge(self._edges_from(graph, "a"), out_suggested, Context())
         assert edge_suggested.target == "c"
 
+    def test_suggested_next_ids_uses_list_priority_with_fallback_on_missing_ids(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                a [shape=box]
+                b [shape=box]
+                c [shape=box]
+                done [shape=Msquare]
+
+                start -> a
+                a -> b
+                a -> c
+                b -> done
+                c -> done
+            }
+            """
+        )
+        outcome = Outcome(status=OutcomeStatus.SUCCESS, suggested_next_ids=["missing", "c", "b"])
+        edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
+        assert edge.target == "c"
+
     def test_weight_then_lexical_tiebreak_for_unconditional(self):
         graph = parse_dot(
             """
