@@ -120,7 +120,7 @@ Status key:
 
 ### 3.1 Run Lifecycle
 - [x] [3.1-01] Implement lifecycle phases: `PARSE -> VALIDATE -> INITIALIZE -> EXECUTE -> FINALIZE`.
-- [ ] [3.1-02] In initialize, create run directory, seed context/checkpoint, apply transforms.
+- [x] [3.1-02] In initialize, create run directory, seed context/checkpoint, apply transforms.
 - [ ] [3.1-03] In finalize, persist final checkpoint and completion events, then clean resources.
 
 ### 3.2 Core Execution Loop

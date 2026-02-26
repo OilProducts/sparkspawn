@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from attractor.dsl import DotParseError, Diagnostic, DiagnosticSeverity, parse_dot, validate_graph
-from attractor.engine import Context, PipelineExecutor
+from attractor.engine import Checkpoint, Context, PipelineExecutor, save_checkpoint
 from attractor.graphviz_export import export_graphviz_artifact
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
@@ -316,6 +316,31 @@ PIPELINE_LIFECYCLE_PHASES = ("PARSE", "VALIDATE", "INITIALIZE", "EXECUTE", "FINA
 
 def _run_root(run_id: str) -> Path:
     return RUNS_ROOT / run_id
+
+
+def _resolve_start_node_id(graph) -> str:
+    shape_starts = []
+    for node in graph.nodes.values():
+        shape_attr = node.attrs.get("shape")
+        shape_value = str(shape_attr.value) if shape_attr is not None else ""
+        if shape_value == "Mdiamond":
+            shape_starts.append(node.node_id)
+
+    candidates = shape_starts or [node_id for node_id in graph.nodes if node_id in {"start", "Start"}]
+    if len(candidates) != 1:
+        raise RuntimeError(f"Expected exactly one start node, found {len(candidates)}")
+    return candidates[0]
+
+
+def _graph_attr_context_seed(graph) -> Dict[str, object]:
+    seeded: Dict[str, object] = {}
+    for key, attr in graph.graph_attrs.items():
+        value = getattr(attr, "value", "")
+        if hasattr(value, "raw"):
+            value = value.raw
+        seeded[f"graph.{key}"] = value
+    seeded.setdefault("graph.goal", "")
+    return seeded
 
 
 def _run_meta_path(run_id: str) -> Path:
@@ -1170,8 +1195,18 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
     logs_root = str(run_root / "logs")
     graphviz_export = export_graphviz_artifact(req.flow_content, run_root)
 
-    goal_attr = graph.graph_attrs.get("goal")
-    context = Context(values={"graph.goal": str(goal_attr.value) if goal_attr else ""})
+    context = Context(values=_graph_attr_context_seed(graph))
+    run_root.mkdir(parents=True, exist_ok=True)
+    Path(logs_root).mkdir(parents=True, exist_ok=True)
+    save_checkpoint(
+        Path(checkpoint_file),
+        Checkpoint(
+            current_node=_resolve_start_node_id(graph),
+            completed_nodes=[],
+            context=dict(context.values),
+            retry_counts={},
+        ),
+    )
 
     with ACTIVE_RUNS_LOCK:
         ACTIVE_RUNS[run_id] = ActiveRun(

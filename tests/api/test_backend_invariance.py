@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import attractor.api.server as server
+from attractor.engine import load_checkpoint
 
 
 FLOW = """
@@ -83,3 +84,57 @@ def test_pipeline_emits_lifecycle_phases_in_spec_order(
     ]
 
     assert lifecycle_phases == ["PARSE", "VALIDATE", "INITIALIZE", "EXECUTE", "FINALIZE"]
+
+
+def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    flow = """
+    digraph G {
+        graph [goal="Ship API", default_max_retry=7, default_fidelity="compact", model_stylesheet=".fast { llm_model: fast-model; }"]
+        start [shape=Mdiamond]
+        plan [shape=box, class="fast", prompt="Plan for $goal"]
+        done [shape=Msquare]
+        start -> plan -> done
+    }
+    """
+
+    payload = asyncio.run(
+        server._start_pipeline(
+            server.PipelineStartRequest(
+                flow_content=flow,
+                working_directory=str(tmp_path / "work"),
+                backend="codex",
+            )
+        )
+    )
+    assert payload["status"] == "started"
+    run_id = payload["run_id"]
+    run_root = server._run_root(run_id)
+    assert run_root.exists()
+
+    checkpoint = load_checkpoint(run_root / "state.json")
+    assert checkpoint is not None
+    assert checkpoint.current_node == "start"
+    assert checkpoint.completed_nodes == []
+    assert checkpoint.context["graph.goal"] == "Ship API"
+    assert checkpoint.context["graph.default_max_retry"] == 7
+    assert checkpoint.context["graph.default_fidelity"] == "compact"
+
+    history = server.EVENT_HUB.history(run_id)
+    lifecycle_phases = [
+        str(event.get("phase"))
+        for event in history
+        if event.get("type") == "lifecycle"
+    ]
+    assert lifecycle_phases == ["PARSE", "VALIDATE", "INITIALIZE"]
+
+    graph_event = next(event for event in history if event.get("type") == "graph")
+    nodes_by_id = {str(node["id"]): node for node in graph_event["nodes"]}
+    assert nodes_by_id["plan"]["prompt"] == "Plan for Ship API"
+    assert nodes_by_id["plan"]["llm_model"] == "fast-model"
+
+    server._pop_active_run(run_id)
