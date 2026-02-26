@@ -230,7 +230,7 @@ Status key:
 
 ### 4.12 Custom Handlers
 - [x] [4.12-02] Catch handler exceptions and convert to FAIL outcomes.
-- [ ] [4.12-03] Enforce statelessness/synchronization expectations for handler implementations.
+- [x] [4.12-03] Enforce statelessness/synchronization expectations for handler implementations.
 
 ---
 

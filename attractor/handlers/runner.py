@@ -17,6 +17,19 @@ from .base import HandlerRuntime
 from .registry import HandlerRegistry
 
 
+BUILTIN_HANDLER_TYPES = {
+    "start",
+    "exit",
+    "codergen",
+    "wait.human",
+    "conditional",
+    "parallel",
+    "parallel.fan_in",
+    "tool",
+    "stack.manager_loop",
+}
+
+
 @dataclass
 class HandlerRunner:
     graph: DotGraph
@@ -25,6 +38,8 @@ class HandlerRunner:
     _concurrency_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _active_calls: int = field(default=0, init=False, repr=False)
     _concurrency_overrides: int = field(default=0, init=False, repr=False)
+    _custom_handler_locks_guard: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _custom_handler_locks: dict[int, threading.Lock] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.logs_root is not None:
@@ -37,7 +52,8 @@ class HandlerRunner:
             entered = True
             node = self.graph.nodes[node_id]
             outgoing = [edge for edge in self.graph.edges if edge.source == node_id]
-            handler = self.registry.resolve(node)
+            handler_type = self.registry.resolve_handler_type(node)
+            handler = self.registry.get(handler_type)
             runtime = HandlerRuntime(
                 node_id=node_id,
                 node=node,
@@ -51,12 +67,12 @@ class HandlerRunner:
             )
             timeout = _to_seconds(node.attrs.get("timeout"))
             if timeout is None or timeout <= 0:
-                return _invoke_handler(handler, runtime)
+                return self._invoke_handler_with_contract(handler_type, handler, runtime)
 
             message = f"handler timed out after {timeout:g}s"
             try:
                 with _wall_timeout(timeout):
-                    return _invoke_handler(handler, runtime)
+                    return self._invoke_handler_with_contract(handler_type, handler, runtime)
             except TimeoutError:
                 return Outcome(status=OutcomeStatus.FAIL, failure_reason=message)
         finally:
@@ -91,6 +107,28 @@ class HandlerRunner:
             self.logs_root = None
             return
         self.logs_root = Path(logs_root)
+
+    def _invoke_handler_with_contract(self, handler_type: str, handler: Any, runtime: HandlerRuntime) -> Outcome:
+        lock = self._custom_handler_lock(handler_type, handler)
+        if lock is None:
+            return _invoke_handler(handler, runtime)
+
+        with lock:
+            return _invoke_handler(handler, runtime)
+
+    def _custom_handler_lock(self, handler_type: str, handler: Any) -> threading.Lock | None:
+        if handler_type in BUILTIN_HANDLER_TYPES:
+            return None
+        if _is_declared_thread_safe(handler):
+            return None
+
+        key = id(handler)
+        with self._custom_handler_locks_guard:
+            lock = self._custom_handler_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._custom_handler_locks[key] = lock
+            return lock
 
 
 class _SignalTimeout:
@@ -172,3 +210,7 @@ def _invoke_handler(handler: Any, runtime: HandlerRuntime) -> Outcome:
     if isinstance(outcome, Outcome):
         return outcome
     return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler returned non-Outcome result")
+
+
+def _is_declared_thread_safe(handler: Any) -> bool:
+    return bool(getattr(handler, "thread_safe", False) or getattr(handler, "stateless", False))

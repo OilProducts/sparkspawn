@@ -200,6 +200,24 @@ class _MaxParallelProbeHandler:
         return Outcome(status=OutcomeStatus.SUCCESS, notes=f"probe:{runtime.node_id}")
 
 
+class _CustomConcurrencyProbeHandler:
+    def __init__(self, state: dict[str, object], delay_s: float = 0.05):
+        self.state = state
+        self.delay_s = delay_s
+
+    def execute(self, runtime):
+        lock = self.state["lock"]
+        with lock:
+            self.state["in_flight"] += 1
+            self.state["peak"] = max(self.state["peak"], self.state["in_flight"])
+        try:
+            time.sleep(self.delay_s)
+        finally:
+            with lock:
+                self.state["in_flight"] -= 1
+        return Outcome(status=OutcomeStatus.SUCCESS, notes=f"probe:{runtime.node_id}")
+
+
 class _AlwaysSuccessHandler:
     def run(self, runtime):
         return Outcome(status=OutcomeStatus.SUCCESS, notes=f"success:{runtime.node_id}")
@@ -1393,6 +1411,43 @@ class TestBuiltInHandlers:
         branch_results = outcome.context_updates.get("parallel.results", [])
         assert isinstance(branch_results, list)
         assert len(branch_results) == 4
+
+    def test_custom_handler_without_thread_safe_marker_is_serialized_under_parallel_execution(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan [shape=component, max_parallel=4]
+                a [shape=box, type="custom.probe"]
+                b [shape=box, type="custom.probe"]
+                c [shape=box, type="custom.probe"]
+                d [shape=box, type="custom.probe"]
+                a_stop [shape=tripleoctagon]
+                b_stop [shape=tripleoctagon]
+                c_stop [shape=tripleoctagon]
+                d_stop [shape=tripleoctagon]
+
+                fan -> a
+                fan -> b
+                fan -> c
+                fan -> d
+                a -> a_stop [condition="outcome=success"]
+                b -> b_stop [condition="outcome=success"]
+                c -> c_stop [condition="outcome=success"]
+                d -> d_stop [condition="outcome=success"]
+            }
+            """
+        )
+        state = {"lock": threading.Lock(), "in_flight": 0, "peak": 0}
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={"custom.probe": _CustomConcurrencyProbeHandler(state)},
+        )
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("fan", "", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert state["peak"] == 1
 
     def test_parallel_handler_rejects_non_positive_max_parallel(self):
         graph = parse_dot(
