@@ -1,4 +1,6 @@
 import pytest
+from pathlib import Path
+import tempfile
 
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
@@ -7,6 +9,70 @@ from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
 class TestExecutor:
+    def test_loop_restart_relaunches_from_edge_target_with_fresh_result_state(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                loop [shape=box]
+                work [shape=box]
+                done [shape=Msquare]
+
+                start -> loop
+                loop -> work [loop_restart=true]
+                work -> done
+            }
+            """
+        )
+
+        calls: list[str] = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            calls.append(node_id)
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "success"
+        assert calls == ["start", "loop", "work"]
+        assert result.current_node == "done"
+        assert result.route_trace == ["work", "done"]
+        assert result.completed_nodes == ["work"]
+        assert set(result.node_outcomes.keys()) == {"work"}
+
+    def test_loop_restart_switches_to_fresh_logs_directory(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                loop [shape=box]
+                work [shape=box]
+                done [shape=Msquare]
+
+                start -> loop
+                loop -> work [loop_restart=true]
+                work -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                return Outcome(status=OutcomeStatus.SUCCESS, notes=node_id)
+
+            result = PipelineExecutor(graph, runner, logs_root=str(logs_root)).run(Context())
+
+            assert result.status == "success"
+            assert (logs_root / "start" / "status.json").exists()
+            assert (logs_root / "loop" / "status.json").exists()
+
+            restart_logs_root = logs_root.parent / "logs.restart-1"
+            assert (restart_logs_root / "work" / "status.json").exists()
+            assert not (restart_logs_root / "start").exists()
+            assert not (restart_logs_root / "loop").exists()
+
     def test_executor_resolves_runtime_thread_id_from_node_attr_for_full_fidelity(self):
         graph = parse_dot(
             """

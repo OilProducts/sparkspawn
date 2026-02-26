@@ -86,7 +86,7 @@ Status key:
 ### 2.7 Edge Attributes
 - [x] [2.7-02] Parse/evaluate edge `condition` expressions.
 - [x] [2.7-04] Implement edge-level `fidelity` and `thread_id` overrides for target node execution.
-- [ ] [2.7-05] Implement `loop_restart` semantics to relaunch run with fresh logs.
+- [x] [2.7-05] Implement `loop_restart` semantics to relaunch run with fresh logs.
 
 ### 2.8 Shape-to-Handler-Type Mapping
 - [ ] [2.8-01] Implement canonical shape->type mapping exactly as specified.

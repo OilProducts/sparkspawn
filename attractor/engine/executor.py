@@ -55,6 +55,8 @@ class PipelineExecutor:
         self.graph = graph
         self.runner = runner
         self.logs_root = Path(logs_root) if logs_root else None
+        self._base_logs_root = self.logs_root
+        self._restart_count = 0
         self.checkpoint_path = Path(checkpoint_file) if checkpoint_file else None
         self.control = control
         self.on_event = on_event
@@ -263,6 +265,22 @@ class PipelineExecutor:
                 self._emit_event("PipelineFailed", current_node=node.node_id, error=message)
                 raise RuntimeError(message)
 
+            if _edge_attr_bool(next_edge, "loop_restart"):
+                self._emit_event("PipelineRestarted", from_node=node.node_id, restart_node=next_edge.target)
+                self._apply_loop_restart(
+                    restart_node=next_edge.target,
+                    context=ctx,
+                    completed=completed,
+                    outcomes=outcomes,
+                    retry_counts=retry_counts,
+                    route_trace=route_trace,
+                    persist_checkpoint=True,
+                )
+                current = next_edge.target
+                incoming_edge = None
+                steps = 0
+                continue
+
             current = next_edge.target
             incoming_edge = next_edge
             route_trace.append(current)
@@ -429,6 +447,22 @@ class PipelineExecutor:
                     failure_reason=message,
                 )
 
+            if _edge_attr_bool(next_edge, "loop_restart"):
+                self._emit_event("PipelineRestarted", from_node=node.node_id, restart_node=next_edge.target)
+                self._apply_loop_restart(
+                    restart_node=next_edge.target,
+                    context=ctx,
+                    completed=completed,
+                    outcomes=outcomes,
+                    retry_counts=retry_counts,
+                    route_trace=route_trace,
+                    persist_checkpoint=False,
+                )
+                current = next_edge.target
+                incoming_edge = None
+                steps = 0
+                continue
+
             current = next_edge.target
             incoming_edge = next_edge
             route_trace.append(current)
@@ -501,6 +535,50 @@ class PipelineExecutor:
         }
         with (stage_dir / "status.json").open("w", encoding="utf-8") as f:
             json.dump(status_payload, f, indent=2, sort_keys=True)
+
+    def _apply_loop_restart(
+        self,
+        restart_node: str,
+        context: Context,
+        completed: List[str],
+        outcomes: Dict[str, Outcome],
+        retry_counts: Dict[str, int],
+        route_trace: List[str],
+        *,
+        persist_checkpoint: bool,
+    ) -> None:
+        completed.clear()
+        outcomes.clear()
+        retry_counts.clear()
+        route_trace.clear()
+        route_trace.append(restart_node)
+
+        context.set(NODE_OUTCOMES_KEY, {})
+        context.set("outcome", "")
+        context.set("preferred_label", "")
+
+        self._rotate_logs_root_for_restart()
+
+        if persist_checkpoint:
+            self._save_checkpoint(
+                current_node=restart_node,
+                completed_nodes=completed,
+                context=context,
+                retry_counts=retry_counts,
+            )
+
+    def _rotate_logs_root_for_restart(self) -> None:
+        if not self._base_logs_root:
+            return
+
+        while True:
+            self._restart_count += 1
+            candidate = self._base_logs_root.parent / f"{self._base_logs_root.name}.restart-{self._restart_count}"
+            if candidate.exists():
+                continue
+            candidate.mkdir(parents=True, exist_ok=True)
+            self.logs_root = candidate
+            return
 
     def _resolve_start_node(self) -> str:
         starts = [
@@ -805,6 +883,18 @@ def _edge_attr_text(edge: object | None, key: str) -> str:
     if not attr:
         return ""
     return str(attr.value).strip()
+
+
+def _edge_attr_bool(edge: object | None, key: str) -> bool:
+    if edge is None:
+        return False
+    attrs = getattr(edge, "attrs", None)
+    if not isinstance(attrs, dict):
+        return False
+    attr = attrs.get(key)
+    if not attr:
+        return False
+    return _to_bool(attr.value)
 
 
 def _edge_endpoint_text(edge: object | None, key: str) -> str:
