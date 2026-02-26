@@ -74,7 +74,7 @@ class QueueInterviewer(Interviewer):
 
     def ask(self, question: Question) -> Answer:
         if not self._answers:
-            return Answer()
+            return Answer(value=AnswerValue.SKIPPED)
         return self._answers.popleft()
 
 

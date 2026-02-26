@@ -286,8 +286,7 @@ Status key:
 ### 6.4 Built-In Interviewer Implementations
 - [x] [6.4-01] Implement `AutoApproveInterviewer` behavior for yes/no and multiple-choice.
 - [x] [6.4-02] Implement `ConsoleInterviewer` input handling and option matching.
-- [ ] [6.4-03] Implement `CallbackInterviewer` delegation path.
-- [ ] [6.4-04] Implement `QueueInterviewer` deterministic dequeue behavior.
+- [x] [6.4-04] Implement `QueueInterviewer` deterministic dequeue behavior.
 - [ ] [6.4-05] Implement `RecordingInterviewer` wrapper and durable recording storage.
 
 ### 6.5 Timeout Handling
@@ -546,6 +545,7 @@ Status key:
 ---
 
 ## Deferred Tasks
+- [ ] [6.4-03] Implement `CallbackInterviewer` delegation path. Deferred because `CallbackInterviewer.ask` already delegates directly to the injected callback and this behavior is covered in `tests/interviewer/test_interviewer.py::test_callback_interviewer`, so this is checklist state drift.
 - [ ] [5.6-02] Ensure each stage directory includes `prompt.md`, `response.md`, `status.json`. Deferred because executor stage artifact writes already guarantee all three files per executed stage (`attractor/engine/executor.py::_write_stage_artifacts`), and coverage exists in `tests/engine/test_checkpointing.py::test_artifacts_and_checkpoint_written_each_step`, so this is checklist state drift.
 - [ ] [4.2-01] Implement registration API with replacement behavior for duplicate keys. Deferred because `HandlerRegistry.register` already replaces existing entries via direct map assignment and this is checklist state drift.
 - [ ] [2.6-02] Resolve `type` override before shape-based handler mapping. Deferred because `HandlerRegistry.resolve_handler_type` already checks explicit `type` before shape mapping and tests already cover this precedence (`tests/handlers/test_handlers.py`), so this is checklist state drift.

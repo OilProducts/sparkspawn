@@ -102,8 +102,10 @@ class TestInterviewerImplementations:
         interviewer = QueueInterviewer([Answer(selected_values=["first"]), Answer(text="second")])
         a1 = interviewer.ask(Question(title="1", prompt="1", question_type=QuestionType.SINGLE_SELECT))
         a2 = interviewer.ask(Question(title="2", prompt="2", question_type=QuestionType.FREE_TEXT))
+        a3 = interviewer.ask(Question(title="3", prompt="3", question_type=QuestionType.FREE_TEXT))
         assert a1.selected_values == ["first"]
         assert a2.text == "second"
+        assert a3.value == AnswerValue.SKIPPED.value
 
     def test_builtin_interviewer_variants_satisfy_adapter_contracts(self):
         question = Question(

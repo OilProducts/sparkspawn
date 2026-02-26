@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from attractor.engine.outcome import Outcome, OutcomeStatus
-from attractor.interviewer import Answer, Interviewer, Question, QuestionOption, QuestionType
+from attractor.interviewer import Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType
 
 from ..base import HandlerRuntime
 
@@ -59,6 +59,8 @@ class WaitHumanHandler:
                 },
                 notes="human selection applied",
             )
+        if answer.value == AnswerValue.SKIPPED.value:
+            return Outcome(status=OutcomeStatus.FAIL, failure_reason="human skipped interaction")
 
         selected = _select_choice(answer, choices)
         if selected is None:
@@ -77,6 +79,8 @@ class WaitHumanHandler:
 
 
 def _is_timeout(answer: Answer) -> bool:
+    if answer.value == AnswerValue.TIMEOUT.value:
+        return True
     if any(value and value.strip() for value in answer.selected_values):
         return False
     if answer.text and answer.text.strip():

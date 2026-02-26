@@ -937,7 +937,7 @@ class TestBuiltInHandlers:
 
         registry = build_default_registry(
             codergen_backend=_StubBackend(),
-            interviewer=QueueInterviewer([]),
+            interviewer=QueueInterviewer([Answer(value="TIMEOUT")]),
         )
         runner = HandlerRunner(graph, registry)
         outcome = runner("gate", "Choose", Context())
@@ -965,13 +965,36 @@ class TestBuiltInHandlers:
 
         registry = build_default_registry(
             codergen_backend=_StubBackend(),
-            interviewer=QueueInterviewer([]),
+            interviewer=QueueInterviewer([Answer(value="TIMEOUT")]),
         )
         runner = HandlerRunner(graph, registry)
         outcome = runner("gate", "Choose", Context())
 
         assert outcome.status == OutcomeStatus.RETRY
         assert outcome.failure_reason == "human gate timeout, no default"
+
+    def test_wait_human_skipped_answer_returns_fail(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                gate [shape=hexagon, prompt="Choose"]
+                ship [shape=box]
+                fix [shape=box]
+                gate -> ship [label="Approve"]
+                gate -> fix [label="Fix"]
+            }
+            """
+        )
+
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            interviewer=QueueInterviewer([]),
+        )
+        runner = HandlerRunner(graph, registry)
+        outcome = runner("gate", "Choose", Context())
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason == "human skipped interaction"
 
     @pytest.mark.parametrize(
         ("label", "expected_key"),
