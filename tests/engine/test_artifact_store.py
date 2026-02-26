@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
+from pathlib import Path
 
 import pytest
 
@@ -31,3 +33,26 @@ def test_retrieve_supports_optional_type_assertion() -> None:
 
     with pytest.raises(TypeError):
         store.retrieve("artifact-2", expected_type=list)
+
+
+def test_store_file_backs_large_payload_when_base_dir_present(tmp_path: Path) -> None:
+    store = ArtifactStore(base_dir=tmp_path)
+    payload = {"blob": "x" * (100 * 1024 + 1)}
+
+    info = store.store("artifact-large", "large-output", payload)
+
+    assert info.is_file_backed is True
+    artifact_path = tmp_path / "artifacts" / "artifact-large.json"
+    assert artifact_path.exists()
+    assert json.loads(artifact_path.read_text(encoding="utf-8")) == payload
+    assert store.retrieve("artifact-large", expected_type=dict) == payload
+
+
+def test_store_keeps_large_payload_in_memory_without_base_dir() -> None:
+    store = ArtifactStore()
+    payload = "x" * (100 * 1024 + 1)
+
+    info = store.store("artifact-memory", "large-output", payload)
+
+    assert info.is_file_backed is False
+    assert store.retrieve("artifact-memory", expected_type=str) == payload
