@@ -287,7 +287,7 @@ Status key:
 - [x] [6.4-01] Implement `AutoApproveInterviewer` behavior for yes/no and multiple-choice.
 - [x] [6.4-02] Implement `ConsoleInterviewer` input handling and option matching.
 - [x] [6.4-04] Implement `QueueInterviewer` deterministic dequeue behavior.
-- [ ] [6.4-05] Implement `RecordingInterviewer` wrapper and durable recording storage.
+- [x] [6.4-05] Implement `RecordingInterviewer` wrapper and durable recording storage.
 
 ### 6.5 Timeout Handling
 - [ ] [6.5-01] Apply default answer when timeout occurs and default exists.

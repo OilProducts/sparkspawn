@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 from attractor.interviewer import (
@@ -106,6 +107,25 @@ class TestInterviewerImplementations:
         assert a1.selected_values == ["first"]
         assert a2.text == "second"
         assert a3.value == AnswerValue.SKIPPED.value
+
+    def test_recording_interviewer_persists_jsonl_records(self, tmp_path):
+        record_path = tmp_path / "recordings.jsonl"
+        interviewer = RecordingInterviewer(
+            QueueInterviewer([Answer(value=AnswerValue.YES), Answer(text="notes")]),
+            record_path=record_path,
+        )
+
+        interviewer.ask(Question(text="Ship?", type=QuestionType.YES_NO, stage="gate"))
+        interviewer.ask(Question(text="Why?", type=QuestionType.FREEFORM, stage="gate"))
+
+        lines = record_path.read_text().strip().splitlines()
+        assert len(lines) == 2
+        first = json.loads(lines[0])
+        second = json.loads(lines[1])
+        assert first["question"]["text"] == "Ship?"
+        assert first["answer"]["value"] == AnswerValue.YES.value
+        assert second["question"]["text"] == "Why?"
+        assert second["answer"]["text"] == "notes"
 
     def test_builtin_interviewer_variants_satisfy_adapter_contracts(self):
         question = Question(

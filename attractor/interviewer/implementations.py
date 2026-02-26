@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections import deque
+from dataclasses import asdict
+from pathlib import Path
 from typing import Callable, Deque, Iterable
 
 from .base import Interviewer
@@ -79,11 +82,25 @@ class QueueInterviewer(Interviewer):
 
 
 class RecordingInterviewer(Interviewer):
-    def __init__(self, inner: Interviewer):
+    def __init__(self, inner: Interviewer, record_path: str | Path | None = None):
         self.inner = inner
         self.recordings: list[tuple[Question, Answer]] = []
+        self._record_path = Path(record_path) if record_path else None
+        if self._record_path:
+            self._record_path.parent.mkdir(parents=True, exist_ok=True)
 
     def ask(self, question: Question) -> Answer:
         answer = self.inner.ask(question)
         self.recordings.append((question, answer))
+        self._append_record(question, answer)
         return answer
+
+    def _append_record(self, question: Question, answer: Answer) -> None:
+        if not self._record_path:
+            return
+        payload = {
+            "question": asdict(question),
+            "answer": asdict(answer),
+        }
+        with self._record_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, default=str) + "\n")
