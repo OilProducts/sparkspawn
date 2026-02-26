@@ -59,6 +59,25 @@ line2"]
         assert isinstance(timeout.value, Duration)
         assert timeout.value.raw == "250ms"
 
+    def test_parses_only_lowercase_boolean_literals_as_boolean_type(self):
+        dot = """
+        digraph BooleanLiterals {
+            node_a [is_ready=true, is_done=false, upper=True, mixed=False]
+        }
+        """
+        graph = parse_dot(dot)
+        attrs = graph.nodes["node_a"].attrs
+
+        assert attrs["is_ready"].value is True
+        assert attrs["is_ready"].value_type == DotValueType.BOOLEAN
+        assert attrs["is_done"].value is False
+        assert attrs["is_done"].value_type == DotValueType.BOOLEAN
+
+        assert attrs["upper"].value == "True"
+        assert attrs["upper"].value_type == DotValueType.STRING
+        assert attrs["mixed"].value == "False"
+        assert attrs["mixed"].value_type == DotValueType.STRING
+
     def test_lexes_float_literals_without_leading_zero(self):
         dot = """
         digraph FloatForms {

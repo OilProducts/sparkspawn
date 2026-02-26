@@ -260,8 +260,7 @@ class _Parser:
         if tok.kind in {"STRING", "INT", "FLOAT", "IDENT"}:
             val_tok = self.advance()
             if val_tok.kind == "IDENT":
-                lowered = val_tok.value.lower()
-                if lowered in {"true", "false"}:
+                if val_tok.value in {"true", "false"}:
                     value, value_type = parse_typed_value(val_tok.value, val_tok.kind)
                     return value, value_type, val_tok.line
                 # Bare identifiers are accepted as string-like enums (e.g. rankdir=LR).
