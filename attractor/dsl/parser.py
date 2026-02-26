@@ -48,6 +48,8 @@ def parse_dot(source: str) -> DotGraph:
     tokens = _tokenize(source)
     parser = _Parser(tokens)
     graph = parser.parse_graph()
+    while parser.accept("SEMI"):
+        pass
     trailing = parser.current()
     if trailing.kind == "IDENT" and trailing.value in {"digraph", "graph", "strict"}:
         raise DotParseError("multiple graph declarations are not supported", trailing.line)

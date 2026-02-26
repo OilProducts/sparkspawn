@@ -105,6 +105,18 @@ class TestDotParser:
         with pytest.raises(DotParseError, match="multiple graph declarations are not supported"):
             parse_dot(dot)
 
+    def test_reject_multiple_graph_declarations_when_separated_by_semicolon(self):
+        dot = """
+        digraph One {
+            a -> b
+        };
+        digraph Two {
+            c -> d
+        }
+        """
+        with pytest.raises(DotParseError, match="multiple graph declarations are not supported"):
+            parse_dot(dot)
+
     def test_reject_strict_graph_modifier(self):
         dot = """
         strict digraph G {
