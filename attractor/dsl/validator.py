@@ -454,6 +454,15 @@ def _lint_stylesheet_syntax(stylesheet: str, line: int) -> List[Diagnostic]:
             )
         else:
             statements = [s.strip() for s in body.split(";") if s.strip()]
+            if not statements:
+                diagnostics.append(
+                    Diagnostic(
+                        rule_id="stylesheet_syntax",
+                        severity=DiagnosticSeverity.ERROR,
+                        message="stylesheet rule block must include at least one declaration",
+                        line=line,
+                    )
+                )
             for stmt in statements:
                 if ":" not in stmt:
                     diagnostics.append(
