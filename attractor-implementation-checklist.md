@@ -290,7 +290,7 @@ Status key:
 - [x] [6.4-05] Implement `RecordingInterviewer` wrapper and durable recording storage.
 
 ### 6.5 Timeout Handling
-- [ ] [6.5-01] Apply default answer when timeout occurs and default exists.
+- [x] [6.5-01] Apply default answer when timeout occurs and default exists.
 - [ ] [6.5-02] Return `TIMEOUT` answer when no default exists.
 - [ ] [6.5-03] Implement `human.default_choice` resolution for `wait.human` nodes.
 

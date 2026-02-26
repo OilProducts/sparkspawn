@@ -131,11 +131,15 @@ class HumanGateBroker:
             }
         )
 
-        event.wait()
+        timeout_seconds = question.timeout_seconds
+        wait_timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
+        responded = event.wait(wait_timeout)
         with self._lock:
             entry = self._pending.pop(gate_id, {})
             selected = entry.get("answer") if entry else None
 
+        if not responded and question.default is not None:
+            return question.default
         if selected:
             return Answer(selected_values=[str(selected)])
         return Answer()
