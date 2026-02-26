@@ -210,6 +210,12 @@ class _AlwaysFailHandler:
         return Outcome(status=OutcomeStatus.FAIL, failure_reason=f"fail:{runtime.node_id}")
 
 
+class _SystemExitHandler:
+    def run(self, runtime):
+        del runtime
+        raise SystemExit("handler terminated abruptly")
+
+
 class _FalseyInterviewer(Interviewer):
     def __bool__(self) -> bool:
         return False
@@ -1179,6 +1185,37 @@ class TestBuiltInHandlers:
         runtime = capture_handler.calls[0]
         assert runtime.logs_root == tmp_path
         assert isinstance(runtime.logs_root, Path)
+
+    def test_custom_handler_system_exit_is_converted_to_fail_outcome(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                risky [shape=box, type="custom.system_exit"]
+                recover [shape=box, type="custom.success"]
+                done [shape=Msquare]
+                start -> risky
+                risky -> done [condition="outcome=success"]
+                risky -> recover [condition="outcome=fail"]
+                recover -> done
+            }
+            """
+        )
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={
+                "custom.system_exit": _SystemExitHandler(),
+                "custom.success": _AlwaysSuccessHandler(),
+            },
+        )
+        runner = HandlerRunner(graph, registry)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "success"
+        assert result.route_trace == ["start", "risky", "recover", "done"]
+        assert result.node_outcomes["risky"].status is OutcomeStatus.FAIL
+        assert result.node_outcomes["risky"].failure_reason == "handler terminated abruptly"
 
     def test_conditional_handler_is_noop_success(self):
         graph = parse_dot(

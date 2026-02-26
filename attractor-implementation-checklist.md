@@ -229,7 +229,7 @@ Status key:
 - [x] [4.11-04] Emit intervention and telemetry artifacts for supervisor decisions.
 
 ### 4.12 Custom Handlers
-- [ ] [4.12-02] Catch handler exceptions and convert to FAIL outcomes.
+- [x] [4.12-02] Catch handler exceptions and convert to FAIL outcomes.
 - [ ] [4.12-03] Enforce statelessness/synchronization expectations for handler implementations.
 
 ---

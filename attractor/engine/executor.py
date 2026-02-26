@@ -903,12 +903,14 @@ class PipelineExecutor:
     def _execute_node_handler(self, node_id: str, prompt: str, context: Context) -> Outcome:
         try:
             raw_outcome = self.runner(node_id, prompt, context)
-        except Exception as exc:
+        except BaseException as exc:
+            if isinstance(exc, KeyboardInterrupt):
+                raise
             failure_reason = str(exc) or exc.__class__.__name__
             return Outcome(
                 status=OutcomeStatus.FAIL,
                 failure_reason=failure_reason,
-                retryable=_is_retryable_exception(exc),
+                retryable=_is_retryable_exception(exc) if isinstance(exc, Exception) else False,
             )
         return self._normalize_outcome(node_id, raw_outcome)
 
