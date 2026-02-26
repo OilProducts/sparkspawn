@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import random
+import threading
 from typing import Callable, Dict, List, Optional, Tuple
 
 from attractor.dsl.models import DotGraph
@@ -122,6 +123,8 @@ class PipelineExecutor:
         self.on_event = on_event
         self._shape_start_nodes = self._node_ids_for_shape("Mdiamond")
         self._shape_exit_nodes = self._node_ids_for_shape("Msquare")
+        self._active_top_level_node: str | None = None
+        self._active_top_level_node_lock = threading.Lock()
 
     def run(
         self,
@@ -253,7 +256,11 @@ class PipelineExecutor:
                 prior_status = self._context_outcome_status(ctx)
                 prompt = self._prompt_for_node(node.node_id)
                 self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
-                outcome = self._execute_node_handler(node.node_id, prompt, ctx)
+                self._enter_top_level_stage(node.node_id)
+                try:
+                    outcome = self._execute_node_handler(node.node_id, prompt, ctx)
+                finally:
+                    self._exit_top_level_stage()
                 outcomes[node.node_id] = outcome
 
                 if outcome.context_updates:
@@ -548,7 +555,11 @@ class PipelineExecutor:
                 prior_status = self._context_outcome_status(ctx)
                 prompt = self._prompt_for_node(node.node_id)
                 self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
-                outcome = self._execute_node_handler(node.node_id, prompt, ctx)
+                self._enter_top_level_stage(node.node_id)
+                try:
+                    outcome = self._execute_node_handler(node.node_id, prompt, ctx)
+                finally:
+                    self._exit_top_level_stage()
                 outcomes[node.node_id] = outcome
 
                 if outcome.context_updates:
@@ -881,6 +892,19 @@ class PipelineExecutor:
                 retryable=_is_retryable_exception(exc),
             )
         return self._normalize_outcome(node_id, raw_outcome)
+
+    def _enter_top_level_stage(self, node_id: str) -> None:
+        with self._active_top_level_node_lock:
+            if self._active_top_level_node is not None:
+                raise RuntimeError(
+                    "Top-level traversal must be single-threaded; "
+                    f"attempted to run '{node_id}' while '{self._active_top_level_node}' was still executing"
+                )
+            self._active_top_level_node = node_id
+
+    def _exit_top_level_stage(self) -> None:
+        with self._active_top_level_node_lock:
+            self._active_top_level_node = None
 
     def _is_start_node(self, node_id: str) -> bool:
         if self._shape_start_nodes:

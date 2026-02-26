@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+import threading
 import tempfile
 
 from attractor.dsl import parse_dot
@@ -337,6 +338,47 @@ class TestExecutor:
         assert len(retry_events) == 1
         assert retry_events[0]["node_id"] == "work"
         assert retry_events[0]["attempt"] == 1
+
+    def test_executor_rejects_concurrent_top_level_traversal(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+
+        entered_start = threading.Event()
+        release_start = threading.Event()
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "start":
+                entered_start.set()
+                release_start.wait(timeout=2.0)
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        executor = PipelineExecutor(graph, runner)
+        first_run_done = threading.Event()
+
+        def run_first_pipeline() -> None:
+            try:
+                executor.run(Context())
+            finally:
+                first_run_done.set()
+
+        thread = threading.Thread(target=run_first_pipeline, daemon=True)
+        thread.start()
+        assert entered_start.wait(timeout=2.0)
+
+        with pytest.raises(RuntimeError, match="single-threaded"):
+            executor.run_from("work", Context())
+
+        release_start.set()
+        assert first_run_done.wait(timeout=2.0)
 
     def test_goal_gate_blocks_terminal_exit_when_visited_gate_failed(self):
         graph = parse_dot(
