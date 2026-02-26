@@ -1872,10 +1872,12 @@ This section defines how to validate that an implementation of this spec is comp
 ### 11.10 Model Stylesheet
 
 - [ ] Stylesheet is parsed from the graph's `model_stylesheet` attribute
-- [ ] Selectors by shape name work (e.g., `box { model = "claude-opus-4-6" }`)
-- [ ] Selectors by class name work (e.g., `.fast { model = "gemini-3-flash-preview" }`)
-- [ ] Selectors by node ID work (e.g., `#review { reasoning_effort = "high" }`)
-- [ ] Specificity order: universal < shape < class < ID
+- [ ] Selector subset is enforced: only `*`, `.class_name`, and `#node_id`
+- [ ] Class selector works (e.g., `.fast { llm_model: "gemini-3-flash-preview"; }`)
+- [ ] Node-ID selector works (e.g., `#review { reasoning_effort: "high"; }`)
+- [ ] Specificity order: universal < class < ID
+- [ ] Only stylesheet properties `llm_model`, `llm_provider`, and `reasoning_effort` are accepted
+- [ ] Declaration syntax uses `property: value` (not `property = value`)
 - [ ] Stylesheet properties are overridden by explicit node attributes
 
 ### 11.11 Transforms and Extensibility

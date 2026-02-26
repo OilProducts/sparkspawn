@@ -12,3 +12,6 @@ logs:
 restart:
   docker compose down
   docker compose up --build
+
+test:
+  uv run pytest -q

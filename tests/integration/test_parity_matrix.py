@@ -1,4 +1,4 @@
-import unittest
+from pathlib import Path
 
 from attractor.dsl import DiagnosticSeverity, parse_dot, validate_graph
 from attractor.engine import Context, PipelineExecutor
@@ -14,7 +14,7 @@ class _Backend:
         self.plan = plan
         self.calls = []
 
-    def run(self, node_id, prompt, context):
+    def run(self, node_id, prompt, context, *, timeout=None):
         self.calls.append((node_id, prompt))
         value = self.plan.get(node_id, True)
         if isinstance(value, list):
@@ -48,7 +48,7 @@ class _ContextReaderHandler:
         return Outcome(status=OutcomeStatus.FAIL, failure_reason="missing context")
 
 
-class TestParityMatrixSubset(unittest.TestCase):
+class TestParityMatrixSubset:
     def test_parse_simple_linear_pipeline(self):
         dot = """
         digraph G {
@@ -60,8 +60,8 @@ class TestParityMatrixSubset(unittest.TestCase):
         }
         """
         graph = parse_dot(dot)
-        self.assertEqual(4, len(graph.nodes))
-        self.assertEqual(3, len(graph.edges))
+        assert len(graph.nodes) == 4
+        assert len(graph.edges) == 3
 
     def test_validate_missing_start(self):
         dot = """
@@ -73,7 +73,7 @@ class TestParityMatrixSubset(unittest.TestCase):
         """
         diagnostics = validate_graph(parse_dot(dot))
         error_rules = {d.rule_id for d in diagnostics if d.severity == DiagnosticSeverity.ERROR}
-        self.assertIn("start_node", error_rules)
+        assert "start_node" in error_rules
 
     def test_execute_linear_pipeline_end_to_end(self):
         dot = """
@@ -89,8 +89,8 @@ class TestParityMatrixSubset(unittest.TestCase):
         backend = _Backend({"start": True, "plan": True, "implement": True})
         registry = build_default_registry(codergen_backend=backend)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertEqual(["start", "plan", "implement"], result.completed_nodes)
+        assert result.status == "success"
+        assert result.completed_nodes == ["start", "plan", "implement"]
 
     def test_execute_conditional_branching_success_fail_paths(self):
         dot = """
@@ -110,8 +110,8 @@ class TestParityMatrixSubset(unittest.TestCase):
         backend = _Backend({"start": True, "gate": False, "fix": True})
         registry = build_default_registry(codergen_backend=backend)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertIn("fix", result.completed_nodes)
+        assert result.status == "success"
+        assert "fix" in result.completed_nodes
 
     def test_retry_on_failure_max_retries(self):
         dot = """
@@ -130,8 +130,8 @@ class TestParityMatrixSubset(unittest.TestCase):
         registry.register("flaky", flaky)
 
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertEqual(3, flaky.calls)
+        assert result.status == "success"
+        assert flaky.calls == 3
 
     def test_wait_human_routes_on_selection(self):
         dot = """
@@ -152,8 +152,8 @@ class TestParityMatrixSubset(unittest.TestCase):
         interviewer = QueueInterviewer([Answer(selected_values=["Fix"])])
         registry = build_default_registry(codergen_backend=_Backend({"start": True, "fix": True}), interviewer=interviewer)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertIn("fix", result.completed_nodes)
+        assert result.status == "success"
+        assert "fix" in result.completed_nodes
 
     def test_context_updates_visible_next_node(self):
         dot = """
@@ -172,13 +172,13 @@ class TestParityMatrixSubset(unittest.TestCase):
         registry.register("ctx.read", _ContextReaderHandler())
 
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        self.assertEqual("success", result.status)
+        assert result.status == "success"
 
     def test_stylesheet_and_goal_variable_transforms(self):
         graph = parse_dot(
             """
             digraph G {
-                graph [goal="hello", model_stylesheet="box { model = gpt-5; }"]
+                graph [goal="hello", model_stylesheet="* { llm_model: gpt-5; }"]
                 start [shape=Mdiamond]
                 task [shape=box, prompt="Do $goal"]
                 done [shape=Msquare]
@@ -192,8 +192,76 @@ class TestParityMatrixSubset(unittest.TestCase):
         pipeline.register(ModelStylesheetTransform())
         graph = pipeline.apply(graph)
 
-        self.assertEqual("Do hello", graph.nodes["task"].attrs["prompt"].value)
-        self.assertEqual("gpt-5", graph.nodes["task"].attrs["llm_model"].value)
+        assert graph.nodes["task"].attrs["prompt"].value == "Do hello"
+        assert graph.nodes["task"].attrs["llm_model"].value == "gpt-5"
+
+    def test_reference_workflow_includes_llm_conditions_human_and_parallel(self):
+        flow_path = Path(__file__).resolve().parents[2] / "flows" / "reference-1.1-01.dot"
+        assert flow_path.exists(), f"Missing reference workflow: {flow_path}"
+
+        graph = parse_dot(flow_path.read_text(encoding="utf-8"))
+        diagnostics = validate_graph(graph)
+        error_rules = {d.rule_id for d in diagnostics if d.severity == DiagnosticSeverity.ERROR}
+        assert error_rules == set()
+
+        def _shape(node_id):
+            attr = graph.nodes[node_id].attrs.get("shape")
+            return str(attr.value) if attr else "box"
+
+        assert sum(1 for node_id in graph.nodes if _shape(node_id) == "box") >= 2
+        assert any(_shape(node_id) == "hexagon" for node_id in graph.nodes)
+        assert any(_shape(node_id) == "component" for node_id in graph.nodes)
+        assert any(_shape(node_id) == "tripleoctagon" for node_id in graph.nodes)
+        assert any("condition" in edge.attrs for edge in graph.edges)
+
+        interviewer = QueueInterviewer([Answer(selected_values=["Proceed"])])
+        backend = _Backend(
+            {
+                "start": True,
+                "plan": True,
+                "implement": True,
+                "branch_docs": True,
+                "branch_tests": True,
+                "final_review": True,
+            }
+        )
+        registry = build_default_registry(codergen_backend=backend, interviewer=interviewer)
+        result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
+        assert result.status == "success"
+        assert "plan" in result.completed_nodes
+        assert "implement" in result.completed_nodes
+        assert "approval" in result.completed_nodes
+        assert "parallel_work" in result.completed_nodes
+        assert "final_review" in result.completed_nodes
+
+        parallel_results = result.context.get("parallel.results", [])
+        assert isinstance(parallel_results, list) and parallel_results
+        branch_ids = {entry.get("id", "") for entry in parallel_results if isinstance(entry, dict)}
+        assert {"branch_docs", "branch_tests"}.issubset(branch_ids)
+
+    def test_reference_workflow_cancel_branch_exits_before_parallel(self):
+        flow_path = Path(__file__).resolve().parents[2] / "flows" / "reference-1.1-01.dot"
+        graph = parse_dot(flow_path.read_text(encoding="utf-8"))
+
+        interviewer = QueueInterviewer([Answer(selected_values=["Cancel"])])
+        backend = _Backend(
+            {
+                "start": True,
+                "plan": True,
+                "implement": True,
+            }
+        )
+        registry = build_default_registry(codergen_backend=backend, interviewer=interviewer)
+        result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
+
+        assert result.status == "success"
+        assert "approval" in result.completed_nodes
+        assert "parallel_work" not in result.completed_nodes
+        assert "branch_docs" not in result.completed_nodes
+        assert "branch_tests" not in result.completed_nodes
+        assert "fan_in" not in result.completed_nodes
+        assert "final_review" not in result.completed_nodes
+        assert result.context.get("parallel.results", "") == ""
 
     def test_pipeline_with_10_nodes(self):
         parts = ["digraph G {"]
@@ -211,9 +279,5 @@ class TestParityMatrixSubset(unittest.TestCase):
         graph = parse_dot(dot)
         registry = build_default_registry(codergen_backend=_Backend({}))
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertEqual(11, len(result.completed_nodes))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert result.status == "success"
+        assert len(result.completed_nodes) == 11

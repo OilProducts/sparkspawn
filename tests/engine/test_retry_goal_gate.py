@@ -1,12 +1,10 @@
-import unittest
-
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
-class TestRetryAndGoalGate(unittest.TestCase):
+class TestRetryAndGoalGate:
     def test_retry_status_retries_same_node(self):
         graph = parse_dot(
             """
@@ -30,8 +28,8 @@ class TestRetryAndGoalGate(unittest.TestCase):
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertEqual(2, calls["task"])
+        assert result.status == "success"
+        assert calls["task"] == 2
 
     def test_fail_edge_after_retry_exhaustion(self):
         graph = parse_dot(
@@ -58,9 +56,9 @@ class TestRetryAndGoalGate(unittest.TestCase):
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertEqual(2, calls["task"])
-        self.assertIn("fix", result.completed_nodes)
+        assert result.status == "success"
+        assert calls["task"] == 2
+        assert "fix" in result.completed_nodes
 
     def test_failure_routing_uses_retry_target(self):
         graph = parse_dot(
@@ -83,8 +81,8 @@ class TestRetryAndGoalGate(unittest.TestCase):
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertIn("fix", result.completed_nodes)
+        assert result.status == "success"
+        assert "fix" in result.completed_nodes
 
     def test_goal_gate_enforced_at_exit(self):
         graph = parse_dot(
@@ -110,9 +108,5 @@ class TestRetryAndGoalGate(unittest.TestCase):
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        self.assertEqual("success", result.status)
-        self.assertEqual(2, calls["implement"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert result.status == "success"
+        assert calls["implement"] == 2

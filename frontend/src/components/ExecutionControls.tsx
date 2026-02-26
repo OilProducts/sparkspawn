@@ -4,8 +4,10 @@ import { useStore } from '@/store'
 
 const STATUS_LABELS: Record<string, string> = {
     running: 'Running',
+    abort_requested: 'Canceling…',
     cancel_requested: 'Canceling…',
-    aborted: 'Aborted',
+    aborted: 'Canceled',
+    canceled: 'Canceled',
     failed: 'Failed',
     validation_error: 'Validation Error',
     success: 'Complete',

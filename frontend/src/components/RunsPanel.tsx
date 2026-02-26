@@ -21,6 +21,7 @@ const STATUS_STYLES: Record<string, string> = {
     failed: 'bg-destructive/15 text-destructive',
     fail: 'bg-destructive/15 text-destructive',
     aborted: 'bg-amber-500/15 text-amber-700',
+    canceled: 'bg-amber-500/15 text-amber-700',
     paused: 'bg-amber-500/15 text-amber-700',
     pause_requested: 'bg-amber-500/15 text-amber-700',
     abort_requested: 'bg-amber-500/15 text-amber-700',
@@ -30,8 +31,10 @@ const STATUS_STYLES: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
     pause_requested: 'Pausing',
-    abort_requested: 'Aborting',
+    abort_requested: 'Canceling',
     cancel_requested: 'Canceling',
+    aborted: 'Canceled',
+    canceled: 'Canceled',
 }
 
 const formatTimestamp = (value?: string | null) => {
@@ -106,7 +109,9 @@ export function RunsPanel() {
 
     const summary = useMemo(() => {
         const total = runs.length
-        const running = runs.filter((run) => run.status === 'running' || run.status === 'cancel_requested').length
+        const running = runs.filter(
+            (run) => run.status === 'running' || run.status === 'cancel_requested' || run.status === 'abort_requested'
+        ).length
         return { total, running }
     }, [runs])
 
@@ -220,7 +225,11 @@ export function RunsPanel() {
                                         </button>
                                         <button
                                             onClick={() => requestCancel(run.run_id)}
-                                            disabled={!(run.status === 'running' || run.status === 'cancel_requested')}
+                                            disabled={!(
+                                                run.status === 'running'
+                                                || run.status === 'cancel_requested'
+                                                || run.status === 'abort_requested'
+                                            )}
                                             className="inline-flex h-7 items-center gap-1.5 rounded-md bg-destructive px-2 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
                                         >
                                             <OctagonX className="h-3.5 w-3.5" />

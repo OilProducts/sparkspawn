@@ -1,10 +1,8 @@
-import unittest
-
 from attractor.dsl import parse_dot, validate_graph
 from attractor.dsl.models import DiagnosticSeverity
 
 
-class TestDotValidator(unittest.TestCase):
+class TestDotValidator:
     def _errors(self, diagnostics):
         return [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
 
@@ -21,7 +19,7 @@ class TestDotValidator(unittest.TestCase):
         diagnostics = validate_graph(graph)
 
         rule_ids = {d.rule_id for d in diagnostics}
-        self.assertIn("reachability", rule_ids)
+        assert "reachability" in rule_ids
 
     def test_edge_target_exists_and_start_incoming_exit_outgoing(self):
         dot = """
@@ -39,9 +37,9 @@ class TestDotValidator(unittest.TestCase):
         diagnostics = validate_graph(graph)
         rule_ids = [d.rule_id for d in diagnostics]
 
-        self.assertIn("edge_target_exists", rule_ids)
-        self.assertIn("start_no_incoming", rule_ids)
-        self.assertIn("exit_no_outgoing", rule_ids)
+        assert "edge_target_exists" in rule_ids
+        assert "start_no_incoming" in rule_ids
+        assert "exit_no_outgoing" in rule_ids
 
     def test_condition_and_stylesheet_syntax(self):
         dot = """
@@ -59,8 +57,22 @@ class TestDotValidator(unittest.TestCase):
         diagnostics = validate_graph(graph)
         rule_ids = {d.rule_id for d in diagnostics}
 
-        self.assertIn("condition_syntax", rule_ids)
-        self.assertIn("stylesheet_syntax", rule_ids)
+        assert "condition_syntax" in rule_ids
+        assert "stylesheet_syntax" in rule_ids
+
+    def test_stylesheet_selector_and_property_restrictions(self):
+        dot = """
+        digraph G {
+            graph [model_stylesheet="box { llm_model: x; } .BadClass { llm_provider: openai; } * { model: gpt; } #node { reasoning_effort: ultra; }"]
+            start [shape=Mdiamond]
+            done [shape=Msquare]
+            start -> done
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+        errors = [d for d in diagnostics if d.rule_id == "stylesheet_syntax" and d.severity == DiagnosticSeverity.ERROR]
+        assert len(errors) >= 3
 
     def test_retry_target_and_fidelity_warnings(self):
         dot = """
@@ -77,8 +89,8 @@ class TestDotValidator(unittest.TestCase):
         diagnostics = validate_graph(graph)
 
         warning_rules = {d.rule_id for d in diagnostics if d.severity == DiagnosticSeverity.WARNING}
-        self.assertIn("retry_target_exists", warning_rules)
-        self.assertIn("fidelity_valid", warning_rules)
+        assert "retry_target_exists" in warning_rules
+        assert "fidelity_valid" in warning_rules
 
     def test_valid_minimal_graph(self):
         dot = """
@@ -92,8 +104,4 @@ class TestDotValidator(unittest.TestCase):
         """
         graph = parse_dot(dot)
         diagnostics = validate_graph(graph)
-        self.assertEqual([], self._errors(diagnostics))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert self._errors(diagnostics) == []

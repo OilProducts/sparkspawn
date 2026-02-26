@@ -1,5 +1,3 @@
-import unittest
-
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.outcome import OutcomeStatus
@@ -11,12 +9,12 @@ class _StubBackend:
         self.ok = ok
         self.calls = []
 
-    def run(self, node_id: str, prompt: str, context: Context) -> bool:
+    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
         self.calls.append((node_id, prompt, dict(context.values)))
         return self.ok
 
 
-class TestBuiltInHandlers(unittest.TestCase):
+class TestBuiltInHandlers:
     def test_registry_resolution_by_shape_and_type(self):
         graph = parse_dot(
             """
@@ -33,9 +31,9 @@ class TestBuiltInHandlers(unittest.TestCase):
         )
 
         registry = build_default_registry(codergen_backend=_StubBackend())
-        self.assertEqual("start", registry.resolve_handler_type(graph.nodes["start"]))
-        self.assertEqual("wait.human", registry.resolve_handler_type(graph.nodes["human"]))
-        self.assertEqual("tool", registry.resolve_handler_type(graph.nodes["custom"]))
+        assert registry.resolve_handler_type(graph.nodes["start"]) == "start"
+        assert registry.resolve_handler_type(graph.nodes["human"]) == "wait.human"
+        assert registry.resolve_handler_type(graph.nodes["custom"]) == "tool"
 
     def test_codergen_handler_calls_backend(self):
         graph = parse_dot(
@@ -56,8 +54,8 @@ class TestBuiltInHandlers(unittest.TestCase):
         ctx = Context(values={"graph.goal": "ship"})
 
         outcome = runner("task", "Plan for $goal", ctx)
-        self.assertEqual(OutcomeStatus.SUCCESS, outcome.status)
-        self.assertEqual("Plan for ship", backend.calls[0][1])
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0][1] == "Plan for ship"
 
     def test_wait_human_uses_interviewer_and_sets_preferred_label(self):
         graph = parse_dot(
@@ -76,8 +74,8 @@ class TestBuiltInHandlers(unittest.TestCase):
         runner = HandlerRunner(graph, registry)
 
         outcome = runner("gate", "Choose", Context())
-        self.assertEqual(OutcomeStatus.SUCCESS, outcome.status)
-        self.assertEqual("Approve", outcome.preferred_label)
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.preferred_label == "Approve"
 
     def test_tool_handler_executes_command(self):
         graph = parse_dot(
@@ -90,9 +88,5 @@ class TestBuiltInHandlers(unittest.TestCase):
         registry = build_default_registry(codergen_backend=_StubBackend())
         runner = HandlerRunner(graph, registry)
         outcome = runner("tool_node", "", Context())
-        self.assertEqual(OutcomeStatus.SUCCESS, outcome.status)
-        self.assertIn("hello", outcome.notes)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert "hello" in outcome.notes

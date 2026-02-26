@@ -341,6 +341,10 @@ def _read_run_meta(path: Path) -> Optional[RunRecord]:
 def _normalize_run_status(status: str) -> str:
     if status == "fail":
         return "failed"
+    if status in {"aborted", "abort_requested"}:
+        return {"aborted": "canceled", "abort_requested": "cancel_requested"}[status]
+    if status == "cancelled":
+        return "canceled"
     return status
 
 
@@ -919,7 +923,7 @@ async def list_runs():
                         status = _normalize_run_status(status_match.group(1))
                         break
                     if "Pipeline Aborted" in line:
-                        status = "failed"
+                        status = "canceled"
                         break
 
                 if status:

@@ -1,4 +1,4 @@
-import unittest
+import pytest
 
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
@@ -6,7 +6,7 @@ from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
-class TestExecutor(unittest.TestCase):
+class TestExecutor:
     def test_executor_resolves_start_and_branches(self):
         graph = parse_dot(
             """
@@ -38,11 +38,11 @@ class TestExecutor(unittest.TestCase):
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        self.assertEqual("success", result.status)
-        self.assertEqual("done", result.current_node)
-        self.assertEqual(["start", "plan", "fix"], result.completed_nodes)
-        self.assertEqual("true", result.context.get("needs_fix"))
-        self.assertEqual(calls[1][1], "plan")
+        assert result.status == "success"
+        assert result.current_node == "done"
+        assert result.completed_nodes == ["start", "plan", "fix"]
+        assert result.context.get("needs_fix") == "true"
+        assert calls[1][1] == "plan"
 
     def test_executor_requires_single_start(self):
         graph = parse_dot(
@@ -57,9 +57,5 @@ class TestExecutor(unittest.TestCase):
             """
         )
 
-        with self.assertRaises(RuntimeError):
+        with pytest.raises(RuntimeError):
             PipelineExecutor(graph, lambda *_: Outcome(status=OutcomeStatus.SUCCESS)).run(Context())
-
-
-if __name__ == "__main__":
-    unittest.main()

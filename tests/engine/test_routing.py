@@ -1,12 +1,10 @@
-import unittest
-
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.outcome import Outcome, OutcomeStatus
 from attractor.engine.routing import select_next_edge
 
 
-class TestRouting(unittest.TestCase):
+class TestRouting:
     def _edges_from(self, graph, node_id):
         return [e for e in graph.edges if e.source == node_id]
 
@@ -30,7 +28,7 @@ class TestRouting(unittest.TestCase):
         )
         outcome = Outcome(status=OutcomeStatus.SUCCESS)
         edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
-        self.assertEqual("b", edge.target)
+        assert edge.target == "b"
 
     def test_preferred_label_then_suggested_ids(self):
         graph = parse_dot(
@@ -52,11 +50,11 @@ class TestRouting(unittest.TestCase):
         )
         out_pref = Outcome(status=OutcomeStatus.SUCCESS, preferred_label="Approve")
         edge_pref = select_next_edge(self._edges_from(graph, "a"), out_pref, Context())
-        self.assertEqual("b", edge_pref.target)
+        assert edge_pref.target == "b"
 
         out_suggested = Outcome(status=OutcomeStatus.SUCCESS, suggested_next_ids=["c"])
         edge_suggested = select_next_edge(self._edges_from(graph, "a"), out_suggested, Context())
-        self.assertEqual("c", edge_suggested.target)
+        assert edge_suggested.target == "c"
 
     def test_weight_then_lexical_tiebreak_for_unconditional(self):
         graph = parse_dot(
@@ -78,8 +76,4 @@ class TestRouting(unittest.TestCase):
         )
         outcome = Outcome(status=OutcomeStatus.SUCCESS)
         edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
-        self.assertEqual("b", edge.target)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert edge.target == "b"

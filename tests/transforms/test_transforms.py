@@ -1,10 +1,8 @@
-import unittest
-
 from attractor.dsl import parse_dot
 from attractor.transforms import GoalVariableTransform, ModelStylesheetTransform, TransformPipeline
 
 
-class TestTransforms(unittest.TestCase):
+class TestTransforms:
     def test_goal_variable_transform(self):
         graph = parse_dot(
             """
@@ -19,13 +17,13 @@ class TestTransforms(unittest.TestCase):
         )
 
         GoalVariableTransform().apply(graph)
-        self.assertEqual("Plan for Build API", graph.nodes["plan"].attrs["prompt"].value)
+        assert graph.nodes["plan"].attrs["prompt"].value == "Plan for Build API"
 
     def test_stylesheet_specificity_and_explicit_override(self):
         graph = parse_dot(
             """
             digraph G {
-                graph [model_stylesheet="* { model = base; provider = generic; } box { model = boxy; } .fast { model = flash; } #review { model = best; provider = openai; reasoning_effort = high; }"]
+                graph [model_stylesheet="* { llm_model: base; llm_provider: generic; } .fast { llm_model: flash; } #review { llm_model: best; llm_provider: openai; reasoning_effort: high; }"]
 
                 start [shape=Mdiamond]
                 plan [shape=box, class="fast"]
@@ -39,18 +37,18 @@ class TestTransforms(unittest.TestCase):
         ModelStylesheetTransform().apply(graph)
 
         # class overrides shape and universal
-        self.assertEqual("flash", graph.nodes["plan"].attrs["llm_model"].value)
+        assert graph.nodes["plan"].attrs["llm_model"].value == "flash"
         # explicit attribute is not overwritten
-        self.assertEqual("explicit", graph.nodes["review"].attrs["llm_model"].value)
+        assert graph.nodes["review"].attrs["llm_model"].value == "explicit"
         # other properties from highest-specific rule can still apply
-        self.assertEqual("openai", graph.nodes["review"].attrs["llm_provider"].value)
-        self.assertEqual("high", graph.nodes["review"].attrs["reasoning_effort"].value)
+        assert graph.nodes["review"].attrs["llm_provider"].value == "openai"
+        assert graph.nodes["review"].attrs["reasoning_effort"].value == "high"
 
     def test_transform_pipeline_order(self):
         graph = parse_dot(
             """
             digraph G {
-                graph [goal="Landing Page", model_stylesheet="box { model = gpt-5; }"]
+                graph [goal="Landing Page", model_stylesheet="* { llm_model: gpt-5; }"]
                 start [shape=Mdiamond]
                 task [shape=box, prompt="Build $goal"]
                 done [shape=Msquare]
@@ -64,9 +62,5 @@ class TestTransforms(unittest.TestCase):
         pipeline.register(ModelStylesheetTransform())
         pipeline.apply(graph)
 
-        self.assertEqual("Build Landing Page", graph.nodes["task"].attrs["prompt"].value)
-        self.assertEqual("gpt-5", graph.nodes["task"].attrs["llm_model"].value)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert graph.nodes["task"].attrs["prompt"].value == "Build Landing Page"
+        assert graph.nodes["task"].attrs["llm_model"].value == "gpt-5"

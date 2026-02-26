@@ -16,6 +16,9 @@ VALID_FIDELITY = {
 }
 
 _CONDITION_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*)\s*(=|!=)\s*(.+)$")
+_STYLESHEET_ALLOWED_PROPERTIES = {"llm_model", "llm_provider", "reasoning_effort"}
+_STYLESHEET_CLASS_RE = re.compile(r"^[a-z0-9-]+$")
+_STYLESHEET_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def validate_graph(graph: DotGraph) -> List[Diagnostic]:
@@ -391,6 +394,20 @@ def _lint_stylesheet_syntax(stylesheet: str, line: int) -> List[Diagnostic]:
                     line=line,
                 )
             )
+        elif selector != "*" and not (
+            (selector.startswith(".") and _STYLESHEET_CLASS_RE.fullmatch(selector[1:] or ""))
+            or (selector.startswith("#") and _STYLESHEET_ID_RE.fullmatch(selector[1:] or ""))
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    rule_id="stylesheet_syntax",
+                    severity=DiagnosticSeverity.ERROR,
+                    message=(
+                        f"invalid stylesheet selector '{selector}', must be '*', '.class', or '#node_id'"
+                    ),
+                    line=line,
+                )
+            )
 
         close = text.find("}", brace + 1)
         if close == -1:
@@ -423,6 +440,34 @@ def _lint_stylesheet_syntax(stylesheet: str, line: int) -> List[Diagnostic]:
                             rule_id="stylesheet_syntax",
                             severity=DiagnosticSeverity.ERROR,
                             message=f"stylesheet statement '{stmt}' must contain ':'",
+                            line=line,
+                        )
+                    )
+                    continue
+
+                key, raw_value = stmt.split(":", 1)
+                key = key.strip()
+                if key not in _STYLESHEET_ALLOWED_PROPERTIES:
+                    diagnostics.append(
+                        Diagnostic(
+                            rule_id="stylesheet_syntax",
+                            severity=DiagnosticSeverity.ERROR,
+                            message=(
+                                f"unsupported stylesheet property '{key}', expected one of "
+                                "llm_model, llm_provider, reasoning_effort"
+                            ),
+                            line=line,
+                        )
+                    )
+                    continue
+
+                value = raw_value.strip().strip('"')
+                if key == "reasoning_effort" and value not in {"low", "medium", "high"}:
+                    diagnostics.append(
+                        Diagnostic(
+                            rule_id="stylesheet_syntax",
+                            severity=DiagnosticSeverity.ERROR,
+                            message="reasoning_effort must be one of: low, medium, high",
                             line=line,
                         )
                     )

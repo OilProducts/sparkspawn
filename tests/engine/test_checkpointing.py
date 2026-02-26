@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 import tempfile
-import unittest
 
 from attractor.dsl import parse_dot
 from attractor.engine import load_checkpoint
@@ -10,7 +9,7 @@ from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
-class TestCheckpointAndArtifacts(unittest.TestCase):
+class TestCheckpointAndArtifacts:
     def test_artifacts_and_checkpoint_written_each_step(self):
         graph = parse_dot(
             """
@@ -39,24 +38,24 @@ class TestCheckpointAndArtifacts(unittest.TestCase):
                 checkpoint_file=str(checkpoint_file),
             ).run(Context())
 
-            self.assertEqual("success", result.status)
-            self.assertEqual("done", result.current_node)
+            assert result.status == "success"
+            assert result.current_node == "done"
 
             # Artifacts for non-terminal stages.
             for node_id in ["start", "plan"]:
                 stage = logs_root / node_id
-                self.assertTrue((stage / "prompt.md").exists())
-                self.assertTrue((stage / "response.md").exists())
-                self.assertTrue((stage / "status.json").exists())
+                assert (stage / "prompt.md").exists()
+                assert (stage / "response.md").exists()
+                assert (stage / "status.json").exists()
 
                 payload = json.loads((stage / "status.json").read_text(encoding="utf-8"))
-                self.assertEqual("success", payload["outcome"])
-                self.assertIn("notes", payload)
+                assert payload["outcome"] == "success"
+                assert "notes" in payload
 
             checkpoint = load_checkpoint(checkpoint_file)
-            self.assertIsNotNone(checkpoint)
-            self.assertEqual("done", checkpoint.current_node)
-            self.assertEqual(["start", "plan"], checkpoint.completed_nodes)
+            assert checkpoint is not None
+            assert checkpoint.current_node == "done"
+            assert checkpoint.completed_nodes == ["start", "plan"]
 
     def test_resume_from_checkpoint(self):
         graph = parse_dot(
@@ -91,17 +90,13 @@ class TestCheckpointAndArtifacts(unittest.TestCase):
             )
 
             paused = executor.run(Context(), max_steps=1)
-            self.assertEqual("paused", paused.status)
-            self.assertEqual("plan", paused.current_node)
-            self.assertEqual(["start"], paused.completed_nodes)
+            assert paused.status == "paused"
+            assert paused.current_node == "plan"
+            assert paused.completed_nodes == ["start"]
 
             resumed = executor.run(Context(), resume=True)
-            self.assertEqual("success", resumed.status)
-            self.assertEqual("done", resumed.current_node)
+            assert resumed.status == "success"
+            assert resumed.current_node == "done"
 
             # start executes once; resume continues at plan.
-            self.assertEqual(["start", "plan", "review"], calls)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert calls == ["start", "plan", "review"]
