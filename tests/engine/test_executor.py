@@ -7,6 +7,64 @@ from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
 class TestExecutor:
+    def test_executor_emits_typed_runtime_events_for_ui_consumers(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+        events = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
+
+        event_types = [event["type"] for event in events]
+        assert result.status == "success"
+        assert event_types[0] == "PipelineStarted"
+        assert event_types[-1] == "PipelineCompleted"
+        assert event_types.count("StageStarted") == 2
+        assert event_types.count("StageCompleted") == 2
+        assert event_types.count("CheckpointSaved") >= 1
+        assert all(isinstance(event, dict) and "type" in event for event in events)
+
+    def test_executor_emits_stage_retrying_event(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box, max_retries=2]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+        events = []
+        calls = {"work": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "work":
+                calls["work"] += 1
+                if calls["work"] == 1:
+                    return Outcome(status=OutcomeStatus.RETRY, failure_reason="retryable")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
+
+        retry_events = [event for event in events if event["type"] == "StageRetrying"]
+        assert result.status == "success"
+        assert len(retry_events) == 1
+        assert retry_events[0]["node_id"] == "work"
+        assert retry_events[0]["attempt"] == 1
+
     def test_shape_start_takes_precedence_over_start_id_fallback(self):
         graph = parse_dot(
             """

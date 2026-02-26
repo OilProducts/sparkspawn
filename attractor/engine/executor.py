@@ -15,6 +15,7 @@ from .routing import select_next_edge
 
 RunnerFn = Callable[[str, str, Context], Outcome]
 ControlFn = Callable[[], Optional[str]]
+EventFn = Callable[[Dict[str, object]], None]
 NODE_OUTCOMES_KEY = "_attractor.node_outcomes"
 
 
@@ -37,12 +38,14 @@ class PipelineExecutor:
         logs_root: Optional[str] = None,
         checkpoint_file: Optional[str] = None,
         control: Optional[ControlFn] = None,
+        on_event: Optional[EventFn] = None,
     ):
         self.graph = graph
         self.runner = runner
         self.logs_root = Path(logs_root) if logs_root else None
         self.checkpoint_path = Path(checkpoint_file) if checkpoint_file else None
         self.control = control
+        self.on_event = on_event
         self._shape_start_nodes = self._node_ids_for_shape("Mdiamond")
         self._shape_exit_nodes = self._node_ids_for_shape("Msquare")
 
@@ -76,6 +79,7 @@ class PipelineExecutor:
                     restored_context = dict(checkpoint.context)
                     restored_context.update(ctx.values)
                     ctx = Context(values=restored_context)
+        self._emit_event("PipelineStarted", current_node=current, resumed=resume)
 
         steps = 0
         while True:
@@ -87,6 +91,7 @@ class PipelineExecutor:
                     context=ctx,
                     retry_counts=retry_counts,
                 )
+                self._emit_event("PipelineFailed", current_node=current, error="aborted_by_user")
                 return PipelineResult(
                     status="aborted",
                     current_node=current,
@@ -103,6 +108,7 @@ class PipelineExecutor:
                     context=ctx,
                     retry_counts=retry_counts,
                 )
+                self._emit_event("PipelinePaused", current_node=current)
                 return PipelineResult(
                     status="paused",
                     current_node=current,
@@ -121,6 +127,7 @@ class PipelineExecutor:
                         context=ctx,
                         retry_counts=retry_counts,
                     )
+                    self._emit_event("PipelineCompleted", current_node=current)
                     return PipelineResult(
                         status="success",
                         current_node=current,
@@ -142,6 +149,7 @@ class PipelineExecutor:
                     )
                     continue
 
+                self._emit_event("PipelineFailed", current_node=current, error="goal_gate_failed")
                 return PipelineResult(
                     status="fail",
                     current_node=current,
@@ -154,6 +162,7 @@ class PipelineExecutor:
             node = self.graph.nodes[current]
             prior_status = self._context_outcome_status(ctx)
             prompt = self._prompt_for_node(node.node_id)
+            self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
             outcome = self.runner(node.node_id, prompt, ctx)
             outcomes[node.node_id] = outcome
 
@@ -170,6 +179,13 @@ class PipelineExecutor:
             retries_so_far = retry_counts.get(node.node_id, 0)
             if self._should_retry(outcome, retries_so_far, max_retries):
                 retry_counts[node.node_id] = retries_so_far + 1
+                self._emit_event(
+                    "StageRetrying",
+                    node_id=node.node_id,
+                    index=len(completed),
+                    attempt=retry_counts[node.node_id],
+                    delay=0,
+                )
                 self._save_checkpoint(
                     current_node=node.node_id,
                     completed_nodes=completed,
@@ -178,6 +194,21 @@ class PipelineExecutor:
                 )
                 continue
 
+            if outcome.status.value == "fail":
+                self._emit_event(
+                    "StageFailed",
+                    node_id=node.node_id,
+                    index=len(completed),
+                    error=outcome.failure_reason or "stage_failed",
+                    will_retry=False,
+                )
+            else:
+                self._emit_event(
+                    "StageCompleted",
+                    node_id=node.node_id,
+                    index=len(completed),
+                    outcome=outcome.status.value,
+                )
             completed.append(node.node_id)
             self._save_checkpoint(
                 current_node=node.node_id,
@@ -193,9 +224,16 @@ class PipelineExecutor:
                 if route:
                     next_edge = _SyntheticEdge(route)
             if not next_edge:
-                raise RuntimeError(
-                    f"Stage '{node.node_id}' has no eligible outgoing edge"
+                message = f"Stage '{node.node_id}' has no eligible outgoing edge"
+                self._emit_event(
+                    "StageFailed",
+                    node_id=node.node_id,
+                    index=len(completed),
+                    error=message,
+                    will_retry=False,
                 )
+                self._emit_event("PipelineFailed", current_node=node.node_id, error=message)
+                raise RuntimeError(message)
 
             current = next_edge.target
             route_trace.append(current)
@@ -208,6 +246,7 @@ class PipelineExecutor:
 
             steps += 1
             if max_steps is not None and steps >= max_steps:
+                self._emit_event("PipelinePaused", current_node=current)
                 return PipelineResult(
                     status="paused",
                     current_node=current,
@@ -233,10 +272,12 @@ class PipelineExecutor:
         route_trace: List[str] = [current]
         steps = 0
         stop_nodes = set(stop_nodes or [])
+        self._emit_event("PipelineStarted", current_node=current, resumed=False)
 
         while True:
             action = self._poll_control()
             if action == "abort":
+                self._emit_event("PipelineFailed", current_node=current, error="aborted_by_user")
                 return PipelineResult(
                     status="aborted",
                     current_node=current,
@@ -247,6 +288,7 @@ class PipelineExecutor:
                     failure_reason="aborted_by_user",
                 )
             if action == "pause":
+                self._emit_event("PipelinePaused", current_node=current)
                 return PipelineResult(
                     status="paused",
                     current_node=current,
@@ -257,6 +299,7 @@ class PipelineExecutor:
                 )
 
             if current in stop_nodes:
+                self._emit_event("PipelineCompleted", current_node=current)
                 return PipelineResult(
                     status="success",
                     current_node=current,
@@ -267,6 +310,7 @@ class PipelineExecutor:
                 )
 
             if self._is_exit_node(current):
+                self._emit_event("PipelineCompleted", current_node=current)
                 return PipelineResult(
                     status="success",
                     current_node=current,
@@ -279,6 +323,7 @@ class PipelineExecutor:
             node = self.graph.nodes[current]
             prior_status = self._context_outcome_status(ctx)
             prompt = self._prompt_for_node(node.node_id)
+            self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
             outcome = self.runner(node.node_id, prompt, ctx)
             outcomes[node.node_id] = outcome
 
@@ -295,8 +340,30 @@ class PipelineExecutor:
             retries_so_far = retry_counts.get(node.node_id, 0)
             if self._should_retry(outcome, retries_so_far, max_retries):
                 retry_counts[node.node_id] = retries_so_far + 1
+                self._emit_event(
+                    "StageRetrying",
+                    node_id=node.node_id,
+                    index=len(completed),
+                    attempt=retry_counts[node.node_id],
+                    delay=0,
+                )
                 continue
 
+            if outcome.status.value == "fail":
+                self._emit_event(
+                    "StageFailed",
+                    node_id=node.node_id,
+                    index=len(completed),
+                    error=outcome.failure_reason or "stage_failed",
+                    will_retry=False,
+                )
+            else:
+                self._emit_event(
+                    "StageCompleted",
+                    node_id=node.node_id,
+                    index=len(completed),
+                    outcome=outcome.status.value,
+                )
             completed.append(node.node_id)
             outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
             routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
@@ -306,6 +373,8 @@ class PipelineExecutor:
                 if route:
                     next_edge = _SyntheticEdge(route)
             if not next_edge:
+                message = f"Stage '{node.node_id}' has no eligible outgoing edge"
+                self._emit_event("PipelineFailed", current_node=node.node_id, error=message)
                 return PipelineResult(
                     status="fail",
                     current_node=current,
@@ -313,7 +382,7 @@ class PipelineExecutor:
                     context=dict(ctx.values),
                     node_outcomes=outcomes,
                     route_trace=route_trace,
-                    failure_reason=f"Stage '{node.node_id}' has no eligible outgoing edge",
+                    failure_reason=message,
                 )
 
             current = next_edge.target
@@ -321,6 +390,7 @@ class PipelineExecutor:
 
             steps += 1
             if max_steps is not None and steps >= max_steps:
+                self._emit_event("PipelinePaused", current_node=current)
                 return PipelineResult(
                     status="paused",
                     current_node=current,
@@ -337,15 +407,16 @@ class PipelineExecutor:
         context: Context,
         retry_counts: Dict[str, int],
     ) -> None:
-        if not self.checkpoint_path:
-            return
-        checkpoint = Checkpoint(
-            current_node=current_node,
-            completed_nodes=list(completed_nodes),
-            context=dict(context.values),
-            retry_counts=dict(retry_counts),
-        )
-        save_checkpoint(self.checkpoint_path, checkpoint)
+        persisted = bool(self.checkpoint_path)
+        if self.checkpoint_path:
+            checkpoint = Checkpoint(
+                current_node=current_node,
+                completed_nodes=list(completed_nodes),
+                context=dict(context.values),
+                retry_counts=dict(retry_counts),
+            )
+            save_checkpoint(self.checkpoint_path, checkpoint)
+        self._emit_event("CheckpointSaved", node_id=current_node, persisted=persisted)
 
     def _poll_control(self) -> Optional[str]:
         if not self.control:
@@ -354,6 +425,16 @@ class PipelineExecutor:
             return self.control()
         except Exception:
             return None
+
+    def _emit_event(self, event_type: str, **payload: object) -> None:
+        if not self.on_event:
+            return
+        event: Dict[str, object] = {"type": event_type}
+        event.update(payload)
+        try:
+            self.on_event(event)
+        except Exception:
+            return
 
     def _write_stage_artifacts(self, node_id: str, prompt: str, outcome: Outcome) -> None:
         if not self.logs_root:
