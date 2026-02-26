@@ -183,7 +183,7 @@ Status key:
 - [x] [4.3-02] Ensure lint enforces exactly one start node.
 
 ### 4.4 Exit Handler
-- [ ] [4.4-01] Implement no-op exit handler returning SUCCESS.
+- [x] [4.4-01] Implement no-op exit handler returning SUCCESS.
 - [ ] [4.4-02] Keep goal-gate logic in engine, not exit handler.
 
 ### 4.5 Codergen Handler (LLM Task)

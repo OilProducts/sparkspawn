@@ -484,6 +484,23 @@ class TestBuiltInHandlers:
         assert outcome.notes == ""
         assert outcome.context_updates == {}
 
+    def test_exit_handler_is_noop_success(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                done [shape=Msquare]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("done", "", Context(values={"outcome": "fail"}))
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.notes == ""
+        assert outcome.context_updates == {}
+
     def test_handler_runner_enforces_node_timeout(self):
         graph = parse_dot(
             """

@@ -7,4 +7,4 @@ from ..base import HandlerRuntime
 
 class ExitHandler:
     def execute(self, runtime: HandlerRuntime) -> Outcome:
-        return Outcome(status=OutcomeStatus.SUCCESS, notes="exit no-op")
+        return Outcome(status=OutcomeStatus.SUCCESS)
