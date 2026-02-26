@@ -1,3 +1,5 @@
+import pytest
+
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
@@ -140,3 +142,83 @@ class TestRetryAndGoalGate:
         result = PipelineExecutor(graph, runner).run(Context())
         assert result.status == "success"
         assert calls["implement"] == 2
+
+    def test_goal_gate_recovery_uses_graph_level_retry_target(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [retry_target="implement"]
+                start [shape=Mdiamond]
+                implement [shape=box, goal_gate=true, max_retries=0]
+                done [shape=Msquare]
+
+                start -> implement
+                implement -> done
+            }
+            """
+        )
+
+        calls = {"implement": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "implement":
+                calls["implement"] += 1
+                if calls["implement"] == 1:
+                    return Outcome(status=OutcomeStatus.FAIL, failure_reason="needs fix")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+        assert result.status == "success"
+        assert calls["implement"] == 2
+
+    def test_goal_gate_recovery_uses_graph_level_fallback_retry_target(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [retry_target="missing", fallback_retry_target="implement"]
+                start [shape=Mdiamond]
+                implement [shape=box, goal_gate=true, max_retries=0]
+                done [shape=Msquare]
+
+                start -> implement
+                implement -> done
+            }
+            """
+        )
+
+        calls = {"implement": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "implement":
+                calls["implement"] += 1
+                if calls["implement"] == 1:
+                    return Outcome(status=OutcomeStatus.FAIL, failure_reason="needs fix")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+        assert result.status == "success"
+        assert calls["implement"] == 2
+
+    def test_non_goal_gate_fail_routing_ignores_graph_level_retry_target(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [retry_target="fix"]
+                start [shape=Mdiamond]
+                task [shape=box, max_retries=0]
+                fix [shape=box]
+                done [shape=Msquare]
+                start -> task
+                task -> done [condition="outcome=success"]
+                fix -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "task":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="permanent")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        with pytest.raises(RuntimeError, match="Stage 'task' has no eligible outgoing edge"):
+            PipelineExecutor(graph, runner).run(Context())

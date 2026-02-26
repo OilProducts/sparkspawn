@@ -581,7 +581,9 @@ class PipelineExecutor:
                 target = str(attr.value)
                 if target in self.graph.nodes:
                     return target
+        return ""
 
+    def _resolve_graph_retry_target(self) -> str:
         for key in ("retry_target", "fallback_retry_target"):
             attr = self.graph.graph_attrs.get(key)
             if attr:
@@ -620,7 +622,10 @@ class PipelineExecutor:
     def _resolve_goal_gate_retry_target(self, failed_gate_node: str) -> str:
         if not failed_gate_node:
             return ""
-        return self._resolve_failure_retry_target(failed_gate_node)
+        node_target = self._resolve_failure_retry_target(failed_gate_node)
+        if node_target:
+            return node_target
+        return self._resolve_graph_retry_target()
 
 
 class _SyntheticEdge:
