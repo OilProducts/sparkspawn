@@ -276,7 +276,7 @@ Status key:
 - [x] [6.1-02] Add adapter compatibility tests for all built-in interviewer variants.
 
 ### 6.2 Question Model
-- [ ] [6.2-01] Implement full question payload (`text`, `type`, `options`, `default`, `timeout_seconds`, `stage`, `metadata`).
+- [x] [6.2-01] Implement full question payload (`text`, `type`, `options`, `default`, `timeout_seconds`, `stage`, `metadata`).
 - [ ] [6.2-02] Validate question types and option schema.
 
 ### 6.3 Answer Model
