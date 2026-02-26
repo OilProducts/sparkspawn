@@ -1002,7 +1002,7 @@ def _graph_payload(graph) -> dict:
         ],
         "graph_attrs": {
             "goal": _attr_value(graph.graph_attrs, "goal"),
-            "label": _attr_value(graph.graph_attrs, "label"),
+            "label": _attr_value(graph.graph_attrs, "label", ""),
             "model_stylesheet": _attr_value(graph.graph_attrs, "model_stylesheet"),
             "default_max_retry": _attr_value(graph.graph_attrs, "default_max_retry"),
             "retry_target": _attr_value(graph.graph_attrs, "retry_target"),
