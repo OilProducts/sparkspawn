@@ -982,14 +982,16 @@ class PipelineExecutor:
         if not isinstance(statuses, dict):
             statuses = {}
 
-        for node_id, node in self.graph.nodes.items():
+        for node_id, status in statuses.items():
+            node = self.graph.nodes.get(node_id)
+            if node is None:
+                continue
             goal_gate_attr = node.attrs.get("goal_gate")
             if not goal_gate_attr:
                 continue
             if not _to_bool(goal_gate_attr.value):
                 continue
 
-            status = statuses.get(node_id)
             if status not in {"success", "partial_success"}:
                 return False, node_id
 

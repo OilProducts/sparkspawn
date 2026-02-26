@@ -338,6 +338,53 @@ class TestExecutor:
         assert retry_events[0]["node_id"] == "work"
         assert retry_events[0]["attempt"] == 1
 
+    def test_goal_gate_blocks_terminal_exit_when_visited_gate_failed(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                review [shape=box, goal_gate=true]
+                done [shape=Msquare]
+
+                start -> review
+                review -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "review":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="needs changes")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "fail"
+        assert result.current_node == "done"
+        assert result.route_trace == ["start", "review", "done"]
+        assert result.failure_reason == "goal_gate_failed"
+
+    def test_goal_gate_does_not_block_exit_for_unvisited_goal_gate_nodes(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box]
+                skipped_gate [shape=box, goal_gate=true]
+                done [shape=Msquare]
+
+                start -> work
+                work -> done
+            }
+            """
+        )
+
+        result = PipelineExecutor(graph, lambda *_: Outcome(status=OutcomeStatus.SUCCESS)).run(Context())
+
+        assert result.status == "success"
+        assert result.current_node == "done"
+        assert result.route_trace == ["start", "work", "done"]
+
     def test_shape_start_takes_precedence_over_start_id_fallback(self):
         graph = parse_dot(
             """
