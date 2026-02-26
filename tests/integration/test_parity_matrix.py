@@ -155,6 +155,20 @@ class TestParityMatrixSubset:
         assert result.status == "success"
         assert "fix" in result.completed_nodes
 
+    def test_human_gate_fixture_routes_by_labeled_options(self):
+        fixture_path = Path(__file__).resolve().parents[1] / "fixtures" / "human_gate_workflow.dot"
+        graph = parse_dot(fixture_path.read_text(encoding="utf-8"))
+
+        interviewer = QueueInterviewer([Answer(selected_values=["[F] Fix"]), Answer(selected_values=["[A] Approve"])])
+        backend = _Backend({"start": True, "ship_it": True, "fixes": True})
+        registry = build_default_registry(codergen_backend=backend, interviewer=interviewer)
+        result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
+
+        assert result.status == "success"
+        assert result.completed_nodes.count("review_gate") == 2
+        assert "fixes" in result.completed_nodes
+        assert "ship_it" in result.completed_nodes
+
     def test_context_updates_visible_next_node(self):
         dot = """
         digraph G {

@@ -5,6 +5,7 @@ from attractor.dsl.models import DiagnosticSeverity
 
 
 SIMPLE_LINEAR_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "simple_linear_workflow.dot"
+HUMAN_GATE_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "human_gate_workflow.dot"
 
 
 class TestDotValidator:
@@ -144,6 +145,12 @@ class TestDotValidator:
 
     def test_simple_linear_workflow_fixture_is_validator_clean(self):
         graph = parse_dot(SIMPLE_LINEAR_FIXTURE.read_text(encoding="utf-8"))
+        diagnostics = validate_graph(graph)
+
+        assert self._errors(diagnostics) == []
+
+    def test_human_gate_workflow_fixture_is_validator_clean(self):
+        graph = parse_dot(HUMAN_GATE_FIXTURE.read_text(encoding="utf-8"))
         diagnostics = validate_graph(graph)
 
         assert self._errors(diagnostics) == []

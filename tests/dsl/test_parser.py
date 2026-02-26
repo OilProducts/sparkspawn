@@ -7,6 +7,7 @@ from attractor.dsl.models import DotValueType, Duration
 
 
 SIMPLE_LINEAR_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "simple_linear_workflow.dot"
+HUMAN_GATE_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "human_gate_workflow.dot"
 
 
 class TestDotParser:
@@ -21,6 +22,27 @@ class TestDotParser:
             ("run_tests", "report"),
             ("report", "exit"),
         ]
+
+    def test_parses_human_gate_workflow_fixture_with_labeled_options(self):
+        graph = parse_dot(HUMAN_GATE_FIXTURE.read_text(encoding="utf-8"))
+
+        assert graph.graph_id == "Review"
+        assert list(graph.nodes.keys()) == ["start", "exit", "review_gate", "ship_it", "fixes"]
+        assert graph.nodes["review_gate"].attrs["type"].value == "wait.human"
+        assert [(edge.source, edge.target) for edge in graph.edges] == [
+            ("start", "review_gate"),
+            ("review_gate", "ship_it"),
+            ("review_gate", "fixes"),
+            ("ship_it", "exit"),
+            ("fixes", "review_gate"),
+        ]
+        edge_labels = {
+            (edge.source, edge.target): edge.attrs["label"].value
+            for edge in graph.edges
+            if "label" in edge.attrs
+        }
+        assert edge_labels[("review_gate", "ship_it")] == "[A] Approve"
+        assert edge_labels[("review_gate", "fixes")] == "[F] Fix"
 
     def test_parses_quoted_strings_with_supported_escapes(self):
         dot = r'''
