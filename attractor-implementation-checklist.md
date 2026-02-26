@@ -190,7 +190,7 @@ Status key:
 - [x] [4.5-01] Build prompt from node prompt/label with `$goal` expansion.
 - [x] [4.5-02] Write `prompt.md` before backend call and `response.md` afterward.
 - [x] [4.5-03] Support backend return as text or full `Outcome`.
-- [ ] [4.5-04] Serialize `status.json` from final outcome.
+- [x] [4.5-04] Serialize `status.json` from final outcome.
 - [ ] [4.5-05] Return simulation response when backend is absent.
 
 #### CodergenBackend Interface

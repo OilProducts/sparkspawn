@@ -1,5 +1,6 @@
 import threading
 import time
+import json
 from pathlib import Path
 import tempfile
 
@@ -432,6 +433,40 @@ class TestBuiltInHandlers:
         assert outcome.notes == "please retry"
         assert outcome.suggested_next_ids == ["fallback_stage"]
         assert outcome.context_updates == {"work.last": "task"}
+
+    def test_codergen_handler_writes_status_json_from_final_outcome(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [shape=box, prompt="Plan for $goal"]
+            }
+            """
+        )
+        backend_outcome = Outcome(
+            status=OutcomeStatus.PARTIAL_SUCCESS,
+            preferred_label="continue",
+            suggested_next_ids=["followup"],
+            context_updates={"work.last": "task"},
+            notes="backend returned partial",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+            registry = build_default_registry(codergen_backend=_OutcomeBackend(backend_outcome))
+            runner = HandlerRunner(graph, registry, logs_root=logs_root)
+
+            outcome = runner("task", "Plan for $goal", Context(values={"graph.goal": "ship"}))
+
+            assert outcome is backend_outcome
+            status_path = logs_root / "task" / "status.json"
+            assert status_path.exists()
+            assert json.loads(status_path.read_text(encoding="utf-8")) == {
+                "context_updates": {"work.last": "task"},
+                "notes": "backend returned partial",
+                "outcome": "partial_success",
+                "preferred_next_label": "continue",
+                "suggested_next_ids": ["followup"],
+            }
 
     def test_wait_human_uses_interviewer_and_sets_preferred_label(self):
         graph = parse_dot(

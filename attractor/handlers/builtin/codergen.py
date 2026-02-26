@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +33,7 @@ class CodergenHandler:
                 notes="codergen handler completed without backend",
             )
             _write_stage_file(stage_dir, "response.md", outcome.notes or "")
+            _write_status_file(stage_dir, outcome)
             return outcome
 
         timeout = _to_seconds(runtime.node_attrs.get("timeout"))
@@ -51,6 +53,7 @@ class CodergenHandler:
             outcome = Outcome(status=OutcomeStatus.FAIL, failure_reason="codergen backend failure")
             response_text = outcome.failure_reason
         _write_stage_file(stage_dir, "response.md", response_text)
+        _write_status_file(stage_dir, outcome)
         return outcome
 
 
@@ -101,3 +104,17 @@ def _write_stage_file(stage_dir: Path | None, filename: str, content: str) -> No
     if stage_dir is None:
         return
     (stage_dir / filename).write_text(content + "\n", encoding="utf-8")
+
+
+def _write_status_file(stage_dir: Path | None, outcome: Outcome) -> None:
+    if stage_dir is None:
+        return
+    payload = {
+        "outcome": outcome.status.value,
+        "preferred_next_label": outcome.preferred_label,
+        "suggested_next_ids": list(outcome.suggested_next_ids),
+        "context_updates": dict(outcome.context_updates),
+        "notes": outcome.notes,
+    }
+    with (stage_dir / "status.json").open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
