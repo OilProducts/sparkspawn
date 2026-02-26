@@ -265,7 +265,6 @@ Status key:
 
 ### 5.6 Run Directory Structure
 - [x] [5.6-01] Create run root with `checkpoint.json`, `manifest.json`, stage directories, and `artifacts/`.
-- [ ] [5.6-02] Ensure each stage directory includes `prompt.md`, `response.md`, `status.json`.
 - [ ] [5.6-03] Add integrity test that verifies directory structure after end-to-end run.
 
 ---
@@ -547,6 +546,7 @@ Status key:
 ---
 
 ## Deferred Tasks
+- [ ] [5.6-02] Ensure each stage directory includes `prompt.md`, `response.md`, `status.json`. Deferred because executor stage artifact writes already guarantee all three files per executed stage (`attractor/engine/executor.py::_write_stage_artifacts`), and coverage exists in `tests/engine/test_checkpointing.py::test_artifacts_and_checkpoint_written_each_step`, so this is checklist state drift.
 - [ ] [4.2-01] Implement registration API with replacement behavior for duplicate keys. Deferred because `HandlerRegistry.register` already replaces existing entries via direct map assignment and this is checklist state drift.
 - [ ] [2.6-02] Resolve `type` override before shape-based handler mapping. Deferred because `HandlerRegistry.resolve_handler_type` already checks explicit `type` before shape mapping and tests already cover this precedence (`tests/handlers/test_handlers.py`), so this is checklist state drift.
 - [ ] [2.8-02] Ensure explicit `type` attribute overrides shape mapping. Deferred because explicit `type` precedence is already implemented in `HandlerRegistry.resolve_handler_type` and validated by `tests/handlers/test_handlers.py::test_registry_resolution_by_shape_and_type`, so this is checklist state drift.
