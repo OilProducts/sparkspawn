@@ -300,7 +300,7 @@ Status key:
 
 ### 7.1 Diagnostic Model
 - [x] [7.1-01] Implement diagnostic structure with rule/severity/message/node/edge/fix fields.
-- [ ] [7.1-03] Preserve WARNING/INFO diagnostics in API responses and UI surfaces.
+- [x] [7.1-03] Preserve WARNING/INFO diagnostics in API responses and UI surfaces.
 
 ### 7.2 Built-In Lint Rules
 - [ ] [7.2-01] Implement `start_node` rule.

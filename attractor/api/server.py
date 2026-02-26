@@ -1189,13 +1189,15 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[1])
     diagnostics = validate_graph(graph)
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
+    diagnostic_payloads = [_diagnostic_payload(d) for d in diagnostics]
+    error_payloads = [_diagnostic_payload(d) for d in errors]
     if errors:
         RUNTIME.status = "validation_error"
         RUNTIME.last_error = errors[0].message
         return {
             "status": "validation_error",
-            "diagnostics": [_diagnostic_payload(d) for d in diagnostics],
-            "errors": [_diagnostic_payload(d) for d in errors],
+            "diagnostics": diagnostic_payloads,
+            "errors": error_payloads,
         }
 
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[2])
@@ -1355,6 +1357,8 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
         "run_id": run_id,
         "working_directory": working_dir,
         "model": display_model,
+        "diagnostics": diagnostic_payloads,
+        "errors": error_payloads,
         "graph_dot_path": str(graphviz_export.dot_path),
         "graph_render_path": str(graphviz_export.rendered_path) if graphviz_export.rendered_path else None,
     }
