@@ -111,7 +111,7 @@ Status key:
 
 ### 2.13 Minimal Examples
 - [x] [2.13-01] Add parser+validator fixture for simple linear workflow example.
-- [ ] [2.13-02] Add execution fixture for branching condition example.
+- [x] [2.13-02] Add execution fixture for branching condition example.
 - [ ] [2.13-03] Add interviewer fixture for human-gate example with labeled options.
 
 ---

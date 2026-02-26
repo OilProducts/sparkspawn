@@ -7,8 +7,40 @@ from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
 
+BRANCHING_CONDITION_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "branching_condition_workflow.dot"
+
 
 class TestExecutor:
+    @pytest.mark.parametrize(
+        ("validate_outcomes", "expected_route"),
+        [
+            (
+                [OutcomeStatus.SUCCESS],
+                ["start", "plan", "implement", "validate", "gate", "exit"],
+            ),
+            (
+                [OutcomeStatus.PARTIAL_SUCCESS, OutcomeStatus.SUCCESS],
+                ["start", "plan", "implement", "validate", "gate", "implement", "validate", "gate", "exit"],
+            ),
+        ],
+    )
+    def test_executes_branching_condition_workflow_fixture(self, validate_outcomes, expected_route):
+        graph = parse_dot(BRANCHING_CONDITION_FIXTURE.read_text(encoding="utf-8"))
+        validate_attempts = {"count": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "validate":
+                idx = validate_attempts["count"]
+                validate_attempts["count"] += 1
+                status = validate_outcomes[min(idx, len(validate_outcomes) - 1)]
+                return Outcome(status=status)
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "success"
+        assert result.route_trace == expected_route
+
     def test_loop_restart_relaunches_from_edge_target_with_fresh_result_state(self):
         graph = parse_dot(
             """
