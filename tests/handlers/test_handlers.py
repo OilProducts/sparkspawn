@@ -1,5 +1,6 @@
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -369,6 +370,29 @@ class TestBuiltInHandlers:
         assert runtime.context is context
         assert runtime.graph is graph
         assert runtime.logs_root == tmp_path
+
+    def test_handler_contract_normalizes_string_logs_root_to_path(self, tmp_path):
+        graph = parse_dot(
+            """
+            digraph G {
+                capture [shape=box, type="custom.capture"]
+            }
+            """
+        )
+        capture_handler = _RuntimeCaptureHandler()
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={"custom.capture": capture_handler},
+        )
+        runner = HandlerRunner(graph, registry, logs_root=str(tmp_path))
+
+        outcome = runner("capture", "", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert len(capture_handler.calls) == 1
+        runtime = capture_handler.calls[0]
+        assert runtime.logs_root == tmp_path
+        assert isinstance(runtime.logs_root, Path)
 
     def test_conditional_handler_is_noop_success(self):
         graph = parse_dot(

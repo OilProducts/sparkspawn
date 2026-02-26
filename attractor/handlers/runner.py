@@ -26,6 +26,10 @@ class HandlerRunner:
     _active_calls: int = field(default=0, init=False, repr=False)
     _concurrency_overrides: int = field(default=0, init=False, repr=False)
 
+    def __post_init__(self) -> None:
+        if self.logs_root is not None:
+            self.logs_root = Path(self.logs_root)
+
     def __call__(self, node_id: str, prompt: str, context: Context) -> Outcome:
         entered = False
         try:
