@@ -67,6 +67,43 @@ class _ConcurrentOutsideParallelHandler:
         )
 
 
+class _SharedRefSeedHandler:
+    def __init__(self, shared_ref):
+        self.shared_ref = shared_ref
+
+    def run(self, runtime):
+        return Outcome(
+            status=OutcomeStatus.SUCCESS,
+            context_updates={"shared_ref": self.shared_ref},
+        )
+
+
+class _SharedRefIsolationChecker:
+    def __init__(self, marker: str, barrier: threading.Barrier):
+        self.marker = marker
+        self.barrier = barrier
+
+    def run(self, runtime):
+        shared_ref = runtime.context.get("shared_ref", {})
+        if not isinstance(shared_ref, dict):
+            return Outcome(status=OutcomeStatus.FAIL, failure_reason="missing shared_ref dict")
+        markers = shared_ref.setdefault("markers", [])
+        if not isinstance(markers, list):
+            return Outcome(status=OutcomeStatus.FAIL, failure_reason="shared_ref.markers must be list")
+        markers.append(self.marker)
+        try:
+            self.barrier.wait(timeout=1.0)
+        except threading.BrokenBarrierError:
+            return Outcome(status=OutcomeStatus.FAIL, failure_reason="checker synchronization failed")
+
+        if markers == [self.marker]:
+            return Outcome(status=OutcomeStatus.SUCCESS, notes=f"isolated:{self.marker}")
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=f"context leaked markers for {self.marker}: {markers}",
+        )
+
+
 class _FalseyInterviewer(Interviewer):
     def __bool__(self) -> bool:
         return False
@@ -317,3 +354,48 @@ class TestBuiltInHandlers:
         outcome = runner("fan", "", Context())
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.notes == "concurrency gate enforced"
+
+    def test_parallel_branches_keep_context_updates_isolated_per_branch(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan [shape=component]
+                a_seed [shape=box, type="custom.seed_a"]
+                b_seed [shape=box, type="custom.seed_b"]
+                a_check [shape=box, type="custom.check_a"]
+                b_check [shape=box, type="custom.check_b"]
+                a_stop [shape=tripleoctagon]
+                b_stop [shape=tripleoctagon]
+
+                fan -> a_seed
+                fan -> b_seed
+                a_seed -> a_check
+                b_seed -> b_check
+                a_check -> a_stop [condition="outcome=success"]
+                b_check -> b_stop [condition="outcome=success"]
+            }
+            """
+        )
+        shared_ref = {"markers": []}
+        barrier = threading.Barrier(2)
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={
+                "custom.seed_a": _SharedRefSeedHandler(shared_ref),
+                "custom.seed_b": _SharedRefSeedHandler(shared_ref),
+                "custom.check_a": _SharedRefIsolationChecker("a", barrier),
+                "custom.check_b": _SharedRefIsolationChecker("b", barrier),
+            },
+        )
+        runner = HandlerRunner(graph, registry)
+        context = Context(values={"base": "kept"})
+
+        outcome = runner("fan", "", context)
+        context.merge_updates(outcome.context_updates)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert context.get("base") == "kept"
+        assert context.get("shared_ref", "") == ""
+        branch_results = context.get("parallel.results", [])
+        assert len(branch_results) == 2
+        assert all(item.get("status") == "success" for item in branch_results)

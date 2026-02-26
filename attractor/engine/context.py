@@ -17,7 +17,7 @@ class Context:
 
     def merge_updates(self, updates: Dict[str, Any]) -> None:
         for key, value in updates.items():
-            self.values[key] = value
+            self.values[key] = copy.deepcopy(value)
 
     def clone(self) -> "Context":
         return Context(values=copy.deepcopy(self.values))
