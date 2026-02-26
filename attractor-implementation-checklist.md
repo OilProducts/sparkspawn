@@ -272,7 +272,7 @@ Status key:
 ## 6. Human-in-the-Loop (Interviewer Pattern)
 
 ### 6.1 Interviewer Interface
-- [ ] [6.1-01] Implement `ask`, `ask_multiple`, and `inform` interface contract.
+- [x] [6.1-01] Implement `ask`, `ask_multiple`, and `inform` interface contract.
 - [ ] [6.1-02] Add adapter compatibility tests for all built-in interviewer variants.
 
 ### 6.2 Question Model

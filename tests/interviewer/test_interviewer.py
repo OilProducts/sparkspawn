@@ -2,6 +2,7 @@ from attractor.interviewer import (
     Answer,
     AutoApproveInterviewer,
     CallbackInterviewer,
+    Interviewer,
     Question,
     QuestionOption,
     QuestionType,
@@ -10,6 +11,28 @@ from attractor.interviewer import (
 
 
 class TestInterviewerImplementations:
+    def test_interviewer_ask_multiple_delegates_to_ask(self):
+        class _StubInterviewer(Interviewer):
+            def ask(self, question: Question) -> Answer:
+                return Answer(selected_values=[question.title])
+
+        interviewer = _StubInterviewer()
+        questions = [
+            Question(title="q1", prompt="p1", question_type=QuestionType.SINGLE_SELECT),
+            Question(title="q2", prompt="p2", question_type=QuestionType.SINGLE_SELECT),
+        ]
+
+        answers = interviewer.ask_multiple(questions)
+        assert [answer.selected_values for answer in answers] == [["q1"], ["q2"]]
+
+    def test_interviewer_inform_default_is_noop(self):
+        class _StubInterviewer(Interviewer):
+            def ask(self, question: Question) -> Answer:
+                return Answer()
+
+        interviewer = _StubInterviewer()
+        assert interviewer.inform("Heads up", "review") is None
+
     def test_autoapprove_picks_first(self):
         q = Question(
             title="Pick",
