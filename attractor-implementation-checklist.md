@@ -265,7 +265,7 @@ Status key:
 
 ### 5.6 Run Directory Structure
 - [x] [5.6-01] Create run root with `checkpoint.json`, `manifest.json`, stage directories, and `artifacts/`.
-- [ ] [5.6-03] Add integrity test that verifies directory structure after end-to-end run.
+- [x] [5.6-03] Add integrity test that verifies directory structure after end-to-end run.
 
 ---
 

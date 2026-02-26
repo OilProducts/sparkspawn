@@ -13,6 +13,53 @@ from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
 class TestCheckpointAndArtifacts:
+    def test_end_to_end_run_directory_structure_includes_terminal_stage_artifacts(self):
+        graph = parse_dot(
+            """
+            digraph release_flow {
+                graph [goal="Ship release"]
+                start [shape=Mdiamond]
+                plan [shape=box, prompt="Draft release plan"]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "run-logs"
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                return Outcome(status=OutcomeStatus.SUCCESS, notes=f"{node_id} complete")
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "success"
+
+            required_root_entries = [
+                logs_root / "checkpoint.json",
+                logs_root / "manifest.json",
+                logs_root / "artifacts",
+            ]
+            for path in required_root_entries:
+                assert path.exists()
+
+            for node_id in ["start", "plan", "done"]:
+                stage_dir = logs_root / node_id
+                assert stage_dir.is_dir()
+                assert (stage_dir / "status.json").is_file()
+                assert (stage_dir / "prompt.md").is_file()
+                assert (stage_dir / "response.md").is_file()
+
+            terminal_status = json.loads((logs_root / "done" / "status.json").read_text(encoding="utf-8"))
+            assert terminal_status["outcome"] == "success"
+
     def test_run_root_bootstraps_checkpoint_manifest_stage_dirs_and_artifacts_directory(self):
         graph = parse_dot(
             """
