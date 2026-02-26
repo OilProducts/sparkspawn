@@ -16,6 +16,7 @@ from .routing import select_next_edge
 RunnerFn = Callable[[str, str, Context], Outcome | None]
 ControlFn = Callable[[], Optional[str]]
 EventFn = Callable[[Dict[str, object]], None]
+ShouldRetryFn = Callable[[Outcome], bool]
 NODE_OUTCOMES_KEY = "_attractor.node_outcomes"
 RUNTIME_FIDELITY_KEY = "_attractor.runtime.fidelity"
 RUNTIME_THREAD_ID_KEY = "_attractor.runtime.thread_id"
@@ -30,6 +31,31 @@ _NON_CODEGEN_SHAPES = {
     "house",
 }
 GOAL_GATE_NO_RETRY_TARGET_REASON = "Goal gate unsatisfied and no retry target"
+
+
+@dataclass(frozen=True)
+class BackoffConfig:
+    initial_delay_ms: int = 200
+    backoff_factor: float = 2.0
+    max_delay_ms: int = 60000
+    jitter: bool = True
+
+
+def _default_should_retry_outcome(outcome: Outcome) -> bool:
+    if outcome.status.value == "retry":
+        return True
+    if outcome.status.value == "fail":
+        if outcome.retryable is not None:
+            return outcome.retryable
+        return True
+    return False
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    max_attempts: int
+    backoff: BackoffConfig = field(default_factory=BackoffConfig)
+    should_retry: ShouldRetryFn = _default_should_retry_outcome
 
 
 @dataclass
@@ -206,9 +232,10 @@ class PipelineExecutor:
 
                 self._write_stage_artifacts(node.node_id, prompt, outcome)
 
-                max_retries = self._max_retries_for_node(node.node_id)
+                retry_policy = self._retry_policy_for_node(node.node_id)
+                max_retries = retry_policy.max_attempts - 1
                 retries_so_far = retry_counts.get(node.node_id, 0)
-                if self._should_retry(outcome, retries_so_far, max_retries):
+                if self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
                     self._emit_event(
                         "StageRetrying",
@@ -473,9 +500,10 @@ class PipelineExecutor:
 
                 self._write_stage_artifacts(node.node_id, prompt, outcome)
 
-                max_retries = self._max_retries_for_node(node.node_id)
+                retry_policy = self._retry_policy_for_node(node.node_id)
+                max_retries = retry_policy.max_attempts - 1
                 retries_so_far = retry_counts.get(node.node_id, 0)
-                if self._should_retry(outcome, retries_so_far, max_retries):
+                if self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
                     self._emit_event(
                         "StageRetrying",
@@ -903,6 +931,11 @@ class PipelineExecutor:
             return _to_int(node_attr.value, 0)
         return 50
 
+    def _retry_policy_for_node(self, node_id: str) -> RetryPolicy:
+        max_retries = self._max_retries_for_node(node_id)
+        max_attempts = max(1, max_retries + 1)
+        return RetryPolicy(max_attempts=max_attempts)
+
     def _coerce_retry_exhausted_outcome(
         self,
         node_id: str,
@@ -939,16 +972,10 @@ class PipelineExecutor:
             notes=outcome.notes or "retries exhausted, partial accepted",
         )
 
-    def _should_retry(self, outcome: Outcome, retries_so_far: int, max_retries: int) -> bool:
-        if retries_so_far >= max_retries:
+    def _should_retry(self, outcome: Outcome, retries_so_far: int, policy: RetryPolicy) -> bool:
+        if retries_so_far + 1 >= policy.max_attempts:
             return False
-        if outcome.status.value == "retry":
-            return True
-        if outcome.status.value == "fail":
-            if outcome.retryable is not None:
-                return outcome.retryable
-            return True
-        return False
+        return policy.should_retry(outcome)
 
     def _reset_retry_counter(self, node_id: str, outcome: Outcome, retry_counts: Dict[str, int]) -> None:
         if outcome.status not in {OutcomeStatus.SUCCESS, OutcomeStatus.PARTIAL_SUCCESS}:
