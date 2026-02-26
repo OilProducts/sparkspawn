@@ -94,7 +94,7 @@ Status key:
 
 ### 2.9 Chained Edges
 - [x] [2.9-02] Apply shared edge attr block to each expanded edge.
-- [ ] [2.9-03] Add parser normalization test for chain equivalence.
+- [x] [2.9-03] Add parser normalization test for chain equivalence.
 
 ### 2.10 Subgraphs
 - [ ] [2.10-01] Flatten subgraph wrappers while preserving contained nodes/edges.

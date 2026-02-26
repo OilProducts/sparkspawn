@@ -1,6 +1,6 @@
 import pytest
 
-from attractor.dsl import DotParseError, parse_dot
+from attractor.dsl import DotParseError, normalize_graph, parse_dot
 from attractor.dsl.models import DotValueType, Duration
 
 
@@ -442,3 +442,23 @@ line2"]
         assert isinstance(second_timeout, Duration)
         assert first_timeout == second_timeout
         assert first_timeout is not second_timeout
+
+    def test_chained_edge_normalization_is_equivalent_to_expanded_edges(self):
+        chained = """
+        digraph G {
+            edge [weight=2]
+            a -> b -> c [label="next", timeout=5s]
+        }
+        """
+        expanded = """
+        digraph G {
+            edge [weight=2]
+            a -> b [label="next", timeout=5s]
+            b -> c [label="next", timeout=5s]
+        }
+        """
+
+        normalized_chained = normalize_graph(parse_dot(chained))
+        normalized_expanded = normalize_graph(parse_dot(expanded))
+
+        assert normalized_chained == normalized_expanded

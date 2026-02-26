@@ -60,6 +60,26 @@ def parse_dot(source: str) -> DotGraph:
     return graph
 
 
+def normalize_graph(graph: DotGraph) -> DotGraph:
+    """Return a deep-copied graph normalized for semantic comparisons."""
+    normalized = copy.deepcopy(graph)
+
+    for attr in normalized.graph_attrs.values():
+        attr.line = 0
+
+    for node in normalized.nodes.values():
+        node.line = 0
+        for attr in node.attrs.values():
+            attr.line = 0
+
+    for edge in normalized.edges:
+        edge.line = 0
+        for attr in edge.attrs.values():
+            attr.line = 0
+
+    return normalized
+
+
 class _Parser:
     def __init__(self, tokens: List[Token]):
         self.tokens = tokens
