@@ -7,6 +7,31 @@ from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
 class TestExecutor:
+    def test_executor_mirrors_graph_goal_into_context(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [goal="Ship docs"]
+                start [shape=Mdiamond]
+                work [shape=box]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+        seen_goals: list[object] = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            seen_goals.append(context.get("graph.goal"))
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "success"
+        assert result.context["graph.goal"] == "Ship docs"
+        assert seen_goals == ["Ship docs", "Ship docs"]
+
     def test_executor_emits_typed_runtime_events_for_ui_consumers(self):
         graph = parse_dot(
             """

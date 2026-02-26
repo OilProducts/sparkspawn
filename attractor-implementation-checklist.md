@@ -63,7 +63,7 @@ Status key:
 - [x] [2.4-04] Parse durations with units (`ms|s|m|h|d`) and normalize representation.
 
 ### 2.5 Graph-Level Attributes
-- [ ] [2.5-01] Implement `goal` extraction and mirror to context key `graph.goal`.
+- [x] [2.5-01] Implement `goal` extraction and mirror to context key `graph.goal`.
 - [ ] [2.5-02] Implement `label` as graph display metadata.
 - [ ] [2.5-03] Parse and validate `model_stylesheet` text.
 - [ ] [2.5-04] Apply `default_max_retry` fallback for nodes without `max_retries`.

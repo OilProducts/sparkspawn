@@ -79,6 +79,7 @@ class PipelineExecutor:
                     restored_context = dict(checkpoint.context)
                     restored_context.update(ctx.values)
                     ctx = Context(values=restored_context)
+        self._mirror_graph_goal(ctx)
         self._emit_event("PipelineStarted", current_node=current, resumed=resume)
 
         steps = 0
@@ -265,6 +266,7 @@ class PipelineExecutor:
         stop_nodes: Optional[set[str]] = None,
     ) -> PipelineResult:
         ctx = context or Context()
+        self._mirror_graph_goal(ctx)
         completed: List[str] = []
         outcomes: Dict[str, Outcome] = {}
         retry_counts: Dict[str, int] = {}
@@ -529,6 +531,10 @@ class PipelineExecutor:
         if label_attr:
             return str(label_attr.value)
         return node_id
+
+    def _mirror_graph_goal(self, context: Context) -> None:
+        goal_attr = self.graph.graph_attrs.get("goal")
+        context.set("graph.goal", str(goal_attr.value) if goal_attr else "")
 
     def _max_retries_for_node(self, node_id: str) -> int:
         node = self.graph.nodes[node_id]
