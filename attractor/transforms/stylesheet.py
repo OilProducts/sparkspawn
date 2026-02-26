@@ -22,20 +22,25 @@ class _StyleRule:
 class ModelStylesheetTransform:
     def apply(self, graph: DotGraph) -> DotGraph:
         style_attr = graph.graph_attrs.get("model_stylesheet")
-        if not style_attr:
-            return graph
+        rules: List[_StyleRule] = []
+        stylesheet_line = 0
+        if style_attr and isinstance(style_attr.value, str) and style_attr.value.strip() != "":
+            rules = _parse_rules(style_attr.value)
+            stylesheet_line = style_attr.line
 
-        stylesheet = style_attr.value
-        if not isinstance(stylesheet, str) or stylesheet.strip() == "":
-            return graph
-
-        rules = _parse_rules(stylesheet)
+        graph_defaults = _graph_default_model_attrs(graph)
         for node in graph.nodes.values():
-            self._apply_rules(node, rules, style_attr.line)
+            self._apply_rules(node, rules, stylesheet_line, graph_defaults)
 
         return graph
 
-    def _apply_rules(self, node: DotNode, rules: List[_StyleRule], line: int) -> None:
+    def _apply_rules(
+        self,
+        node: DotNode,
+        rules: List[_StyleRule],
+        line: int,
+        graph_defaults: Dict[str, Tuple[str, int]],
+    ) -> None:
         candidates: Dict[str, Tuple[int, int, str]] = {}
         for rule in rules:
             if not _selector_matches(rule.selector, node):
@@ -47,17 +52,24 @@ class ModelStylesheetTransform:
                 if current is None or entry > current:
                     candidates[prop] = entry
 
-        for prop, (_, _, value) in candidates.items():
+        for prop in _ALLOWED_PROPERTIES:
             existing = node.attrs.get(prop)
             # Preserve explicit node attributes from source; allow stylesheet
             # to replace parser/default-injected placeholders (line == 0).
             if existing is not None and existing.line > 0:
                 continue
+            if prop in candidates:
+                value = candidates[prop][2]
+                value_line = line
+            elif prop in graph_defaults:
+                value, value_line = graph_defaults[prop]
+            else:
+                continue
             node.attrs[prop] = DotAttribute(
                 key=prop,
                 value=value,
                 value_type=DotValueType.STRING,
-                line=line,
+                line=value_line,
             )
 
 
@@ -113,3 +125,16 @@ def _strip_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
         return value[1:-1]
     return value
+
+
+def _graph_default_model_attrs(graph: DotGraph) -> Dict[str, Tuple[str, int]]:
+    defaults: Dict[str, Tuple[str, int]] = {}
+    for prop in _ALLOWED_PROPERTIES:
+        attr = graph.graph_attrs.get(prop)
+        if not attr or attr.line <= 0:
+            continue
+        value = str(attr.value).strip()
+        if value == "":
+            continue
+        defaults[prop] = (value, attr.line)
+    return defaults

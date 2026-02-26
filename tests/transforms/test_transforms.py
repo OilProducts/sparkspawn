@@ -173,6 +173,45 @@ class TestTransforms:
         assert graph.nodes["review"].attrs["llm_model"].value == "gpt-5.2"
         assert graph.nodes["review"].attrs["llm_provider"].value == "openai"
 
+    def test_model_attr_precedence_node_then_stylesheet_then_graph_default(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [
+                    llm_model="graph-model",
+                    llm_provider="graph-provider",
+                    reasoning_effort="low",
+                    model_stylesheet=".fast { llm_model: class-model; } #review { llm_model: review-model; llm_provider: review-provider; }"
+                ]
+                start [shape=Mdiamond]
+                plan [shape=box, class="fast"]
+                review [shape=box]
+                explicit [shape=box, class="fast", llm_model="node-model", llm_provider="node-provider", reasoning_effort="medium"]
+                done [shape=Msquare]
+                start -> plan -> review -> explicit -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        # Stylesheet wins over graph defaults.
+        assert graph.nodes["plan"].attrs["llm_model"].value == "class-model"
+        # Graph defaults fill unresolved attrs.
+        assert graph.nodes["plan"].attrs["llm_provider"].value == "graph-provider"
+        assert graph.nodes["plan"].attrs["reasoning_effort"].value == "low"
+
+        # ID selector wins over class/universal and graph defaults.
+        assert graph.nodes["review"].attrs["llm_model"].value == "review-model"
+        assert graph.nodes["review"].attrs["llm_provider"].value == "review-provider"
+        assert graph.nodes["review"].attrs["reasoning_effort"].value == "low"
+
+        # Explicit node attrs always win.
+        assert graph.nodes["explicit"].attrs["llm_model"].value == "node-model"
+        assert graph.nodes["explicit"].attrs["llm_provider"].value == "node-provider"
+        assert graph.nodes["explicit"].attrs["reasoning_effort"].value == "medium"
+
     def test_transform_pipeline_order(self):
         graph = parse_dot(
             """
