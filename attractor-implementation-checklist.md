@@ -31,7 +31,7 @@ Status key:
 - [x] [1.3-05] Keep routing edge-driven (conditions/labels/weights), not handler-internal branching.
 
 ### 1.4 Layering and LLM Backends
-- [ ] [1.4-01] Keep orchestration layer backend-agnostic via `CodergenBackend` interface.
+- [x] [1.4-01] Keep orchestration layer backend-agnostic via `CodergenBackend` interface.
 - [ ] [1.4-02] Ensure pipeline definition is backend-invariant (switch backend without DOT changes).
 - [ ] [1.4-03] Emit runtime events suitable for TUI/web/IDE consumers with no UI coupling in engine.
 

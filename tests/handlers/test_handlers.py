@@ -2,6 +2,7 @@ from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.outcome import Outcome
 from attractor.engine.outcome import OutcomeStatus
+from attractor.handlers.base import CodergenBackend
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.interviewer import Answer, Interviewer, Question
 
@@ -30,6 +31,14 @@ class _FalseyInterviewer(Interviewer):
 
 
 class TestBuiltInHandlers:
+    def test_codergen_backend_protocol_is_structural(self):
+        class _AltBackend:
+            def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
+                return True
+
+        assert isinstance(_StubBackend(), CodergenBackend)
+        assert isinstance(_AltBackend(), CodergenBackend)
+
     def test_registry_resolution_by_shape_and_type(self):
         graph = parse_dot(
             """

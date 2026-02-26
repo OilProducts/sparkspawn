@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Protocol
+from typing import Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 from attractor.dsl.models import DotAttribute, DotEdge, DotGraph
 from attractor.engine.context import Context
 from attractor.engine.outcome import Outcome
 
 
+@runtime_checkable
 class CodergenBackend(Protocol):
     def run(
         self,
