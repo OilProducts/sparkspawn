@@ -36,7 +36,11 @@ class FanInHandler:
         if best is None:
             best = sorted(
                 candidates,
-                key=lambda r: (_status_rank(r.get("status", "")), str(r.get("id", ""))),
+                key=lambda r: (
+                    _status_rank(r.get("status", "")),
+                    -_score_value(r.get("score")),
+                    str(r.get("id", "")),
+                ),
             )[0]
 
         return Outcome(
@@ -72,6 +76,17 @@ def _status_rank(status: str) -> int:
         "fail": 3,
     }
     return order.get(normalized, 4)
+
+
+def _score_value(score: Any) -> float:
+    if score is None:
+        return 0.0
+    if isinstance(score, (int, float)):
+        return float(score)
+    try:
+        return float(str(score))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _backend_select(

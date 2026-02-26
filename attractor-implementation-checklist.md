@@ -215,7 +215,7 @@ Status key:
 
 ### 4.9 Fan-In Handler
 - [x] [4.9-02] Support LLM-based ranking when prompt is present.
-- [ ] [4.9-03] Support heuristic ranking fallback.
+- [x] [4.9-03] Support heuristic ranking fallback.
 - [ ] [4.9-04] Publish selected candidate via `parallel.fan_in.*` context keys.
 
 ### 4.10 Tool Handler

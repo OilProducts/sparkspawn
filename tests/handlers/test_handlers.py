@@ -1254,3 +1254,29 @@ class TestBuiltInHandlers:
         assert outcome.context_updates["parallel.fan_in.best_outcome"] == "success"
         assert len(backend.calls) == 1
         assert "Rank the branch results" in backend.calls[0]["prompt"]
+
+    def test_fan_in_uses_heuristic_score_fallback_without_prompt(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan_in [shape=tripleoctagon]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+        context = Context(
+            values={
+                "parallel.results": [
+                    {"id": "branch_a", "status": "success", "score": 0.2},
+                    {"id": "branch_b", "status": "success", "score": 0.9},
+                    {"id": "branch_c", "status": "partial_success", "score": 1.0},
+                ]
+            }
+        )
+
+        outcome = runner("fan_in", "", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.context_updates["parallel.fan_in.best_id"] == "branch_b"
+        assert outcome.context_updates["parallel.fan_in.best_outcome"] == "success"
