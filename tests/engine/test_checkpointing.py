@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 import tempfile
 
+import pytest
+
 from attractor.dsl import parse_dot
 from attractor.engine import load_checkpoint
 from attractor.engine.context import Context
@@ -170,3 +172,87 @@ class TestCheckpointAndArtifacts:
             assert checkpoint is not None
             assert checkpoint.current_node == "plan"
             assert checkpoint.completed_nodes == ["start", "plan"]
+
+    def test_finalize_persists_checkpoint_and_failure_event_on_runner_exception(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                done [shape=Msquare]
+                start -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_file = Path(tmp) / "attractor.state.json"
+            events = []
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                raise RuntimeError("runner exploded")
+
+            executor = PipelineExecutor(
+                graph,
+                runner,
+                checkpoint_file=str(checkpoint_file),
+                on_event=events.append,
+            )
+
+            with pytest.raises(RuntimeError, match="runner exploded"):
+                executor.run(Context())
+
+            checkpoint = load_checkpoint(checkpoint_file)
+            assert checkpoint is not None
+            assert checkpoint.current_node == "start"
+            assert checkpoint.completed_nodes == []
+
+            event_types = [event["type"] for event in events]
+            assert "CheckpointSaved" in event_types
+            assert event_types[-1] == "PipelineFailed"
+
+    def test_finalize_cleans_up_runner_and_control_for_run_and_run_from(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                done [shape=Msquare]
+                start -> done
+            }
+            """
+        )
+
+        class ClosableRunner:
+            def __init__(self) -> None:
+                self.closed = 0
+
+            def __call__(self, node_id: str, prompt: str, context: Context) -> Outcome:
+                return Outcome(status=OutcomeStatus.SUCCESS)
+
+            def close(self) -> None:
+                self.closed += 1
+
+        class ClosableControl:
+            def __init__(self) -> None:
+                self.closed = 0
+
+            def __call__(self) -> str | None:
+                return None
+
+            def close(self) -> None:
+                self.closed += 1
+
+        runner = ClosableRunner()
+        control = ClosableControl()
+        run_result = PipelineExecutor(graph, runner, control=control).run(Context())
+
+        assert run_result.status == "success"
+        assert runner.closed == 1
+        assert control.closed == 1
+
+        runner = ClosableRunner()
+        control = ClosableControl()
+        run_from_result = PipelineExecutor(graph, runner, control=control).run_from("start", Context())
+
+        assert run_from_result.status == "success"
+        assert runner.closed == 1
+        assert control.closed == 1

@@ -98,54 +98,37 @@ class PipelineExecutor:
         self._emit_event("PipelineStarted", current_node=current, resumed=resume)
 
         steps = 0
-        while True:
-            action = self._poll_control()
-            if action == "abort":
-                self._save_checkpoint(
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=ctx,
-                    retry_counts=retry_counts,
-                )
-                self._emit_event("PipelineFailed", current_node=current, error="aborted_by_user")
-                return PipelineResult(
-                    status="aborted",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                    failure_reason="aborted_by_user",
-                )
-            if action == "pause":
-                self._save_checkpoint(
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=ctx,
-                    retry_counts=retry_counts,
-                )
-                self._emit_event("PipelinePaused", current_node=current)
-                return PipelineResult(
-                    status="paused",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                )
-
-            if self._is_exit_node(current):
-                gates_ok, failed_gate_node = self._check_goal_gates(ctx)
-                if gates_ok:
-                    self._save_checkpoint(
+        try:
+            while True:
+                action = self._poll_control()
+                if action == "abort":
+                    self._finalize_run(
                         current_node=current,
                         completed_nodes=completed,
                         context=ctx,
                         retry_counts=retry_counts,
+                        event_type="PipelineFailed",
+                        error="aborted_by_user",
                     )
-                    self._emit_event("PipelineCompleted", current_node=current)
                     return PipelineResult(
-                        status="success",
+                        status="aborted",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                        failure_reason="aborted_by_user",
+                    )
+                if action == "pause":
+                    self._finalize_run(
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelinePaused",
+                    )
+                    return PipelineResult(
+                        status="paused",
                         current_node=current,
                         completed_nodes=completed,
                         context=dict(ctx.values),
@@ -153,155 +136,196 @@ class PipelineExecutor:
                         route_trace=route_trace,
                     )
 
-                retry_target = self._resolve_goal_gate_retry_target(failed_gate_node)
-                if retry_target:
-                    current = retry_target
-                    incoming_edge = None
-                    route_trace.append(current)
-                    self._save_checkpoint(
+                if self._is_exit_node(current):
+                    gates_ok, failed_gate_node = self._check_goal_gates(ctx)
+                    if gates_ok:
+                        self._finalize_run(
+                            current_node=current,
+                            completed_nodes=completed,
+                            context=ctx,
+                            retry_counts=retry_counts,
+                            event_type="PipelineCompleted",
+                        )
+                        return PipelineResult(
+                            status="success",
+                            current_node=current,
+                            completed_nodes=completed,
+                            context=dict(ctx.values),
+                            node_outcomes=outcomes,
+                            route_trace=route_trace,
+                        )
+
+                    retry_target = self._resolve_goal_gate_retry_target(failed_gate_node)
+                    if retry_target:
+                        current = retry_target
+                        incoming_edge = None
+                        route_trace.append(current)
+                        self._save_checkpoint(
+                            current_node=current,
+                            completed_nodes=completed,
+                            context=ctx,
+                            retry_counts=retry_counts,
+                        )
+                        continue
+
+                    self._finalize_run(
                         current_node=current,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelineFailed",
+                        error="goal_gate_failed",
+                    )
+                    return PipelineResult(
+                        status="fail",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
+
+                node = self.graph.nodes[current]
+                fidelity = self._resolve_runtime_fidelity(node.node_id, incoming_edge)
+                ctx.set(RUNTIME_FIDELITY_KEY, fidelity)
+                ctx.set(RUNTIME_THREAD_ID_KEY, self._resolve_runtime_thread_id(node.node_id, incoming_edge, fidelity))
+                prior_status = self._context_outcome_status(ctx)
+                prompt = self._prompt_for_node(node.node_id)
+                self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
+                raw_outcome = self.runner(node.node_id, prompt, ctx)
+                outcome = self._normalize_outcome(node.node_id, raw_outcome)
+                outcomes[node.node_id] = outcome
+
+                ctx.set("outcome", outcome.status.value)
+                if outcome.preferred_label:
+                    ctx.set("preferred_label", outcome.preferred_label)
+                if outcome.context_updates:
+                    ctx.merge_updates(outcome.context_updates)
+                self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
+
+                self._write_stage_artifacts(node.node_id, prompt, outcome)
+
+                max_retries = self._max_retries_for_node(node.node_id)
+                retries_so_far = retry_counts.get(node.node_id, 0)
+                if self._should_retry(outcome, retries_so_far, max_retries):
+                    retry_counts[node.node_id] = retries_so_far + 1
+                    self._emit_event(
+                        "StageRetrying",
+                        node_id=node.node_id,
+                        index=len(completed),
+                        attempt=retry_counts[node.node_id],
+                        delay=0,
+                    )
+                    self._save_checkpoint(
+                        current_node=node.node_id,
                         completed_nodes=completed,
                         context=ctx,
                         retry_counts=retry_counts,
                     )
                     continue
 
-                self._emit_event("PipelineFailed", current_node=current, error="goal_gate_failed")
-                return PipelineResult(
-                    status="fail",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
+                original_status = outcome.status
+                outcome = self._coerce_retry_exhausted_outcome(
+                    node.node_id,
+                    outcome,
+                    retries_so_far,
+                    max_retries,
                 )
+                if outcome.status != original_status:
+                    outcomes[node.node_id] = outcome
+                    ctx.set("outcome", outcome.status.value)
+                    self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
+                    self._write_stage_artifacts(node.node_id, prompt, outcome)
 
-            node = self.graph.nodes[current]
-            fidelity = self._resolve_runtime_fidelity(node.node_id, incoming_edge)
-            ctx.set(RUNTIME_FIDELITY_KEY, fidelity)
-            ctx.set(RUNTIME_THREAD_ID_KEY, self._resolve_runtime_thread_id(node.node_id, incoming_edge, fidelity))
-            prior_status = self._context_outcome_status(ctx)
-            prompt = self._prompt_for_node(node.node_id)
-            self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
-            raw_outcome = self.runner(node.node_id, prompt, ctx)
-            outcome = self._normalize_outcome(node.node_id, raw_outcome)
-            outcomes[node.node_id] = outcome
-
-            ctx.set("outcome", outcome.status.value)
-            if outcome.preferred_label:
-                ctx.set("preferred_label", outcome.preferred_label)
-            if outcome.context_updates:
-                ctx.merge_updates(outcome.context_updates)
-            self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
-
-            self._write_stage_artifacts(node.node_id, prompt, outcome)
-
-            max_retries = self._max_retries_for_node(node.node_id)
-            retries_so_far = retry_counts.get(node.node_id, 0)
-            if self._should_retry(outcome, retries_so_far, max_retries):
-                retry_counts[node.node_id] = retries_so_far + 1
-                self._emit_event(
-                    "StageRetrying",
-                    node_id=node.node_id,
-                    index=len(completed),
-                    attempt=retry_counts[node.node_id],
-                    delay=0,
-                )
+                if outcome.status.value == "fail":
+                    self._emit_event(
+                        "StageFailed",
+                        node_id=node.node_id,
+                        index=len(completed),
+                        error=outcome.failure_reason or "stage_failed",
+                        will_retry=False,
+                    )
+                else:
+                    self._emit_event(
+                        "StageCompleted",
+                        node_id=node.node_id,
+                        index=len(completed),
+                        outcome=outcome.status.value,
+                    )
+                completed.append(node.node_id)
                 self._save_checkpoint(
                     current_node=node.node_id,
                     completed_nodes=completed,
                     context=ctx,
                     retry_counts=retry_counts,
                 )
-                continue
+                outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
+                routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
+                next_edge = self._select_route_edge(node.node_id, outgoing, routing_outcome, ctx)
+                if not next_edge:
+                    message = f"Stage '{node.node_id}' has no eligible outgoing edge"
+                    self._emit_event(
+                        "StageFailed",
+                        node_id=node.node_id,
+                        index=len(completed),
+                        error=message,
+                        will_retry=False,
+                    )
+                    raise RuntimeError(message)
 
-            original_status = outcome.status
-            outcome = self._coerce_retry_exhausted_outcome(
-                node.node_id,
-                outcome,
-                retries_so_far,
-                max_retries,
-            )
-            if outcome.status != original_status:
-                outcomes[node.node_id] = outcome
-                ctx.set("outcome", outcome.status.value)
-                self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
-                self._write_stage_artifacts(node.node_id, prompt, outcome)
+                if _edge_attr_bool(next_edge, "loop_restart"):
+                    self._emit_event("PipelineRestarted", from_node=node.node_id, restart_node=next_edge.target)
+                    self._apply_loop_restart(
+                        restart_node=next_edge.target,
+                        context=ctx,
+                        completed=completed,
+                        outcomes=outcomes,
+                        retry_counts=retry_counts,
+                        route_trace=route_trace,
+                        persist_checkpoint=True,
+                    )
+                    current = next_edge.target
+                    incoming_edge = None
+                    steps = 0
+                    continue
 
-            if outcome.status.value == "fail":
-                self._emit_event(
-                    "StageFailed",
-                    node_id=node.node_id,
-                    index=len(completed),
-                    error=outcome.failure_reason or "stage_failed",
-                    will_retry=False,
-                )
-            else:
-                self._emit_event(
-                    "StageCompleted",
-                    node_id=node.node_id,
-                    index=len(completed),
-                    outcome=outcome.status.value,
-                )
-            completed.append(node.node_id)
-            self._save_checkpoint(
-                current_node=node.node_id,
-                completed_nodes=completed,
-                context=ctx,
-                retry_counts=retry_counts,
-            )
-            outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
-            routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
-            next_edge = self._select_route_edge(node.node_id, outgoing, routing_outcome, ctx)
-            if not next_edge:
-                message = f"Stage '{node.node_id}' has no eligible outgoing edge"
-                self._emit_event(
-                    "StageFailed",
-                    node_id=node.node_id,
-                    index=len(completed),
-                    error=message,
-                    will_retry=False,
-                )
-                self._emit_event("PipelineFailed", current_node=node.node_id, error=message)
-                raise RuntimeError(message)
-
-            if _edge_attr_bool(next_edge, "loop_restart"):
-                self._emit_event("PipelineRestarted", from_node=node.node_id, restart_node=next_edge.target)
-                self._apply_loop_restart(
-                    restart_node=next_edge.target,
-                    context=ctx,
-                    completed=completed,
-                    outcomes=outcomes,
-                    retry_counts=retry_counts,
-                    route_trace=route_trace,
-                    persist_checkpoint=True,
-                )
                 current = next_edge.target
-                incoming_edge = None
-                steps = 0
-                continue
+                incoming_edge = next_edge
+                route_trace.append(current)
+                self._save_checkpoint(
+                    current_node=current,
+                    completed_nodes=completed,
+                    context=ctx,
+                    retry_counts=retry_counts,
+                )
 
-            current = next_edge.target
-            incoming_edge = next_edge
-            route_trace.append(current)
-            self._save_checkpoint(
+                steps += 1
+                if max_steps is not None and steps >= max_steps:
+                    self._finalize_run(
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelinePaused",
+                    )
+                    return PipelineResult(
+                        status="paused",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
+        except Exception as exc:
+            self._finalize_run(
                 current_node=current,
                 completed_nodes=completed,
                 context=ctx,
                 retry_counts=retry_counts,
+                event_type="PipelineFailed",
+                error=str(exc),
             )
-
-            steps += 1
-            if max_steps is not None and steps >= max_steps:
-                self._emit_event("PipelinePaused", current_node=current)
-                return PipelineResult(
-                    status="paused",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                )
+            raise
 
     def run_from(
         self,
@@ -323,161 +347,210 @@ class PipelineExecutor:
         stop_nodes = set(stop_nodes or [])
         self._emit_event("PipelineStarted", current_node=current, resumed=False)
 
-        while True:
-            action = self._poll_control()
-            if action == "abort":
-                self._emit_event("PipelineFailed", current_node=current, error="aborted_by_user")
-                return PipelineResult(
-                    status="aborted",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                    failure_reason="aborted_by_user",
-                )
-            if action == "pause":
-                self._emit_event("PipelinePaused", current_node=current)
-                return PipelineResult(
-                    status="paused",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                )
+        try:
+            while True:
+                action = self._poll_control()
+                if action == "abort":
+                    self._finalize_run(
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelineFailed",
+                        error="aborted_by_user",
+                    )
+                    return PipelineResult(
+                        status="aborted",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                        failure_reason="aborted_by_user",
+                    )
+                if action == "pause":
+                    self._finalize_run(
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelinePaused",
+                    )
+                    return PipelineResult(
+                        status="paused",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
 
-            if current in stop_nodes:
-                self._emit_event("PipelineCompleted", current_node=current)
-                return PipelineResult(
-                    status="success",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                )
+                if current in stop_nodes:
+                    self._finalize_run(
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelineCompleted",
+                    )
+                    return PipelineResult(
+                        status="success",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
 
-            if self._is_exit_node(current):
-                self._emit_event("PipelineCompleted", current_node=current)
-                return PipelineResult(
-                    status="success",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                )
+                if self._is_exit_node(current):
+                    self._finalize_run(
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelineCompleted",
+                    )
+                    return PipelineResult(
+                        status="success",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
 
-            node = self.graph.nodes[current]
-            fidelity = self._resolve_runtime_fidelity(node.node_id, incoming_edge)
-            ctx.set(RUNTIME_FIDELITY_KEY, fidelity)
-            ctx.set(RUNTIME_THREAD_ID_KEY, self._resolve_runtime_thread_id(node.node_id, incoming_edge, fidelity))
-            prior_status = self._context_outcome_status(ctx)
-            prompt = self._prompt_for_node(node.node_id)
-            self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
-            raw_outcome = self.runner(node.node_id, prompt, ctx)
-            outcome = self._normalize_outcome(node.node_id, raw_outcome)
-            outcomes[node.node_id] = outcome
-
-            ctx.set("outcome", outcome.status.value)
-            if outcome.preferred_label:
-                ctx.set("preferred_label", outcome.preferred_label)
-            if outcome.context_updates:
-                ctx.merge_updates(outcome.context_updates)
-            self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
-
-            self._write_stage_artifacts(node.node_id, prompt, outcome)
-
-            max_retries = self._max_retries_for_node(node.node_id)
-            retries_so_far = retry_counts.get(node.node_id, 0)
-            if self._should_retry(outcome, retries_so_far, max_retries):
-                retry_counts[node.node_id] = retries_so_far + 1
-                self._emit_event(
-                    "StageRetrying",
-                    node_id=node.node_id,
-                    index=len(completed),
-                    attempt=retry_counts[node.node_id],
-                    delay=0,
-                )
-                continue
-
-            original_status = outcome.status
-            outcome = self._coerce_retry_exhausted_outcome(
-                node.node_id,
-                outcome,
-                retries_so_far,
-                max_retries,
-            )
-            if outcome.status != original_status:
+                node = self.graph.nodes[current]
+                fidelity = self._resolve_runtime_fidelity(node.node_id, incoming_edge)
+                ctx.set(RUNTIME_FIDELITY_KEY, fidelity)
+                ctx.set(RUNTIME_THREAD_ID_KEY, self._resolve_runtime_thread_id(node.node_id, incoming_edge, fidelity))
+                prior_status = self._context_outcome_status(ctx)
+                prompt = self._prompt_for_node(node.node_id)
+                self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
+                raw_outcome = self.runner(node.node_id, prompt, ctx)
+                outcome = self._normalize_outcome(node.node_id, raw_outcome)
                 outcomes[node.node_id] = outcome
+
                 ctx.set("outcome", outcome.status.value)
+                if outcome.preferred_label:
+                    ctx.set("preferred_label", outcome.preferred_label)
+                if outcome.context_updates:
+                    ctx.merge_updates(outcome.context_updates)
                 self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
+
                 self._write_stage_artifacts(node.node_id, prompt, outcome)
 
-            if outcome.status.value == "fail":
-                self._emit_event(
-                    "StageFailed",
-                    node_id=node.node_id,
-                    index=len(completed),
-                    error=outcome.failure_reason or "stage_failed",
-                    will_retry=False,
-                )
-            else:
-                self._emit_event(
-                    "StageCompleted",
-                    node_id=node.node_id,
-                    index=len(completed),
-                    outcome=outcome.status.value,
-                )
-            completed.append(node.node_id)
-            outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
-            routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
-            next_edge = self._select_route_edge(node.node_id, outgoing, routing_outcome, ctx)
-            if not next_edge:
-                message = f"Stage '{node.node_id}' has no eligible outgoing edge"
-                self._emit_event("PipelineFailed", current_node=node.node_id, error=message)
-                return PipelineResult(
-                    status="fail",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                    failure_reason=message,
-                )
+                max_retries = self._max_retries_for_node(node.node_id)
+                retries_so_far = retry_counts.get(node.node_id, 0)
+                if self._should_retry(outcome, retries_so_far, max_retries):
+                    retry_counts[node.node_id] = retries_so_far + 1
+                    self._emit_event(
+                        "StageRetrying",
+                        node_id=node.node_id,
+                        index=len(completed),
+                        attempt=retry_counts[node.node_id],
+                        delay=0,
+                    )
+                    continue
 
-            if _edge_attr_bool(next_edge, "loop_restart"):
-                self._emit_event("PipelineRestarted", from_node=node.node_id, restart_node=next_edge.target)
-                self._apply_loop_restart(
-                    restart_node=next_edge.target,
-                    context=ctx,
-                    completed=completed,
-                    outcomes=outcomes,
-                    retry_counts=retry_counts,
-                    route_trace=route_trace,
-                    persist_checkpoint=False,
+                original_status = outcome.status
+                outcome = self._coerce_retry_exhausted_outcome(
+                    node.node_id,
+                    outcome,
+                    retries_so_far,
+                    max_retries,
                 )
+                if outcome.status != original_status:
+                    outcomes[node.node_id] = outcome
+                    ctx.set("outcome", outcome.status.value)
+                    self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
+                    self._write_stage_artifacts(node.node_id, prompt, outcome)
+
+                if outcome.status.value == "fail":
+                    self._emit_event(
+                        "StageFailed",
+                        node_id=node.node_id,
+                        index=len(completed),
+                        error=outcome.failure_reason or "stage_failed",
+                        will_retry=False,
+                    )
+                else:
+                    self._emit_event(
+                        "StageCompleted",
+                        node_id=node.node_id,
+                        index=len(completed),
+                        outcome=outcome.status.value,
+                    )
+                completed.append(node.node_id)
+                outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
+                routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
+                next_edge = self._select_route_edge(node.node_id, outgoing, routing_outcome, ctx)
+                if not next_edge:
+                    message = f"Stage '{node.node_id}' has no eligible outgoing edge"
+                    self._finalize_run(
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelineFailed",
+                        error=message,
+                    )
+                    return PipelineResult(
+                        status="fail",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                        failure_reason=message,
+                    )
+
+                if _edge_attr_bool(next_edge, "loop_restart"):
+                    self._emit_event("PipelineRestarted", from_node=node.node_id, restart_node=next_edge.target)
+                    self._apply_loop_restart(
+                        restart_node=next_edge.target,
+                        context=ctx,
+                        completed=completed,
+                        outcomes=outcomes,
+                        retry_counts=retry_counts,
+                        route_trace=route_trace,
+                        persist_checkpoint=False,
+                    )
+                    current = next_edge.target
+                    incoming_edge = None
+                    steps = 0
+                    continue
+
                 current = next_edge.target
-                incoming_edge = None
-                steps = 0
-                continue
+                incoming_edge = next_edge
+                route_trace.append(current)
 
-            current = next_edge.target
-            incoming_edge = next_edge
-            route_trace.append(current)
-
-            steps += 1
-            if max_steps is not None and steps >= max_steps:
-                self._emit_event("PipelinePaused", current_node=current)
-                return PipelineResult(
-                    status="paused",
-                    current_node=current,
-                    completed_nodes=completed,
-                    context=dict(ctx.values),
-                    node_outcomes=outcomes,
-                    route_trace=route_trace,
-                )
+                steps += 1
+                if max_steps is not None and steps >= max_steps:
+                    self._finalize_run(
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelinePaused",
+                    )
+                    return PipelineResult(
+                        status="paused",
+                        current_node=current,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
+        except Exception as exc:
+            self._finalize_run(
+                current_node=current,
+                completed_nodes=completed,
+                context=ctx,
+                retry_counts=retry_counts,
+                event_type="PipelineFailed",
+                error=str(exc),
+            )
+            raise
 
     def _save_checkpoint(
         self,
@@ -496,6 +569,43 @@ class PipelineExecutor:
             )
             save_checkpoint(self.checkpoint_path, checkpoint)
         self._emit_event("CheckpointSaved", node_id=current_node, persisted=persisted)
+
+    def _finalize_run(
+        self,
+        *,
+        current_node: str,
+        completed_nodes: List[str],
+        context: Context,
+        retry_counts: Dict[str, int],
+        event_type: str,
+        error: str = "",
+    ) -> None:
+        self._save_checkpoint(
+            current_node=current_node,
+            completed_nodes=completed_nodes,
+            context=context,
+            retry_counts=retry_counts,
+        )
+        if error:
+            self._emit_event(event_type, current_node=current_node, error=error)
+        else:
+            self._emit_event(event_type, current_node=current_node)
+        self._cleanup_resources()
+
+    def _cleanup_resources(self) -> None:
+        self._close_if_supported(self.runner)
+        self._close_if_supported(self.control)
+
+    def _close_if_supported(self, target: object) -> None:
+        if target is None:
+            return
+        close_fn = getattr(target, "close", None)
+        if not callable(close_fn):
+            return
+        try:
+            close_fn()
+        except Exception:
+            return
 
     def _poll_control(self) -> Optional[str]:
         if not self.control:
