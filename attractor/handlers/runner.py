@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import signal
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import threading
 from typing import Any
 
 from attractor.dsl.models import Duration
@@ -18,30 +20,63 @@ from .registry import HandlerRegistry
 class HandlerRunner:
     graph: DotGraph
     registry: HandlerRegistry
+    _concurrency_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _active_calls: int = field(default=0, init=False, repr=False)
+    _concurrency_overrides: int = field(default=0, init=False, repr=False)
 
     def __call__(self, node_id: str, prompt: str, context: Context) -> Outcome:
-        node = self.graph.nodes[node_id]
-        outgoing = [edge for edge in self.graph.edges if edge.source == node_id]
-        handler = self.registry.resolve(node)
-        runtime = HandlerRuntime(
-            node_id=node_id,
-            prompt=prompt,
-            node_attrs=node.attrs,
-            outgoing_edges=outgoing,
-            context=context,
-            graph=self.graph,
-            runner=self,
-        )
-        timeout = _to_seconds(node.attrs.get("timeout"))
-        if timeout is None or timeout <= 0:
-            return handler.run(runtime)
-
-        message = f"handler timed out after {timeout:g}s"
+        entered = False
         try:
-            with _wall_timeout(timeout):
+            self._enter_call()
+            entered = True
+            node = self.graph.nodes[node_id]
+            outgoing = [edge for edge in self.graph.edges if edge.source == node_id]
+            handler = self.registry.resolve(node)
+            runtime = HandlerRuntime(
+                node_id=node_id,
+                prompt=prompt,
+                node_attrs=node.attrs,
+                outgoing_edges=outgoing,
+                context=context,
+                graph=self.graph,
+                runner=self,
+            )
+            timeout = _to_seconds(node.attrs.get("timeout"))
+            if timeout is None or timeout <= 0:
                 return handler.run(runtime)
-        except TimeoutError:
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=message)
+
+            message = f"handler timed out after {timeout:g}s"
+            try:
+                with _wall_timeout(timeout):
+                    return handler.run(runtime)
+            except TimeoutError:
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason=message)
+        finally:
+            if entered:
+                self._exit_call()
+
+    @contextmanager
+    def allow_concurrency(self):
+        with self._concurrency_lock:
+            self._concurrency_overrides += 1
+        try:
+            yield
+        finally:
+            with self._concurrency_lock:
+                self._concurrency_overrides = max(0, self._concurrency_overrides - 1)
+
+    def _enter_call(self) -> None:
+        with self._concurrency_lock:
+            self._active_calls += 1
+            if self._active_calls > 1 and self._concurrency_overrides == 0:
+                self._active_calls -= 1
+                raise RuntimeError(
+                    "Concurrent handler execution is only supported inside parallel handlers"
+                )
+
+    def _exit_call(self) -> None:
+        with self._concurrency_lock:
+            self._active_calls = max(0, self._active_calls - 1)
 
 
 class _SignalTimeout:

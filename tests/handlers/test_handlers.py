@@ -1,3 +1,4 @@
+import threading
 import time
 
 import pytest
@@ -31,6 +32,39 @@ class _SlowHandler:
     def run(self, runtime):
         time.sleep(0.2)
         return Outcome(status=OutcomeStatus.SUCCESS, notes="slow handler completed")
+
+
+class _ConcurrentOutsideParallelHandler:
+    def run(self, runtime):
+        targets = [edge.target for edge in runtime.outgoing_edges]
+        if len(targets) < 2:
+            return Outcome(status=OutcomeStatus.FAIL, failure_reason="need at least two branches")
+
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def invoke(target: str) -> None:
+            try:
+                barrier.wait(timeout=1.0)
+                runtime.runner(target, "", runtime.context.clone())
+            except Exception as exc:
+                errors.append(str(exc))
+
+        threads = [
+            threading.Thread(target=invoke, args=(targets[0],), daemon=True),
+            threading.Thread(target=invoke, args=(targets[1],), daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=2.0)
+
+        if any("parallel handlers" in message for message in errors):
+            return Outcome(status=OutcomeStatus.SUCCESS, notes="concurrency gate enforced")
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=f"unexpectedly allowed concurrent non-parallel handler execution: {errors}",
+        )
 
 
 class _FalseyInterviewer(Interviewer):
@@ -258,3 +292,28 @@ class TestBuiltInHandlers:
         outcome = runner("slow", "", Context())
         assert outcome.status == OutcomeStatus.FAIL
         assert outcome.failure_reason == "handler timed out after 0.05s"
+
+    def test_handler_runner_rejects_concurrent_nested_calls_outside_parallel_handler(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan [shape=box, type="custom.concurrent"]
+                left [shape=box, type="custom.slow"]
+                right [shape=box, type="custom.slow"]
+                fan -> left
+                fan -> right
+            }
+            """
+        )
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={
+                "custom.concurrent": _ConcurrentOutsideParallelHandler(),
+                "custom.slow": _SlowHandler(),
+            },
+        )
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("fan", "", Context())
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.notes == "concurrency gate enforced"

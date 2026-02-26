@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 import math
 from typing import Any, Dict, List, Tuple
 
@@ -46,23 +47,26 @@ class ParallelHandler:
 
         results: List[Dict[str, Any]] = []
         futures = []
-        with ThreadPoolExecutor(max_workers=max_parallel) as pool:
-            for edge in runtime.outgoing_edges:
-                futures.append(pool.submit(run_branch, edge.target, runtime.context))
+        allow_concurrency = getattr(runtime.runner, "allow_concurrency", None)
+        concurrency_scope = allow_concurrency() if callable(allow_concurrency) else nullcontext()
+        with concurrency_scope:
+            with ThreadPoolExecutor(max_workers=max_parallel) as pool:
+                for edge in runtime.outgoing_edges:
+                    futures.append(pool.submit(run_branch, edge.target, runtime.context))
 
-            for future in as_completed(futures):
-                _, payload = future.result()
-                results.append(payload)
+                for future in as_completed(futures):
+                    _, payload = future.result()
+                    results.append(payload)
 
-                if error_policy == "fail_fast" and payload["status"] == "fail":
-                    for remaining in futures:
-                        remaining.cancel()
-                    break
+                    if error_policy == "fail_fast" and payload["status"] == "fail":
+                        for remaining in futures:
+                            remaining.cancel()
+                        break
 
-                if join_policy == "first_success" and payload["status"] in SUCCESS_STATUSES:
-                    for remaining in futures:
-                        remaining.cancel()
-                    break
+                    if join_policy == "first_success" and payload["status"] in SUCCESS_STATUSES:
+                        for remaining in futures:
+                            remaining.cancel()
+                        break
 
         results_for_policy = list(results)
         if error_policy == "ignore":
