@@ -264,7 +264,7 @@ Status key:
 - [x] [5.5-03] Implement `store`, `retrieve`, `has`, `list`, `remove`, `clear`.
 
 ### 5.6 Run Directory Structure
-- [ ] [5.6-01] Create run root with `checkpoint.json`, `manifest.json`, stage directories, and `artifacts/`.
+- [x] [5.6-01] Create run root with `checkpoint.json`, `manifest.json`, stage directories, and `artifacts/`.
 - [ ] [5.6-02] Ensure each stage directory includes `prompt.md`, `response.md`, `status.json`.
 - [ ] [5.6-03] Add integrity test that verifies directory structure after end-to-end run.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import random
@@ -34,6 +35,10 @@ _NON_CODEGEN_SHAPES = {
     "house",
 }
 GOAL_GATE_NO_RETRY_TARGET_REASON = "Goal gate unsatisfied and no retry target"
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
@@ -119,7 +124,12 @@ class PipelineExecutor:
         self.logs_root = Path(logs_root) if logs_root else None
         self._base_logs_root = self.logs_root
         self._restart_count = 0
-        self.checkpoint_path = Path(checkpoint_file) if checkpoint_file else None
+        self._checkpoint_path_follows_logs_root = checkpoint_file is None and self.logs_root is not None
+        self.checkpoint_path = (
+            Path(checkpoint_file)
+            if checkpoint_file
+            else (self.logs_root / "checkpoint.json" if self.logs_root else None)
+        )
         self.control = control
         self.on_event = on_event
         self._shape_start_nodes = self._node_ids_for_shape("Mdiamond")
@@ -127,6 +137,7 @@ class PipelineExecutor:
         self._active_top_level_node: str | None = None
         self._active_top_level_node_lock = threading.Lock()
         self._stage_status_transitions: Dict[str, List[str]] = {}
+        self._run_started_at: str | None = None
         self._sync_runner_logs_root()
 
     def run(
@@ -176,6 +187,7 @@ class PipelineExecutor:
                             route_trace = [current]
         self._mirror_graph_goal(ctx)
         self._seed_builtin_context(ctx, current)
+        self._ensure_run_root_layout(current_node=current, context=ctx)
         self._emit_event("PipelineStarted", current_node=current, resumed=resume)
 
         steps = 0
@@ -478,6 +490,7 @@ class PipelineExecutor:
         route_trace: List[str] = [current]
         steps = 0
         stop_nodes = set(stop_nodes or [])
+        self._ensure_run_root_layout(current_node=current, context=ctx)
         self._emit_event("PipelineStarted", current_node=current, resumed=False)
 
         try:
@@ -776,17 +789,49 @@ class PipelineExecutor:
         context: Context,
         retry_counts: Dict[str, int],
     ) -> None:
-        persisted = bool(self.checkpoint_path)
+        checkpoint = Checkpoint(
+            current_node=current_node,
+            completed_nodes=list(completed_nodes),
+            context=dict(context.values),
+            retry_counts=dict(retry_counts),
+            logs=list(context.clone().logs),
+        )
+        persisted = False
         if self.checkpoint_path:
-            checkpoint = Checkpoint(
-                current_node=current_node,
-                completed_nodes=list(completed_nodes),
-                context=dict(context.values),
-                retry_counts=dict(retry_counts),
-                logs=list(context.clone().logs),
-            )
             save_checkpoint(self.checkpoint_path, checkpoint)
+            persisted = True
+        run_root_checkpoint_path = self.logs_root / "checkpoint.json" if self.logs_root else None
+        if run_root_checkpoint_path and run_root_checkpoint_path != self.checkpoint_path:
+            save_checkpoint(run_root_checkpoint_path, checkpoint)
+            persisted = True
         self._emit_event("CheckpointSaved", node_id=current_node, persisted=persisted)
+
+    def _ensure_run_root_layout(self, *, current_node: str, context: Context) -> None:
+        if not self.logs_root:
+            return
+
+        self.logs_root.mkdir(parents=True, exist_ok=True)
+        (self.logs_root / "artifacts").mkdir(parents=True, exist_ok=True)
+
+        if self._checkpoint_path_follows_logs_root:
+            self.checkpoint_path = self.logs_root / "checkpoint.json"
+
+        if self._run_started_at is None:
+            self._run_started_at = _utc_timestamp()
+
+        manifest_path = self.logs_root / "manifest.json"
+        if manifest_path.exists():
+            return
+
+        goal_attr = self.graph.graph_attrs.get("goal")
+        manifest_payload = {
+            "graph_id": self.graph.graph_id,
+            "goal": str(goal_attr.value) if goal_attr else str(context.get("graph.goal", "")),
+            "start_node": current_node,
+            "started_at": self._run_started_at,
+        }
+        with manifest_path.open("w", encoding="utf-8") as f:
+            json.dump(manifest_payload, f, indent=2, sort_keys=True)
 
     def _finalize_run(
         self,
@@ -891,6 +936,7 @@ class PipelineExecutor:
         context.set("current_node", restart_node)
 
         self._rotate_logs_root_for_restart()
+        self._ensure_run_root_layout(current_node=restart_node, context=context)
 
         if persist_checkpoint:
             self._save_checkpoint(
@@ -913,6 +959,8 @@ class PipelineExecutor:
                 continue
             candidate.mkdir(parents=True, exist_ok=True)
             self.logs_root = candidate
+            if self._checkpoint_path_follows_logs_root:
+                self.checkpoint_path = candidate / "checkpoint.json"
             self._sync_runner_logs_root()
             return
 

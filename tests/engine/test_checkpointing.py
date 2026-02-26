@@ -13,6 +13,52 @@ from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
 class TestCheckpointAndArtifacts:
+    def test_run_root_bootstraps_checkpoint_manifest_stage_dirs_and_artifacts_directory(self):
+        graph = parse_dot(
+            """
+            digraph release_flow {
+                graph [goal="Ship release"]
+                start [shape=Mdiamond]
+                plan [shape=box]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "run-logs"
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                return Outcome(status=OutcomeStatus.SUCCESS, notes=f"{node_id} complete")
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "success"
+            assert logs_root.is_dir()
+            assert (logs_root / "checkpoint.json").exists()
+            assert (logs_root / "manifest.json").exists()
+            assert (logs_root / "artifacts").is_dir()
+            assert (logs_root / "start").is_dir()
+            assert (logs_root / "plan").is_dir()
+
+            checkpoint_payload = json.loads((logs_root / "checkpoint.json").read_text(encoding="utf-8"))
+            assert checkpoint_payload["current_node"] == "done"
+            assert checkpoint_payload["completed_nodes"] == ["start", "plan"]
+
+            manifest_payload = json.loads((logs_root / "manifest.json").read_text(encoding="utf-8"))
+            assert manifest_payload["graph_id"] == "release_flow"
+            assert manifest_payload["goal"] == "Ship release"
+            assert manifest_payload["start_node"] == "start"
+            assert isinstance(manifest_payload["started_at"], str)
+            assert manifest_payload["started_at"]
+
     def test_auto_status_synthesizes_success_when_runner_returns_none(self):
         graph = parse_dot(
             """
