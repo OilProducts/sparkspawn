@@ -233,11 +233,7 @@ class PipelineExecutor:
             )
             outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
             routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
-            next_edge = select_next_edge(outgoing, routing_outcome, ctx)
-            if not next_edge and outcome.status.value == "fail":
-                route = self._resolve_failure_retry_target(node.node_id)
-                if route:
-                    next_edge = _SyntheticEdge(route)
+            next_edge = self._select_route_edge(node.node_id, outgoing, routing_outcome, ctx)
             if not next_edge:
                 message = f"Stage '{node.node_id}' has no eligible outgoing edge"
                 self._emit_event(
@@ -386,11 +382,7 @@ class PipelineExecutor:
             completed.append(node.node_id)
             outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
             routing_outcome = self._routing_outcome(node.node_id, outcome, prior_status)
-            next_edge = select_next_edge(outgoing, routing_outcome, ctx)
-            if not next_edge and outcome.status.value == "fail":
-                route = self._resolve_failure_retry_target(node.node_id)
-                if route:
-                    next_edge = _SyntheticEdge(route)
+            next_edge = self._select_route_edge(node.node_id, outgoing, routing_outcome, ctx)
             if not next_edge:
                 message = f"Stage '{node.node_id}' has no eligible outgoing edge"
                 self._emit_event("PipelineFailed", current_node=node.node_id, error=message)
@@ -629,6 +621,31 @@ class PipelineExecutor:
                     return target
         return ""
 
+    def _select_route_edge(
+        self,
+        node_id: str,
+        outgoing: List[DotEdge],
+        routing_outcome: Outcome,
+        context: Context,
+    ) -> DotEdge | _SyntheticEdge | None:
+        next_edge = select_next_edge(outgoing, routing_outcome, context)
+        if routing_outcome.status.value != "fail":
+            return next_edge
+
+        fail_edges = [
+            edge for edge in outgoing if _is_outcome_fail_condition(_edge_attr_text(edge, "condition"))
+        ]
+        if fail_edges:
+            prioritized = select_next_edge(fail_edges, routing_outcome, context)
+            if prioritized:
+                return prioritized
+
+        route = self._resolve_failure_retry_target(node_id)
+        if route:
+            return _SyntheticEdge(route)
+
+        return next_edge
+
     def _remember_node_outcome(self, context: Context, node_id: str, status: str) -> None:
         stored = context.get(NODE_OUTCOMES_KEY, {})
         if not isinstance(stored, dict):
@@ -695,3 +712,7 @@ def _edge_attr_text(edge: object | None, key: str) -> str:
     if not attr:
         return ""
     return str(attr.value).strip()
+
+
+def _is_outcome_fail_condition(condition: str) -> bool:
+    return "".join(condition.split()).lower() == "outcome=fail"

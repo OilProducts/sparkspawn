@@ -145,6 +145,59 @@ class TestRetryAndGoalGate:
         assert result.status == "success"
         assert "fix" in result.completed_nodes
 
+    def test_failure_routing_uses_fallback_retry_target_before_unconditional_edge(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box, max_retries=0, retry_target="missing", fallback_retry_target="fix"]
+                fix [shape=box]
+                done [shape=Msquare]
+                start -> task
+                task -> done
+                fix -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "task":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="permanent")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+        assert result.status == "success"
+        assert result.route_trace == ["start", "task", "fix", "done"]
+
+    def test_failure_routing_prefers_outcome_fail_edge_over_other_true_conditions(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box, max_retries=0, retry_target="fix"]
+                review [shape=box]
+                fix [shape=box]
+                done [shape=Msquare]
+                start -> task
+                task -> done [condition="outcome=fail"]
+                task -> review [condition="context.force_route=true", weight=10]
+                review -> done
+                fix -> done
+            }
+            """
+        )
+
+        context = Context(values={"force_route": "true"})
+
+        def runner(node_id: str, prompt: str, ctx: Context) -> Outcome:
+            if node_id == "task":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="permanent")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(context)
+        assert result.status == "success"
+        assert result.route_trace == ["start", "task", "done"]
+
     def test_goal_gate_enforced_at_exit(self):
         graph = parse_dot(
             """
