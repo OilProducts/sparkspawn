@@ -97,7 +97,6 @@ Status key:
 - [x] [2.9-03] Add parser normalization test for chain equivalence.
 
 ### 2.10 Subgraphs
-- [ ] [2.10-01] Flatten subgraph wrappers while preserving contained nodes/edges.
 - [ ] [2.10-02] Apply subgraph-local defaults to enclosed nodes unless overridden.
 - [ ] [2.10-03] Derive stylesheet classes from subgraph labels (normalize case/spaces/symbols).
 
@@ -565,3 +564,4 @@ Status key:
 - [ ] [2.7-01] Implement edge `label` for preferred-label routing. Deferred because preferred-label edge routing is already implemented in `attractor/engine/routing.py` and covered by `tests/engine/test_routing.py::test_preferred_label_then_suggested_ids`, so this is checklist state drift.
 - [ ] [2.7-03] Implement `weight` for deterministic prioritization. Deferred because deterministic weight routing is already implemented in `attractor/engine/routing.py` (`_best_by_weight_then_lexical`) and covered by `tests/engine/test_routing.py::test_weight_then_lexical_tiebreak_for_unconditional`, so this is checklist state drift.
 - [ ] [2.9-01] Expand chained declarations into pairwise edges. Deferred because parser chain expansion already emits pairwise edges in `attractor/dsl/parser.py::parse_node_or_edge` and is covered by parser tests (`tests/dsl/test_parser.py`), so this is checklist state drift.
+- [ ] [2.10-01] Flatten subgraph wrappers while preserving contained nodes/edges. Deferred because `parse_statement` already flattens subgraph bodies directly into the top-level `DotGraph` in `attractor/dsl/parser.py`, and the remaining explicit edge-retention coverage gap is better tracked under parser DoD test-conversion work (`11.1-01`) than this implementation task.
