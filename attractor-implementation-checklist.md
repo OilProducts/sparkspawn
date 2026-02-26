@@ -133,7 +133,7 @@ Status key:
 - [x] [3.2-07] Stop at terminal node only after goal-gate enforcement.
 
 ### 3.3 Edge Selection Algorithm
-- [ ] [3.3-01] Implement condition-pass candidate evaluation.
+- [x] [3.3-01] Implement condition-pass candidate evaluation.
 - [ ] [3.3-02] Implement normalized preferred-label matching (case/trim/accelerator stripping).
 - [ ] [3.3-03] Implement `suggested_next_ids` matching fallback.
 - [ ] [3.3-04] Implement weight-descending selection for unconditional edges.

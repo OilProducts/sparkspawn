@@ -14,7 +14,7 @@ def select_next_edge(edges: Iterable[DotEdge], outcome: Outcome, context: Contex
 
     condition_matched = []
     for edge in ordered:
-        condition = _attr_str(edge, "condition")
+        condition = _condition_text(edge)
         if condition and evaluate_condition(condition, outcome, context):
             condition_matched.append(edge)
     if condition_matched:
@@ -24,7 +24,7 @@ def select_next_edge(edges: Iterable[DotEdge], outcome: Outcome, context: Contex
     if preferred:
         norm_preferred = _normalize_label(preferred)
         for edge in ordered:
-            condition = _attr_str(edge, "condition")
+            condition = _condition_text(edge)
             if condition and not evaluate_condition(condition, outcome, context):
                 continue
             if _normalize_label(_attr_str(edge, "label")) == norm_preferred:
@@ -33,13 +33,13 @@ def select_next_edge(edges: Iterable[DotEdge], outcome: Outcome, context: Contex
     if outcome.suggested_next_ids:
         for suggested_id in outcome.suggested_next_ids:
             for edge in ordered:
-                condition = _attr_str(edge, "condition")
+                condition = _condition_text(edge)
                 if condition and not evaluate_condition(condition, outcome, context):
                     continue
                 if edge.target == suggested_id:
                     return edge
 
-    unconditional = [edge for edge in ordered if _attr_str(edge, "condition") == ""]
+    unconditional = [edge for edge in ordered if _condition_text(edge) == ""]
     if unconditional:
         return _best_by_weight_then_lexical(unconditional)
 
@@ -70,6 +70,10 @@ def _attr_int(edge: DotEdge, key: str, default: int) -> int:
         return int(str(value))
     except ValueError:
         return default
+
+
+def _condition_text(edge: DotEdge) -> str:
+    return _attr_str(edge, "condition").strip()
 
 
 def _normalize_label(label: str) -> str:

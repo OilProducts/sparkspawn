@@ -77,3 +77,25 @@ class TestRouting:
         outcome = Outcome(status=OutcomeStatus.SUCCESS)
         edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
         assert edge.target == "b"
+
+    def test_condition_candidate_evaluation_ignores_whitespace_only_conditions(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                a [shape=box]
+                b [shape=box]
+                c [shape=box]
+                done [shape=Msquare]
+
+                start -> a
+                a -> b [condition="   ", weight=99]
+                a -> c [condition="outcome=success", weight=1]
+                b -> done
+                c -> done
+            }
+            """
+        )
+        outcome = Outcome(status=OutcomeStatus.SUCCESS)
+        edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
+        assert edge.target == "c"
