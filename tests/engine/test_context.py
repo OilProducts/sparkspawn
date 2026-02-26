@@ -1,5 +1,7 @@
 import threading
 
+import pytest
+
 from attractor.engine.context import Context
 
 
@@ -95,3 +97,45 @@ class TestContextHelpers:
 
         assert context.get("a") == 2
         assert context.get("b") == "three"
+
+
+class TestContextNamespaces:
+    def test_allows_documented_namespaces_and_unscoped_keys(self):
+        context = Context()
+
+        context.set("plain_key", "ok")
+        context.apply_updates(
+            {
+                "context.plan": "ready",
+                "graph.goal": "ship",
+                "internal.retry_count.task": 1,
+                "parallel.results": [],
+                "stack.supervisor": "manager",
+                "human.gate.selected": "A",
+                "work.item.id": "42",
+                "_attractor.runtime.fidelity": "compact",
+            }
+        )
+
+        assert context.get("plain_key") == "ok"
+        assert context.get("context.plan") == "ready"
+        assert context.get("graph.goal") == "ship"
+        assert context.get("internal.retry_count.task") == 1
+        assert context.get("parallel.results") == []
+        assert context.get("stack.supervisor") == "manager"
+        assert context.get("human.gate.selected") == "A"
+        assert context.get("work.item.id") == "42"
+        assert context.get("_attractor.runtime.fidelity") == "compact"
+
+    def test_rejects_unknown_dotted_namespaces(self):
+        context = Context(values={"context.keep": "yes"})
+
+        with pytest.raises(ValueError, match="Unsupported context key namespace"):
+            context.set("unknown.value", "nope")
+
+        with pytest.raises(ValueError, match="Unsupported context key namespace"):
+            context.apply_updates({"context.ok": "yes", "tool.output": "blocked"})
+
+        assert context.get("context.keep") == "yes"
+        assert context.get("context.ok") is None
+        assert context.get("tool.output") is None

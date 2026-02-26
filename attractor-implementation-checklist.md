@@ -240,7 +240,7 @@ Status key:
 - [x] [5.1-01] Implement thread-safe context map with read/write locking semantics.
 - [x] [5.1-02] Implement context helpers: `set`, `get`, `get_string`, `append_log`, `snapshot`, `clone`, `apply_updates`.
 - [x] [5.1-03] Seed built-in keys (`outcome`, `preferred_label`, `graph.goal`, etc.) at appropriate lifecycle points.
-- [ ] [5.1-04] Enforce namespace conventions (`context.*`, `graph.*`, `internal.*`, `parallel.*`, `stack.*`, `human.gate.*`, `work.*`).
+- [x] [5.1-04] Enforce namespace conventions (`context.*`, `graph.*`, `internal.*`, `parallel.*`, `stack.*`, `human.gate.*`, `work.*`).
 
 ### 5.2 Outcome
 - [ ] [5.2-01] Define full outcome payload fields (`status`, `preferred_label`, `suggested_next_ids`, `context_updates`, `notes`, `failure_reason`).

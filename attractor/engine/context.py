@@ -51,6 +51,7 @@ class Context:
     lock: ReadWriteLock = field(default_factory=ReadWriteLock)
 
     def set(self, key: str, value: Any) -> None:
+        _validate_context_key(key)
         with self.lock.write_lock():
             self.values[key] = value
 
@@ -73,6 +74,8 @@ class Context:
             return copy.deepcopy(self.values)
 
     def apply_updates(self, updates: Dict[str, Any]) -> None:
+        for key in updates.keys():
+            _validate_context_key(key)
         with self.lock.write_lock():
             for key, value in updates.items():
                 self.values[key] = copy.deepcopy(value)
@@ -109,3 +112,24 @@ def _to_string(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+_ALLOWED_NAMESPACED_PREFIXES: tuple[str, ...] = (
+    "context.",
+    "graph.",
+    "internal.",
+    "parallel.",
+    "stack.",
+    "human.gate.",
+    "work.",
+    "_attractor.",
+)
+
+
+def _validate_context_key(key: str) -> None:
+    if "." not in key:
+        return
+    for prefix in _ALLOWED_NAMESPACED_PREFIXES:
+        if key.startswith(prefix):
+            return
+    raise ValueError(f"Unsupported context key namespace: {key}")

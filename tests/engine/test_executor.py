@@ -624,7 +624,7 @@ class TestExecutor:
                     context_updates={
                         "outcome": "fail",
                         "preferred_label": "Reject",
-                        "custom.flag": "set",
+                        "context.custom.flag": "set",
                     },
                 )
             return Outcome(status=OutcomeStatus.SUCCESS)
@@ -632,7 +632,7 @@ class TestExecutor:
         result = PipelineExecutor(graph, runner).run(Context())
 
         assert result.status == "success"
-        assert result.context["custom.flag"] == "set"
+        assert result.context["context.custom.flag"] == "set"
         assert result.context["outcome"] == "success"
         assert result.context["preferred_label"] == "Approve"
 

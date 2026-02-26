@@ -26,8 +26,8 @@ class ToolHandler:
                     status=OutcomeStatus.SUCCESS,
                     notes=notes,
                     context_updates={
-                        "tool.output": proc.stdout.strip(),
-                        "tool.exit_code": proc.returncode,
+                        "context.tool.output": proc.stdout.strip(),
+                        "context.tool.exit_code": proc.returncode,
                     },
                 )
 
@@ -36,8 +36,8 @@ class ToolHandler:
                 status=OutcomeStatus.FAIL,
                 failure_reason=reason,
                 context_updates={
-                    "tool.output": proc.stdout.strip(),
-                    "tool.exit_code": proc.returncode,
+                    "context.tool.output": proc.stdout.strip(),
+                    "context.tool.exit_code": proc.returncode,
                 },
             )
         except subprocess.TimeoutExpired as exc:
@@ -48,8 +48,8 @@ class ToolHandler:
                 status=OutcomeStatus.FAIL,
                 failure_reason=reason,
                 context_updates={
-                    "tool.output": timeout_output.strip(),
-                    "tool.exit_code": -1,
+                    "context.tool.output": timeout_output.strip(),
+                    "context.tool.exit_code": -1,
                 },
             )
         except Exception as exc:
@@ -59,8 +59,8 @@ class ToolHandler:
                 status=OutcomeStatus.FAIL,
                 failure_reason=reason,
                 context_updates={
-                    "tool.output": "",
-                    "tool.exit_code": -1,
+                    "context.tool.output": "",
+                    "context.tool.exit_code": -1,
                 },
             )
 

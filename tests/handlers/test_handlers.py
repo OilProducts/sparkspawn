@@ -1025,8 +1025,8 @@ class TestBuiltInHandlers:
         outcome = runner("tool_node", "", Context())
         assert outcome.status == OutcomeStatus.SUCCESS
         assert "hello" in outcome.notes
-        assert outcome.context_updates["tool.output"] == "hello"
-        assert outcome.context_updates["tool.exit_code"] == 0
+        assert outcome.context_updates["context.tool.output"] == "hello"
+        assert outcome.context_updates["context.tool.exit_code"] == 0
 
     def test_tool_handler_writes_output_artifact(self, tmp_path):
         graph = parse_dot(
@@ -1108,8 +1108,8 @@ class TestBuiltInHandlers:
         assert outcome.status == OutcomeStatus.FAIL
         assert "timed out" in (outcome.failure_reason or "")
         assert "sleep 5" in (outcome.failure_reason or "")
-        assert outcome.context_updates["tool.output"] == "partial output"
-        assert outcome.context_updates["tool.exit_code"] == -1
+        assert outcome.context_updates["context.tool.output"] == "partial output"
+        assert outcome.context_updates["context.tool.exit_code"] == -1
 
     def test_registry_allows_plugin_injection_via_builder(self):
         graph = parse_dot(
