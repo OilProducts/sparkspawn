@@ -280,7 +280,7 @@ Status key:
 - [x] [6.2-02] Validate question types and option schema.
 
 ### 6.3 Answer Model
-- [ ] [6.3-01] Implement answer payload (`value`, `selected_option`, `text`).
+- [x] [6.3-01] Implement answer payload (`value`, `selected_option`, `text`).
 - [ ] [6.3-02] Support `YES/NO/SKIPPED/TIMEOUT` answer values.
 
 ### 6.4 Built-In Interviewer Implementations

@@ -98,3 +98,12 @@ def test_question_rejects_blank_option_key_for_multiple_choice():
         assert "non-empty key" in str(exc)
     else:
         raise AssertionError("Expected ValueError for blank multiple-choice option key")
+
+
+def test_answer_supports_spec_payload_fields():
+    option = QuestionOption(label="Approve", key="A", value="approve")
+    answer = Answer(value="A", selected_option=option, text="looks good")
+
+    assert answer.value == "A"
+    assert answer.selected_option == option
+    assert answer.text == "looks good"

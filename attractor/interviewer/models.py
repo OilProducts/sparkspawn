@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List
 
@@ -89,10 +89,43 @@ class Question:
         self.type = value
 
 
-@dataclass
+@dataclass(init=False)
 class Answer:
-    selected_values: List[str] = field(default_factory=list)
-    text: str = ""
+    value: str
+    selected_option: QuestionOption | None
+    text: str
+    _selected_values: List[str]
+
+    def __init__(
+        self,
+        value: str = "",
+        selected_option: QuestionOption | None = None,
+        text: str = "",
+        *,
+        selected_values: List[str] | None = None,
+    ) -> None:
+        self.selected_option = selected_option
+        self.text = text
+        normalized = [str(item).strip() for item in (selected_values or []) if str(item).strip()]
+        if not value and normalized:
+            value = normalized[0]
+        self.value = value
+        self._selected_values = normalized
+
+    @property
+    def selected_values(self) -> List[str]:
+        if self._selected_values:
+            return list(self._selected_values)
+        if self.value and self.value.strip():
+            return [self.value.strip()]
+        return []
+
+    @selected_values.setter
+    def selected_values(self, values: List[str]) -> None:
+        normalized = [str(item).strip() for item in (values or []) if str(item).strip()]
+        self._selected_values = normalized
+        if normalized:
+            self.value = normalized[0]
 
 
 _SELECT_TYPES = {QuestionType.MULTIPLE_CHOICE}
