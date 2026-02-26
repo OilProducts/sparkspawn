@@ -1,10 +1,27 @@
+from pathlib import Path
+
 import pytest
 
 from attractor.dsl import DotParseError, normalize_graph, parse_dot
 from attractor.dsl.models import DotValueType, Duration
 
 
+SIMPLE_LINEAR_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "simple_linear_workflow.dot"
+
+
 class TestDotParser:
+    def test_parses_simple_linear_workflow_fixture(self):
+        graph = parse_dot(SIMPLE_LINEAR_FIXTURE.read_text(encoding="utf-8"))
+
+        assert graph.graph_id == "Simple"
+        assert graph.graph_attrs["goal"].value == "Run tests and report"
+        assert list(graph.nodes.keys()) == ["start", "exit", "run_tests", "report"]
+        assert [(edge.source, edge.target) for edge in graph.edges] == [
+            ("start", "run_tests"),
+            ("run_tests", "report"),
+            ("report", "exit"),
+        ]
+
     def test_parses_quoted_strings_with_supported_escapes(self):
         dot = r'''
         digraph EscapedStrings {

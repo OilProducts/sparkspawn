@@ -1,5 +1,10 @@
+from pathlib import Path
+
 from attractor.dsl import parse_dot, validate_graph
 from attractor.dsl.models import DiagnosticSeverity
+
+
+SIMPLE_LINEAR_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "simple_linear_workflow.dot"
 
 
 class TestDotValidator:
@@ -135,6 +140,12 @@ class TestDotValidator:
         """
         graph = parse_dot(dot)
         diagnostics = validate_graph(graph)
+        assert self._errors(diagnostics) == []
+
+    def test_simple_linear_workflow_fixture_is_validator_clean(self):
+        graph = parse_dot(SIMPLE_LINEAR_FIXTURE.read_text(encoding="utf-8"))
+        diagnostics = validate_graph(graph)
+
         assert self._errors(diagnostics) == []
 
     def test_shape_start_takes_precedence_over_start_id_fallback(self):

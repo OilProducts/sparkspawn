@@ -110,7 +110,7 @@ Status key:
 - [x] [2.12-03] Add tests for multiple-class matching and precedence interactions.
 
 ### 2.13 Minimal Examples
-- [ ] [2.13-01] Add parser+validator fixture for simple linear workflow example.
+- [x] [2.13-01] Add parser+validator fixture for simple linear workflow example.
 - [ ] [2.13-02] Add execution fixture for branching condition example.
 - [ ] [2.13-03] Add interviewer fixture for human-gate example with labeled options.
 
