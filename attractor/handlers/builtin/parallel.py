@@ -13,6 +13,7 @@ from ..base import HandlerRuntime
 
 
 SUCCESS_STATUSES = {"success", "paused"}
+SUPPORTED_JOIN_POLICIES = {"wait_all", "k_of_n", "first_success", "quorum"}
 
 
 class ParallelHandler:
@@ -21,6 +22,8 @@ class ParallelHandler:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="parallel node has no outgoing edges")
 
         join_policy = _attr_str(runtime.node_attrs, "join_policy", "wait_all")
+        if join_policy not in SUPPORTED_JOIN_POLICIES:
+            return Outcome(status=OutcomeStatus.FAIL, failure_reason=f"unsupported join_policy: {join_policy}")
         error_policy = _attr_str(runtime.node_attrs, "error_policy", "continue")
         max_parallel = _attr_int(runtime.node_attrs, "max_parallel", 4)
         if max_parallel < 1:

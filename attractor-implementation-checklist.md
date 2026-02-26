@@ -210,7 +210,7 @@ Status key:
 
 ### 4.8 Parallel Handler
 - [x] [4.8-01] Execute outgoing branches with bounded parallelism (`max_parallel`).
-- [ ] [4.8-02] Support join policies (`wait_all`, `k_of_n`, `first_success`, `quorum`).
+- [x] [4.8-02] Support join policies (`wait_all`, `k_of_n`, `first_success`, `quorum`).
 - [ ] [4.8-03] Support error policies (`fail_fast`, `continue`, `ignore`).
 - [ ] [4.8-04] Serialize branch results into `parallel.results`.
 

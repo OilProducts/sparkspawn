@@ -182,6 +182,16 @@ class _MaxParallelProbeHandler:
         return Outcome(status=OutcomeStatus.SUCCESS, notes=f"probe:{runtime.node_id}")
 
 
+class _AlwaysSuccessHandler:
+    def run(self, runtime):
+        return Outcome(status=OutcomeStatus.SUCCESS, notes=f"success:{runtime.node_id}")
+
+
+class _AlwaysFailHandler:
+    def run(self, runtime):
+        return Outcome(status=OutcomeStatus.FAIL, failure_reason=f"fail:{runtime.node_id}")
+
+
 class _FalseyInterviewer(Interviewer):
     def __bool__(self) -> bool:
         return False
@@ -1053,3 +1063,75 @@ class TestBuiltInHandlers:
         captures = [runtime for runtime in capture_handler.calls if runtime.node_id in {"a", "b", "post"}]
         assert len(captures) == 3
         assert all(runtime.logs_root == tmp_path for runtime in captures)
+
+    @pytest.mark.parametrize(
+        ("join_policy", "join_attrs", "expected_status"),
+        [
+            ("wait_all", "", OutcomeStatus.PARTIAL_SUCCESS),
+            ("first_success", "", OutcomeStatus.SUCCESS),
+            ("k_of_n", ", join_k=2", OutcomeStatus.SUCCESS),
+            ("quorum", ", join_quorum=0.66", OutcomeStatus.SUCCESS),
+        ],
+    )
+    def test_parallel_handler_supports_configured_join_policies(
+        self,
+        join_policy: str,
+        join_attrs: str,
+        expected_status: OutcomeStatus,
+    ):
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                fan [shape=component, join_policy={join_policy}{join_attrs}]
+                good_a [shape=box, type="custom.success"]
+                bad [shape=box, type="custom.fail"]
+                good_b [shape=box, type="custom.success"]
+                stop_a [shape=tripleoctagon]
+                stop_b [shape=tripleoctagon]
+
+                fan -> good_a
+                fan -> bad
+                fan -> good_b
+                good_a -> stop_a [condition="outcome=success"]
+                good_b -> stop_b [condition="outcome=success"]
+            }}
+            """
+        )
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={
+                "custom.success": _AlwaysSuccessHandler(),
+                "custom.fail": _AlwaysFailHandler(),
+            },
+        )
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("fan", "", Context())
+
+        assert outcome.status == expected_status
+        branch_results = outcome.context_updates.get("parallel.results", [])
+        assert isinstance(branch_results, list)
+        assert len(branch_results) >= 1
+
+    def test_parallel_handler_rejects_unknown_join_policy(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan [shape=component, join_policy=not_a_policy]
+                a [shape=box, type="custom.success"]
+                stop_a [shape=tripleoctagon]
+                fan -> a
+                a -> stop_a [condition="outcome=success"]
+            }
+            """
+        )
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={"custom.success": _AlwaysSuccessHandler()},
+        )
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("fan", "", Context())
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason == "unsupported join_policy: not_a_policy"
