@@ -92,6 +92,35 @@ class TestRetryAndGoalGate:
         assert calls["task"] == 2
         assert "fix" in result.completed_nodes
 
+    def test_fail_status_retries_for_max_retries_budget(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box, max_retries=2]
+                fix [shape=box]
+                done [shape=Msquare]
+                start -> task
+                task -> done [condition="outcome=success"]
+                task -> fix [condition="outcome=fail"]
+                fix -> done
+            }
+            """
+        )
+
+        calls = {"task": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "task":
+                calls["task"] += 1
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="permanent")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+        assert result.status == "success"
+        assert calls["task"] == 3
+        assert "fix" in result.completed_nodes
+
     def test_failure_routing_uses_retry_target(self):
         graph = parse_dot(
             """

@@ -607,21 +607,7 @@ class PipelineExecutor:
         if outcome.status.value == "retry":
             return True
         if outcome.status.value == "fail":
-            reason = (outcome.failure_reason or "").lower()
-            if reason == "":
-                return False
-            retryable_signals = (
-                "timeout",
-                "timed out",
-                "rate limit",
-                "429",
-                "5xx",
-                "network",
-                "temporar",
-                "retryable",
-                "unavailable",
-            )
-            return any(signal in reason for signal in retryable_signals)
+            return True
         return False
 
     def _resolve_failure_retry_target(self, node_id: str) -> str:

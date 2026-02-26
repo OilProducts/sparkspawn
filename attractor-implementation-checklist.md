@@ -73,7 +73,7 @@ Status key:
 ### 2.6 Node Attributes
 - [x] [2.6-01] Support and persist all node attrs from spec table.
 - [x] [2.6-03] Implement prompt fallback to `label` for LLM stages.
-- [ ] [2.6-04] Implement `max_retries` semantics as additional attempts.
+- [x] [2.6-04] Implement `max_retries` semantics as additional attempts.
 - [ ] [2.6-05] Enforce `goal_gate` tracking and exit blocking behavior.
 - [ ] [2.6-06] Implement node-level retry target fallback chain.
 - [ ] [2.6-07] Implement fidelity/thread/session attrs (`fidelity`, `thread_id`).
