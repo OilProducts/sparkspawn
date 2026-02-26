@@ -15,7 +15,7 @@ from attractor.engine.outcome import OutcomeStatus
 from attractor.handlers.base import CodergenBackend
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.registry import SHAPE_TO_TYPE
-from attractor.interviewer import Answer, CallbackInterviewer, Interviewer, Question
+from attractor.interviewer import Answer, CallbackInterviewer, Interviewer, Question, QueueInterviewer
 
 
 class _StubBackend:
@@ -576,6 +576,29 @@ class TestBuiltInHandlers:
             ("ship", "ship"),
             ("fix", "fix"),
         ]
+
+    def test_wait_human_maps_target_answer_back_to_selected_edge_label(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                gate [shape=hexagon, prompt="Choose"]
+                ship [shape=box]
+                fix [shape=box]
+                gate -> ship [label="Approve"]
+                gate -> fix [label="Fix"]
+            }
+            """
+        )
+
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            interviewer=QueueInterviewer([Answer(selected_values=["ship"])]),
+        )
+        runner = HandlerRunner(graph, registry)
+        outcome = runner("gate", "Choose", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.preferred_label == "Approve"
 
     @pytest.mark.parametrize(
         ("label", "expected_key"),

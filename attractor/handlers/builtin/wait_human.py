@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from attractor.engine.outcome import Outcome, OutcomeStatus
 from attractor.interviewer import Answer, Interviewer, Question, QuestionOption, QuestionType
 
 from ..base import HandlerRuntime
+
+
+@dataclass(frozen=True)
+class _Choice:
+    key: str
+    label: str
+    target: str
 
 
 class WaitHumanHandler:
@@ -14,6 +23,7 @@ class WaitHumanHandler:
         if not runtime.outgoing_edges:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="No outgoing edges for human gate")
 
+        choices: list[_Choice] = []
         options = []
         for edge in runtime.outgoing_edges:
             label_attr = edge.attrs.get("label")
@@ -22,7 +32,9 @@ class WaitHumanHandler:
                 raw_label = str(label_attr.value)
                 if raw_label.strip():
                     label = raw_label
-            options.append(QuestionOption(label=label, value=label, key=_parse_accelerator_key(label)))
+            key = _parse_accelerator_key(label)
+            choices.append(_Choice(key=key, label=label, target=edge.target))
+            options.append(QuestionOption(label=label, value=label, key=key))
 
         question = Question(
             title=f"Human Gate: {runtime.node_id}",
@@ -33,17 +45,51 @@ class WaitHumanHandler:
         )
 
         answer = self.interviewer.ask(question)
-        selected = _pick_single(answer)
-        if not selected:
+        selected = _select_choice(answer, choices)
+        if selected is None:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="human skipped interaction")
 
-        return Outcome(status=OutcomeStatus.SUCCESS, preferred_label=selected, notes="human selection applied")
+        return Outcome(status=OutcomeStatus.SUCCESS, preferred_label=selected.label, notes="human selection applied")
 
 
-def _pick_single(answer: Answer) -> str:
-    if answer.selected_values:
-        return answer.selected_values[0]
-    return ""
+def _select_choice(answer: Answer, choices: list[_Choice]) -> _Choice | None:
+    tokens = [value.strip() for value in answer.selected_values if value and value.strip()]
+    if answer.text and answer.text.strip():
+        tokens.append(answer.text.strip())
+
+    if not tokens:
+        return None
+
+    for token in tokens:
+        normalized_token = token.lower()
+        for choice in choices:
+            if choice.target == token:
+                return choice
+            if choice.label == token:
+                return choice
+            if _normalize_label(choice.label) == _normalize_label(token):
+                return choice
+            if choice.key and choice.key.upper() == token.upper():
+                return choice
+            if choice.target.lower() == normalized_token:
+                return choice
+
+    return choices[0] if choices else None
+
+
+def _normalize_label(label: str) -> str:
+    text = (label or "").strip().lower()
+    if text.startswith("[") and "]" in text:
+        text = text[text.find("]") + 1 :].strip()
+    if len(text) >= 2 and text[0].isalnum() and text[1] == ")":
+        text = text[2:].strip()
+    if len(text) >= 3 and text[0].isalnum():
+        idx = 1
+        while idx < len(text) and text[idx] == " ":
+            idx += 1
+        if idx < len(text) and text[idx] == "-":
+            text = text[idx + 1 :].strip()
+    return text
 
 
 def _parse_accelerator_key(label: str) -> str:
