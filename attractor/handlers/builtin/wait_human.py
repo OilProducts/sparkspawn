@@ -52,6 +52,11 @@ class WaitHumanHandler:
             return Outcome(
                 status=OutcomeStatus.SUCCESS,
                 preferred_label=default_choice.label,
+                suggested_next_ids=[default_choice.target],
+                context_updates={
+                    "human.gate.selected": default_choice.key,
+                    "human.gate.label": default_choice.label,
+                },
                 notes="human selection applied",
             )
 
@@ -59,7 +64,16 @@ class WaitHumanHandler:
         if selected is None:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="human skipped interaction")
 
-        return Outcome(status=OutcomeStatus.SUCCESS, preferred_label=selected.label, notes="human selection applied")
+        return Outcome(
+            status=OutcomeStatus.SUCCESS,
+            preferred_label=selected.label,
+            suggested_next_ids=[selected.target],
+            context_updates={
+                "human.gate.selected": selected.key,
+                "human.gate.label": selected.label,
+            },
+            notes="human selection applied",
+        )
 
 
 def _is_timeout(answer: Answer) -> bool:

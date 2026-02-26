@@ -519,6 +519,11 @@ class TestBuiltInHandlers:
         outcome = runner("gate", "Choose", Context())
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.preferred_label == "Approve"
+        assert outcome.suggested_next_ids == ["pass"]
+        assert outcome.context_updates == {
+            "human.gate.selected": "A",
+            "human.gate.label": "Approve",
+        }
 
     def test_wait_human_uses_falsey_external_interviewer(self):
         graph = parse_dot(
@@ -622,6 +627,11 @@ class TestBuiltInHandlers:
 
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.preferred_label == "Fix"
+        assert outcome.suggested_next_ids == ["fix"]
+        assert outcome.context_updates == {
+            "human.gate.selected": "F",
+            "human.gate.label": "Fix",
+        }
 
     def test_wait_human_timeout_without_default_returns_retry(self):
         graph = parse_dot(
