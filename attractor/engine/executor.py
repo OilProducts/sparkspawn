@@ -13,7 +13,7 @@ from .outcome import Outcome, OutcomeStatus
 from .routing import select_next_edge
 
 
-RunnerFn = Callable[[str, str, Context], Outcome]
+RunnerFn = Callable[[str, str, Context], Outcome | None]
 ControlFn = Callable[[], Optional[str]]
 EventFn = Callable[[Dict[str, object]], None]
 NODE_OUTCOMES_KEY = "_attractor.node_outcomes"
@@ -181,7 +181,8 @@ class PipelineExecutor:
             prior_status = self._context_outcome_status(ctx)
             prompt = self._prompt_for_node(node.node_id)
             self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
-            outcome = self.runner(node.node_id, prompt, ctx)
+            raw_outcome = self.runner(node.node_id, prompt, ctx)
+            outcome = self._normalize_outcome(node.node_id, raw_outcome)
             outcomes[node.node_id] = outcome
 
             ctx.set("outcome", outcome.status.value)
@@ -344,7 +345,8 @@ class PipelineExecutor:
             prior_status = self._context_outcome_status(ctx)
             prompt = self._prompt_for_node(node.node_id)
             self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
-            outcome = self.runner(node.node_id, prompt, ctx)
+            raw_outcome = self.runner(node.node_id, prompt, ctx)
+            outcome = self._normalize_outcome(node.node_id, raw_outcome)
             outcomes[node.node_id] = outcome
 
             ctx.set("outcome", outcome.status.value)
@@ -483,6 +485,20 @@ class PipelineExecutor:
         if len(starts) != 1:
             raise RuntimeError(f"Expected exactly one start node, found {len(starts)}")
         return starts[0]
+
+    def _normalize_outcome(self, node_id: str, outcome: Outcome | None) -> Outcome:
+        if isinstance(outcome, Outcome):
+            return outcome
+
+        node = self.graph.nodes[node_id]
+        auto_status_attr = node.attrs.get("auto_status")
+        if auto_status_attr and _to_bool(auto_status_attr.value):
+            return Outcome(
+                status=OutcomeStatus.SUCCESS,
+                notes="auto-status: handler completed without writing status",
+            )
+
+        return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler returned no outcome")
 
     def _is_start_node(self, node_id: str) -> bool:
         if self._shape_start_nodes:

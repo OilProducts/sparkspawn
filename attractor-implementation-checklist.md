@@ -80,7 +80,7 @@ Status key:
 - [x] [2.6-08] Parse and apply stylesheet `class` selectors (comma-separated classes).
 - [x] [2.6-09] Enforce `timeout` in handler execution paths.
 - [x] [2.6-10] Resolve model attrs (`llm_model`, `llm_provider`, `reasoning_effort`) with precedence rules.
-- [ ] [2.6-11] Implement `auto_status` status synthesis behavior.
+- [x] [2.6-11] Implement `auto_status` status synthesis behavior.
 - [ ] [2.6-12] Implement `allow_partial` behavior when retries exhaust.
 
 ### 2.7 Edge Attributes

@@ -10,6 +10,40 @@ from attractor.engine.outcome import Outcome, OutcomeStatus
 
 
 class TestCheckpointAndArtifacts:
+    def test_auto_status_synthesizes_success_when_runner_returns_none(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box, auto_status=true]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+
+            def runner(node_id: str, prompt: str, context: Context):
+                if node_id == "plan":
+                    return None
+                return Outcome(status=OutcomeStatus.SUCCESS)
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "success"
+            assert result.node_outcomes["plan"].status == OutcomeStatus.SUCCESS
+            status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
+            assert status_payload["outcome"] == "success"
+            assert status_payload["notes"] == "auto-status: handler completed without writing status"
+
     def test_artifacts_and_checkpoint_written_each_step(self):
         graph = parse_dot(
             """
