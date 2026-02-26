@@ -42,7 +42,7 @@ Status key:
 ### 2.1 Supported Subset
 - [x] [2.1-01] Accept only one directed graph per file (`digraph`).
 - [x] [2.1-02] Reject HTML-like labels and other out-of-subset constructs.
-- [ ] [2.1-03] Enforce typed attributes with defaults at parse/normalize stage.
+- [x] [2.1-03] Enforce typed attributes with defaults at parse/normalize stage.
 
 ### 2.2 BNF-Style Grammar
 - [ ] [2.2-01] Implement parser productions for graph statements (`graph/node/edge/subgraph/attr decl`).
