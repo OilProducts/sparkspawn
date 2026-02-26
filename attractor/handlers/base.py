@@ -33,5 +33,5 @@ class HandlerRuntime:
 
 
 class Handler(Protocol):
-    def run(self, runtime: HandlerRuntime) -> Outcome:
+    def execute(self, runtime: HandlerRuntime) -> Outcome:
         ...

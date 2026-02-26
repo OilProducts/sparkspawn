@@ -43,12 +43,12 @@ class HandlerRunner:
             )
             timeout = _to_seconds(node.attrs.get("timeout"))
             if timeout is None or timeout <= 0:
-                return handler.run(runtime)
+                return _invoke_handler(handler, runtime)
 
             message = f"handler timed out after {timeout:g}s"
             try:
                 with _wall_timeout(timeout):
-                    return handler.run(runtime)
+                    return _invoke_handler(handler, runtime)
             except TimeoutError:
                 return Outcome(status=OutcomeStatus.FAIL, failure_reason=message)
         finally:
@@ -142,3 +142,19 @@ def _to_seconds(attr: Any) -> float | None:
         return float(str(value))
     except (TypeError, ValueError):
         return None
+
+
+def _invoke_handler(handler: Any, runtime: HandlerRuntime) -> Outcome:
+    execute = getattr(handler, "execute", None)
+    if callable(execute):
+        outcome = execute(runtime)
+    else:
+        # Backward compatibility for plugin handlers still using the old contract.
+        run = getattr(handler, "run", None)
+        if not callable(run):
+            return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler does not implement execute(runtime)")
+        outcome = run(runtime)
+
+    if isinstance(outcome, Outcome):
+        return outcome
+    return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler returned non-Outcome result")

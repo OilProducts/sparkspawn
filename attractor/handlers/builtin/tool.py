@@ -10,7 +10,7 @@ from ..base import HandlerRuntime
 
 
 class ToolHandler:
-    def run(self, runtime: HandlerRuntime) -> Outcome:
+    def execute(self, runtime: HandlerRuntime) -> Outcome:
         cmd_attr = runtime.node_attrs.get("tool_command")
         if not cmd_attr or not str(cmd_attr.value).strip():
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="No tool_command specified")

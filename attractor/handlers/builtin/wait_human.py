@@ -10,7 +10,7 @@ class WaitHumanHandler:
     def __init__(self, interviewer: Interviewer):
         self.interviewer = interviewer
 
-    def run(self, runtime: HandlerRuntime) -> Outcome:
+    def execute(self, runtime: HandlerRuntime) -> Outcome:
         if not runtime.outgoing_edges:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="No outgoing edges for human gate")
 

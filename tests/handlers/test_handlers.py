@@ -28,6 +28,15 @@ class _PluginHandler:
         return Outcome(status=OutcomeStatus.SUCCESS, notes=f"plugin:{runtime.node_id}")
 
 
+class _ExecuteOnlyHandler:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, runtime):
+        self.calls.append(runtime)
+        return Outcome(status=OutcomeStatus.SUCCESS, notes=f"execute:{runtime.node_id}")
+
+
 class _SlowHandler:
     def run(self, runtime):
         time.sleep(0.2)
@@ -297,6 +306,29 @@ class TestBuiltInHandlers:
         outcome = runner("plugin_stage", "", Context())
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.notes == "plugin:plugin_stage"
+
+    def test_handler_runner_dispatches_execute_contract(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                execute_stage [shape=box, type="custom.execute"]
+            }
+            """
+        )
+        execute_handler = _ExecuteOnlyHandler()
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            extra_handlers={"custom.execute": execute_handler},
+        )
+        runner = HandlerRunner(graph, registry)
+        context = Context(values={"seed": "ok"})
+
+        outcome = runner("execute_stage", "ignored", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.notes == "execute:execute_stage"
+        assert len(execute_handler.calls) == 1
+        assert execute_handler.calls[0].node_id == "execute_stage"
 
     def test_conditional_handler_is_noop_success(self):
         graph = parse_dot(

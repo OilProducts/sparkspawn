@@ -13,7 +13,7 @@ class CodergenHandler:
     def __init__(self, backend: Optional[CodergenBackend] = None):
         self.backend = backend
 
-    def run(self, runtime: HandlerRuntime) -> Outcome:
+    def execute(self, runtime: HandlerRuntime) -> Outcome:
         prompt = runtime.prompt.strip()
         if not prompt:
             label_attr = runtime.node_attrs.get("label")

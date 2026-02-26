@@ -9,7 +9,7 @@ from ..base import HandlerRuntime
 
 
 class FanInHandler:
-    def run(self, runtime: HandlerRuntime) -> Outcome:
+    def execute(self, runtime: HandlerRuntime) -> Outcome:
         raw_results = runtime.context.get("parallel.results", [])
         results = _normalize_results(raw_results)
         if not results:

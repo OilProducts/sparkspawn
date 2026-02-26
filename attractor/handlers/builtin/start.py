@@ -6,5 +6,5 @@ from ..base import HandlerRuntime
 
 
 class StartHandler:
-    def run(self, runtime: HandlerRuntime) -> Outcome:
+    def execute(self, runtime: HandlerRuntime) -> Outcome:
         return Outcome(status=OutcomeStatus.SUCCESS, notes="start no-op")

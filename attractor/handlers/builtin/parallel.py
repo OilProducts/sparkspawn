@@ -16,7 +16,7 @@ SUCCESS_STATUSES = {"success", "paused"}
 
 
 class ParallelHandler:
-    def run(self, runtime: HandlerRuntime) -> Outcome:
+    def execute(self, runtime: HandlerRuntime) -> Outcome:
         if not runtime.outgoing_edges:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="parallel node has no outgoing edges")
 
