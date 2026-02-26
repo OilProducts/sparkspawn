@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import copy
 from contextlib import contextmanager
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 class ReadWriteLock:
@@ -47,24 +47,42 @@ class ReadWriteLock:
 @dataclass
 class Context:
     values: Dict[str, Any] = field(default_factory=dict)
+    logs: List[str] = field(default_factory=list)
     lock: ReadWriteLock = field(default_factory=ReadWriteLock)
 
     def set(self, key: str, value: Any) -> None:
         with self.lock.write_lock():
             self.values[key] = value
 
-    def get(self, key: str, default: Any = "") -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
         with self.lock.read_lock():
             return self.values.get(key, default)
 
-    def merge_updates(self, updates: Dict[str, Any]) -> None:
+    def get_string(self, key: str, default: str = "") -> str:
+        value = self.get(key, None)
+        if value is None:
+            return default
+        return _to_string(value)
+
+    def append_log(self, entry: str) -> None:
+        with self.lock.write_lock():
+            self.logs.append(str(entry))
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self.lock.read_lock():
+            return copy.deepcopy(self.values)
+
+    def apply_updates(self, updates: Dict[str, Any]) -> None:
         with self.lock.write_lock():
             for key, value in updates.items():
                 self.values[key] = copy.deepcopy(value)
 
+    def merge_updates(self, updates: Dict[str, Any]) -> None:
+        self.apply_updates(updates)
+
     def clone(self) -> "Context":
         with self.lock.read_lock():
-            return Context(values=copy.deepcopy(self.values))
+            return Context(values=copy.deepcopy(self.values), logs=copy.deepcopy(self.logs))
 
     def get_context_path(self, path: str) -> str:
         # path is expected to be the suffix after "context."

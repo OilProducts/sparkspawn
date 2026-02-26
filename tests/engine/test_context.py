@@ -49,3 +49,49 @@ class TestContextLocking:
 
         assert read_completed.wait(timeout=1.0)
         thread.join(timeout=1.0)
+
+
+class TestContextHelpers:
+    def test_set_get_and_get_string(self):
+        context = Context()
+        context.set("name", "sparkspawn")
+        context.set("attempts", 3)
+        context.set("empty", None)
+
+        assert context.get("name") == "sparkspawn"
+        assert context.get("missing") is None
+        assert context.get("missing", "fallback") == "fallback"
+        assert context.get_string("name") == "sparkspawn"
+        assert context.get_string("attempts") == "3"
+        assert context.get_string("empty", "none") == "none"
+        assert context.get_string("missing", "fallback") == "fallback"
+
+    def test_append_log_and_clone_isolation(self):
+        context = Context(values={"status": "ready"})
+        context.append_log("first")
+
+        cloned = context.clone()
+        cloned.set("status", "running")
+        cloned.append_log("second")
+
+        assert context.get("status") == "ready"
+        assert context.logs == ["first"]
+        assert cloned.logs == ["first", "second"]
+
+    def test_snapshot_returns_copy(self):
+        context = Context(values={"a": 1})
+
+        snapshot = context.snapshot()
+        snapshot["a"] = 2
+        snapshot["b"] = 3
+
+        assert context.get("a") == 1
+        assert context.get("b", None) is None
+
+    def test_apply_updates_merges_values(self):
+        context = Context(values={"a": 1})
+
+        context.apply_updates({"a": 2, "b": "three"})
+
+        assert context.get("a") == 2
+        assert context.get("b") == "three"
