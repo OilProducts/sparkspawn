@@ -537,6 +537,71 @@ class TestBuiltInHandlers:
         assert outcome.status == OutcomeStatus.FAIL
         assert outcome.failure_reason == "Child failed"
 
+    def test_manager_loop_observe_action_writes_telemetry_artifacts(self, monkeypatch, tmp_path):
+        def _fake_observe(context: Context, node_id: str, cycle: int) -> None:
+            del node_id
+            context.set("context.stack.child.status", f"running-{cycle}")
+            context.set("context.stack.child.outcome", "")
+            context.set("context.stack.child.active_stage", f"stage-{cycle}")
+            context.set("context.stack.child.retry_count", cycle)
+
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop._ingest_child_telemetry", _fake_observe)
+        graph = parse_dot(
+            """
+            digraph G {
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=2, manager.actions="observe"]
+            }
+            """
+        )
+        logs_root = tmp_path / "logs"
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry, logs_root=logs_root)
+
+        outcome = runner("manager", "", Context())
+
+        assert outcome.status == OutcomeStatus.FAIL
+        telemetry_path = logs_root / "manager" / "manager_telemetry.jsonl"
+        assert telemetry_path.exists()
+        lines = telemetry_path.read_text(encoding="utf-8").splitlines()
+        payloads = [json.loads(line) for line in lines]
+        assert [entry["cycle"] for entry in payloads] == [1, 2]
+        assert [entry["node_id"] for entry in payloads] == ["manager", "manager"]
+        assert [entry["child_status"] for entry in payloads] == ["running-1", "running-2"]
+        assert [entry["child_active_stage"] for entry in payloads] == ["stage-1", "stage-2"]
+        assert [entry["child_retry_count"] for entry in payloads] == [1, 2]
+
+    def test_manager_loop_steer_action_writes_intervention_artifacts(self, monkeypatch, tmp_path):
+        def _fake_steer(context: Context, node_id: str, cycle: int) -> None:
+            del node_id
+            context.set("context.stack.child.active_stage", f"active-{cycle}")
+            context.set("context.stack.child.intervention", f"instruction-{cycle}")
+            context.set("context.stack.child.status", "running")
+            context.set("context.stack.child.outcome", "")
+
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop._steer_child", _fake_steer)
+        graph = parse_dot(
+            """
+            digraph G {
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=2, manager.actions="steer"]
+            }
+            """
+        )
+        logs_root = tmp_path / "logs"
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry, logs_root=logs_root)
+
+        outcome = runner("manager", "", Context())
+
+        assert outcome.status == OutcomeStatus.FAIL
+        interventions_path = logs_root / "manager" / "manager_interventions.jsonl"
+        assert interventions_path.exists()
+        lines = interventions_path.read_text(encoding="utf-8").splitlines()
+        payloads = [json.loads(line) for line in lines]
+        assert [entry["cycle"] for entry in payloads] == [1, 2]
+        assert [entry["node_id"] for entry in payloads] == ["manager", "manager"]
+        assert [entry["child_active_stage"] for entry in payloads] == ["active-1", "active-2"]
+        assert [entry["instruction"] for entry in payloads] == ["instruction-1", "instruction-2"]
+
     def test_codergen_handler_calls_backend(self):
         graph = parse_dot(
             """

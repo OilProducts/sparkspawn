@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import re
 import time
+from typing import Any
 
 from attractor.dsl.models import DotAttribute, Duration
 from attractor.engine.conditions import evaluate_condition
@@ -23,6 +26,12 @@ class ManagerLoopHandler:
         for cycle in range(1, max_cycles + 1):
             if "observe" in actions:
                 _ingest_child_telemetry(runtime.context, runtime.node_id, cycle)
+                _append_manager_artifact(
+                    runtime.logs_root,
+                    runtime.node_id,
+                    "manager_telemetry.jsonl",
+                    _telemetry_payload(runtime.context, runtime.node_id, cycle),
+                )
 
             now = time.monotonic()
             if "steer" in actions and _steer_cooldown_elapsed(
@@ -31,6 +40,12 @@ class ManagerLoopHandler:
                 cooldown_seconds=steer_cooldown,
             ):
                 _steer_child(runtime.context, runtime.node_id, cycle)
+                _append_manager_artifact(
+                    runtime.logs_root,
+                    runtime.node_id,
+                    "manager_interventions.jsonl",
+                    _intervention_payload(runtime.context, runtime.node_id, cycle),
+                )
                 last_steer_at = now
 
             child_resolution = _resolve_child_status(runtime.context)
@@ -134,6 +149,47 @@ def _ingest_child_telemetry(context: Context, node_id: str, cycle: int) -> None:
 
 def _steer_child(context: Context, node_id: str, cycle: int) -> None:
     del context, node_id, cycle
+
+
+def _telemetry_payload(context: Context, node_id: str, cycle: int) -> dict[str, Any]:
+    return {
+        "cycle": cycle,
+        "node_id": node_id,
+        "timestamp_unix": time.time(),
+        "child_status": context.get("context.stack.child.status", ""),
+        "child_outcome": context.get("context.stack.child.outcome", ""),
+        "child_active_stage": context.get("context.stack.child.active_stage", ""),
+        "child_retry_count": context.get("context.stack.child.retry_count", ""),
+    }
+
+
+def _intervention_payload(context: Context, node_id: str, cycle: int) -> dict[str, Any]:
+    return {
+        "cycle": cycle,
+        "node_id": node_id,
+        "timestamp_unix": time.time(),
+        "child_status": context.get("context.stack.child.status", ""),
+        "child_active_stage": context.get("context.stack.child.active_stage", ""),
+        "instruction": context.get("context.stack.child.intervention", ""),
+    }
+
+
+def _append_manager_artifact(
+    logs_root: Path | None,
+    node_id: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> None:
+    if not logs_root:
+        return
+    try:
+        stage_dir = logs_root / node_id
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        with (stage_dir / filename).open("a", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True)
+            handle.write("\n")
+    except OSError:
+        return
 
 
 def _parse_duration_string(raw: str, default: float) -> float:

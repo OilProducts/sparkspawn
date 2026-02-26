@@ -226,7 +226,7 @@ Status key:
 - [x] [4.11-01] Implement child pipeline supervision loop with configurable poll interval/max cycles.
 - [x] [4.11-02] Implement observe/steer/wait action set and stop-condition evaluation.
 - [x] [4.11-03] Implement child status/outcome checks and fail/success resolution.
-- [ ] [4.11-04] Emit intervention and telemetry artifacts for supervisor decisions.
+- [x] [4.11-04] Emit intervention and telemetry artifacts for supervisor decisions.
 
 ### 4.12 Custom Handlers
 - [ ] [4.12-01] Document and support custom handler registration by type string.
