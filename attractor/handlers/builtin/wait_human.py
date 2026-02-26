@@ -22,7 +22,7 @@ class WaitHumanHandler:
                 raw_label = str(label_attr.value)
                 if raw_label.strip():
                     label = raw_label
-            options.append(QuestionOption(label=label, value=label))
+            options.append(QuestionOption(label=label, value=label, key=_parse_accelerator_key(label)))
 
         question = Question(
             title=f"Human Gate: {runtime.node_id}",
@@ -44,3 +44,26 @@ def _pick_single(answer: Answer) -> str:
     if answer.selected_values:
         return answer.selected_values[0]
     return ""
+
+
+def _parse_accelerator_key(label: str) -> str:
+    text = (label or "").strip()
+    if not text:
+        return ""
+
+    if text.startswith("[") and "]" in text:
+        inside = text[1 : text.find("]")].strip()
+        if inside:
+            return inside[0].upper()
+
+    if len(text) >= 2 and text[0].isalnum() and text[1] == ")":
+        return text[0].upper()
+
+    if len(text) >= 3 and text[0].isalnum():
+        idx = 1
+        while idx < len(text) and text[idx] == " ":
+            idx += 1
+        if idx < len(text) and text[idx] == "-":
+            return text[0].upper()
+
+    return text[0].upper()

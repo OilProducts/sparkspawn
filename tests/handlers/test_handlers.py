@@ -577,6 +577,45 @@ class TestBuiltInHandlers:
             ("fix", "fix"),
         ]
 
+    @pytest.mark.parametrize(
+        ("label", "expected_key"),
+        [
+            ("[Y] Yes, deploy", "Y"),
+            ("Y) Yes, deploy", "Y"),
+            ("Y - Yes, deploy", "Y"),
+            ("Yes, deploy", "Y"),
+        ],
+    )
+    def test_wait_human_parses_accelerator_keys_from_supported_label_patterns(self, label, expected_key):
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                gate [shape=hexagon, prompt="Choose"]
+                yes_path [shape=box]
+                no_path [shape=box]
+                gate -> yes_path [label="{label}"]
+                gate -> no_path [label="[N] No, cancel"]
+            }}
+            """
+        )
+
+        seen = {}
+
+        def _capture(question):
+            seen["question"] = question
+            return Answer(selected_values=[question.options[0].value])
+
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            interviewer=CallbackInterviewer(_capture),
+        )
+        runner = HandlerRunner(graph, registry)
+        outcome = runner("gate", "Choose", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert seen["question"].options[0].key == expected_key
+        assert seen["question"].options[1].key == "N"
+
     def test_tool_handler_executes_command(self):
         graph = parse_dot(
             """

@@ -16,6 +16,7 @@ class QuestionType(str, Enum):
 class QuestionOption:
     label: str
     value: str
+    key: str = ""
 
 
 @dataclass
