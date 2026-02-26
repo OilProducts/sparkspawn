@@ -305,7 +305,6 @@ Status key:
 ### 7.2 Built-In Lint Rules
 - [x] [7.2-01] Implement `start_node` rule.
 - [x] [7.2-02] Implement `terminal_node` rule.
-- [ ] [7.2-03] Implement `reachability` rule.
 - [ ] [7.2-04] Implement `edge_target_exists` rule.
 - [ ] [7.2-05] Implement `start_no_incoming` rule.
 - [ ] [7.2-06] Implement `exit_no_outgoing` rule.
@@ -544,6 +543,7 @@ Status key:
 ---
 
 ## Deferred Tasks
+- [ ] [7.2-03] Implement `reachability` rule. Deferred because `validate_graph` already emits `reachability` diagnostics for nodes outside the start-node traversal and this behavior is covered by validator tests (`tests/dsl/test_validator.py`), so this is checklist state drift.
 - [ ] [6.4-03] Implement `CallbackInterviewer` delegation path. Deferred because `CallbackInterviewer.ask` already delegates directly to the injected callback and this behavior is covered in `tests/interviewer/test_interviewer.py::test_callback_interviewer`, so this is checklist state drift.
 - [ ] [5.6-02] Ensure each stage directory includes `prompt.md`, `response.md`, `status.json`. Deferred because executor stage artifact writes already guarantee all three files per executed stage (`attractor/engine/executor.py::_write_stage_artifacts`), and coverage exists in `tests/engine/test_checkpointing.py::test_artifacts_and_checkpoint_written_each_step`, so this is checklist state drift.
 - [ ] [4.2-01] Implement registration API with replacement behavior for duplicate keys. Deferred because `HandlerRegistry.register` already replaces existing entries via direct map assignment and this is checklist state drift.
