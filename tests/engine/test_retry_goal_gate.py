@@ -423,6 +423,48 @@ class TestRetryAndGoalGate:
         assert result.route_trace == ["start", "implement", "done"]
         assert result.failure_reason == "goal_gate_failed"
 
+    def test_run_from_goal_gate_recovery_checkpoints_retry_target_before_stage_execution(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [retry_target="fix"]
+                start [shape=Mdiamond]
+                implement [shape=box, goal_gate=true, max_retries=0]
+                fix [shape=box]
+                done [shape=Msquare]
+
+                start -> implement
+                implement -> done [condition="outcome=fail"]
+                implement -> done [condition="outcome=success"]
+                fix -> implement
+            }
+            """
+        )
+
+        events = []
+        calls = {"implement": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "implement":
+                calls["implement"] += 1
+                if calls["implement"] == 1:
+                    return Outcome(status=OutcomeStatus.FAIL, failure_reason="needs fix")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run_from("start", Context())
+
+        assert result.status == "success"
+        stage_started_fix_index = next(
+            i for i, event in enumerate(events) if event["type"] == "StageStarted" and event.get("node_id") == "fix"
+        )
+        checkpoint_fix_indices = [
+            i
+            for i, event in enumerate(events)
+            if event["type"] == "CheckpointSaved" and event.get("node_id") == "fix"
+        ]
+        assert checkpoint_fix_indices
+        assert any(index < stage_started_fix_index for index in checkpoint_fix_indices)
+
     def test_non_goal_gate_fail_routing_ignores_graph_level_retry_target(self):
         graph = parse_dot(
             """

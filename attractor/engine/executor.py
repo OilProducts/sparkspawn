@@ -409,6 +409,12 @@ class PipelineExecutor:
                         current = retry_target
                         incoming_edge = None
                         route_trace.append(current)
+                        self._save_checkpoint(
+                            current_node=current,
+                            completed_nodes=completed,
+                            context=ctx,
+                            retry_counts=retry_counts,
+                        )
                         continue
 
                     self._finalize_run(
