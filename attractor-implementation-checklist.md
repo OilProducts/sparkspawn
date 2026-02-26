@@ -277,7 +277,7 @@ Status key:
 
 ### 6.2 Question Model
 - [x] [6.2-01] Implement full question payload (`text`, `type`, `options`, `default`, `timeout_seconds`, `stage`, `metadata`).
-- [ ] [6.2-02] Validate question types and option schema.
+- [x] [6.2-02] Validate question types and option schema.
 
 ### 6.3 Answer Model
 - [ ] [6.3-01] Implement answer payload (`value`, `selected_option`, `text`).

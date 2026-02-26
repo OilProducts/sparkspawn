@@ -6,16 +6,22 @@ from typing import Any, List
 
 
 class QuestionType(str, Enum):
-    SINGLE_SELECT = "SINGLE_SELECT"
-    MULTI_SELECT = "MULTI_SELECT"
-    FREE_TEXT = "FREE_TEXT"
-    CONFIRM = "CONFIRM"
+    YES_NO = "YES_NO"
+    MULTIPLE_CHOICE = "MULTIPLE_CHOICE"
+    FREEFORM = "FREEFORM"
+    CONFIRMATION = "CONFIRMATION"
+
+    # Legacy aliases retained for compatibility with existing callers/tests.
+    SINGLE_SELECT = MULTIPLE_CHOICE
+    MULTI_SELECT = MULTIPLE_CHOICE
+    FREE_TEXT = FREEFORM
+    CONFIRM = CONFIRMATION
 
 
 @dataclass
 class QuestionOption:
     label: str
-    value: str
+    value: str = ""
     key: str = ""
 
 
@@ -43,13 +49,16 @@ class Question:
         prompt: str | None = None,
         question_type: QuestionType | None = None,
     ):
-        resolved_type = type if type is not None else question_type
+        resolved_type = _coerce_question_type(type if type is not None else question_type)
         if resolved_type is None:
             raise TypeError("Question requires `type` (or legacy `question_type`).")
 
+        resolved_options = list(options) if options else []
+        _validate_option_schema(resolved_type, resolved_options)
+
         self.text = text if text is not None else (prompt or "")
         self.type = resolved_type
-        self.options = list(options) if options else []
+        self.options = resolved_options
         self.default = default
         self.timeout_seconds = timeout_seconds
         self.stage = stage or (title or "")
@@ -84,3 +93,43 @@ class Question:
 class Answer:
     selected_values: List[str] = field(default_factory=list)
     text: str = ""
+
+
+_SELECT_TYPES = {QuestionType.MULTIPLE_CHOICE}
+_LEGACY_QUESTION_TYPE_NAMES = {
+    "SINGLE_SELECT": QuestionType.MULTIPLE_CHOICE,
+    "MULTI_SELECT": QuestionType.MULTIPLE_CHOICE,
+    "FREE_TEXT": QuestionType.FREEFORM,
+    "CONFIRM": QuestionType.CONFIRMATION,
+}
+
+
+def _coerce_question_type(value: QuestionType | str | None) -> QuestionType | None:
+    if value is None:
+        return None
+    if isinstance(value, QuestionType):
+        return value
+    if isinstance(value, str):
+        legacy = _LEGACY_QUESTION_TYPE_NAMES.get(value)
+        if legacy is not None:
+            return legacy
+        try:
+            return QuestionType(value)
+        except ValueError as exc:
+            raise ValueError(f"Unknown question type: {value}") from exc
+    raise TypeError(f"Unsupported question type value: {value!r}")
+
+
+def _validate_option_schema(question_type: QuestionType, options: list[QuestionOption]) -> None:
+    if question_type not in _SELECT_TYPES and options:
+        raise ValueError("Question options are only valid for multiple-choice questions.")
+
+    for option in options:
+        if not isinstance(option, QuestionOption):
+            raise TypeError("Question options must be QuestionOption instances.")
+        if not option.label or not option.label.strip():
+            raise ValueError("Question options must include a non-empty label.")
+        if question_type in _SELECT_TYPES and (not option.key or not option.key.strip()):
+            raise ValueError("Multiple-choice question options must include a non-empty key.")
+        if question_type in _SELECT_TYPES and (not option.value or not option.value.strip()):
+            option.value = option.key.strip()

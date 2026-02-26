@@ -39,7 +39,7 @@ class WaitHumanHandler:
         question = Question(
             title=f"Human Gate: {runtime.node_id}",
             prompt=runtime.prompt or "Choose next route",
-            question_type=QuestionType.SINGLE_SELECT,
+            question_type=QuestionType.MULTIPLE_CHOICE,
             options=options,
             metadata={"node_id": runtime.node_id},
         )

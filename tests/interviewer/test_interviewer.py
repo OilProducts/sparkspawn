@@ -41,15 +41,15 @@ class TestInterviewerImplementations:
         q = Question(
             title="Pick",
             prompt="choose",
-            question_type=QuestionType.SINGLE_SELECT,
-            options=[QuestionOption(label="A", value="a"), QuestionOption(label="B", value="b")],
+            question_type=QuestionType.MULTIPLE_CHOICE,
+            options=[QuestionOption(label="A", value="a", key="A"), QuestionOption(label="B", value="b", key="B")],
         )
         answer = AutoApproveInterviewer().ask(q)
         assert answer.selected_values == ["a"]
 
     def test_callback_interviewer(self):
         interviewer = CallbackInterviewer(lambda q: Answer(selected_values=["x"]))
-        answer = interviewer.ask(Question(title="T", prompt="P", question_type=QuestionType.CONFIRM))
+        answer = interviewer.ask(Question(title="T", prompt="P", question_type=QuestionType.CONFIRMATION))
         assert answer.selected_values == ["x"]
 
     def test_queue_interviewer(self):
@@ -63,8 +63,8 @@ class TestInterviewerImplementations:
         question = Question(
             title="Pick",
             prompt="Choose one",
-            question_type=QuestionType.SINGLE_SELECT,
-            options=[QuestionOption(label="A", value="a"), QuestionOption(label="B", value="b")],
+            question_type=QuestionType.MULTIPLE_CHOICE,
+            options=[QuestionOption(label="A", value="a", key="A"), QuestionOption(label="B", value="b", key="B")],
         )
         with patch("builtins.input", side_effect=["1", "1"]):
             interviewer_variants = [
