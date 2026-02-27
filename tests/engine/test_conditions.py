@@ -79,3 +79,12 @@ class TestConditions:
         assert not evaluate_condition('preferred_label="Fix"', outcome, context)
         assert evaluate_condition("context.review_result=Ship", outcome, context)
         assert not evaluate_condition("context.review_result=ship", outcome, context)
+
+    def test_bare_key_truthy_checks(self):
+        outcome = Outcome(status=OutcomeStatus.SUCCESS, preferred_label="Fix")
+        context = Context(values={"context.tests_passed": "true"})
+
+        assert evaluate_condition("outcome", outcome, context)
+        assert evaluate_condition("preferred_label", outcome, context)
+        assert evaluate_condition("context.tests_passed", outcome, context)
+        assert not evaluate_condition("context.missing_key", outcome, context)

@@ -183,6 +183,23 @@ class TestDotValidator:
 
         assert condition_errors == []
 
+    def test_condition_syntax_accepts_bare_key_truthy_clause(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            task [shape=box]
+            done [shape=Msquare]
+
+            start -> task
+            task -> done [condition="context.tests_passed && outcome=success"]
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+        condition_errors = [d for d in self._errors(diagnostics) if d.rule_id == "condition_syntax"]
+
+        assert condition_errors == []
+
     def test_condition_syntax_rejects_context_path_with_trailing_dot(self):
         dot = """
         digraph G {

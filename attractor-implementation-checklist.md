@@ -414,7 +414,7 @@ Status key:
 - [x] [10.4-03] Resolve unknown keys to empty string.
 
 ### 10.5 Evaluation
-- [ ] [10.5-03] Support bare-key truthy checks.
+- [x] [10.5-03] Support bare-key truthy checks.
 - [ ] [10.5-04] Add parser/evaluator tests for mixed-clause expressions.
 
 ### 10.6 Examples

@@ -7,6 +7,7 @@ from .outcome import Outcome
 
 
 _CLAUSE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*)\s*(=|!=)\s*(.+)$")
+_BARE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 
 
 def evaluate_condition(condition: str, outcome: Outcome, context: Context) -> bool:
@@ -19,17 +20,21 @@ def evaluate_condition(condition: str, outcome: Outcome, context: Context) -> bo
         if clause == "":
             return False
         match = _CLAUSE_RE.match(clause)
-        if not match:
-            return False
+        if match:
+            key = match.group(1)
+            op = match.group(2)
+            expected = _normalize_literal(match.group(3))
+            actual = _resolve_key(key, outcome, context)
 
-        key = match.group(1)
-        op = match.group(2)
-        expected = _normalize_literal(match.group(3))
-        actual = _resolve_key(key, outcome, context)
+            if op == "=" and actual != expected:
+                return False
+            if op == "!=" and actual == expected:
+                return False
+            continue
 
-        if op == "=" and actual != expected:
+        if not _BARE_KEY_RE.fullmatch(clause):
             return False
-        if op == "!=" and actual == expected:
+        if not _resolve_key(clause, outcome, context):
             return False
 
     return True

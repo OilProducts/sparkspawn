@@ -16,6 +16,7 @@ VALID_FIDELITY = {
 }
 
 _CONDITION_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*)\s*(=|!=)\s*(.+)$")
+_CONDITION_BARE_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*)$")
 _CONTEXT_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 _STYLESHEET_ALLOWED_PROPERTIES = {"llm_model", "llm_provider", "reasoning_effort"}
 _STYLESHEET_CLASS_RE = re.compile(r"^[a-z0-9-]+$")
@@ -327,19 +328,24 @@ def _validate_edge_condition(condition_attr, edge: DotEdge) -> List[Diagnostic]:
             continue
 
         match = _CONDITION_RE.match(clause)
-        if not match:
-            diagnostics.append(
-                Diagnostic(
-                    rule_id="condition_syntax",
-                    severity=DiagnosticSeverity.ERROR,
-                    message=f"invalid condition clause '{clause}'",
-                    line=edge.line,
-                    edge=(edge.source, edge.target),
+        key: str
+        if match:
+            key = match.group(1)
+        else:
+            bare_match = _CONDITION_BARE_KEY_RE.match(clause)
+            if not bare_match:
+                diagnostics.append(
+                    Diagnostic(
+                        rule_id="condition_syntax",
+                        severity=DiagnosticSeverity.ERROR,
+                        message=f"invalid condition clause '{clause}'",
+                        line=edge.line,
+                        edge=(edge.source, edge.target),
+                    )
                 )
-            )
-            continue
+                continue
+            key = bare_match.group(1)
 
-        key = match.group(1)
         if key in {"outcome", "preferred_label"}:
             continue
         if key.startswith("context.") and _CONTEXT_PATH_RE.fullmatch(key[len("context.") :]):
