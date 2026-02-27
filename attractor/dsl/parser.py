@@ -281,11 +281,17 @@ class _Parser:
                     )
             merged.update(stmt_attrs)
             existing.attrs = merged
+            existing.explicit_attr_keys.update(stmt_attrs.keys())
             if subgraph_state is not None:
                 subgraph_state.node_ids.add(first.value)
             return
 
-        graph.nodes[first.value] = DotNode(node_id=first.value, attrs=effective, line=first.line)
+        graph.nodes[first.value] = DotNode(
+            node_id=first.value,
+            attrs=effective,
+            line=first.line,
+            explicit_attr_keys=set(stmt_attrs.keys()),
+        )
         if subgraph_state is not None:
             subgraph_state.node_ids.add(first.value)
 

@@ -343,7 +343,7 @@ Status key:
 ### 8.5 Application Order
 - [x] [8.5-01] Implement precedence order: node attr -> stylesheet -> graph default -> system default.
 - [x] [8.5-02] Run stylesheet transform post-parse/pre-validate.
-- [ ] [8.5-03] Ensure transform only fills missing model-related attrs.
+- [x] [8.5-03] Ensure transform only fills missing model-related attrs.
 
 ### 8.6 Example
 - [ ] [8.6-01] Add fixture that reproduces universal/class/id precedence exactly as documented example.

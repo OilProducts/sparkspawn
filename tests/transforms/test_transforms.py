@@ -333,6 +333,26 @@ class TestTransforms:
         assert graph.nodes["explicit"].attrs["llm_provider"].value == "node-provider"
         assert graph.nodes["explicit"].attrs["reasoning_effort"].value == "high"
 
+    def test_stylesheet_overrides_inherited_model_defaults_even_when_declared_on_same_line(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [model_stylesheet=".fast { llm_model: style-model; llm_provider: style-provider; reasoning_effort: low; }"]
+                node [llm_model="default-model", llm_provider="default-provider", reasoning_effort="medium"] implicit [shape=box, class="fast"]
+                start [shape=Mdiamond]
+                done [shape=Msquare]
+                start -> implicit -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        assert graph.nodes["implicit"].attrs["llm_model"].value == "style-model"
+        assert graph.nodes["implicit"].attrs["llm_provider"].value == "style-provider"
+        assert graph.nodes["implicit"].attrs["reasoning_effort"].value == "low"
+
     def test_stylesheet_parses_quoted_values_with_semicolons(self):
         graph = parse_dot(
             """

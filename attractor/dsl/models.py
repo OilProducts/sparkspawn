@@ -36,6 +36,7 @@ class DotNode:
     node_id: str
     attrs: Dict[str, DotAttribute] = field(default_factory=dict)
     line: int = 0
+    explicit_attr_keys: set[str] = field(default_factory=set)
 
 
 @dataclass
