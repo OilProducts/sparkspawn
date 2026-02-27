@@ -52,6 +52,14 @@ class TestConditions:
         monkeypatch.setattr(context, "get_context_path", fail_if_called)
         assert evaluate_condition("context.tests_passed=true", outcome, context)
 
+    def test_missing_prefixed_context_key_resolves_to_empty_string(self):
+        outcome = Outcome(status=OutcomeStatus.SUCCESS)
+        context = Context()
+
+        assert evaluate_condition('context.missing_key=""', outcome, context)
+        assert evaluate_condition("context.missing_key!=nonempty", outcome, context)
+        assert not evaluate_condition('context.missing_key!=""', outcome, context)
+
     def test_quoted_literal_can_contain_and_delimiter(self):
         outcome = Outcome(status=OutcomeStatus.SUCCESS, preferred_label="A && B")
         assert evaluate_condition('preferred_label="A && B"', outcome, Context())
