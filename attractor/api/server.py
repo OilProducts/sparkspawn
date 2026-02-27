@@ -39,14 +39,22 @@ FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_DIST_INDEX = FRONTEND_DIST / "index.html"
 LEGACY_INDEX = PROJECT_ROOT / "index.html"
 REGISTERED_TRANSFORMS: List[object] = []
+_REGISTERED_TRANSFORMS_LOCK = threading.Lock()
 
 
 def register_transform(transform: object) -> None:
-    REGISTERED_TRANSFORMS.append(transform)
+    with _REGISTERED_TRANSFORMS_LOCK:
+        REGISTERED_TRANSFORMS.append(transform)
 
 
 def clear_registered_transforms() -> None:
-    REGISTERED_TRANSFORMS.clear()
+    with _REGISTERED_TRANSFORMS_LOCK:
+        REGISTERED_TRANSFORMS.clear()
+
+
+def _registered_transforms_snapshot() -> List[object]:
+    with _REGISTERED_TRANSFORMS_LOCK:
+        return list(REGISTERED_TRANSFORMS)
 
 
 class ConnectionManager:
@@ -1143,7 +1151,7 @@ def _build_transform_pipeline() -> TransformPipeline:
     pipeline = TransformPipeline()
     pipeline.register(GoalVariableTransform())
     pipeline.register(ModelStylesheetTransform())
-    for transform in REGISTERED_TRANSFORMS:
+    for transform in _registered_transforms_snapshot():
         pipeline.register(transform)
     return pipeline
 

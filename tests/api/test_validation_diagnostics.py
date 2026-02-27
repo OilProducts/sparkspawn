@@ -221,3 +221,39 @@ def test_preview_applies_registered_custom_transform() -> None:
         assert nodes_by_id["task"]["prompt"] == "Build [custom]"
     finally:
         server.clear_registered_transforms()
+
+
+def test_build_transform_pipeline_uses_stable_custom_transform_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FirstTransform:
+        def apply(self, graph):
+            return graph
+
+    class _LateTransform:
+        def apply(self, graph):
+            return graph
+
+    first = _FirstTransform()
+    late = _LateTransform()
+    original_register = server.TransformPipeline.register
+
+    def _register_and_mutate_registry(self, transform):
+        original_register(self, transform)
+        if transform is first and late not in server.REGISTERED_TRANSFORMS:
+            server.REGISTERED_TRANSFORMS.append(late)
+
+    server.clear_registered_transforms()
+    try:
+        server.register_transform(first)
+        monkeypatch.setattr(
+            server.TransformPipeline,
+            "register",
+            _register_and_mutate_registry,
+        )
+        pipeline = server._build_transform_pipeline()
+        custom_transforms = [t for t in pipeline.transforms if t in (first, late)]
+
+        assert custom_transforms == [first]
+    finally:
+        server.clear_registered_transforms()
