@@ -310,9 +310,8 @@ Status key:
 - [x] [7.2-07] Implement `condition_syntax` rule.
 - [x] [7.2-08] Implement `stylesheet_syntax` rule.
 - [x] [7.2-09] Implement `type_known` warning rule.
-- [ ] [7.2-11] Implement `retry_target_exists` warning rule.
 - [x] [7.2-12] Implement `goal_gate_has_retry` warning rule.
-- [ ] [7.2-13] Implement `prompt_on_llm_nodes` warning rule.
+- [x] [7.2-13] Implement `prompt_on_llm_nodes` warning rule.
 
 ### 7.3 Validation API
 - [ ] [7.3-01] Implement `validate(graph, extra_rules)` composition path.

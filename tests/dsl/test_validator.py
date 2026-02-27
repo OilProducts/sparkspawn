@@ -371,6 +371,45 @@ class TestDotValidator:
         assert type_warnings[0].node_id == "custom"
         assert "custom.unknown" in type_warnings[0].message
 
+    def test_codergen_node_without_prompt_or_label_emits_warning(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            task [shape=box]
+            done [shape=Msquare]
+            start -> task
+            task -> done
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+
+        prompt_warnings = [
+            d for d in diagnostics if d.rule_id == "prompt_on_llm_nodes" and d.severity == DiagnosticSeverity.WARNING
+        ]
+        assert len(prompt_warnings) == 1
+        assert prompt_warnings[0].node_id == "task"
+
+    def test_prompt_on_llm_nodes_uses_resolved_codergen_type(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            gate [shape=hexagon]
+            custom [shape=box, type="custom.unknown"]
+            done [shape=Msquare]
+            start -> gate
+            gate -> custom
+            custom -> done
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+
+        prompt_warnings = [
+            d for d in diagnostics if d.rule_id == "prompt_on_llm_nodes" and d.severity == DiagnosticSeverity.WARNING
+        ]
+        assert [d.node_id for d in prompt_warnings] == ["custom"]
+
     def test_valid_minimal_graph(self):
         dot = """
         digraph G {

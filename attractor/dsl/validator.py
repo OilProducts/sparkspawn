@@ -32,6 +32,17 @@ _KNOWN_HANDLER_TYPES = {
     "tool",
     "stack.manager_loop",
 }
+_SHAPE_TO_HANDLER_TYPE = {
+    "Mdiamond": "start",
+    "Msquare": "exit",
+    "box": "codergen",
+    "hexagon": "wait.human",
+    "diamond": "conditional",
+    "component": "parallel",
+    "tripleoctagon": "parallel.fan_in",
+    "parallelogram": "tool",
+    "house": "stack.manager_loop",
+}
 
 
 def validate_graph(graph: DotGraph) -> List[Diagnostic]:
@@ -163,6 +174,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
     diagnostics.extend(_validate_goal_gate_retry_targets(graph))
     diagnostics.extend(_validate_fidelity_values(graph))
     diagnostics.extend(_validate_known_types(graph))
+    diagnostics.extend(_validate_prompt_on_llm_nodes(graph))
     diagnostics.extend(_validate_stylesheet(graph))
 
     return diagnostics
@@ -429,6 +441,56 @@ def _validate_known_types(graph: DotGraph) -> List[Diagnostic]:
             )
 
     return diagnostics
+
+
+def _validate_prompt_on_llm_nodes(graph: DotGraph) -> List[Diagnostic]:
+    diagnostics: List[Diagnostic] = []
+
+    for node in graph.nodes.values():
+        if not _resolves_to_codergen(node):
+            continue
+
+        has_prompt = _has_non_empty_attr(node, "prompt")
+        has_label = _has_non_empty_attr(node, "label")
+        if has_prompt or has_label:
+            continue
+
+        diagnostics.append(
+            Diagnostic(
+                rule_id="prompt_on_llm_nodes",
+                severity=DiagnosticSeverity.WARNING,
+                message=(
+                    f"node '{node.node_id}' resolves to codergen and should define "
+                    "a non-empty prompt or label"
+                ),
+                line=node.line,
+                node_id=node.node_id,
+            )
+        )
+
+    return diagnostics
+
+
+def _resolves_to_codergen(node: DotNode) -> bool:
+    explicit = node.attrs.get("type")
+    if explicit:
+        explicit_value = str(explicit.value).strip()
+        if explicit_value:
+            if explicit_value in _KNOWN_HANDLER_TYPES:
+                return explicit_value == "codergen"
+
+    shape = node.attrs.get("shape")
+    if shape:
+        mapped = _SHAPE_TO_HANDLER_TYPE.get(str(shape.value).strip())
+        if mapped is not None:
+            return mapped == "codergen"
+
+    return True
+
+
+def _has_non_empty_attr(node: DotNode, key: str) -> bool:
+    attr = node.attrs.get(key)
+    return bool(attr and str(attr.value).strip())
 
 
 def _validate_stylesheet(graph: DotGraph) -> List[Diagnostic]:
