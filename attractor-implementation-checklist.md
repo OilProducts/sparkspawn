@@ -409,7 +409,7 @@ Status key:
 - [x] [10.3-03] Use exact case-sensitive string comparison.
 
 ### 10.4 Variable Resolution
-- [ ] [10.4-01] Resolve `outcome` and `preferred_label` from current stage outcome.
+- [x] [10.4-01] Resolve `outcome` and `preferred_label` from current stage outcome.
 - [ ] [10.4-02] Resolve `context.*` keys with fallback unprefixed lookup.
 - [ ] [10.4-03] Resolve unknown keys to empty string.
 

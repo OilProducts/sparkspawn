@@ -1144,7 +1144,10 @@ class PipelineExecutor:
         )
 
     def _context_preferred_label(self, context: Context) -> str:
-        return str(context.get("preferred_label", "")).strip()
+        value = context.get("preferred_label", "")
+        if value is None:
+            return ""
+        return str(value)
 
     def _node_ids_for_shape(self, shape: str) -> set[str]:
         matches: set[str] = set()
