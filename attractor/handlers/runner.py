@@ -45,7 +45,7 @@ class HandlerRunner:
         if self.logs_root is not None:
             self.logs_root = Path(self.logs_root)
 
-    def __call__(self, node_id: str, prompt: str, context: Context) -> Outcome:
+    def __call__(self, node_id: str, prompt: str, context: Context) -> Outcome | None:
         return self._run(node_id, prompt, context, emit_event=None)
 
     def run_with_events(
@@ -54,7 +54,7 @@ class HandlerRunner:
         prompt: str,
         context: Context,
         emit_event: Callable[..., None] | None,
-    ) -> Outcome:
+    ) -> Outcome | None:
         return self._run(node_id, prompt, context, emit_event=emit_event)
 
     def _run(
@@ -64,7 +64,7 @@ class HandlerRunner:
         context: Context,
         *,
         emit_event: Callable[..., None] | None,
-    ) -> Outcome:
+    ) -> Outcome | None:
         entered = False
         try:
             self._enter_call()
@@ -128,7 +128,9 @@ class HandlerRunner:
             return
         self.logs_root = Path(logs_root)
 
-    def _invoke_handler_with_contract(self, handler_type: str, handler: Any, runtime: HandlerRuntime) -> Outcome:
+    def _invoke_handler_with_contract(
+        self, handler_type: str, handler: Any, runtime: HandlerRuntime
+    ) -> Outcome | None:
         lock = self._custom_handler_lock(handler_type, handler)
         if lock is None:
             return _invoke_handler(handler, runtime)
@@ -216,7 +218,7 @@ def _to_seconds(attr: Any) -> float | None:
         return None
 
 
-def _invoke_handler(handler: Any, runtime: HandlerRuntime) -> Outcome:
+def _invoke_handler(handler: Any, runtime: HandlerRuntime) -> Outcome | None:
     execute = getattr(handler, "execute", None)
     if callable(execute):
         outcome = execute(runtime)
@@ -227,6 +229,8 @@ def _invoke_handler(handler: Any, runtime: HandlerRuntime) -> Outcome:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler does not implement execute(runtime)")
         outcome = run(runtime)
 
+    if outcome is None:
+        return None
     if isinstance(outcome, Outcome):
         return outcome
     return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler returned non-Outcome result")

@@ -10,6 +10,7 @@ import attractor.engine.executor as executor_module
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.handlers import HandlerRunner, build_default_registry
 
 
 class TestCheckpointAndArtifacts:
@@ -127,6 +128,42 @@ class TestCheckpointAndArtifacts:
                 if node_id == "plan":
                     return None
                 return Outcome(status=OutcomeStatus.SUCCESS)
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "success"
+            assert result.node_outcomes["plan"].status == OutcomeStatus.SUCCESS
+            status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
+            assert status_payload["outcome"] == "success"
+            assert status_payload["notes"] == "auto-status: handler completed without writing status"
+
+    def test_auto_status_synthesizes_success_when_custom_handler_returns_none(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box, type="custom.none", auto_status=true]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done
+            }
+            """
+        )
+
+        class _NoOutcomeHandler:
+            def execute(self, runtime):
+                del runtime
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+            registry = build_default_registry(extra_handlers={"custom.none": _NoOutcomeHandler()})
+            runner = HandlerRunner(graph, registry, logs_root=str(logs_root))
 
             result = PipelineExecutor(
                 graph,
