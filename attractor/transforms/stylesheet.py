@@ -93,20 +93,24 @@ def _parse_rules(stylesheet: str) -> List[_StyleRule]:
         body = text[brace + 1 : close].strip()
 
         properties: Dict[str, str] = {}
+        rule_is_valid = True
         for statement in _split_unquoted(body, ";"):
             stmt = statement.strip()
             if not stmt:
                 continue
             colon = _find_unquoted(stmt, ":")
             if colon == -1:
-                continue
+                rule_is_valid = False
+                break
             raw_key = stmt[:colon]
             raw_value = stmt[colon + 1 :]
             key = raw_key.strip()
             value = _strip_quotes(raw_value.strip())
-            if key in _ALLOWED_PROPERTIES and value != "":
-                properties[key] = value
-        if selector and properties:
+            if key not in _ALLOWED_PROPERTIES or value == "":
+                rule_is_valid = False
+                break
+            properties[key] = value
+        if selector and properties and rule_is_valid:
             rules.append(_StyleRule(selector=selector, properties=properties, order=order))
         order += 1
         idx = close + 1

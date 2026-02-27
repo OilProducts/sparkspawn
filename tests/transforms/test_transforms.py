@@ -320,6 +320,26 @@ class TestTransforms:
         assert graph.nodes["task"].attrs["llm_model"].value == "gpt;v2"
         assert graph.nodes["task"].attrs["llm_provider"].value == "openai"
 
+    def test_stylesheet_rejects_rule_containing_unsupported_property(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [model_stylesheet="* { llm_model: gpt-5; temperature: 0.2; llm_provider: openai; }"]
+                start [shape=Mdiamond]
+                task [shape=box]
+                done [shape=Msquare]
+                start -> task -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        # Unsupported properties invalidate the containing rule.
+        assert graph.nodes["task"].attrs["llm_model"].value == ""
+        assert graph.nodes["task"].attrs["llm_provider"].value == ""
+
     def test_transform_pipeline_order(self):
         graph = parse_dot(
             """
