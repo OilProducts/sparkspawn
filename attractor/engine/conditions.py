@@ -49,6 +49,9 @@ def _resolve_key(key: str, outcome: Outcome, context: Context) -> str:
         if unprefixed is not None:
             return _stringify(unprefixed)
         return context.get_context_path(unprefixed_key)
+    value = context.get(key, None)
+    if value is not None:
+        return _stringify(value)
     return ""
 
 

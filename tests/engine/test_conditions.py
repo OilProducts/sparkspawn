@@ -24,6 +24,15 @@ class TestConditions:
         assert not evaluate_condition("bad clause", outcome, Context())
         assert not evaluate_condition("unknown=foo", outcome, Context())
 
+    def test_unqualified_lookup_and_unknown_keys_resolve_to_empty_string(self):
+        outcome = Outcome(status=OutcomeStatus.SUCCESS)
+        context = Context(values={"tests_passed": "true"})
+
+        assert evaluate_condition("tests_passed=true", outcome, context)
+        assert evaluate_condition('missing_key=""', outcome, context)
+        assert evaluate_condition("missing_key!=nonempty", outcome, context)
+        assert not evaluate_condition('missing_key!=""', outcome, context)
+
     def test_context_key_resolution_prefers_prefixed_then_unprefixed(self):
         outcome = Outcome(status=OutcomeStatus.SUCCESS)
 
