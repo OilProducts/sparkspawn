@@ -1460,6 +1460,22 @@ async def get_pipeline(pipeline_id: str):
     }
 
 
+@app.get("/pipelines/{pipeline_id}/checkpoint")
+async def get_pipeline_checkpoint(pipeline_id: str):
+    active = _get_active_run(pipeline_id)
+    if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
+        raise HTTPException(status_code=404, detail="Unknown pipeline")
+
+    checkpoint = load_checkpoint(_run_root(pipeline_id) / "state.json")
+    if checkpoint is None:
+        raise HTTPException(status_code=404, detail="Checkpoint unavailable")
+
+    return {
+        "pipeline_id": pipeline_id,
+        "checkpoint": checkpoint.to_dict(),
+    }
+
+
 @app.get("/pipelines/{pipeline_id}/events")
 async def pipeline_events(pipeline_id: str, request: Request):
     active = _get_active_run(pipeline_id)

@@ -378,7 +378,7 @@ Status key:
 - [x] [9.5-05] Implement `GET /pipelines/{id}/graph` visualization endpoint.
 - [x] [9.5-06] Implement `GET /pipelines/{id}/questions` endpoint.
 - [x] [9.5-07] Implement `POST /pipelines/{id}/questions/{qid}/answer` endpoint.
-- [ ] [9.5-08] Implement `GET /pipelines/{id}/checkpoint` endpoint.
+- [x] [9.5-08] Implement `GET /pipelines/{id}/checkpoint` endpoint.
 - [ ] [9.5-09] Implement `GET /pipelines/{id}/context` endpoint.
 - [ ] [9.5-10] Verify human-gate web controls operate entirely through run-scoped APIs.
 
