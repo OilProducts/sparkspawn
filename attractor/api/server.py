@@ -1168,9 +1168,8 @@ def _diagnostic_payload(diagnostic: Diagnostic) -> dict:
         "message": diagnostic.message,
         "line": diagnostic.line,
         "node": diagnostic.node_id,
+        "node_id": diagnostic.node_id,
     }
-    if diagnostic.node_id is not None:
-        payload["node_id"] = diagnostic.node_id
     if diagnostic.edge is not None:
         payload["edge"] = list(diagnostic.edge)
     if diagnostic.fix is not None:

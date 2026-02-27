@@ -87,14 +87,18 @@ def test_preview_validation_error_payload_shape(monkeypatch: pytest.MonkeyPatch)
 
     assert warning_diag["rule"] == "type_known"
     assert warning_diag["rule_id"] == "type_known"
+    assert warning_diag["message"] == "unrecognized type"
     assert warning_diag["node"] == "start"
     assert warning_diag["node_id"] == "start"
 
     assert error_diag["rule"] == "edge_target_exists"
     assert error_diag["rule_id"] == "edge_target_exists"
+    assert error_diag["message"] == "edge target does not exist"
     assert error_diag["edge"] == ["start", "missing"]
     assert error_diag["fix"] == "define node 'missing' or update edge"
     assert error_diag["node"] is None
+    assert "node_id" in error_diag
+    assert error_diag["node_id"] is None
 
     assert len(payload["errors"]) == 1
     assert payload["errors"][0] == error_diag
@@ -149,9 +153,14 @@ def test_start_pipeline_validation_error_payload_shape(
 
     warning_diag, error_diag = payload["diagnostics"]
     assert warning_diag["rule"] == "type_known"
+    assert warning_diag["message"] == "unrecognized type"
     assert warning_diag["node"] == "start"
+    assert warning_diag["node_id"] == "start"
     assert error_diag["rule"] == "edge_target_exists"
+    assert error_diag["message"] == "edge target does not exist"
     assert error_diag["edge"] == ["start", "missing"]
+    assert "node_id" in error_diag
+    assert error_diag["node_id"] is None
     assert payload["errors"][0] == error_diag
 
 

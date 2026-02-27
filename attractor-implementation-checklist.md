@@ -432,7 +432,7 @@ Status key:
 
 ### 11.2 Validation and Linting
 - [x] [11.2-01] Convert each DoD bullet in spec 11.2 into validator tests.
-- [ ] [11.2-02] Assert `validate_or_raise` behavior and diagnostic payload shape.
+- [x] [11.2-02] Assert `validate_or_raise` behavior and diagnostic payload shape.
 
 ### 11.3 Execution Engine
 - [ ] [11.3-01] Convert each DoD bullet in spec 11.3 into execution tests.
