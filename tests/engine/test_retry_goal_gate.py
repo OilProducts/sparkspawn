@@ -543,6 +543,42 @@ class TestRetryAndGoalGate:
         assert result.route_trace == ["start", "implement", "done"]
         assert result.failure_reason == "Goal gate unsatisfied and no retry target"
 
+    def test_goal_gate_tracking_survives_context_update_overwrites(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                gate [shape=box, goal_gate=true, max_retries=0]
+                after [shape=box]
+                done [shape=Msquare]
+
+                start -> gate
+                gate -> after [condition="outcome=fail"]
+                after -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "gate":
+                return Outcome(
+                    status=OutcomeStatus.FAIL,
+                    failure_reason="needs changes",
+                    context_updates={"_attractor.node_outcomes": {}},
+                )
+            if node_id == "after":
+                return Outcome(
+                    status=OutcomeStatus.SUCCESS,
+                    context_updates={"_attractor.node_outcomes": {}},
+                )
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "fail"
+        assert result.route_trace == ["start", "gate", "after", "done"]
+        assert result.failure_reason == "Goal gate unsatisfied and no retry target"
+
     def test_goal_gate_failure_with_only_invalid_retry_targets_fails_at_exit(self):
         graph = parse_dot(
             """

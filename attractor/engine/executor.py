@@ -317,7 +317,7 @@ class PipelineExecutor:
                 outcomes[node.node_id] = outcome
 
                 if outcome.context_updates:
-                    ctx.merge_updates(outcome.context_updates)
+                    self._merge_outcome_context_updates(ctx, outcome.context_updates)
                 ctx.set("outcome", outcome.status.value)
                 ctx.set("preferred_label", outcome.preferred_label or "")
                 self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
@@ -658,7 +658,7 @@ class PipelineExecutor:
                 outcomes[node.node_id] = outcome
 
                 if outcome.context_updates:
-                    ctx.merge_updates(outcome.context_updates)
+                    self._merge_outcome_context_updates(ctx, outcome.context_updates)
                 ctx.set("outcome", outcome.status.value)
                 ctx.set("preferred_label", outcome.preferred_label or "")
                 self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
@@ -1422,6 +1422,12 @@ class PipelineExecutor:
         stored = dict(stored)
         stored[node_id] = status
         context.set(NODE_OUTCOMES_KEY, stored)
+
+    def _merge_outcome_context_updates(self, context: Context, updates: Dict[str, object]) -> None:
+        safe_updates = dict(updates)
+        safe_updates.pop(NODE_OUTCOMES_KEY, None)
+        if safe_updates:
+            context.merge_updates(safe_updates)
 
     def _check_goal_gates(self, context: Context, completed_nodes: List[str]) -> Tuple[bool, str]:
         statuses = context.get(NODE_OUTCOMES_KEY, {})
