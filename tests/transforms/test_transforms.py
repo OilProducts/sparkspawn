@@ -273,6 +273,34 @@ class TestTransforms:
         assert graph.nodes["explicit"].attrs["llm_provider"].value == "node-provider"
         assert graph.nodes["explicit"].attrs["reasoning_effort"].value == "medium"
 
+    def test_stylesheet_overrides_node_default_model_attrs_but_not_explicit_node_attrs(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [model_stylesheet=".fast { llm_model: style-model; llm_provider: style-provider; reasoning_effort: low; }"]
+                node [llm_model="default-model", llm_provider="default-provider", reasoning_effort="medium"]
+                start [shape=Mdiamond]
+                implicit [shape=box, class="fast"]
+                explicit [shape=box, class="fast", llm_model="node-model", llm_provider="node-provider", reasoning_effort="high"]
+                done [shape=Msquare]
+                start -> implicit -> explicit -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        # Node defaults are not explicit per-node attributes, so stylesheet can override.
+        assert graph.nodes["implicit"].attrs["llm_model"].value == "style-model"
+        assert graph.nodes["implicit"].attrs["llm_provider"].value == "style-provider"
+        assert graph.nodes["implicit"].attrs["reasoning_effort"].value == "low"
+
+        # Explicit per-node attributes still win over stylesheet values.
+        assert graph.nodes["explicit"].attrs["llm_model"].value == "node-model"
+        assert graph.nodes["explicit"].attrs["llm_provider"].value == "node-provider"
+        assert graph.nodes["explicit"].attrs["reasoning_effort"].value == "high"
+
     def test_transform_pipeline_order(self):
         graph = parse_dot(
             """

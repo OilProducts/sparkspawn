@@ -327,7 +327,7 @@ Status key:
 ## 8. Model Stylesheet
 
 ### 8.1 Overview
-- [ ] [8.1-02] Ensure node explicit attrs override stylesheet-inferred values.
+- [x] [8.1-02] Ensure node explicit attrs override stylesheet-inferred values.
 
 ### 8.2 Stylesheet Grammar
 - [ ] [8.2-01] Implement parser for `Rule+` grammar with selector/declaration blocks.

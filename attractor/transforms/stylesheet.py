@@ -54,9 +54,9 @@ class ModelStylesheetTransform:
 
         for prop in _ALLOWED_PROPERTIES:
             existing = node.attrs.get(prop)
-            # Preserve explicit node attributes from source; allow stylesheet
-            # to replace parser/default-injected placeholders (line == 0).
-            if existing is not None and existing.line > 0:
+            # Preserve explicit per-node attributes from source; allow stylesheet
+            # to replace parser/default-injected placeholders and inherited node defaults.
+            if existing is not None and _is_explicit_node_attr(existing, node):
                 continue
             if prop in candidates:
                 value = candidates[prop][2]
@@ -138,3 +138,13 @@ def _graph_default_model_attrs(graph: DotGraph) -> Dict[str, Tuple[str, int]]:
             continue
         defaults[prop] = (value, attr.line)
     return defaults
+
+
+def _is_explicit_node_attr(attr: DotAttribute, node: DotNode) -> bool:
+    if attr.line <= 0:
+        return False
+    # Attributes inherited from `node [...]` defaults appear on an earlier line
+    # than the node declaration itself; treat those as overridable defaults.
+    if node.line > 0 and attr.line < node.line:
+        return False
+    return True
