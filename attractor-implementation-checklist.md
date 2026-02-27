@@ -449,7 +449,7 @@ Status key:
 - [x] [11.7-01] Convert each DoD bullet in spec 11.7 into context/checkpoint/artifact tests.
 
 ### 11.8 Human-in-the-Loop
-- [ ] [11.8-01] Convert each DoD bullet in spec 11.8 into interviewer/human-gate tests.
+- [x] [11.8-01] Convert each DoD bullet in spec 11.8 into interviewer/human-gate tests.
 
 ### 11.9 Condition Expressions
 - [ ] [11.9-01] Convert each DoD bullet in spec 11.9 into evaluator tests.

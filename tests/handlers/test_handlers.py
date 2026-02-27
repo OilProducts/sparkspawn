@@ -960,6 +960,37 @@ class TestBuiltInHandlers:
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.preferred_label == "Approve"
 
+    def test_wait_human_honors_answer_selected_option_without_value(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                gate [shape=hexagon, prompt="Choose"]
+                ship [shape=box]
+                fix [shape=box]
+                gate -> ship [label="Approve"]
+                gate -> fix [label="Fix"]
+            }
+            """
+        )
+
+        def _capture(question):
+            return Answer(selected_option=question.options[1])
+
+        registry = build_default_registry(
+            codergen_backend=_StubBackend(),
+            interviewer=CallbackInterviewer(_capture),
+        )
+        runner = HandlerRunner(graph, registry)
+        outcome = runner("gate", "Choose", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.preferred_label == "Fix"
+        assert outcome.suggested_next_ids == ["fix"]
+        assert outcome.context_updates == {
+            "human.gate.selected": "F",
+            "human.gate.label": "Fix",
+        }
+
     def test_wait_human_timeout_uses_human_default_choice_target(self):
         graph = parse_dot(
             """

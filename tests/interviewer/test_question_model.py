@@ -74,6 +74,18 @@ def test_question_accepts_spec_question_types():
     assert confirmation.type.value == "CONFIRMATION"
 
 
+def test_question_accepts_section_11_8_legacy_type_names():
+    single = Question(text="Pick one", type="SINGLE_SELECT")
+    multi = Question(text="Pick many", type="MULTI_SELECT")
+    free_text = Question(text="Explain", type="FREE_TEXT")
+    confirm = Question(text="Confirm", type="CONFIRM")
+
+    assert single.type is QuestionType.MULTIPLE_CHOICE
+    assert multi.type is QuestionType.MULTIPLE_CHOICE
+    assert free_text.type is QuestionType.FREEFORM
+    assert confirm.type is QuestionType.CONFIRMATION
+
+
 def test_question_rejects_options_for_non_multiple_choice():
     try:
         Question(

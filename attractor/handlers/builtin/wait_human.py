@@ -99,6 +99,13 @@ class WaitHumanHandler:
 def _is_timeout(answer: Answer) -> bool:
     if answer.value == AnswerValue.TIMEOUT.value:
         return True
+    if answer.selected_option is not None:
+        if answer.selected_option.value and answer.selected_option.value.strip():
+            return False
+        if answer.selected_option.label and answer.selected_option.label.strip():
+            return False
+        if answer.selected_option.key and answer.selected_option.key.strip():
+            return False
     if any(value and value.strip() for value in answer.selected_values):
         return False
     if answer.text and answer.text.strip():
@@ -123,6 +130,13 @@ def _default_choice(node_attrs, choices: list[_Choice]) -> _Choice | None:
 
 def _select_choice(answer: Answer, choices: list[_Choice]) -> _Choice | None:
     tokens = [value.strip() for value in answer.selected_values if value and value.strip()]
+    if answer.selected_option is not None:
+        if answer.selected_option.value and answer.selected_option.value.strip():
+            tokens.append(answer.selected_option.value.strip())
+        if answer.selected_option.label and answer.selected_option.label.strip():
+            tokens.append(answer.selected_option.label.strip())
+        if answer.selected_option.key and answer.selected_option.key.strip():
+            tokens.append(answer.selected_option.key.strip())
     if answer.text and answer.text.strip():
         tokens.append(answer.text.strip())
 
