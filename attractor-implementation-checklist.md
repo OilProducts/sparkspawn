@@ -342,7 +342,7 @@ Status key:
 
 ### 8.5 Application Order
 - [x] [8.5-01] Implement precedence order: node attr -> stylesheet -> graph default -> system default.
-- [ ] [8.5-02] Run stylesheet transform post-parse/pre-validate.
+- [x] [8.5-02] Run stylesheet transform post-parse/pre-validate.
 - [ ] [8.5-03] Ensure transform only fills missing model-related attrs.
 
 ### 8.6 Example

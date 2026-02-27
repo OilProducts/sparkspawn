@@ -1192,6 +1192,11 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
             "errors": [parse_diag],
         }
 
+    pipeline = TransformPipeline()
+    pipeline.register(GoalVariableTransform())
+    pipeline.register(ModelStylesheetTransform())
+    graph = pipeline.apply(graph)
+
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[1])
     diagnostics = validate_graph(graph)
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
@@ -1207,10 +1212,6 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
         }
 
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[2])
-    pipeline = TransformPipeline()
-    pipeline.register(GoalVariableTransform())
-    pipeline.register(ModelStylesheetTransform())
-    graph = pipeline.apply(graph)
 
     os.makedirs(req.working_directory, exist_ok=True)
     working_dir = str(Path(req.working_directory).resolve())

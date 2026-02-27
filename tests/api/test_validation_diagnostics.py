@@ -153,3 +153,45 @@ def test_start_pipeline_validation_error_payload_shape(
     assert error_diag["rule"] == "edge_target_exists"
     assert error_diag["edge"] == ["start", "missing"]
     assert payload["errors"][0] == error_diag
+
+
+def test_start_pipeline_runs_stylesheet_transform_before_validation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+    captured: dict[str, str | None] = {}
+
+    def _validate(graph):
+        llm_model_attr = graph.nodes["plan"].attrs.get("llm_model")
+        captured["plan_llm_model"] = None if llm_model_attr is None else str(llm_model_attr.value)
+        return []
+
+    monkeypatch.setattr(server, "validate_graph", _validate)
+
+    flow = """
+    digraph G {
+        graph [model_stylesheet=".fast { llm_model: fast-model; }"]
+        start [shape=Mdiamond]
+        plan [shape=box, class="fast"]
+        done [shape=Msquare]
+        start -> plan -> done
+    }
+    """
+
+    payload = asyncio.run(
+        server._start_pipeline(
+            server.PipelineStartRequest(
+                flow_content=flow,
+                working_directory=str(tmp_path / "work"),
+                backend="codex",
+            )
+        )
+    )
+
+    try:
+        assert payload["status"] == "started"
+        assert captured["plan_llm_model"] == "fast-model"
+    finally:
+        if payload.get("pipeline_id"):
+            server._pop_active_run(str(payload["pipeline_id"]))
