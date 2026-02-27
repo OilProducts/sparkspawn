@@ -299,7 +299,7 @@ def _validate_edge_condition(condition_attr, edge: DotEdge) -> List[Diagnostic]:
     if stripped == "":
         return diagnostics
 
-    clauses = [cl.strip() for cl in stripped.split("&&")]
+    clauses = [cl.strip() for cl in _split_condition_clauses(stripped)]
     for clause in clauses:
         if clause == "":
             diagnostics.append(
@@ -370,6 +370,43 @@ def _find_unsupported_condition_operator(clause: str) -> str | None:
         if symbol in unquoted:
             return symbol
     return None
+
+
+def _split_condition_clauses(condition: str) -> List[str]:
+    clauses: List[str] = []
+    current: List[str] = []
+    in_quotes = False
+    escaped = False
+    index = 0
+
+    while index < len(condition):
+        char = condition[index]
+        if escaped:
+            current.append(char)
+            escaped = False
+            index += 1
+            continue
+        if char == "\\":
+            current.append(char)
+            escaped = True
+            index += 1
+            continue
+        if char == '"':
+            in_quotes = not in_quotes
+            current.append(char)
+            index += 1
+            continue
+        if not in_quotes and char == "&" and index + 1 < len(condition) and condition[index + 1] == "&":
+            clauses.append("".join(current))
+            current = []
+            index += 2
+            continue
+
+        current.append(char)
+        index += 1
+
+    clauses.append("".join(current))
+    return clauses
 
 
 def _strip_quoted_segments(text: str) -> str:

@@ -166,6 +166,23 @@ class TestDotValidator:
 
         assert condition_errors == []
 
+    def test_condition_syntax_accepts_supported_keys_with_quoted_and_literal(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            task [shape=box]
+            done [shape=Msquare]
+
+            start -> task
+            task -> done [condition="preferred_label=\\"Fix && Verify\\" && outcome=success && context.tests_passed=true"]
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+        condition_errors = [d for d in self._errors(diagnostics) if d.rule_id == "condition_syntax"]
+
+        assert condition_errors == []
+
     def test_condition_syntax_rejects_context_path_with_trailing_dot(self):
         dot = """
         digraph G {
