@@ -488,7 +488,6 @@ Status key:
 ---
 
 ## Appendix B: Shape-to-Handler-Type Mapping
-- [ ] [B-01] Add one conformance test per shape-to-handler mapping row.
 - [ ] [B-02] Assert no mapping drift between parser normalization, registry resolver, and docs.
 
 ---
@@ -560,6 +559,7 @@ Status key:
 - [ ] [7.2-06] Implement `exit_no_outgoing` rule. Deferred because `validate_graph` already emits `exit_no_outgoing` diagnostics for terminal nodes with outgoing edges and validator coverage exists in `tests/dsl/test_validator.py::test_edge_target_exists_and_start_incoming_exit_outgoing`, so this is checklist state drift.
 - [ ] [7.2-10] Implement `fidelity_valid` warning rule. Deferred because fidelity warnings for graph/node/edge attrs are already implemented in `attractor/dsl/validator.py::_validate_fidelity_values` and covered by `tests/dsl/test_validator.py::test_retry_target_and_fidelity_warnings`, so this is checklist state drift.
 - [ ] [7.2-11] Implement `retry_target_exists` warning rule. Deferred because `validate_graph` already emits `retry_target_exists` diagnostics for graph/node retry targets that reference missing nodes (`attractor/dsl/validator.py::_validate_retry_targets`) and this behavior is covered in `tests/dsl/test_validator.py::test_retry_target_and_fidelity_warnings`, so this is checklist state drift.
+- [ ] [B-01] Add one conformance test per shape-to-handler mapping row. Deferred because `tests/handlers/test_handlers.py::test_registry_shape_mapping_covers_all_spec_shapes` already includes one parameterized conformance case per Section 2.8 mapping row, so this is checklist state drift.
 - [ ] [10.1-01] Keep expression language minimal and deterministic for routing. Deferred because this is an umbrella outcome that should be closed only after the concrete grammar/semantics/evaluation tasks in Sections 10.2-10.5 are completed.
 - [ ] [10.3-01] Evaluate clauses left-to-right with logical AND semantics. Deferred because `evaluate_condition` already evaluates clauses in source order and short-circuits on first false clause (`attractor/engine/conditions.py`), so this is checklist state drift.
 - [ ] [10.3-02] Treat missing context keys as empty string. Deferred because `context.*` resolution already returns `""` for missing keys via `Context.get_context_path`, and existing condition tests cover missing-key behavior, so this is checklist state drift.
