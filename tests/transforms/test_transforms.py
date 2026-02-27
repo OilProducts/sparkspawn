@@ -474,6 +474,29 @@ class TestTransforms:
             ("critical_review", "exit"),
         ]
 
+    def test_stylesheet_spec_example_fixture_resolves_model_provider_and_reasoning(self):
+        fixture_path = Path(__file__).resolve().parents[1] / "fixtures" / "stylesheet_precedence_example.dot"
+        graph = parse_dot(fixture_path.read_text(encoding="utf-8"))
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        assert (
+            graph.nodes["plan"].attrs["llm_model"].value,
+            graph.nodes["plan"].attrs["llm_provider"].value,
+            graph.nodes["plan"].attrs["reasoning_effort"].value,
+        ) == ("claude-sonnet-4-5", "anthropic", "high")
+        assert (
+            graph.nodes["implement"].attrs["llm_model"].value,
+            graph.nodes["implement"].attrs["llm_provider"].value,
+            graph.nodes["implement"].attrs["reasoning_effort"].value,
+        ) == ("claude-opus-4-6", "anthropic", "high")
+        assert (
+            graph.nodes["critical_review"].attrs["llm_model"].value,
+            graph.nodes["critical_review"].attrs["llm_provider"].value,
+            graph.nodes["critical_review"].attrs["reasoning_effort"].value,
+        ) == ("gpt-5.2", "openai", "high")
+
     def test_transform_pipeline_order(self):
         graph = parse_dot(
             """
