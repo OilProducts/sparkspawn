@@ -1002,12 +1002,24 @@ class PipelineExecutor:
         response_text = outcome.notes or ""
         (stage_dir / "response.md").write_text(response_text + "\n", encoding="utf-8")
 
+        suggested_next_ids = outcome.suggested_next_ids
+        if suggested_next_ids is None:
+            normalized_suggested_next_ids: list[str] = []
+        else:
+            normalized_suggested_next_ids = [str(node) for node in suggested_next_ids]
+
+        context_updates = outcome.context_updates
+        if context_updates is None:
+            normalized_context_updates: Dict[str, object] = {}
+        else:
+            normalized_context_updates = dict(context_updates)
+
         status_payload = {
             "outcome": outcome.status.value,
-            "preferred_next_label": outcome.preferred_label,
-            "suggested_next_ids": list(outcome.suggested_next_ids),
-            "context_updates": dict(outcome.context_updates),
-            "notes": outcome.notes,
+            "preferred_next_label": str(outcome.preferred_label or ""),
+            "suggested_next_ids": normalized_suggested_next_ids,
+            "context_updates": normalized_context_updates,
+            "notes": str(outcome.notes or ""),
             "status_transitions": list(transitions),
         }
         with (stage_dir / "status.json").open("w", encoding="utf-8") as f:

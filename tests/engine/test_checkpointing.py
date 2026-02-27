@@ -140,6 +140,47 @@ class TestCheckpointAndArtifacts:
             assert status_payload["outcome"] == "success"
             assert status_payload["notes"] == "auto-status: handler completed without writing status"
 
+    def test_status_json_contract_defaults_optional_fields_for_non_terminal_stage(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                if node_id == "plan":
+                    return Outcome(
+                        status=OutcomeStatus.SUCCESS,
+                        suggested_next_ids=None,  # type: ignore[arg-type]
+                        context_updates=None,  # type: ignore[arg-type]
+                        notes=None,  # type: ignore[arg-type]
+                    )
+                return Outcome(status=OutcomeStatus.SUCCESS)
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "success"
+            status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
+            assert status_payload["outcome"] == "success"
+            assert status_payload["preferred_next_label"] == ""
+            assert status_payload["suggested_next_ids"] == []
+            assert status_payload["context_updates"] == {}
+            assert status_payload["notes"] == ""
+
     def test_artifacts_and_checkpoint_written_each_step(self):
         graph = parse_dot(
             """
