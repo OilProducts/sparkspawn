@@ -307,7 +307,6 @@ Status key:
 - [x] [7.2-02] Implement `terminal_node` rule.
 - [x] [7.2-04] Implement `edge_target_exists` rule.
 - [x] [7.2-05] Implement `start_no_incoming` rule.
-- [ ] [7.2-06] Implement `exit_no_outgoing` rule.
 - [ ] [7.2-07] Implement `condition_syntax` rule.
 - [ ] [7.2-08] Implement `stylesheet_syntax` rule.
 - [ ] [7.2-09] Implement `type_known` warning rule.
@@ -565,3 +564,4 @@ Status key:
 - [ ] [4.12-01] Document and support custom handler registration by type string. Deferred because type-string registration is already implemented in `HandlerRegistry.register` and exercised by custom-type resolution coverage (`tests/handlers/test_handlers.py`, `tests/integration/test_parity_matrix.py`), so this is checklist state drift.
 - [ ] [5.4-02] Implement fidelity precedence: edge -> target node -> graph default -> `compact`. Deferred because `PipelineExecutor._resolve_runtime_fidelity` already enforces this precedence (including `compact` fallback), and executor fidelity tests already cover edge/node/graph precedence, so this is checklist state drift.
 - [ ] [7.1-02] Block execution when any ERROR diagnostic exists. Deferred because pipeline start already aborts on error-severity diagnostics in `attractor/api/server.py::_start_pipeline`, so this is checklist state drift.
+- [ ] [7.2-06] Implement `exit_no_outgoing` rule. Deferred because `validate_graph` already emits `exit_no_outgoing` diagnostics for terminal nodes with outgoing edges and validator coverage exists in `tests/dsl/test_validator.py::test_edge_target_exists_and_start_incoming_exit_outgoing`, so this is checklist state drift.
