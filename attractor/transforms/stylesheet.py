@@ -109,7 +109,7 @@ def _parse_rules(stylesheet: str) -> List[_StyleRule]:
             raw_key = stmt[:colon]
             raw_value = stmt[colon + 1 :]
             key = raw_key.strip()
-            value = _strip_quotes(raw_value.strip())
+            value = _parse_value(raw_value.strip())
             if key not in _ALLOWED_PROPERTIES or value == "":
                 rule_is_valid = False
                 break
@@ -160,10 +160,41 @@ def _selector_specificity(selector: str) -> int:
     return -1
 
 
-def _strip_quotes(value: str) -> str:
+def _parse_value(value: str) -> str:
     if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-        return value[1:-1]
+        return _unescape_quoted(value[1:-1])
     return value
+
+
+def _unescape_quoted(value: str) -> str:
+    out: List[str] = []
+    idx = 0
+    while idx < len(value):
+        char = value[idx]
+        if char != "\\":
+            out.append(char)
+            idx += 1
+            continue
+
+        if idx + 1 >= len(value):
+            out.append("\\")
+            idx += 1
+            continue
+
+        esc = value[idx + 1]
+        if esc == '"':
+            out.append('"')
+        elif esc == "\\":
+            out.append("\\")
+        elif esc == "n":
+            out.append("\n")
+        elif esc == "t":
+            out.append("\t")
+        else:
+            out.append("\\")
+            out.append(esc)
+        idx += 2
+    return "".join(out)
 
 
 def _find_unquoted(text: str, token: str, start: int = 0) -> int:

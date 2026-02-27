@@ -1,5 +1,5 @@
 from attractor.dsl import parse_dot
-from attractor.dsl.models import DotValueType
+from attractor.dsl.models import DotAttribute, DotValueType
 from attractor.transforms import GoalVariableTransform, ModelStylesheetTransform, TransformPipeline
 from attractor.transforms import AttributeDefaultsTransform
 
@@ -319,6 +319,29 @@ class TestTransforms:
 
         assert graph.nodes["task"].attrs["llm_model"].value == "gpt;v2"
         assert graph.nodes["task"].attrs["llm_provider"].value == "openai"
+
+    def test_stylesheet_unescapes_quoted_llm_model_value(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box]
+                done [shape=Msquare]
+                start -> task -> done
+            }
+            """
+        )
+        graph.graph_attrs["model_stylesheet"] = DotAttribute(
+            key="model_stylesheet",
+            value='* { llm_model: "alpha\\"beta\\\\v2"; }',
+            value_type=DotValueType.STRING,
+            line=1,
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        assert graph.nodes["task"].attrs["llm_model"].value == 'alpha"beta\\v2'
 
     def test_stylesheet_rejects_rule_containing_unsupported_property(self):
         graph = parse_dot(

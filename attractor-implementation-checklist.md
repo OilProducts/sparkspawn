@@ -337,7 +337,7 @@ Status key:
 ### 8.3 Selectors and Specificity
 
 ### 8.4 Recognized Properties
-- [ ] [8.4-01] Apply arbitrary string values for `llm_model`.
+- [x] [8.4-01] Apply arbitrary string values for `llm_model`.
 - [ ] [8.4-02] Apply provider keys for `llm_provider`.
 - [ ] [8.4-03] Validate `reasoning_effort` values (`low|medium|high`).
 
