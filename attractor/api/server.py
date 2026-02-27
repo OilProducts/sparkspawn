@@ -1508,6 +1508,19 @@ async def cancel_pipeline(pipeline_id: str):
     return {"status": "cancel_requested", "pipeline_id": pipeline_id}
 
 
+@app.get("/pipelines/{pipeline_id}/graph")
+async def get_pipeline_graph(pipeline_id: str):
+    active = _get_active_run(pipeline_id)
+    if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
+        raise HTTPException(status_code=404, detail="Unknown pipeline")
+
+    graph_svg_path = _run_root(pipeline_id) / "artifacts" / "graphviz" / "pipeline.svg"
+    if not graph_svg_path.exists():
+        raise HTTPException(status_code=404, detail="Graph visualization unavailable")
+
+    return FileResponse(graph_svg_path, media_type="image/svg+xml")
+
+
 @app.get("/pipelines/{pipeline_id}/questions")
 async def list_pipeline_questions(pipeline_id: str):
     return {"questions": HUMAN_BROKER.list_for_run(pipeline_id)}
