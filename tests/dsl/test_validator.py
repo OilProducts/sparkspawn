@@ -252,6 +252,42 @@ class TestDotValidator:
         assert errors
         assert any("unsupported operator" in d.message for d in errors)
 
+    def test_condition_syntax_rejects_textual_or_operator(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            task [shape=box]
+            done [shape=Msquare]
+
+            start -> task
+            task -> done [condition="outcome=success OR context.tests_passed=true"]
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+        errors = [d for d in self._errors(diagnostics) if d.rule_id == "condition_syntax"]
+
+        assert errors
+        assert any("unsupported operator 'OR'" in d.message for d in errors)
+
+    def test_condition_syntax_rejects_not_operator(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            task [shape=box]
+            done [shape=Msquare]
+
+            start -> task
+            task -> done [condition="NOT context.tests_passed"]
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+        errors = [d for d in self._errors(diagnostics) if d.rule_id == "condition_syntax"]
+
+        assert errors
+        assert any("unsupported operator 'NOT'" in d.message for d in errors)
+
     def test_stylesheet_selector_and_property_restrictions(self):
         dot = """
         digraph G {

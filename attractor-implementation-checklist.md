@@ -418,13 +418,9 @@ Status key:
 - [x] [10.5-04] Add parser/evaluator tests for mixed-clause expressions.
 
 ### 10.6 Examples
-- [ ] [10.6-01] Add routing tests for `outcome=success` and `outcome=fail`.
-- [ ] [10.6-02] Add routing test for conjunction with `context.tests_passed=true`.
-- [ ] [10.6-03] Add routing tests for inequality and `preferred_label` matching.
 
 ### 10.7 Extended Operators (Future)
-- [ ] [10.7-01] Document unsupported future operators as non-implemented features.
-- [ ] [10.7-02] Add validation guardrails so unsupported operators fail with clear diagnostics.
+- [x] [10.7-02] Add validation guardrails so unsupported operators fail with clear diagnostics.
 
 ---
 
@@ -527,6 +523,10 @@ Status key:
 ---
 
 ## Deferred Tasks
+- [ ] [10.6-01] Add routing tests for `outcome=success` and `outcome=fail`. Deferred because success/fail edge-condition routing is already covered by engine execution tests (`tests/engine/test_retry_goal_gate.py`) and condition-evaluation tests (`tests/engine/test_conditions.py`), so this is checklist state drift.
+- [ ] [10.6-02] Add routing test for conjunction with `context.tests_passed=true`. Deferred because conjunction evaluation with `context.tests_passed` is already covered in `tests/engine/test_conditions.py`, so this is checklist state drift.
+- [ ] [10.6-03] Add routing tests for inequality and `preferred_label` matching. Deferred because `!=` and `preferred_label` condition evaluation plus preferred-label routing are already covered in `tests/engine/test_conditions.py`, `tests/engine/test_executor.py`, and `tests/engine/test_routing.py`, so this is checklist state drift.
+- [ ] [10.7-01] Document unsupported future operators as non-implemented features. Deferred because unsupported future operators are already explicitly documented in `attractor-spec.md` Section 10.7, so this is checklist state drift.
 - [ ] [9.6-04] Emit interview lifecycle events. Deferred because interview events are already emitted by `WaitHumanHandler` (`InterviewStarted`, `InterviewCompleted`, `InterviewTimeout`) and covered by executor runtime-event tests (`tests/engine/test_executor.py::test_executor_emits_parallel_and_interview_runtime_events`), so this is checklist state drift.
 - [ ] [9.6-05] Emit checkpoint-saved events. Deferred because `PipelineExecutor._save_checkpoint` already emits `CheckpointSaved` and engine tests assert those events (`tests/engine/test_checkpointing.py`, `tests/engine/test_executor.py`), so this is checklist state drift.
 - [ ] [9.6-06] Support observer callback consumption and streaming consumption. Deferred because observer callbacks are already supported via `PipelineExecutor(on_event=...)` and stream consumption is already exposed by `GET /pipelines/{id}/events` SSE with endpoint tests (`tests/api/test_pipeline_events_endpoint.py`), so this is checklist state drift.

@@ -368,9 +368,12 @@ def _find_unsupported_condition_operator(clause: str) -> str | None:
     if "||" in unquoted:
         return "||"
 
-    keyword_match = re.search(r"\s(contains|matches)\s", unquoted)
+    keyword_match = re.search(r"\b(contains|matches|or|not)\b", unquoted, flags=re.IGNORECASE)
     if keyword_match:
-        return keyword_match.group(1)
+        operator = keyword_match.group(1).lower()
+        if operator in {"or", "not"}:
+            return operator.upper()
+        return operator
 
     for symbol in (">=", "<=", ">", "<"):
         if symbol in unquoted:
