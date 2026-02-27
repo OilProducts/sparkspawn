@@ -460,7 +460,7 @@ Status key:
 - [x] [11.11-01] Convert each DoD bullet in spec 11.11 into transform/HTTP integration tests.
 
 ### 11.12 Cross-Feature Parity Matrix
-- [ ] [11.12-01] Execute the entire parity matrix and persist a pass/fail report artifact.
+- [x] [11.12-01] Execute the entire parity matrix and persist a pass/fail report artifact.
 - [ ] [11.12-02] Fail release gate if any matrix row is unchecked.
 
 ### 11.13 Integration Smoke Test
