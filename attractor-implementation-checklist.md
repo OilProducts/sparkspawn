@@ -306,7 +306,7 @@ Status key:
 - [x] [7.2-01] Implement `start_node` rule.
 - [x] [7.2-02] Implement `terminal_node` rule.
 - [x] [7.2-04] Implement `edge_target_exists` rule.
-- [ ] [7.2-05] Implement `start_no_incoming` rule.
+- [x] [7.2-05] Implement `start_no_incoming` rule.
 - [ ] [7.2-06] Implement `exit_no_outgoing` rule.
 - [ ] [7.2-07] Implement `condition_syntax` rule.
 - [ ] [7.2-08] Implement `stylesheet_syntax` rule.

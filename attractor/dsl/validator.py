@@ -93,8 +93,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
 
         diagnostics.extend(_validate_edge_condition(edge.attrs.get("condition"), edge))
 
-    if len(start_nodes) == 1:
-        start = start_nodes[0]
+    for start in start_nodes:
         if in_degree.get(start.node_id, 0) != 0:
             diagnostics.append(
                 Diagnostic(

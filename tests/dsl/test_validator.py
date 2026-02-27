@@ -212,6 +212,26 @@ class TestDotValidator:
 
         assert "start_node" in error_rules
 
+    def test_start_no_incoming_applies_even_with_multiple_start_nodes(self):
+        dot = """
+        digraph G {
+            entry [shape=Mdiamond]
+            start [shape=box]
+            helper [shape=box]
+            done [shape=Msquare]
+
+            helper -> entry
+            helper -> start
+            entry -> done
+            start -> done
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+
+        start_no_incoming_errors = [d for d in self._errors(diagnostics) if d.rule_id == "start_no_incoming"]
+        assert {d.node_id for d in start_no_incoming_errors} == {"entry", "start"}
+
     def test_shape_exit_takes_precedence_over_end_id_fallback(self):
         dot = """
         digraph G {
