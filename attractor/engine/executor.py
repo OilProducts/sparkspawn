@@ -306,7 +306,9 @@ class PipelineExecutor:
                 prior_status = self._context_outcome_status(ctx)
                 prior_preferred_label = self._context_preferred_label(ctx)
                 prompt = self._prompt_for_node(node.node_id)
-                self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
+                stage_index = len(completed)
+                stage_started_at = time.perf_counter()
+                self._emit_event("StageStarted", node_id=node.node_id, name=node.node_id, index=stage_index)
                 self._enter_top_level_stage(node.node_id)
                 try:
                     outcome = self._execute_node_handler(node.node_id, prompt, ctx)
@@ -327,11 +329,22 @@ class PipelineExecutor:
                 retries_so_far = retry_counts.get(node.node_id, 0)
                 if self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
+                    if outcome.status.value == "fail":
+                        self._emit_event(
+                            "StageFailed",
+                            node_id=node.node_id,
+                            name=node.node_id,
+                            index=stage_index,
+                            error=outcome.failure_reason or "stage_failed",
+                            will_retry=True,
+                            attempt=retry_counts[node.node_id],
+                        )
                     delay_ms = retry_policy.backoff.delay_for_attempt(retry_counts[node.node_id])
                     self._emit_event(
                         "StageRetrying",
                         node_id=node.node_id,
-                        index=len(completed),
+                        name=node.node_id,
+                        index=stage_index,
                         attempt=retry_counts[node.node_id],
                         delay=delay_ms,
                     )
@@ -357,12 +370,14 @@ class PipelineExecutor:
                     self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
                     self._write_stage_artifacts(node.node_id, prompt, outcome)
                 self._reset_retry_counter(node.node_id, outcome, retry_counts)
+                stage_duration = max(0.0, time.perf_counter() - stage_started_at)
 
                 if outcome.status.value == "fail":
                     self._emit_event(
                         "StageFailed",
                         node_id=node.node_id,
-                        index=len(completed),
+                        name=node.node_id,
+                        index=stage_index,
                         error=outcome.failure_reason or "stage_failed",
                         will_retry=False,
                     )
@@ -370,7 +385,9 @@ class PipelineExecutor:
                     self._emit_event(
                         "StageCompleted",
                         node_id=node.node_id,
-                        index=len(completed),
+                        name=node.node_id,
+                        index=stage_index,
+                        duration=stage_duration,
                         outcome=outcome.status.value,
                     )
                 completed.append(node.node_id)
@@ -394,7 +411,8 @@ class PipelineExecutor:
                         self._emit_event(
                             "StageFailed",
                             node_id=node.node_id,
-                            index=len(completed),
+                            name=node.node_id,
+                            index=stage_index,
                             error=failure_reason,
                             will_retry=False,
                         )
@@ -419,7 +437,8 @@ class PipelineExecutor:
                     self._emit_event(
                         "StageFailed",
                         node_id=node.node_id,
-                        index=len(completed),
+                        name=node.node_id,
+                        index=stage_index,
                         error=message,
                         will_retry=False,
                     )
@@ -622,7 +641,9 @@ class PipelineExecutor:
                 prior_status = self._context_outcome_status(ctx)
                 prior_preferred_label = self._context_preferred_label(ctx)
                 prompt = self._prompt_for_node(node.node_id)
-                self._emit_event("StageStarted", node_id=node.node_id, index=len(completed))
+                stage_index = len(completed)
+                stage_started_at = time.perf_counter()
+                self._emit_event("StageStarted", node_id=node.node_id, name=node.node_id, index=stage_index)
                 self._enter_top_level_stage(node.node_id)
                 try:
                     outcome = self._execute_node_handler(node.node_id, prompt, ctx)
@@ -643,11 +664,22 @@ class PipelineExecutor:
                 retries_so_far = retry_counts.get(node.node_id, 0)
                 if self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
+                    if outcome.status.value == "fail":
+                        self._emit_event(
+                            "StageFailed",
+                            node_id=node.node_id,
+                            name=node.node_id,
+                            index=stage_index,
+                            error=outcome.failure_reason or "stage_failed",
+                            will_retry=True,
+                            attempt=retry_counts[node.node_id],
+                        )
                     delay_ms = retry_policy.backoff.delay_for_attempt(retry_counts[node.node_id])
                     self._emit_event(
                         "StageRetrying",
                         node_id=node.node_id,
-                        index=len(completed),
+                        name=node.node_id,
+                        index=stage_index,
                         attempt=retry_counts[node.node_id],
                         delay=delay_ms,
                     )
@@ -667,12 +699,14 @@ class PipelineExecutor:
                     self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
                     self._write_stage_artifacts(node.node_id, prompt, outcome)
                 self._reset_retry_counter(node.node_id, outcome, retry_counts)
+                stage_duration = max(0.0, time.perf_counter() - stage_started_at)
 
                 if outcome.status.value == "fail":
                     self._emit_event(
                         "StageFailed",
                         node_id=node.node_id,
-                        index=len(completed),
+                        name=node.node_id,
+                        index=stage_index,
                         error=outcome.failure_reason or "stage_failed",
                         will_retry=False,
                     )
@@ -680,7 +714,9 @@ class PipelineExecutor:
                     self._emit_event(
                         "StageCompleted",
                         node_id=node.node_id,
-                        index=len(completed),
+                        name=node.node_id,
+                        index=stage_index,
+                        duration=stage_duration,
                         outcome=outcome.status.value,
                     )
                 completed.append(node.node_id)
@@ -704,7 +740,8 @@ class PipelineExecutor:
                         self._emit_event(
                             "StageFailed",
                             node_id=node.node_id,
-                            index=len(completed),
+                            name=node.node_id,
+                            index=stage_index,
                             error=failure_reason,
                             will_retry=False,
                         )

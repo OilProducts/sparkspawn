@@ -595,7 +595,105 @@ class TestExecutor:
         assert result.status == "success"
         assert len(retry_events) == 1
         assert retry_events[0]["node_id"] == "work"
+        assert retry_events[0]["name"] == "work"
+        assert retry_events[0]["index"] == 1
         assert retry_events[0]["attempt"] == 1
+        assert isinstance(retry_events[0]["delay"], (int, float))
+        assert float(retry_events[0]["delay"]) >= 0.0
+
+    def test_stage_lifecycle_events_include_spec_payload_fields(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+        events: list[dict] = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
+
+        stage_started = [event for event in events if event["type"] == "StageStarted"]
+        stage_completed = [event for event in events if event["type"] == "StageCompleted"]
+
+        assert result.status == "success"
+        assert [event["name"] for event in stage_started] == ["start", "work"]
+        assert [event["name"] for event in stage_completed] == ["start", "work"]
+        assert [event["index"] for event in stage_started] == [0, 1]
+        assert [event["index"] for event in stage_completed] == [0, 1]
+        assert all(isinstance(event.get("duration"), (int, float)) for event in stage_completed)
+        assert all(float(event["duration"]) >= 0.0 for event in stage_completed)
+
+    def test_stage_failed_event_marks_retryable_attempts(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box, max_retries=1]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+        events: list[dict] = []
+        attempts = {"work": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id != "work":
+                return Outcome(status=OutcomeStatus.SUCCESS)
+            attempts["work"] += 1
+            if attempts["work"] == 1:
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="transient")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
+
+        stage_failed = [event for event in events if event["type"] == "StageFailed"]
+        retry_events = [event for event in events if event["type"] == "StageRetrying"]
+
+        assert result.status == "success"
+        assert len(stage_failed) == 1
+        assert stage_failed[0]["name"] == "work"
+        assert stage_failed[0]["node_id"] == "work"
+        assert stage_failed[0]["index"] == 1
+        assert stage_failed[0]["error"] == "transient"
+        assert stage_failed[0]["will_retry"] is True
+        assert len(retry_events) == 1
+        assert stage_failed[0]["attempt"] == retry_events[0]["attempt"]
+
+    def test_stage_failed_events_keep_consistent_stage_index_on_terminal_failure(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box]
+                start -> work
+            }
+            """
+        )
+        events: list[dict] = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "work":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="boom")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
+
+        stage_failed = [event for event in events if event["type"] == "StageFailed" and event["node_id"] == "work"]
+        assert result.status == "fail"
+        assert stage_failed
+        assert all(event["name"] == "work" for event in stage_failed)
+        assert all(event["index"] == 1 for event in stage_failed)
+        assert any(event["will_retry"] is False for event in stage_failed)
 
     def test_executor_emits_parallel_and_interview_runtime_events(self):
         graph = parse_dot(REFERENCE_WORKFLOW_FIXTURE.read_text(encoding="utf-8"))
