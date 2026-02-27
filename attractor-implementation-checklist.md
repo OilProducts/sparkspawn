@@ -359,7 +359,7 @@ Status key:
 ### 9.2 Built-In Transforms
 - [x] [9.2-01] Implement variable expansion transform for `$goal` in prompts.
 - [x] [9.2-02] Implement stylesheet application transform.
-- [ ] [9.2-03] Implement runtime preamble transform for non-`full` fidelity handoff.
+- [x] [9.2-03] Implement runtime preamble transform for non-`full` fidelity handoff.
 
 ### 9.3 Custom Transforms
 - [ ] [9.3-01] Implement custom transform registration API.
