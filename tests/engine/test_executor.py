@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 import threading
 import tempfile
+import time
 
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
@@ -243,6 +244,28 @@ class TestExecutor:
 
         assert result.status == "success"
         assert seen_fidelity == ["summary:medium", "full"]
+
+    def test_executor_enforces_node_timeout_for_callable_runner(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                slow [shape=box, timeout=20ms, max_retries=0]
+                start -> slow
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            del prompt, context
+            if node_id == "slow":
+                time.sleep(0.1)
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "fail"
+        assert "handler timed out after" in result.failure_reason
 
     def test_executor_target_node_thread_id_overrides_edge_thread_id(self):
         graph = parse_dot(

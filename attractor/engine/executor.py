@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import random
+import signal
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Tuple
 
 from attractor.dsl.models import DotGraph
+from attractor.dsl.models import Duration
 from attractor.transforms.runtime_preamble import RuntimePreambleTransform
 
 from .checkpoint import Checkpoint, load_checkpoint, save_checkpoint
@@ -1090,17 +1092,19 @@ class PipelineExecutor:
         return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler returned no outcome")
 
     def _execute_node_handler(self, node_id: str, prompt: str, context: Context) -> Outcome:
+        timeout = self._node_timeout_seconds(node_id)
+
         try:
-            runner_with_events = getattr(self.runner, "run_with_events", None)
-            if callable(runner_with_events):
-                raw_outcome = runner_with_events(
-                    node_id,
-                    prompt,
-                    context,
-                    self._emit_event if self.on_event else None,
-                )
+            if timeout is None:
+                raw_outcome = self._invoke_runner(node_id, prompt, context)
             else:
-                raw_outcome = self.runner(node_id, prompt, context)
+                with _wall_timeout(timeout):
+                    raw_outcome = self._invoke_runner(node_id, prompt, context)
+        except TimeoutError:
+            message = "handler timed out"
+            if timeout is not None:
+                message = f"handler timed out after {timeout:g}s"
+            return Outcome(status=OutcomeStatus.FAIL, failure_reason=message)
         except BaseException as exc:
             if isinstance(exc, KeyboardInterrupt):
                 raise
@@ -1111,6 +1115,28 @@ class PipelineExecutor:
                 retryable=_is_retryable_exception(exc) if isinstance(exc, Exception) else False,
             )
         return self._normalize_outcome(node_id, raw_outcome)
+
+    def _invoke_runner(self, node_id: str, prompt: str, context: Context) -> Outcome | None:
+        runner_with_events = getattr(self.runner, "run_with_events", None)
+        if callable(runner_with_events):
+            return runner_with_events(
+                node_id,
+                prompt,
+                context,
+                self._emit_event if self.on_event else None,
+            )
+        return self.runner(node_id, prompt, context)
+
+    def _node_timeout_seconds(self, node_id: str) -> float | None:
+        node = self.graph.nodes[node_id]
+        timeout_attr = node.attrs.get("timeout")
+        if not timeout_attr:
+            return None
+
+        timeout = _to_seconds(timeout_attr.value)
+        if timeout is None or timeout <= 0:
+            return None
+        return timeout
 
     def _enter_top_level_stage(self, node_id: str) -> None:
         with self._active_top_level_node_lock:
@@ -1499,6 +1525,47 @@ class _SyntheticEdge:
         self.target = target
 
 
+class _SignalTimeout:
+    def __init__(self, seconds: float):
+        self.seconds = seconds
+        self._previous_handler = None
+        self._previous_timer = (0.0, 0.0)
+        self._enabled = False
+
+    def __enter__(self) -> None:
+        if not hasattr(signal, "setitimer"):
+            return None
+        try:
+            self._previous_handler = signal.getsignal(signal.SIGALRM)
+            self._previous_timer = signal.getitimer(signal.ITIMER_REAL)
+            signal.signal(signal.SIGALRM, _raise_timeout)
+            signal.setitimer(signal.ITIMER_REAL, self.seconds)
+            self._enabled = True
+        except (AttributeError, ValueError):
+            self._enabled = False
+        return None
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if not self._enabled:
+            return False
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        if self._previous_handler is not None:
+            signal.signal(signal.SIGALRM, self._previous_handler)
+        delay, interval = self._previous_timer
+        if delay > 0 or interval > 0:
+            signal.setitimer(signal.ITIMER_REAL, delay, interval)
+        return False
+
+
+def _wall_timeout(seconds: float) -> _SignalTimeout:
+    return _SignalTimeout(seconds)
+
+
+def _raise_timeout(signum: int, frame: object) -> None:
+    del signum, frame
+    raise TimeoutError
+
+
 def _to_int(value: object, default: int) -> int:
     if isinstance(value, int):
         return value
@@ -1512,6 +1579,28 @@ def _to_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() == "true"
+
+
+def _to_seconds(value: object) -> float | None:
+    if isinstance(value, Duration):
+        if value.unit == "ms":
+            return value.value / 1000
+        if value.unit == "s":
+            return value.value
+        if value.unit == "m":
+            return value.value * 60
+        if value.unit == "h":
+            return value.value * 3600
+        if value.unit == "d":
+            return value.value * 86400
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _edge_attr_text(edge: object | None, key: str) -> str:
