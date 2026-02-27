@@ -312,6 +312,45 @@ class TestDotValidator:
         assert "retry_target_exists" in warning_rules
         assert "fidelity_valid" in warning_rules
 
+    def test_goal_gate_without_retry_targets_emits_warning(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            gate [shape=box, goal_gate=true]
+            done [shape=Msquare]
+            start -> gate
+            gate -> done
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+
+        warnings = [
+            d for d in diagnostics if d.rule_id == "goal_gate_has_retry" and d.severity == DiagnosticSeverity.WARNING
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].node_id == "gate"
+
+    def test_goal_gate_with_retry_target_does_not_emit_warning(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            gate [shape=box, goal_gate=true, retry_target="rework"]
+            rework [shape=box]
+            done [shape=Msquare]
+            start -> gate
+            gate -> done
+            rework -> gate
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+
+        warnings = [
+            d for d in diagnostics if d.rule_id == "goal_gate_has_retry" and d.severity == DiagnosticSeverity.WARNING
+        ]
+        assert warnings == []
+
     def test_unknown_node_type_emits_type_known_warning(self):
         dot = """
         digraph G {

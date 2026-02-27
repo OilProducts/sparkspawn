@@ -160,6 +160,7 @@ def validate_graph(graph: DotGraph) -> List[Diagnostic]:
                 )
 
     diagnostics.extend(_validate_retry_targets(graph))
+    diagnostics.extend(_validate_goal_gate_retry_targets(graph))
     diagnostics.extend(_validate_fidelity_values(graph))
     diagnostics.extend(_validate_known_types(graph))
     diagnostics.extend(_validate_stylesheet(graph))
@@ -318,6 +319,52 @@ def _validate_retry_targets(graph: DotGraph) -> List[Diagnostic]:
                 )
 
     return diagnostics
+
+
+def _validate_goal_gate_retry_targets(graph: DotGraph) -> List[Diagnostic]:
+    diagnostics: List[Diagnostic] = []
+
+    for node in graph.nodes.values():
+        goal_gate_attr = node.attrs.get("goal_gate")
+        if not _attr_is_true(goal_gate_attr):
+            continue
+
+        has_retry_target = False
+        for key in ("retry_target", "fallback_retry_target"):
+            attr = node.attrs.get(key)
+            if attr and str(attr.value).strip():
+                has_retry_target = True
+                break
+
+        if has_retry_target:
+            continue
+
+        diagnostics.append(
+            Diagnostic(
+                rule_id="goal_gate_has_retry",
+                severity=DiagnosticSeverity.WARNING,
+                message=(
+                    f"node '{node.node_id}' has goal_gate=true but does not define "
+                    "retry_target or fallback_retry_target"
+                ),
+                line=goal_gate_attr.line if goal_gate_attr else node.line,
+                node_id=node.node_id,
+            )
+        )
+
+    return diagnostics
+
+
+def _attr_is_true(attr) -> bool:
+    if not attr:
+        return False
+
+    value = getattr(attr, "value", None)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return False
 
 
 def _validate_fidelity_values(graph: DotGraph) -> List[Diagnostic]:
