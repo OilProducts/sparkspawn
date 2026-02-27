@@ -33,6 +33,15 @@ class HandlerRuntime:
     graph: DotGraph
     logs_root: Optional[Path]
     runner: Callable[[str, str, Context], Outcome]
+    event_emitter: Optional[Callable[..., None]] = None
+
+    def emit(self, event_type: str, **payload: object) -> None:
+        if not self.event_emitter:
+            return
+        try:
+            self.event_emitter(event_type, **payload)
+        except Exception:
+            return
 
 
 class Handler(Protocol):

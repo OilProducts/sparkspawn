@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 from attractor.engine.outcome import Outcome, OutcomeStatus
 from attractor.interviewer import Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType
@@ -44,8 +45,12 @@ class WaitHumanHandler:
             metadata={"node_id": runtime.node_id},
         )
 
+        started_at = time.perf_counter()
+        runtime.emit("InterviewStarted", question=question.prompt, stage=runtime.node_id)
         answer = self.interviewer.ask(question)
+        duration = time.perf_counter() - started_at
         if _is_timeout(answer):
+            runtime.emit("InterviewTimeout", question=question.prompt, stage=runtime.node_id, duration=duration)
             default_choice = _default_choice(runtime.node_attrs, choices)
             if default_choice is None:
                 return Outcome(status=OutcomeStatus.RETRY, failure_reason="human gate timeout, no default")
@@ -60,9 +65,22 @@ class WaitHumanHandler:
                 notes="human selection applied",
             )
         if answer.value == AnswerValue.SKIPPED.value:
+            runtime.emit(
+                "InterviewCompleted",
+                question=question.prompt,
+                answer=answer.value,
+                duration=duration,
+            )
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="human skipped interaction")
 
         selected = _select_choice(answer, choices)
+        emitted_answer = selected.label if selected else answer.value
+        runtime.emit(
+            "InterviewCompleted",
+            question=question.prompt,
+            answer=emitted_answer,
+            duration=duration,
+        )
         if selected is None:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="human skipped interaction")
 

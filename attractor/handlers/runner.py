@@ -5,7 +5,7 @@ import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from attractor.dsl.models import Duration
 from attractor.dsl.models import DotGraph
@@ -46,6 +46,25 @@ class HandlerRunner:
             self.logs_root = Path(self.logs_root)
 
     def __call__(self, node_id: str, prompt: str, context: Context) -> Outcome:
+        return self._run(node_id, prompt, context, emit_event=None)
+
+    def run_with_events(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        emit_event: Callable[..., None] | None,
+    ) -> Outcome:
+        return self._run(node_id, prompt, context, emit_event=emit_event)
+
+    def _run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        emit_event: Callable[..., None] | None,
+    ) -> Outcome:
         entered = False
         try:
             self._enter_call()
@@ -64,6 +83,7 @@ class HandlerRunner:
                 graph=self.graph,
                 logs_root=self.logs_root,
                 runner=self,
+                event_emitter=emit_event,
             )
             timeout = _to_seconds(node.attrs.get("timeout"))
             if timeout is None or timeout <= 0:

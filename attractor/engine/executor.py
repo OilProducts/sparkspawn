@@ -999,7 +999,16 @@ class PipelineExecutor:
 
     def _execute_node_handler(self, node_id: str, prompt: str, context: Context) -> Outcome:
         try:
-            raw_outcome = self.runner(node_id, prompt, context)
+            runner_with_events = getattr(self.runner, "run_with_events", None)
+            if callable(runner_with_events):
+                raw_outcome = runner_with_events(
+                    node_id,
+                    prompt,
+                    context,
+                    self._emit_event if self.on_event else None,
+                )
+            else:
+                raw_outcome = self.runner(node_id, prompt, context)
         except BaseException as exc:
             if isinstance(exc, KeyboardInterrupt):
                 raise

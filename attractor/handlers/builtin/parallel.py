@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 import math
+import time
 from typing import Any, Dict, List, Tuple
 
 from attractor.engine.context import Context
@@ -33,8 +34,13 @@ class ParallelHandler:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="max_parallel must be >= 1")
 
         fan_in_nodes = _fan_in_nodes(runtime.graph)
+        branch_order = {edge.target: index for index, edge in enumerate(runtime.outgoing_edges)}
+        started_at = time.perf_counter()
+        runtime.emit("ParallelStarted", branch_count=len(runtime.outgoing_edges))
 
         def run_branch(target: str, base_context: Context) -> Tuple[str, Dict[str, Any]]:
+            branch_started_at = time.perf_counter()
+            runtime.emit("ParallelBranchStarted", branch=target, index=branch_order.get(target, -1))
             branch_context = base_context.clone()
             executor = PipelineExecutor(
                 runtime.graph,
@@ -55,6 +61,13 @@ class ParallelHandler:
                 "node_outcomes": {k: v.status.value for k, v in result.node_outcomes.items()},
                 "failure_reason": result.failure_reason,
             }
+            runtime.emit(
+                "ParallelBranchCompleted",
+                branch=target,
+                index=branch_order.get(target, -1),
+                duration=(time.perf_counter() - branch_started_at),
+                success=result.status in SUCCESS_STATUSES,
+            )
             return target, payload
 
         results: List[Dict[str, Any]] = []
@@ -106,6 +119,12 @@ class ParallelHandler:
 
         success_count = sum(1 for r in results_for_policy if r["status"] in SUCCESS_STATUSES)
         fail_count = sum(1 for r in results_for_policy if r["status"] == "fail")
+        runtime.emit(
+            "ParallelCompleted",
+            duration=(time.perf_counter() - started_at),
+            success_count=success_count,
+            failure_count=fail_count,
+        )
 
         outcome_status = OutcomeStatus.SUCCESS
         if join_policy == "wait_all":

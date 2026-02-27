@@ -7,8 +7,20 @@ from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.handlers import HandlerRunner, build_default_registry
+from attractor.interviewer import Answer, QueueInterviewer
 
 BRANCHING_CONDITION_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "branching_condition_workflow.dot"
+REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[2] / "flows" / "reference-1.1-01.dot"
+
+
+class _WorkflowBackend:
+    def __init__(self, responses: dict[str, bool]):
+        self._responses = responses
+
+    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
+        del prompt, context, timeout
+        return self._responses.get(node_id, True)
 
 
 class TestExecutor:
@@ -529,6 +541,33 @@ class TestExecutor:
         assert len(retry_events) == 1
         assert retry_events[0]["node_id"] == "work"
         assert retry_events[0]["attempt"] == 1
+
+    def test_executor_emits_parallel_and_interview_runtime_events(self):
+        graph = parse_dot(REFERENCE_WORKFLOW_FIXTURE.read_text(encoding="utf-8"))
+        events = []
+        backend = _WorkflowBackend(
+            {
+                "start": True,
+                "plan": True,
+                "implement": True,
+                "branch_docs": True,
+                "branch_tests": True,
+                "final_review": True,
+            }
+        )
+        interviewer = QueueInterviewer([Answer(selected_values=["Proceed"])])
+        runner = HandlerRunner(graph, build_default_registry(codergen_backend=backend, interviewer=interviewer))
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
+
+        event_types = [event["type"] for event in events]
+        assert result.status == "success"
+        assert "InterviewStarted" in event_types
+        assert "InterviewCompleted" in event_types
+        assert "ParallelStarted" in event_types
+        assert event_types.count("ParallelBranchStarted") == 2
+        assert event_types.count("ParallelBranchCompleted") == 2
+        assert "ParallelCompleted" in event_types
 
     def test_executor_rejects_concurrent_top_level_traversal(self):
         graph = parse_dot(
