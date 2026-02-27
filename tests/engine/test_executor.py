@@ -722,6 +722,49 @@ class TestExecutor:
         assert event_types.count("ParallelBranchCompleted") == 2
         assert "ParallelCompleted" in event_types
 
+    def test_parallel_completed_event_counts_failures_even_when_ignore_policy_filters_results(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                fan [shape=component, join_policy=wait_all, error_policy=ignore, max_parallel=1]
+                branch_a_ok [shape=box]
+                branch_z_fail [shape=box]
+                join [shape=tripleoctagon]
+                done [shape=Msquare]
+
+                start -> fan
+                fan -> branch_a_ok
+                fan -> branch_z_fail
+                branch_a_ok -> join [condition="outcome=success"]
+                join -> done
+            }
+            """
+        )
+        events: list[dict] = []
+        backend = _WorkflowBackend(
+            {
+                "start": True,
+                "branch_a_ok": True,
+                "branch_z_fail": False,
+            }
+        )
+        runner = HandlerRunner(graph, build_default_registry(codergen_backend=backend))
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
+
+        parallel_started = next(event for event in events if event["type"] == "ParallelStarted")
+        parallel_completed = next(event for event in events if event["type"] == "ParallelCompleted")
+        branch_started = [event for event in events if event["type"] == "ParallelBranchStarted"]
+        branch_completed = [event for event in events if event["type"] == "ParallelBranchCompleted"]
+
+        assert result.status == "success"
+        assert parallel_started["branch_count"] == 2
+        assert len(branch_started) == 2
+        assert len(branch_completed) == 2
+        assert parallel_completed["success_count"] == 1
+        assert parallel_completed["failure_count"] == 1
+
     def test_executor_rejects_concurrent_top_level_traversal(self):
         graph = parse_dot(
             """

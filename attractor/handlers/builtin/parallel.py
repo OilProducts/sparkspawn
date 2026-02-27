@@ -113,6 +113,9 @@ class ParallelHandler:
                     while len(pending) < max_parallel and submit_next():
                         pass
 
+        event_success_count = sum(1 for r in results if r["status"] in SUCCESS_STATUSES)
+        event_fail_count = sum(1 for r in results if r["status"] == "fail")
+
         results_for_policy = list(results)
         if error_policy == "ignore":
             results_for_policy = [r for r in results_for_policy if r["status"] in SUCCESS_STATUSES]
@@ -122,8 +125,8 @@ class ParallelHandler:
         runtime.emit(
             "ParallelCompleted",
             duration=(time.perf_counter() - started_at),
-            success_count=success_count,
-            failure_count=fail_count,
+            success_count=event_success_count,
+            failure_count=event_fail_count,
         )
 
         outcome_status = OutcomeStatus.SUCCESS
