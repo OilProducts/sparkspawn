@@ -410,7 +410,7 @@ Status key:
 
 ### 10.4 Variable Resolution
 - [x] [10.4-01] Resolve `outcome` and `preferred_label` from current stage outcome.
-- [ ] [10.4-02] Resolve `context.*` keys with fallback unprefixed lookup.
+- [x] [10.4-02] Resolve `context.*` keys with fallback unprefixed lookup.
 - [ ] [10.4-03] Resolve unknown keys to empty string.
 
 ### 10.5 Evaluation

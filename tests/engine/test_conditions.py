@@ -33,6 +33,16 @@ class TestConditions:
         unprefixed = Context(values={"tests_passed": "true"})
         assert evaluate_condition("context.tests_passed=true", outcome, unprefixed)
 
+    def test_context_key_resolution_uses_direct_unprefixed_lookup_before_path_resolution(self, monkeypatch):
+        outcome = Outcome(status=OutcomeStatus.SUCCESS)
+        context = Context(values={"tests_passed": "true"})
+
+        def fail_if_called(path: str) -> str:
+            raise AssertionError(f"get_context_path should not be called for '{path}'")
+
+        monkeypatch.setattr(context, "get_context_path", fail_if_called)
+        assert evaluate_condition("context.tests_passed=true", outcome, context)
+
     def test_quoted_literal_can_contain_and_delimiter(self):
         outcome = Outcome(status=OutcomeStatus.SUCCESS, preferred_label="A && B")
         assert evaluate_condition('preferred_label="A && B"', outcome, Context())

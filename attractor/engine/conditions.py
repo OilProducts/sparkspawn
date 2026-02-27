@@ -41,10 +41,14 @@ def _resolve_key(key: str, outcome: Outcome, context: Context) -> str:
     if key == "preferred_label":
         return _stringify(outcome.preferred_label)
     if key.startswith("context."):
+        unprefixed_key = key[len("context.") :]
         prefixed = context.get(key, None)
         if prefixed is not None:
             return _stringify(prefixed)
-        return context.get_context_path(key[len("context.") :])
+        unprefixed = context.get(unprefixed_key, None)
+        if unprefixed is not None:
+            return _stringify(unprefixed)
+        return context.get_context_path(unprefixed_key)
     return ""
 
 
