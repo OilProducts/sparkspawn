@@ -1014,11 +1014,8 @@ class PipelineExecutor:
         else:
             normalized_suggested_next_ids = [str(node) for node in suggested_next_ids]
 
-        context_updates = outcome.context_updates
-        if context_updates is None:
-            normalized_context_updates: Dict[str, object] = {}
-        else:
-            normalized_context_updates = dict(context_updates)
+        normalized_context_updates = self._normalize_context_updates(outcome.context_updates)
+        normalized_context_updates.pop(NODE_OUTCOMES_KEY, None)
 
         status_payload = {
             "outcome": outcome.status.value,

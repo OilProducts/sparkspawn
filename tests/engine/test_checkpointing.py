@@ -263,6 +263,47 @@ class TestCheckpointAndArtifacts:
             assert status_payload["outcome"] == "fail"
             assert status_payload["notes"] == "condition not met"
 
+    def test_status_json_context_updates_match_engine_merge_behavior(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                if node_id == "plan":
+                    return Outcome(
+                        status=OutcomeStatus.SUCCESS,
+                        context_updates={
+                            "context.visible": "yes",
+                            "_attractor.node_outcomes": {"plan": "overwritten"},
+                        },
+                    )
+                return Outcome(status=OutcomeStatus.SUCCESS)
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "success"
+            assert result.context["context.visible"] == "yes"
+            assert result.context["_attractor.node_outcomes"]["plan"] == "success"
+
+            status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
+            assert status_payload["context_updates"] == {"context.visible": "yes"}
+
     def test_artifacts_and_checkpoint_written_each_step(self):
         graph = parse_dot(
             """
