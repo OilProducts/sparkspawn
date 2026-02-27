@@ -36,6 +36,42 @@ class TestRouting:
         edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
         assert edge.target == "b"
 
+    def test_conjunction_with_context_tests_passed_true_routes_matching_edge(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                a [shape=box]
+                deploy [shape=box]
+                fix [shape=box]
+                done [shape=Msquare]
+
+                start -> a
+                a -> deploy [condition="outcome=success && context.tests_passed=true", weight=1]
+                a -> fix [condition="outcome=success && context.tests_passed=false", weight=99]
+                deploy -> done
+                fix -> done
+            }
+            """
+        )
+        outcome = Outcome(status=OutcomeStatus.SUCCESS)
+
+        edge_when_true = select_next_edge(
+            self._edges_from(graph, "a"),
+            outcome,
+            Context(values={"context.tests_passed": True}),
+        )
+        assert edge_when_true is not None
+        assert edge_when_true.target == "deploy"
+
+        edge_when_false = select_next_edge(
+            self._edges_from(graph, "a"),
+            outcome,
+            Context(values={"context.tests_passed": False}),
+        )
+        assert edge_when_false is not None
+        assert edge_when_false.target == "fix"
+
     def test_preferred_label_then_suggested_ids(self):
         graph = parse_dot(
             """
