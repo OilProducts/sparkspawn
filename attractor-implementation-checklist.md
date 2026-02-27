@@ -354,7 +354,6 @@ Status key:
 ## 9. Transforms and Extensibility
 
 ### 9.1 AST Transforms
-- [ ] [9.1-01] Implement transform interface (`apply(graph) -> graph`) and pipeline execution order.
 - [ ] [9.1-02] Prevent destructive in-place mutation of original parsed graph.
 
 ### 9.2 Built-In Transforms
@@ -536,6 +535,7 @@ Status key:
 ---
 
 ## Deferred Tasks
+- [ ] [9.1-01] Implement transform interface (`apply(graph) -> graph`) and pipeline execution order. Deferred because the transform protocol and ordered pipeline execution are already implemented (`attractor/transforms/base.py`, `attractor/transforms/pipeline.py`) and covered by transform/API tests (`tests/transforms/test_transforms.py::test_transform_pipeline_order`, `tests/api/test_validation_diagnostics.py::test_start_pipeline_runs_stylesheet_transform_before_validation`), so this is checklist state drift.
 - [ ] [8.4-02] Apply provider keys for `llm_provider`. Deferred because stylesheet application already supports `llm_provider` declarations in `ModelStylesheetTransform`, and transform tests already assert provider propagation/precedence (`tests/transforms/test_transforms.py`), so this is checklist state drift.
 - [ ] [8.3-02] Implement specificity ordering and tie-break by later rule of equal specificity. Deferred because `ModelStylesheetTransform` already compares `(specificity, rule.order)` when choosing candidate declarations (`attractor/transforms/stylesheet.py`), and transform tests already assert later-rule wins for equal-specificity selectors (`tests/transforms/test_transforms.py::test_stylesheet_multiple_matching_classes_use_rule_order_for_equal_specificity`), so this is checklist state drift.
 - [ ] [8.3-01] Implement selector matching for `*`, `.class`, and `#node_id`. Deferred because `ModelStylesheetTransform` already matches universal/class/id selectors in `attractor/transforms/stylesheet.py::_selector_matches`, and transform tests cover each selector type (`tests/transforms/test_transforms.py`), so this is checklist state drift.
