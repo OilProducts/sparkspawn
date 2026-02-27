@@ -29,6 +29,27 @@ def _close_task_immediately(coro):
     return _DummyTask()
 
 
+def test_pipeline_start_request_accepts_dot_source_alias(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    request = server.PipelineStartRequest.model_validate(
+        {
+            "dot_source": FLOW,
+            "working_directory": str(tmp_path / "work"),
+            "backend": "codex",
+        }
+    )
+
+    payload = asyncio.run(server._start_pipeline(request))
+    assert payload["status"] == "started"
+
+    pipeline_id = payload["pipeline_id"]
+    server._pop_active_run(pipeline_id)
+
+
 @pytest.mark.parametrize("backend", ["codex", "codex-cli"])
 def test_pipeline_definition_is_backend_invariant_for_backend_selection(
     backend: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

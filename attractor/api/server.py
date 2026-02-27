@@ -17,7 +17,7 @@ from typing import Callable, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 from attractor.dsl import DotParseError, Diagnostic, DiagnosticSeverity, parse_dot, validate_graph
 from attractor.engine import Checkpoint, Context, Outcome, OutcomeStatus, PipelineExecutor, save_checkpoint
@@ -526,7 +526,7 @@ def _pop_active_run(run_id: str) -> Optional[ActiveRun]:
 
 
 class PipelineStartRequest(BaseModel):
-    flow_content: str
+    flow_content: str = Field(validation_alias=AliasChoices("flow_content", "dot_source"))
     working_directory: str = "./workspace"
     backend: str = "codex"
     model: Optional[str] = None
