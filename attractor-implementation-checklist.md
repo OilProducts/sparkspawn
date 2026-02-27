@@ -415,7 +415,7 @@ Status key:
 
 ### 10.5 Evaluation
 - [x] [10.5-03] Support bare-key truthy checks.
-- [ ] [10.5-04] Add parser/evaluator tests for mixed-clause expressions.
+- [x] [10.5-04] Add parser/evaluator tests for mixed-clause expressions.
 
 ### 10.6 Examples
 - [ ] [10.6-01] Add routing tests for `outcome=success` and `outcome=fail`.

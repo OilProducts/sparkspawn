@@ -88,3 +88,13 @@ class TestConditions:
         assert evaluate_condition("preferred_label", outcome, context)
         assert evaluate_condition("context.tests_passed", outcome, context)
         assert not evaluate_condition("context.missing_key", outcome, context)
+
+    def test_mixed_clause_expression_ignores_empty_segments(self):
+        outcome = Outcome(status=OutcomeStatus.SUCCESS, preferred_label="Ship")
+        context = Context(values={"context.tests_passed": True})
+
+        assert evaluate_condition(
+            'outcome=success && && preferred_label!="Skip" && context.tests_passed=true',
+            outcome,
+            context,
+        )

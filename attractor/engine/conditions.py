@@ -18,7 +18,7 @@ def evaluate_condition(condition: str, outcome: Outcome, context: Context) -> bo
     clauses = [clause.strip() for clause in _split_clauses(text)]
     for clause in clauses:
         if clause == "":
-            return False
+            continue
         match = _CLAUSE_RE.match(clause)
         if match:
             key = match.group(1)
