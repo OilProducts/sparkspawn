@@ -1381,6 +1381,7 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
                 logs_root=logs_root,
                 checkpoint_file=checkpoint_file,
                 control=control.poll,
+                on_event=emit,
             )
             result = await asyncio.to_thread(
                 executor.run,
