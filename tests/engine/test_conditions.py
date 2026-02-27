@@ -51,3 +51,12 @@ class TestConditions:
             outcome,
             context,
         )
+
+    def test_string_comparison_is_exact_and_case_sensitive(self):
+        outcome = Outcome(status=OutcomeStatus.SUCCESS, preferred_label=" Fix ")
+        context = Context(values={"context.review_result": "Ship"})
+
+        assert evaluate_condition('outcome=success && preferred_label=" Fix "', outcome, context)
+        assert not evaluate_condition('preferred_label="Fix"', outcome, context)
+        assert evaluate_condition("context.review_result=Ship", outcome, context)
+        assert not evaluate_condition("context.review_result=ship", outcome, context)

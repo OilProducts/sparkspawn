@@ -406,9 +406,7 @@ Status key:
 - [x] [10.2-03] Support operators `=` and `!=` with typed literals.
 
 ### 10.3 Semantics
-- [ ] [10.3-01] Evaluate clauses left-to-right with logical AND semantics.
-- [ ] [10.3-02] Treat missing context keys as empty string.
-- [ ] [10.3-03] Use exact case-sensitive string comparison.
+- [x] [10.3-03] Use exact case-sensitive string comparison.
 
 ### 10.4 Variable Resolution
 - [ ] [10.4-01] Resolve `outcome` and `preferred_label` from current stage outcome.
@@ -565,3 +563,5 @@ Status key:
 - [ ] [7.2-10] Implement `fidelity_valid` warning rule. Deferred because fidelity warnings for graph/node/edge attrs are already implemented in `attractor/dsl/validator.py::_validate_fidelity_values` and covered by `tests/dsl/test_validator.py::test_retry_target_and_fidelity_warnings`, so this is checklist state drift.
 - [ ] [7.2-11] Implement `retry_target_exists` warning rule. Deferred because `validate_graph` already emits `retry_target_exists` diagnostics for graph/node retry targets that reference missing nodes (`attractor/dsl/validator.py::_validate_retry_targets`) and this behavior is covered in `tests/dsl/test_validator.py::test_retry_target_and_fidelity_warnings`, so this is checklist state drift.
 - [ ] [10.1-01] Keep expression language minimal and deterministic for routing. Deferred because this is an umbrella outcome that should be closed only after the concrete grammar/semantics/evaluation tasks in Sections 10.2-10.5 are completed.
+- [ ] [10.3-01] Evaluate clauses left-to-right with logical AND semantics. Deferred because `evaluate_condition` already evaluates clauses in source order and short-circuits on first false clause (`attractor/engine/conditions.py`), so this is checklist state drift.
+- [ ] [10.3-02] Treat missing context keys as empty string. Deferred because `context.*` resolution already returns `""` for missing keys via `Context.get_context_path`, and existing condition tests cover missing-key behavior, so this is checklist state drift.

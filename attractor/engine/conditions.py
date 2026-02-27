@@ -39,12 +39,12 @@ def _resolve_key(key: str, outcome: Outcome, context: Context) -> str:
     if key == "outcome":
         return outcome.status.value
     if key == "preferred_label":
-        return _normalize_value(outcome.preferred_label)
+        return _stringify(outcome.preferred_label)
     if key.startswith("context."):
         prefixed = context.get(key, None)
         if prefixed is not None:
-            return _normalize_value(_stringify(prefixed))
-        return _normalize_value(context.get_context_path(key[len("context.") :]))
+            return _stringify(prefixed)
+        return context.get_context_path(key[len("context.") :])
     return ""
 
 
@@ -83,13 +83,6 @@ def _split_clauses(condition: str) -> list[str]:
 
     clauses.append("".join(current))
     return clauses
-
-
-def _normalize_value(raw: str) -> str:
-    text = raw.strip()
-    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
-        text = text[1:-1]
-    return text
 
 
 def _normalize_literal(raw: str) -> str:
