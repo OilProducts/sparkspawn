@@ -611,6 +611,55 @@ class TestDotValidator:
 
         assert diagnostics[-1].rule_id == "registered_custom_rule"
 
+    def test_validate_snapshots_registered_rules_before_execution(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+            done [shape=Msquare]
+
+            start -> done
+        }
+        """
+        graph = parse_dot(dot)
+
+        class _LateRegisteredRule:
+            def apply(self, current_graph):
+                assert current_graph is graph
+                return [
+                    Diagnostic(
+                        rule_id="late_registered_rule",
+                        severity=DiagnosticSeverity.INFO,
+                        message="late registration should not run in current pass",
+                        line=1,
+                    )
+                ]
+
+        class _RegisteringRule:
+            def apply(self, current_graph):
+                assert current_graph is graph
+                register_lint_rule(_LateRegisteredRule())
+                return [
+                    Diagnostic(
+                        rule_id="registering_rule",
+                        severity=DiagnosticSeverity.INFO,
+                        message="register another lint rule during validation",
+                        line=1,
+                    )
+                ]
+
+        register_lint_rule(_RegisteringRule())
+
+        first_pass = validate(graph)
+        first_pass_rule_ids = [d.rule_id for d in first_pass]
+
+        assert "registering_rule" in first_pass_rule_ids
+        assert "late_registered_rule" not in first_pass_rule_ids
+
+        second_pass = validate(graph)
+        second_pass_rule_ids = [d.rule_id for d in second_pass]
+
+        assert "late_registered_rule" in second_pass_rule_ids
+
     def test_validate_or_raise_returns_diagnostics_when_only_warnings(self):
         dot = """
         digraph G {

@@ -320,7 +320,7 @@ Status key:
 
 ### 7.4 Custom Lint Rules
 - [x] [7.4-01] Implement `LintRule` plugin registration and execution.
-- [ ] [7.4-02] Guarantee built-in rules run before custom rules.
+- [x] [7.4-02] Guarantee built-in rules run before custom rules.
 
 ---
 

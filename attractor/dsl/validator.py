@@ -62,7 +62,7 @@ class ValidationError(Exception):
 
 def validate(graph: DotGraph, extra_rules: Iterable[LintRule] | None = None) -> List[Diagnostic]:
     diagnostics = validate_graph(graph)
-    for rule in _registered_lint_rules:
+    for rule in tuple(_registered_lint_rules):
         diagnostics.extend(rule.apply(graph))
 
     if extra_rules is None:
