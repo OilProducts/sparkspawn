@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, Iterable, List, Set
+from typing import Dict, Iterable, List, Protocol, Set
 
 from .models import Diagnostic, DiagnosticSeverity, DotEdge, DotGraph, DotNode
 
@@ -43,6 +43,21 @@ _SHAPE_TO_HANDLER_TYPE = {
     "parallelogram": "tool",
     "house": "stack.manager_loop",
 }
+
+
+class LintRule(Protocol):
+    def apply(self, graph: DotGraph) -> List[Diagnostic]:
+        ...
+
+
+def validate(graph: DotGraph, extra_rules: Iterable[LintRule] | None = None) -> List[Diagnostic]:
+    diagnostics = validate_graph(graph)
+    if extra_rules is None:
+        return diagnostics
+
+    for rule in extra_rules:
+        diagnostics.extend(rule.apply(graph))
+    return diagnostics
 
 
 def validate_graph(graph: DotGraph) -> List[Diagnostic]:

@@ -314,7 +314,7 @@ Status key:
 - [x] [7.2-13] Implement `prompt_on_llm_nodes` warning rule.
 
 ### 7.3 Validation API
-- [ ] [7.3-01] Implement `validate(graph, extra_rules)` composition path.
+- [x] [7.3-01] Implement `validate(graph, extra_rules)` composition path.
 - [ ] [7.3-02] Implement `validate_or_raise` with aggregated error raising.
 - [ ] [7.3-03] Add API endpoint coverage tests for error/warning payload shape.
 

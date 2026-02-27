@@ -3,7 +3,7 @@
 from .models import Diagnostic, DiagnosticSeverity, DotGraph
 from .formatter import canonicalize_dot, format_dot
 from .parser import DotParseError, normalize_graph, parse_dot
-from .validator import validate_graph
+from .validator import validate, validate_graph
 
 __all__ = [
     "Diagnostic",
@@ -14,5 +14,6 @@ __all__ = [
     "format_dot",
     "normalize_graph",
     "parse_dot",
+    "validate",
     "validate_graph",
 ]

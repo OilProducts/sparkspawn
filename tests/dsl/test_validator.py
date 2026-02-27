@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from attractor.dsl import parse_dot, validate_graph
-from attractor.dsl.models import DiagnosticSeverity
+from attractor.dsl import parse_dot, validate, validate_graph
+from attractor.dsl.models import Diagnostic, DiagnosticSeverity
 
 
 SIMPLE_LINEAR_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "simple_linear_workflow.dot"
@@ -546,3 +546,29 @@ class TestDotValidator:
         error_rules = {d.rule_id for d in self._errors(diagnostics)}
 
         assert "terminal_node" not in error_rules
+
+    def test_validate_composes_builtins_with_extra_rules(self):
+        dot = """
+        digraph G {
+            start [shape=Mdiamond]
+        }
+        """
+        graph = parse_dot(dot)
+        baseline = validate_graph(graph)
+
+        class _ExtraRule:
+            def apply(self, current_graph):
+                assert current_graph is graph
+                return [
+                    Diagnostic(
+                        rule_id="custom_rule",
+                        severity=DiagnosticSeverity.INFO,
+                        message="custom lint",
+                        line=1,
+                    )
+                ]
+
+        diagnostics = validate(graph, extra_rules=[_ExtraRule()])
+
+        assert diagnostics[: len(baseline)] == baseline
+        assert diagnostics[len(baseline) :][-1].rule_id == "custom_rule"
