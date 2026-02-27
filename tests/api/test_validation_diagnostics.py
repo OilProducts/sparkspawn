@@ -195,3 +195,29 @@ def test_start_pipeline_runs_stylesheet_transform_before_validation(
     finally:
         if payload.get("pipeline_id"):
             server._pop_active_run(str(payload["pipeline_id"]))
+
+
+def test_preview_applies_registered_custom_transform() -> None:
+    class _CustomPromptTransform:
+        def apply(self, graph):
+            prompt_attr = graph.nodes["task"].attrs["prompt"]
+            prompt_attr.value = f"{prompt_attr.value} [custom]"
+            return graph
+
+    flow = """
+    digraph G {
+        start [shape=Mdiamond]
+        task [shape=box, prompt="Build"]
+        done [shape=Msquare]
+        start -> task -> done
+    }
+    """
+
+    server.clear_registered_transforms()
+    try:
+        server.register_transform(_CustomPromptTransform())
+        payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
+        assert nodes_by_id["task"]["prompt"] == "Build [custom]"
+    finally:
+        server.clear_registered_transforms()

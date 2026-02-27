@@ -38,6 +38,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_DIST_INDEX = FRONTEND_DIST / "index.html"
 LEGACY_INDEX = PROJECT_ROOT / "index.html"
+REGISTERED_TRANSFORMS: List[object] = []
+
+
+def register_transform(transform: object) -> None:
+    REGISTERED_TRANSFORMS.append(transform)
+
+
+def clear_registered_transforms() -> None:
+    REGISTERED_TRANSFORMS.clear()
 
 
 class ConnectionManager:
@@ -1130,6 +1139,15 @@ def _diagnostic_payload(diagnostic: Diagnostic) -> dict:
     return payload
 
 
+def _build_transform_pipeline() -> TransformPipeline:
+    pipeline = TransformPipeline()
+    pipeline.register(GoalVariableTransform())
+    pipeline.register(ModelStylesheetTransform())
+    for transform in REGISTERED_TRANSFORMS:
+        pipeline.register(transform)
+    return pipeline
+
+
 @app.post("/preview")
 async def preview_pipeline(req: PreviewRequest):
     try:
@@ -1150,10 +1168,7 @@ async def preview_pipeline(req: PreviewRequest):
             "errors": [parse_diag],
         }
 
-    pipeline = TransformPipeline()
-    pipeline.register(GoalVariableTransform())
-    pipeline.register(ModelStylesheetTransform())
-    graph = pipeline.apply(graph)
+    graph = _build_transform_pipeline().apply(graph)
 
     diagnostics = validate_graph(graph)
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
@@ -1192,10 +1207,7 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
             "errors": [parse_diag],
         }
 
-    pipeline = TransformPipeline()
-    pipeline.register(GoalVariableTransform())
-    pipeline.register(ModelStylesheetTransform())
-    graph = pipeline.apply(graph)
+    graph = _build_transform_pipeline().apply(graph)
 
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[1])
     diagnostics = validate_graph(graph)
