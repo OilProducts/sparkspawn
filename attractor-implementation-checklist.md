@@ -480,7 +480,7 @@ Status key:
 ### Node Attributes
 - [x] [A.N-01] Verify parser accepts and stores every listed node attribute key.
 - [x] [A.N-02] Add runtime behavior test for each non-display node attr (`max_retries`, `goal_gate`, `retry_target`, `fidelity`, `timeout`, `auto_status`, `allow_partial`).
-- [ ] [A.N-03] Add precedence tests for model-related node attrs vs stylesheet/defaults.
+- [x] [A.N-03] Add precedence tests for model-related node attrs vs stylesheet/defaults.
 
 ### Edge Attributes
 - [ ] [A.E-01] Verify parser accepts and stores every listed edge attribute key.

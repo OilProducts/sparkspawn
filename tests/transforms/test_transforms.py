@@ -411,6 +411,30 @@ class TestTransforms:
         assert graph.nodes["implicit"].attrs["llm_provider"].value == "style-provider"
         assert graph.nodes["implicit"].attrs["reasoning_effort"].value == "low"
 
+    def test_stylesheet_overrides_late_inherited_node_defaults_without_explicit_attrs(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [model_stylesheet="* { llm_model: style-model; llm_provider: style-provider; reasoning_effort: low; }"]
+                start [shape=Mdiamond]
+                implicit
+                node [llm_model="default-model", llm_provider="default-provider", reasoning_effort="medium"]
+                implicit
+                done [shape=Msquare]
+                start -> implicit -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        # Even when inherited defaults are attached on a later redeclaration,
+        # they remain overridable by stylesheet values.
+        assert graph.nodes["implicit"].attrs["llm_model"].value == "style-model"
+        assert graph.nodes["implicit"].attrs["llm_provider"].value == "style-provider"
+        assert graph.nodes["implicit"].attrs["reasoning_effort"].value == "low"
+
     def test_stylesheet_parses_quoted_values_with_semicolons(self):
         graph = parse_dot(
             """
