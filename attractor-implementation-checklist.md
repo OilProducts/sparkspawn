@@ -338,7 +338,7 @@ Status key:
 
 ### 8.4 Recognized Properties
 - [x] [8.4-01] Apply arbitrary string values for `llm_model`.
-- [ ] [8.4-03] Validate `reasoning_effort` values (`low|medium|high`).
+- [x] [8.4-03] Validate `reasoning_effort` values (`low|medium|high`).
 
 ### 8.5 Application Order
 - [ ] [8.5-01] Implement precedence order: node attr -> stylesheet -> graph default -> system default.

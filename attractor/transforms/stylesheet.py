@@ -8,6 +8,7 @@ from attractor.dsl.models import DotAttribute, DotGraph, DotNode, DotValueType
 
 
 _ALLOWED_PROPERTIES = {"llm_model", "llm_provider", "reasoning_effort"}
+_ALLOWED_REASONING_EFFORTS = {"low", "medium", "high"}
 _CLASS_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 _NODE_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -111,6 +112,9 @@ def _parse_rules(stylesheet: str) -> List[_StyleRule]:
             key = raw_key.strip()
             value = _parse_value(raw_value.strip())
             if key not in _ALLOWED_PROPERTIES or value == "":
+                rule_is_valid = False
+                break
+            if key == "reasoning_effort" and value not in _ALLOWED_REASONING_EFFORTS:
                 rule_is_valid = False
                 break
             properties[key] = value

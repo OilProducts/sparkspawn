@@ -363,6 +363,26 @@ class TestTransforms:
         assert graph.nodes["task"].attrs["llm_model"].value == ""
         assert graph.nodes["task"].attrs["llm_provider"].value == ""
 
+    def test_stylesheet_rejects_invalid_reasoning_effort_value(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [model_stylesheet="* { llm_model: gpt-5; reasoning_effort: ultra; }"]
+                start [shape=Mdiamond]
+                task [shape=box]
+                done [shape=Msquare]
+                start -> task -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        # Invalid reasoning_effort values must invalidate the containing rule.
+        assert graph.nodes["task"].attrs["llm_model"].value == ""
+        assert graph.nodes["task"].attrs["reasoning_effort"].value == "high"
+
     def test_stylesheet_rejects_invalid_class_selector_and_malformed_declaration(self):
         graph = parse_dot(
             """
