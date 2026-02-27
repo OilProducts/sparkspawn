@@ -301,6 +301,25 @@ class TestTransforms:
         assert graph.nodes["explicit"].attrs["llm_provider"].value == "node-provider"
         assert graph.nodes["explicit"].attrs["reasoning_effort"].value == "high"
 
+    def test_stylesheet_parses_quoted_values_with_semicolons(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [model_stylesheet="* { llm_model: \\"gpt;v2\\"; llm_provider: openai; }"]
+                start [shape=Mdiamond]
+                task [shape=box]
+                done [shape=Msquare]
+                start -> task -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        assert graph.nodes["task"].attrs["llm_model"].value == "gpt;v2"
+        assert graph.nodes["task"].attrs["llm_provider"].value == "openai"
+
     def test_transform_pipeline_order(self):
         graph = parse_dot(
             """

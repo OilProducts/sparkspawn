@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from typing import Dict, List, Tuple
 
 from attractor.dsl.models import DotAttribute, DotGraph, DotNode, DotValueType
 
-
-_SELECTOR_RE = re.compile(r"([^{}]+)\{([^{}]*)\}", re.DOTALL)
 
 _ALLOWED_PROPERTIES = {"llm_model", "llm_provider", "reasoning_effort"}
 
@@ -74,21 +71,45 @@ class ModelStylesheetTransform:
 
 
 def _parse_rules(stylesheet: str) -> List[_StyleRule]:
+    text = stylesheet.strip()
     rules: List[_StyleRule] = []
-    for idx, match in enumerate(_SELECTOR_RE.finditer(stylesheet)):
-        selector = match.group(1).strip()
-        body = match.group(2).strip()
+    idx = 0
+    order = 0
+    n = len(text)
+    while idx < n:
+        while idx < n and text[idx].isspace():
+            idx += 1
+        if idx >= n:
+            break
+
+        brace = _find_unquoted(text, "{", idx)
+        if brace == -1:
+            break
+
+        selector = text[idx:brace].strip()
+        close = _find_unquoted(text, "}", brace + 1)
+        if close == -1:
+            break
+        body = text[brace + 1 : close].strip()
+
         properties: Dict[str, str] = {}
-        for stmt in [s.strip() for s in body.split(";") if s.strip()]:
-            if ":" not in stmt:
+        for statement in _split_unquoted(body, ";"):
+            stmt = statement.strip()
+            if not stmt:
                 continue
-            raw_key, raw_value = stmt.split(":", 1)
+            colon = _find_unquoted(stmt, ":")
+            if colon == -1:
+                continue
+            raw_key = stmt[:colon]
+            raw_value = stmt[colon + 1 :]
             key = raw_key.strip()
             value = _strip_quotes(raw_value.strip())
-            if key in _ALLOWED_PROPERTIES:
+            if key in _ALLOWED_PROPERTIES and value != "":
                 properties[key] = value
         if selector and properties:
-            rules.append(_StyleRule(selector=selector, properties=properties, order=idx))
+            rules.append(_StyleRule(selector=selector, properties=properties, order=order))
+        order += 1
+        idx = close + 1
     return rules
 
 
@@ -125,6 +146,41 @@ def _strip_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
         return value[1:-1]
     return value
+
+
+def _find_unquoted(text: str, token: str, start: int = 0) -> int:
+    in_quotes = False
+    escaped = False
+    for idx in range(start, len(text)):
+        char = text[idx]
+        if char == "\\" and in_quotes and not escaped:
+            escaped = True
+            continue
+        if char == '"' and not escaped:
+            in_quotes = not in_quotes
+        elif char == token and not in_quotes:
+            return idx
+        escaped = False
+    return -1
+
+
+def _split_unquoted(text: str, token: str) -> List[str]:
+    parts: List[str] = []
+    start = 0
+    in_quotes = False
+    escaped = False
+    for idx, char in enumerate(text):
+        if char == "\\" and in_quotes and not escaped:
+            escaped = True
+            continue
+        if char == '"' and not escaped:
+            in_quotes = not in_quotes
+        elif char == token and not in_quotes:
+            parts.append(text[start:idx])
+            start = idx + 1
+        escaped = False
+    parts.append(text[start:])
+    return parts
 
 
 def _graph_default_model_attrs(graph: DotGraph) -> Dict[str, Tuple[str, int]]:

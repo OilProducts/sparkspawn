@@ -330,7 +330,7 @@ Status key:
 - [x] [8.1-02] Ensure node explicit attrs override stylesheet-inferred values.
 
 ### 8.2 Stylesheet Grammar
-- [ ] [8.2-01] Implement parser for `Rule+` grammar with selector/declaration blocks.
+- [x] [8.2-01] Implement parser for `Rule+` grammar with selector/declaration blocks.
 - [ ] [8.2-02] Restrict properties to `llm_model`, `llm_provider`, `reasoning_effort`.
 - [ ] [8.2-03] Enforce class name format and declaration syntax validation.
 
