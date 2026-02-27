@@ -19,5 +19,11 @@ class TransformPipeline:
     def apply(self, graph: DotGraph) -> DotGraph:
         cur = copy.deepcopy(graph)
         for transform in self.transforms:
-            cur = transform.apply(cur)
+            # Apply a per-run clone when possible so stateful transform instances
+            # do not leak mutable state across independent pipeline runs.
+            try:
+                transform_instance = copy.deepcopy(transform)
+            except Exception:
+                transform_instance = transform
+            cur = transform_instance.apply(cur)
         return cur

@@ -364,7 +364,7 @@ Status key:
 ### 9.3 Custom Transforms
 - [x] [9.3-01] Implement custom transform registration API.
 - [x] [9.3-02] Preserve deterministic execution order of custom transforms.
-- [ ] [9.3-03] Add tests for transform chaining and conflict precedence.
+- [x] [9.3-03] Add tests for transform chaining and conflict precedence.
 
 ### 9.4 Pipeline Composition
 - [ ] [9.4-01] Support sub-pipeline execution pattern for handler-driven child graphs.

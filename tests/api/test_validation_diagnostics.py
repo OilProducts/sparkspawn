@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import attractor.api.server as server
-from attractor.dsl.models import Diagnostic, DiagnosticSeverity
+from attractor.dsl.models import Diagnostic, DiagnosticSeverity, DotAttribute, DotValueType
 
 
 FLOW = """
@@ -219,6 +219,194 @@ def test_preview_applies_registered_custom_transform() -> None:
         payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
         assert nodes_by_id["task"]["prompt"] == "Build [custom]"
+    finally:
+        server.clear_registered_transforms()
+
+
+def test_preview_applies_multiple_custom_transforms_in_registration_order() -> None:
+    class _AppendFirstTransform:
+        def apply(self, graph):
+            prompt_attr = graph.nodes["task"].attrs["prompt"]
+            prompt_attr.value = f"{prompt_attr.value} [first]"
+            return graph
+
+    class _AppendSecondTransform:
+        def apply(self, graph):
+            prompt_attr = graph.nodes["task"].attrs["prompt"]
+            prompt_attr.value = f"{prompt_attr.value} [second]"
+            return graph
+
+    flow = """
+    digraph G {
+        graph [goal="Ship Docs"]
+        start [shape=Mdiamond]
+        task [shape=box, prompt="Build $goal"]
+        done [shape=Msquare]
+        start -> task -> done
+    }
+    """
+
+    server.clear_registered_transforms()
+    try:
+        server.register_transform(_AppendFirstTransform())
+        server.register_transform(_AppendSecondTransform())
+        payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
+
+        assert nodes_by_id["task"]["prompt"] == "Build Ship Docs [first] [second]"
+    finally:
+        server.clear_registered_transforms()
+
+
+def test_preview_runs_custom_transforms_after_builtin_transforms() -> None:
+    class _BuiltInOrderingProbeTransform:
+        def apply(self, graph):
+            prompt_attr = graph.nodes["task"].attrs["prompt"]
+            if "$goal" in str(prompt_attr.value):
+                prompt_attr.value = f"{prompt_attr.value} [before-builtins]"
+            else:
+                prompt_attr.value = f"{prompt_attr.value} [after-builtins]"
+            return graph
+
+    flow = """
+    digraph G {
+        graph [goal="Ship Docs"]
+        start [shape=Mdiamond]
+        task [shape=box, prompt="Build $goal"]
+        done [shape=Msquare]
+        start -> task -> done
+    }
+    """
+
+    server.clear_registered_transforms()
+    try:
+        server.register_transform(_BuiltInOrderingProbeTransform())
+        payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
+
+        assert nodes_by_id["task"]["prompt"] == "Build Ship Docs [after-builtins]"
+    finally:
+        server.clear_registered_transforms()
+
+
+def test_start_pipeline_custom_transform_conflict_uses_later_registration_precedence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _SetFirstModelTransform:
+        def apply(self, graph):
+            graph.nodes["task"].attrs["llm_model"] = DotAttribute(
+                key="llm_model",
+                value="first-model",
+                value_type=DotValueType.STRING,
+                line=0,
+            )
+            return graph
+
+    class _SetSecondModelTransform:
+        def apply(self, graph):
+            graph.nodes["task"].attrs["llm_model"] = DotAttribute(
+                key="llm_model",
+                value="second-model",
+                value_type=DotValueType.STRING,
+                line=0,
+            )
+            return graph
+
+    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+    captured: dict[str, str | None] = {}
+
+    def _validate(graph):
+        model_attr = graph.nodes["task"].attrs.get("llm_model")
+        captured["task_llm_model"] = None if model_attr is None else str(model_attr.value)
+        return []
+
+    monkeypatch.setattr(server, "validate_graph", _validate)
+
+    flow = """
+    digraph G {
+        graph [model_stylesheet="* { llm_model: base-model; }"]
+        start [shape=Mdiamond]
+        task [shape=box, prompt="Build"]
+        done [shape=Msquare]
+        start -> task -> done
+    }
+    """
+
+    server.clear_registered_transforms()
+    try:
+        server.register_transform(_SetFirstModelTransform())
+        server.register_transform(_SetSecondModelTransform())
+        payload = asyncio.run(
+            server._start_pipeline(
+                server.PipelineStartRequest(
+                    flow_content=flow,
+                    working_directory=str(tmp_path / "work"),
+                    backend="codex",
+                )
+            )
+        )
+
+        assert payload["status"] == "started"
+        assert captured["task_llm_model"] == "second-model"
+    finally:
+        if "payload" in locals() and payload.get("pipeline_id"):
+            server._pop_active_run(str(payload["pipeline_id"]))
+        server.clear_registered_transforms()
+
+
+def test_preview_custom_transform_conflict_precedence_is_deterministic_across_runs() -> None:
+    class _StatefulFirstTransform:
+        def __init__(self):
+            self.count = 0
+
+        def apply(self, graph):
+            self.count += 1
+            graph.nodes["task"].attrs["llm_model"] = DotAttribute(
+                key="llm_model",
+                value=f"first-{self.count}",
+                value_type=DotValueType.STRING,
+                line=0,
+            )
+            return graph
+
+    class _StatefulSecondTransform:
+        def __init__(self):
+            self.count = 0
+
+        def apply(self, graph):
+            self.count += 1
+            graph.nodes["task"].attrs["llm_model"] = DotAttribute(
+                key="llm_model",
+                value=f"second-{self.count}",
+                value_type=DotValueType.STRING,
+                line=0,
+            )
+            return graph
+
+    flow = """
+    digraph G {
+        start [shape=Mdiamond]
+        task [shape=box, prompt="Build"]
+        done [shape=Msquare]
+        start -> task -> done
+    }
+    """
+
+    first = _StatefulFirstTransform()
+    second = _StatefulSecondTransform()
+    server.clear_registered_transforms()
+    try:
+        server.register_transform(first)
+        server.register_transform(second)
+
+        first_payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        second_payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        first_nodes = {str(node["id"]): node for node in first_payload["graph"]["nodes"]}
+        second_nodes = {str(node["id"]): node for node in second_payload["graph"]["nodes"]}
+
+        assert first_nodes["task"]["llm_model"] == "second-1"
+        assert second_nodes["task"]["llm_model"] == "second-1"
     finally:
         server.clear_registered_transforms()
 
