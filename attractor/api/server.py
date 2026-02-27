@@ -20,7 +20,15 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field
 
 from attractor.dsl import DotParseError, Diagnostic, DiagnosticSeverity, parse_dot, validate_graph
-from attractor.engine import Checkpoint, Context, Outcome, OutcomeStatus, PipelineExecutor, save_checkpoint
+from attractor.engine import (
+    Checkpoint,
+    Context,
+    Outcome,
+    OutcomeStatus,
+    PipelineExecutor,
+    load_checkpoint,
+    save_checkpoint,
+)
 from attractor.graphviz_export import export_graphviz_artifact
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
@@ -518,6 +526,20 @@ def _set_active_run_completed_nodes(run_id: str, completed_nodes: List[str]) -> 
 def _get_active_run(run_id: str) -> Optional[ActiveRun]:
     with ACTIVE_RUNS_LOCK:
         return ACTIVE_RUNS.get(run_id)
+
+
+def _read_checkpoint_progress(run_id: str) -> tuple[str, List[str]]:
+    checkpoint = load_checkpoint(_run_root(run_id) / "state.json")
+    if checkpoint is None:
+        return "", []
+    return checkpoint.current_node, list(checkpoint.completed_nodes)
+
+
+def _pipeline_progress_payload(current_node: str, completed_nodes: List[str]) -> Dict[str, object]:
+    return {
+        "current_node": current_node,
+        "completed_count": len(completed_nodes),
+    }
 
 
 def _pop_active_run(run_id: str) -> Optional[ActiveRun]:
@@ -1398,8 +1420,10 @@ async def create_pipeline(req: PipelineStartRequest):
 
 @app.get("/pipelines/{pipeline_id}")
 async def get_pipeline(pipeline_id: str):
+    checkpoint_current_node, checkpoint_completed_nodes = _read_checkpoint_progress(pipeline_id)
     active = _get_active_run(pipeline_id)
     if active:
+        completed_nodes = list(active.completed_nodes) if active.completed_nodes else checkpoint_completed_nodes
         return {
             "pipeline_id": pipeline_id,
             "status": active.status,
@@ -1407,7 +1431,8 @@ async def get_pipeline(pipeline_id: str):
             "working_directory": active.working_directory,
             "model": active.model,
             "last_error": active.last_error,
-            "completed_nodes": active.completed_nodes,
+            "completed_nodes": completed_nodes,
+            "progress": _pipeline_progress_payload(checkpoint_current_node, completed_nodes),
         }
 
     record = _read_run_meta(_run_meta_path(pipeline_id))
@@ -1420,7 +1445,8 @@ async def get_pipeline(pipeline_id: str):
         "working_directory": record.working_directory,
         "model": record.model,
         "last_error": record.last_error,
-        "completed_nodes": [],
+        "completed_nodes": checkpoint_completed_nodes,
+        "progress": _pipeline_progress_payload(checkpoint_current_node, checkpoint_completed_nodes),
         "started_at": record.started_at,
         "ended_at": record.ended_at,
         "result": record.result,
