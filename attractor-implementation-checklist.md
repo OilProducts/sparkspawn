@@ -368,7 +368,7 @@ Status key:
 
 ### 9.4 Pipeline Composition
 - [x] [9.4-01] Support sub-pipeline execution pattern for handler-driven child graphs.
-- [ ] [9.4-02] Support transform-based graph merging for modular pipelines.
+- [x] [9.4-02] Support transform-based graph merging for modular pipelines.
 
 ### 9.5 HTTP Server Mode
 - [ ] [9.5-01] Implement `POST /pipelines` start endpoint.

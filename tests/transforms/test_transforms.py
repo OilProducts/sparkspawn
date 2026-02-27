@@ -2,7 +2,12 @@ from pathlib import Path
 
 from attractor.dsl import parse_dot
 from attractor.dsl.models import DotAttribute, DotValueType
-from attractor.transforms import GoalVariableTransform, ModelStylesheetTransform, TransformPipeline
+from attractor.transforms import (
+    GoalVariableTransform,
+    GraphMergeTransform,
+    ModelStylesheetTransform,
+    TransformPipeline,
+)
 from attractor.transforms import AttributeDefaultsTransform
 
 
@@ -578,3 +583,67 @@ class TestTransforms:
         assert "llm_model" not in graph.nodes["task"].attrs
         assert transformed.nodes["task"].attrs["prompt"].value == "Build Landing Page"
         assert transformed.nodes["task"].attrs["llm_model"].value == "gpt-5"
+
+    def test_graph_merge_transform_merges_module_nodes_edges_and_missing_attrs(self):
+        base_graph = parse_dot(
+            """
+            digraph Base {
+                graph [goal="Ship feature"]
+                start [shape=Mdiamond]
+                plan [shape=box, prompt="Plan path"]
+                done [shape=Msquare]
+                start -> plan
+            }
+            """
+        )
+        module_graph = parse_dot(
+            """
+            digraph Module {
+                graph [default_fidelity="summary:low"]
+                plan [llm_model="gpt-5"]
+                review [shape=hexagon, prompt="Review plan"]
+                done [shape=Msquare]
+                plan -> review
+                review -> done [label="approved"]
+            }
+            """
+        )
+
+        merged = GraphMergeTransform(module_graph).apply(base_graph)
+
+        # Existing graph-level attrs are preserved; missing attrs can be filled from module.
+        assert merged.graph_attrs["goal"].value == "Ship feature"
+        assert merged.graph_attrs["default_fidelity"].value == "summary:low"
+
+        # Existing node attrs are preserved, while missing attrs are merged in.
+        assert merged.nodes["plan"].attrs["prompt"].value == "Plan path"
+        assert merged.nodes["plan"].attrs["llm_model"].value == "gpt-5"
+        assert merged.nodes["review"].attrs["shape"].value == "hexagon"
+        assert ("plan", "review") in {(edge.source, edge.target) for edge in merged.edges}
+        assert ("review", "done") in {(edge.source, edge.target) for edge in merged.edges}
+
+    def test_graph_merge_transform_raises_on_conflicting_existing_node_attrs(self):
+        base_graph = parse_dot(
+            """
+            digraph Base {
+                start [shape=Mdiamond]
+                plan [shape=box, prompt="Primary prompt"]
+                done [shape=Msquare]
+                start -> plan -> done
+            }
+            """
+        )
+        module_graph = parse_dot(
+            """
+            digraph Module {
+                plan [shape=diamond, prompt="Conflicting prompt"]
+            }
+            """
+        )
+
+        try:
+            GraphMergeTransform(module_graph).apply(base_graph)
+            assert False, "Expected merge to fail on conflicting node attrs"
+        except ValueError as exc:
+            assert "plan" in str(exc)
+            assert "shape" in str(exc)
