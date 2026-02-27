@@ -626,6 +626,43 @@ class TestBuiltInHandlers:
         assert [entry["child_active_stage"] for entry in payloads] == ["active-1", "active-2"]
         assert [entry["instruction"] for entry in payloads] == ["instruction-1", "instruction-2"]
 
+    def test_manager_loop_autostarts_child_pipeline_from_graph_attr(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Child task"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+        context = Context()
+
+        outcome = runner("manager", "", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.notes == "Child completed"
+        assert [call[0] for call in backend.calls] == ["task"]
+        assert context.get("context.stack.child.status") == "completed"
+        assert context.get("context.stack.child.outcome") == "success"
+        assert context.get("context.stack.child.active_stage") == "done"
+
     def test_codergen_handler_calls_backend(self):
         graph = parse_dot(
             """

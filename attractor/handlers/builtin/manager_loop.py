@@ -6,16 +6,23 @@ import re
 import time
 from typing import Any
 
+from attractor.dsl import DotParseError, parse_dot
 from attractor.dsl.models import DotAttribute, Duration
 from attractor.engine.conditions import evaluate_condition
 from attractor.engine.context import Context
+from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.handlers.runner import HandlerRunner
 
 from ..base import HandlerRuntime
 
 
 class ManagerLoopHandler:
     def execute(self, runtime: HandlerRuntime) -> Outcome:
+        startup_error = _autostart_child_pipeline(runtime)
+        if startup_error is not None:
+            return startup_error
+
         poll_interval = _poll_interval_seconds(runtime.node_attrs.get("manager.poll_interval"))
         max_cycles = _max_cycles(runtime.node_attrs.get("manager.max_cycles"))
         stop_condition = _stop_condition(runtime.node_attrs.get("manager.stop_condition"))
@@ -64,6 +71,69 @@ class ManagerLoopHandler:
         )
 
 
+def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
+    child_dotfile = _dot_attr_string(runtime.graph.graph_attrs.get("stack.child_dotfile"))
+    if not child_dotfile:
+        return None
+    if not _child_autostart_enabled(runtime.node_attrs.get("stack.child_autostart")):
+        return None
+
+    current_status = str(runtime.context.get("context.stack.child.status", "")).strip().lower()
+    if current_status in {"running", "completed", "failed"}:
+        return None
+
+    child_workdir = _dot_attr_string(runtime.graph.graph_attrs.get("stack.child_workdir")) or "."
+    child_dot_path = Path(child_dotfile)
+    if not child_dot_path.is_absolute():
+        child_dot_path = Path(child_workdir) / child_dot_path
+    child_dot_path = child_dot_path.resolve()
+    if not child_dot_path.exists():
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=f"Child DOT file not found: {child_dot_path}",
+        )
+
+    try:
+        child_graph = parse_dot(child_dot_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=f"Unable to read child DOT file: {exc}",
+        )
+    except DotParseError as exc:
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=f"Failed to parse child DOT graph: {exc}",
+        )
+
+    registry = getattr(runtime.runner, "registry", None)
+    if registry is None:
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason="Manager loop requires HandlerRunner-compatible runtime.runner",
+        )
+
+    child_logs_root = runtime.logs_root / runtime.node_id / "child" if runtime.logs_root else None
+    child_runner = HandlerRunner(child_graph, registry, logs_root=child_logs_root)
+    child_executor = PipelineExecutor(
+        child_graph,
+        child_runner,
+        logs_root=str(child_logs_root) if child_logs_root else None,
+    )
+    child_result = child_executor.run(context=runtime.context.clone(), resume=False)
+
+    child_status = "completed" if child_result.status == "success" else "failed"
+    runtime.context.set("context.stack.child.status", child_status)
+    runtime.context.set("context.stack.child.outcome", child_result.status)
+    runtime.context.set("context.stack.child.active_stage", child_result.current_node)
+    runtime.context.set("context.stack.child.completed_nodes", list(child_result.completed_nodes))
+    runtime.context.set("context.stack.child.route_trace", list(child_result.route_trace))
+    if child_result.failure_reason:
+        runtime.context.set("context.stack.child.failure_reason", child_result.failure_reason)
+
+    return None
+
+
 def _poll_interval_seconds(attr: DotAttribute | None) -> float:
     if attr is None:
         return 45.0
@@ -95,6 +165,22 @@ def _max_cycles(attr: DotAttribute | None) -> int:
         return 1000
 
 
+def _child_autostart_enabled(attr: DotAttribute | None) -> bool:
+    if attr is None:
+        return True
+
+    value = attr.value
+    if isinstance(value, bool):
+        return value
+
+    normalized = str(value).strip().lower()
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    return True
+
+
 def _steer_cooldown_seconds(attr: DotAttribute | None) -> float:
     if attr is None:
         return 0.0
@@ -117,6 +203,15 @@ def _manager_actions(attr: DotAttribute | None) -> set[str]:
 
     actions = {token.strip().lower() for token in raw.split(",")}
     return {action for action in actions if action in {"observe", "steer", "wait"}}
+
+
+def _dot_attr_string(attr: DotAttribute | None) -> str:
+    if attr is None:
+        return ""
+    value = attr.value
+    if hasattr(value, "raw"):
+        return str(value.raw).strip()
+    return str(value).strip()
 
 
 def _stop_condition(attr: DotAttribute | None) -> str:

@@ -367,7 +367,7 @@ Status key:
 - [x] [9.3-03] Add tests for transform chaining and conflict precedence.
 
 ### 9.4 Pipeline Composition
-- [ ] [9.4-01] Support sub-pipeline execution pattern for handler-driven child graphs.
+- [x] [9.4-01] Support sub-pipeline execution pattern for handler-driven child graphs.
 - [ ] [9.4-02] Support transform-based graph merging for modular pipelines.
 
 ### 9.5 HTTP Server Mode
