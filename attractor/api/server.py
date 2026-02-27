@@ -1523,6 +1523,9 @@ async def get_pipeline_graph(pipeline_id: str):
 
 @app.get("/pipelines/{pipeline_id}/questions")
 async def list_pipeline_questions(pipeline_id: str):
+    active = _get_active_run(pipeline_id)
+    if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
+        raise HTTPException(status_code=404, detail="Unknown pipeline")
     return {"questions": HUMAN_BROKER.list_for_run(pipeline_id)}
 
 
