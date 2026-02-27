@@ -1,6 +1,18 @@
 from pathlib import Path
 
-from attractor.dsl import parse_dot
+from attractor.dsl import DiagnosticSeverity, parse_dot, validate_graph
+from attractor.engine import Context, PipelineExecutor
+from attractor.handlers import HandlerRunner, build_default_registry
+
+
+class _SmokeBackend:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def run(self, node_id: str, prompt: str, context: Context, *, timeout: float | None = None) -> str:
+        del context, timeout
+        self.calls.append((node_id, prompt))
+        return f"{node_id} completed"
 
 
 def test_spec_smoke_pipeline_fixture_matches_structure() -> None:
@@ -32,3 +44,31 @@ def test_spec_smoke_pipeline_fixture_matches_structure() -> None:
         ("review", "done", "outcome=success", None),
         ("review", "implement", "outcome=fail", "Fix"),
     }
+
+
+def test_spec_smoke_pipeline_parse_validate_execute_and_artifacts(tmp_path: Path) -> None:
+    fixture_path = Path(__file__).resolve().parents[1] / "fixtures" / "integration_smoke_pipeline.dot"
+    graph = parse_dot(fixture_path.read_text(encoding="utf-8"))
+
+    assert graph.goal == "Create a hello world Python script"
+    assert len(graph.nodes) == 5
+    assert len(graph.edges) == 6
+
+    diagnostics = validate_graph(graph)
+    error_diagnostics = [diag for diag in diagnostics if diag.severity == DiagnosticSeverity.ERROR]
+    assert error_diagnostics == []
+
+    backend = _SmokeBackend()
+    logs_root = tmp_path / "smoke-logs"
+    registry = build_default_registry(codergen_backend=backend)
+    result = PipelineExecutor(graph, HandlerRunner(graph, registry), logs_root=str(logs_root)).run(Context())
+
+    assert result.status == "success"
+    assert "implement" in result.completed_nodes
+    assert [node_id for node_id, _ in backend.calls] == ["plan", "implement", "review"]
+
+    for node_id in ("plan", "implement", "review"):
+        stage_dir = logs_root / node_id
+        assert (stage_dir / "prompt.md").is_file()
+        assert (stage_dir / "response.md").is_file()
+        assert (stage_dir / "status.json").is_file()

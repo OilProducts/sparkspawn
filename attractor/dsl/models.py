@@ -54,6 +54,13 @@ class DotGraph:
     nodes: Dict[str, DotNode] = field(default_factory=dict)
     edges: List[DotEdge] = field(default_factory=list)
 
+    @property
+    def goal(self) -> str:
+        goal_attr = self.graph_attrs.get("goal")
+        if goal_attr is None:
+            return ""
+        return str(goal_attr.value)
+
 
 class DiagnosticSeverity(str, Enum):
     ERROR = "error"
