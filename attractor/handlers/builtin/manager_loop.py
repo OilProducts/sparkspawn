@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 import time
@@ -83,9 +84,15 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
         return None
 
     child_workdir = _dot_attr_string(runtime.graph.graph_attrs.get("stack.child_workdir")) or "."
+    child_workdir_path = Path(child_workdir)
+    if not child_workdir_path.is_absolute():
+        child_workdir_path = (Path.cwd() / child_workdir_path).resolve()
+    else:
+        child_workdir_path = child_workdir_path.resolve()
+
     child_dot_path = Path(child_dotfile)
     if not child_dot_path.is_absolute():
-        child_dot_path = Path(child_workdir) / child_dot_path
+        child_dot_path = child_workdir_path / child_dot_path
     child_dot_path = child_dot_path.resolve()
     if not child_dot_path.exists():
         return Outcome(
@@ -120,7 +127,17 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
         child_runner,
         logs_root=str(child_logs_root) if child_logs_root else None,
     )
-    child_result = child_executor.run(context=runtime.context.clone(), resume=False)
+    try:
+        child_result = _run_child_executor_in_workdir(
+            child_executor,
+            context=runtime.context.clone(),
+            workdir=child_workdir_path,
+        )
+    except OSError as exc:
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=f"Unable to run child pipeline from {child_workdir_path}: {exc}",
+        )
 
     child_status = "completed" if child_result.status == "success" else "failed"
     runtime.context.set("context.stack.child.status", child_status)
@@ -285,6 +302,20 @@ def _append_manager_artifact(
             handle.write("\n")
     except OSError:
         return
+
+
+def _run_child_executor_in_workdir(
+    child_executor: PipelineExecutor,
+    *,
+    context: Context,
+    workdir: Path,
+):
+    original_cwd = Path.cwd()
+    os.chdir(workdir)
+    try:
+        return child_executor.run(context=context, resume=False)
+    finally:
+        os.chdir(original_cwd)
 
 
 def _parse_duration_string(raw: str, default: float) -> float:

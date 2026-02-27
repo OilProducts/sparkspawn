@@ -664,6 +664,43 @@ class TestBuiltInHandlers:
         assert context.get("context.stack.child.outcome") == "success"
         assert context.get("context.stack.child.active_stage") == "done"
 
+    def test_manager_loop_runs_autostarted_child_pipeline_from_stack_child_workdir(self, tmp_path):
+        child_workdir = tmp_path / "child-workdir"
+        child_workdir.mkdir(parents=True, exist_ok=True)
+        child_dot_path = child_workdir / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=parallelogram, tool_command="pwd"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="child.dot", stack.child_workdir="{child_workdir}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend(ok=True))
+        logs_root = tmp_path / "logs"
+        runner = HandlerRunner(graph, registry, logs_root=logs_root)
+
+        outcome = runner("manager", "", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        child_tool_output = (logs_root / "manager" / "child" / "task" / "tool_output.txt").read_text(
+            encoding="utf-8"
+        )
+        assert Path(child_tool_output.strip()) == child_workdir
+
     def test_codergen_handler_calls_backend(self):
         graph = parse_dot(
             """
