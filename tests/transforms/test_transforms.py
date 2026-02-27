@@ -273,6 +273,38 @@ class TestTransforms:
         assert graph.nodes["explicit"].attrs["llm_provider"].value == "node-provider"
         assert graph.nodes["explicit"].attrs["reasoning_effort"].value == "medium"
 
+    def test_model_attr_precedence_includes_system_defaults_when_attrs_missing(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [
+                    llm_provider="graph-provider",
+                    model_stylesheet=".fast { llm_model: style-model; }"
+                ]
+                start [shape=Mdiamond]
+                plan [shape=box, class="fast"]
+                explicit [shape=box, class="fast", llm_model="node-model"]
+                plain [shape=box]
+                done [shape=Msquare]
+                start -> plan -> explicit -> plain -> done
+            }
+            """
+        )
+
+        ModelStylesheetTransform().apply(graph)
+
+        # Explicit node attrs are highest precedence.
+        assert graph.nodes["explicit"].attrs["llm_model"].value == "node-model"
+        # Stylesheet values beat graph defaults.
+        assert graph.nodes["plan"].attrs["llm_model"].value == "style-model"
+        # Graph defaults fill unresolved attrs.
+        assert graph.nodes["plan"].attrs["llm_provider"].value == "graph-provider"
+        assert graph.nodes["plain"].attrs["llm_provider"].value == "graph-provider"
+        # System defaults fill any remaining gaps.
+        assert graph.nodes["plan"].attrs["reasoning_effort"].value == "high"
+        assert graph.nodes["plain"].attrs["llm_model"].value == ""
+        assert graph.nodes["plain"].attrs["reasoning_effort"].value == "high"
+
     def test_stylesheet_overrides_node_default_model_attrs_but_not_explicit_node_attrs(self):
         graph = parse_dot(
             """

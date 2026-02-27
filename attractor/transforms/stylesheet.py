@@ -9,6 +9,11 @@ from attractor.dsl.models import DotAttribute, DotGraph, DotNode, DotValueType
 
 _ALLOWED_PROPERTIES = {"llm_model", "llm_provider", "reasoning_effort"}
 _ALLOWED_REASONING_EFFORTS = {"low", "medium", "high"}
+_SYSTEM_DEFAULTS = {
+    "llm_model": "",
+    "llm_provider": "",
+    "reasoning_effort": "high",
+}
 _CLASS_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 _NODE_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -64,6 +69,9 @@ class ModelStylesheetTransform:
                 value_line = line
             elif prop in graph_defaults:
                 value, value_line = graph_defaults[prop]
+            elif existing is None:
+                value = _SYSTEM_DEFAULTS[prop]
+                value_line = 0
             else:
                 continue
             node.attrs[prop] = DotAttribute(
