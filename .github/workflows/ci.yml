@@ -24,3 +24,6 @@ jobs:
 
       - name: Parser unsupported grammar regression suite
         run: just parser-unsupported-grammar
+
+      - name: Integration smoke pipeline
+        run: uv run pytest -q tests/integration/test_integration_smoke_pipeline.py
