@@ -1156,6 +1156,45 @@ class TestBuiltInHandlers:
         assert tool_file.read_text(encoding="utf-8") == "ran"
         assert hook_file.read_text(encoding="utf-8") == "post"
 
+    def test_tool_handler_passes_hook_metadata_via_env_and_stdin_json(self, monkeypatch):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [tool_hooks.pre="pre-hook", tool_hooks.post="post-hook"]
+                tool_node [shape=parallelogram, tool_command="run-tool"]
+            }
+            """
+        )
+
+        run_calls = []
+
+        def _fake_run(command, **kwargs):
+            run_calls.append({"command": command, "kwargs": kwargs})
+            if command == "run-tool":
+                return subprocess.CompletedProcess(command, 0, stdout="hello", stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        monkeypatch.setattr("attractor.handlers.builtin.tool.subprocess.run", _fake_run)
+
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+        outcome = runner("tool_node", "", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+
+        hook_calls = [call for call in run_calls if call["command"] in {"pre-hook", "post-hook"}]
+        assert [call["command"] for call in hook_calls] == ["pre-hook", "post-hook"]
+
+        for expected_phase, call in zip(("pre", "post"), hook_calls):
+            payload = json.loads(call["kwargs"]["input"])
+            env = call["kwargs"]["env"]
+            assert env["ATTRACTOR_TOOL_HOOK_PHASE"] == expected_phase
+            assert env["ATTRACTOR_TOOL_NODE_ID"] == "tool_node"
+            assert env["ATTRACTOR_TOOL_COMMAND"] == "run-tool"
+            assert payload["hook_phase"] == expected_phase
+            assert payload["node_id"] == "tool_node"
+            assert payload["tool_command"] == "run-tool"
+
     def test_tool_handler_writes_output_artifact(self, tmp_path):
         graph = parse_dot(
             """

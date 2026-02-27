@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 from typing import Any
 
@@ -15,12 +17,17 @@ class ToolHandler:
         if not cmd_attr or not str(cmd_attr.value).strip():
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="No tool_command specified")
 
+        command = str(cmd_attr.value)
+        hook_metadata = {
+            "node_id": runtime.node_id,
+            "tool_command": command,
+        }
+
         pre_hook = _resolve_hook_command(runtime, "tool_hooks.pre")
         if pre_hook:
-            _run_hook(pre_hook)
+            _run_hook(pre_hook, hook_phase="pre", metadata=hook_metadata)
         post_hook = _resolve_hook_command(runtime, "tool_hooks.post")
 
-        command = str(cmd_attr.value)
         timeout = _to_seconds(runtime.node_attrs.get("timeout"))
         try:
             proc = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
@@ -70,7 +77,7 @@ class ToolHandler:
             )
         finally:
             if post_hook:
-                _run_hook(post_hook)
+                _run_hook(post_hook, hook_phase="post", metadata=hook_metadata)
 
 
 def _resolve_hook_command(runtime: HandlerRuntime, key: str) -> str:
@@ -85,9 +92,29 @@ def _resolve_hook_command(runtime: HandlerRuntime, key: str) -> str:
     return ""
 
 
-def _run_hook(command: str) -> None:
+def _run_hook(command: str, *, hook_phase: str, metadata: dict[str, str]) -> None:
+    payload = {
+        "hook_phase": hook_phase,
+        "node_id": metadata.get("node_id", ""),
+        "tool_command": metadata.get("tool_command", ""),
+    }
+    env = os.environ.copy()
+    env.update(
+        {
+            "ATTRACTOR_TOOL_HOOK_PHASE": payload["hook_phase"],
+            "ATTRACTOR_TOOL_NODE_ID": payload["node_id"],
+            "ATTRACTOR_TOOL_COMMAND": payload["tool_command"],
+        }
+    )
     try:
-        subprocess.run(command, shell=True, capture_output=True, text=True)
+        subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            input=json.dumps(payload),
+            env=env,
+        )
     except Exception:
         return
 
