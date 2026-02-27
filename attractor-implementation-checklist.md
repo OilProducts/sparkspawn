@@ -488,7 +488,7 @@ Status key:
 ---
 
 ## Appendix B: Shape-to-Handler-Type Mapping
-- [ ] [B-02] Assert no mapping drift between parser normalization, registry resolver, and docs.
+- [x] [B-02] Assert no mapping drift between parser normalization, registry resolver, and docs.
 
 ---
 

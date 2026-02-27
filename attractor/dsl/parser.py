@@ -317,6 +317,8 @@ class _Parser:
             value, value_type, value_line = self.parse_value()
             if key_tok.value == "class" and value_type == DotValueType.STRING:
                 value = _normalize_class_list(str(value))
+            if key_tok.value == "shape" and value_type == DotValueType.STRING:
+                value = _normalize_shape(str(value))
             attrs[key_tok.value] = DotAttribute(
                 key=key_tok.value,
                 value=value,
@@ -645,3 +647,21 @@ def _normalize_class_list(raw: str) -> str:
         seen.add(class_name)
         ordered.append(class_name)
     return ",".join(ordered)
+
+
+_CANONICAL_SHAPES_BY_LOWER = {
+    "mdiamond": "Mdiamond",
+    "msquare": "Msquare",
+    "box": "box",
+    "hexagon": "hexagon",
+    "diamond": "diamond",
+    "component": "component",
+    "tripleoctagon": "tripleoctagon",
+    "parallelogram": "parallelogram",
+    "house": "house",
+}
+
+
+def _normalize_shape(raw: str) -> str:
+    normalized = raw.strip()
+    return _CANONICAL_SHAPES_BY_LOWER.get(normalized.lower(), normalized)
