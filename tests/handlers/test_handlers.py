@@ -1134,6 +1134,28 @@ class TestBuiltInHandlers:
         assert hook_file.read_text(encoding="utf-8") == "pre"
         assert tool_file.read_text(encoding="utf-8") == "ran"
 
+    def test_tool_handler_runs_post_hook_after_tool_command(self, tmp_path):
+        hook_file = tmp_path / "hook.log"
+        tool_file = tmp_path / "tool.log"
+        tool_command = f"printf ran >> {shlex.quote(str(tool_file))}"
+        post_hook = f"test -f {shlex.quote(str(tool_file))} && printf post >> {shlex.quote(str(hook_file))}"
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [tool_hooks.post="{post_hook}"]
+                tool_node [shape=parallelogram, tool_command="{tool_command}"]
+            }}
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("tool_node", "", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert tool_file.read_text(encoding="utf-8") == "ran"
+        assert hook_file.read_text(encoding="utf-8") == "post"
+
     def test_tool_handler_writes_output_artifact(self, tmp_path):
         graph = parse_dot(
             """

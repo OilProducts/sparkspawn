@@ -18,6 +18,7 @@ class ToolHandler:
         pre_hook = _resolve_hook_command(runtime, "tool_hooks.pre")
         if pre_hook:
             _run_hook(pre_hook)
+        post_hook = _resolve_hook_command(runtime, "tool_hooks.post")
 
         command = str(cmd_attr.value)
         timeout = _to_seconds(runtime.node_attrs.get("timeout"))
@@ -67,6 +68,9 @@ class ToolHandler:
                     "context.tool.exit_code": -1,
                 },
             )
+        finally:
+            if post_hook:
+                _run_hook(post_hook)
 
 
 def _resolve_hook_command(runtime: HandlerRuntime, key: str) -> str:
