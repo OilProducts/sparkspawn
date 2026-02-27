@@ -507,7 +507,7 @@ Status key:
 
 ## Release Gate Checklist
 - [x] [RG-02] Every DoD matrix item (Section 11 + parity matrix) is linked to an automated test or explicit manual test record.
-- [ ] [RG-03] API contract matches Section 9.5 endpoints and SSE semantics.
+- [x] [RG-03] API contract matches Section 9.5 endpoints and SSE semantics.
 - [ ] [RG-04] Artifact directory and status file contract validations pass on integration smoke run.
 
 ---

@@ -1530,7 +1530,14 @@ async def pipeline_events(pipeline_id: str, request: Request):
         finally:
             EVENT_HUB.unsubscribe(pipeline_id, queue)
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.post("/pipelines/{pipeline_id}/cancel")
