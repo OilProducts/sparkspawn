@@ -484,7 +484,6 @@ Status key:
 
 ### Edge Attributes
 - [x] [A.E-01] Verify parser accepts and stores every listed edge attribute key.
-- [ ] [A.E-03] Add runtime tests for `fidelity`, `thread_id`, and `loop_restart` behavior.
 
 ---
 
@@ -519,6 +518,7 @@ Status key:
 ---
 
 ## Deferred Tasks
+- [ ] [A.E-03] Add runtime tests for `fidelity`, `thread_id`, and `loop_restart` behavior. Deferred because runtime fidelity precedence, full-fidelity thread-id resolution, and `loop_restart` relaunch semantics are already implemented and covered in `tests/engine/test_executor.py`, so this is checklist state drift.
 - [ ] [A.E-02] Add routing tests for `condition`, `weight`, and `label` interplay. Deferred because routing interplay is already covered by existing tests for condition precedence, preferred-label selection, and weight/lexical tie-breaks in `tests/engine/test_routing.py`.
 - [ ] [11.9-01] Convert each DoD bullet in spec 11.9 into evaluator tests. Deferred because every spec 11.9 DoD bullet (`=`, `!=`, `&&`, `outcome`, `preferred_label`, `context.*` with missing-key empty string, and empty-condition true) is already covered in `tests/engine/test_conditions.py`, so this is checklist state drift.
 - [ ] [11.6-01] Convert each DoD bullet in spec 11.6 into per-handler contract tests. Deferred because spec 11.6 handler contracts are already covered by existing tests across `tests/handlers/test_handlers.py`, `tests/engine/test_executor.py`, and `tests/integration/test_parity_matrix.py`, so this is checklist state drift.
