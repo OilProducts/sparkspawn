@@ -71,7 +71,6 @@ Status key:
 ### 4.3 Projects Workspace Requirements
 - [x] [4.3-01] Implement create/register project UX from local directory path.
 - [x] [4.3-02] Implement duplicate-path prevention on project create/update.
-- [ ] [4.3-03] Implement Git verification UI with explicit initialize action path.
 - [ ] [4.3-04] Implement persistent active-project indicator in top navigation.
 - [ ] [4.3-05] Implement recent/favorite project switching UX.
 - [ ] [4.3-06] Implement glanceable project metadata (`name`, `directory`, current branch, last activity timestamp).
@@ -556,3 +555,5 @@ Status key:
   Deferred because active-project identity and project-scoped conversation state are not implemented yet, so full deep-link determinism cannot be validated end-to-end.
 - [ ] [4.2-02] Enforce Git-repository requirement before workflow execution (with explicit initialize path when user confirms).
   Deferred because the current API/UI contract has no project Git verification/initialize endpoint path yet, so the required enforcement and explicit initialization flow cannot be implemented correctly.
+- [ ] [4.3-03] Implement Git verification UI with explicit initialize action path.
+  Deferred because the frontend currently has no project Git verification/initialize API contract to drive real status checks or an explicit initialize action flow.
