@@ -24,6 +24,9 @@ function buildErrorMessage(status: string | undefined, error: string | undefined
     if (status === 'validation_error') {
         return `Save blocked by validation errors: ${error ?? FALLBACK_SAVE_FAILURE_MESSAGE}`
     }
+    if (status === 'conflict' || statusCode === 409) {
+        return `Save conflict detected: ${error ?? 'The flow was modified elsewhere. Refresh and re-apply your changes.'}`
+    }
     if (error) {
         return error
     }
@@ -31,7 +34,7 @@ function buildErrorMessage(status: string | undefined, error: string | undefined
 }
 
 export async function saveFlowContent(name: string, content: string): Promise<boolean> {
-    const { markSaveInFlight, markSaveSuccess, markSaveFailure } = useStore.getState()
+    const { markSaveInFlight, markSaveSuccess, markSaveFailure, markSaveConflict } = useStore.getState()
     markSaveInFlight()
 
     let response: Response
@@ -57,6 +60,10 @@ export async function saveFlowContent(name: string, content: string): Promise<bo
     if (!response.ok) {
         const detail = parseErrorDetail(payload)
         const message = buildErrorMessage(detail.status, detail.error, response.status)
+        if (detail.status === 'conflict' || response.status === 409) {
+            markSaveConflict(message)
+            return false
+        }
         markSaveFailure(message)
         return false
     }
@@ -65,6 +72,10 @@ export async function saveFlowContent(name: string, content: string): Promise<bo
         ? (payload as { status: string }).status
         : undefined
     if (status !== 'saved') {
+        if (status === 'conflict') {
+            markSaveConflict(buildErrorMessage(status, undefined, response.status))
+            return false
+        }
         markSaveFailure(FALLBACK_SAVE_FAILURE_MESSAGE)
         return false
     }

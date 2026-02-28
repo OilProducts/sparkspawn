@@ -91,7 +91,7 @@ Status key:
 - [x] [5.2-03] Implement raw DOT mode with safe handoff back to structured editing.
 
 ### 5.3 Save Semantics
-- [ ] [5.3-01] Implement explicit save state indicator (saved/saving/error/conflict).
+- [x] [5.3-01] Implement explicit save state indicator (saved/saving/error/conflict).
 - [ ] [5.3-02] Surface save failures with actionable remediation and no silent drop.
 - [ ] [5.3-03] Add semantic-equivalence checks for output DOT where user behavior did not change.
 

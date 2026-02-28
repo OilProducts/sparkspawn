@@ -13,7 +13,7 @@ export type RuntimeStatus =
     | 'failed'
     | 'validation_error'
     | 'success'
-export type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+export type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict'
 
 export interface HumanGateOption {
     label: string
@@ -302,6 +302,7 @@ interface AppState {
     saveErrorMessage: string | null
     markSaveInFlight: () => void
     markSaveSuccess: () => void
+    markSaveConflict: (message: string) => void
     markSaveFailure: (message: string) => void
 }
 
@@ -767,6 +768,11 @@ export const useStore = create<AppState>((set) => ({
     saveErrorMessage: null,
     markSaveInFlight: () => set({ saveState: 'saving', saveErrorMessage: null }),
     markSaveSuccess: () => set({ saveState: 'saved', saveErrorMessage: null }),
+    markSaveConflict: (message) =>
+        set({
+            saveState: 'conflict',
+            saveErrorMessage: message || 'Flow save conflict detected.',
+        }),
     markSaveFailure: (message) =>
         set({
             saveState: 'error',

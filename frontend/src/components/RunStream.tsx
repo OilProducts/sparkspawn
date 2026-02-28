@@ -64,6 +64,8 @@ export function RunStream() {
             ? 'Saving...'
             : saveState === 'saved'
                 ? 'Saved'
+                : saveState === 'conflict'
+                    ? 'Save Conflict'
                 : saveState === 'error'
                     ? 'Save Failed'
                     : 'Idle'
@@ -165,6 +167,8 @@ export function RunStream() {
                 className={`rounded-md border px-2 py-1 text-[11px] font-medium shadow-sm ${
                     saveState === 'error'
                         ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                        : saveState === 'conflict'
+                            ? 'border-amber-500/50 bg-amber-500/10 text-amber-700'
                         : saveState === 'saved'
                             ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
                             : 'border-border bg-background/95 text-muted-foreground'
