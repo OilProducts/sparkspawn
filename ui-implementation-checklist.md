@@ -59,7 +59,7 @@ Status key:
 - [x] [4.1-01] Keep top navigation persistent across modes with active-project, active-flow, and run action context.
 - [x] [4.1-02] Keep canvas workspace as primary interaction zone in editor/execution modes.
 - [x] [4.1-03] Keep inspector panel context-driven for graph/node/edge selection.
-- [ ] [4.1-04] Keep execution footer/stream visible and consistent during active runs.
+- [x] [4.1-04] Keep execution footer/stream visible and consistent during active runs.
 
 ### 4.2 Project Scope and Invariants
 - [ ] [4.2-01] Implement project registry keyed by unique directory path and reject duplicate registrations.

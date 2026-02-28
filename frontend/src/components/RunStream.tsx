@@ -116,7 +116,7 @@ export function RunStream() {
     }, [selectedRunId, addLog, setNodeStatus, clearHumanGate, resetNodeStatuses, setHumanGate, setRuntimeStatus])
 
     return (
-        <div className="pointer-events-none fixed right-4 top-16 z-[70]">
+        <div data-testid="execution-runtime-stream-indicator" className="pointer-events-none fixed right-4 top-16 z-[70]">
             <div
                 data-testid="global-save-state-indicator"
                 className={`rounded-md border px-2 py-1 text-[11px] font-medium shadow-sm ${

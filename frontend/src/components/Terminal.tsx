@@ -16,18 +16,25 @@ export function Terminal() {
     if (viewMode !== 'execution') return null
 
     return (
-        <footer className="h-72 border-t bg-background flex flex-col z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]">
+        <footer
+            data-testid="execution-footer-stream"
+            className="h-72 border-t bg-background flex flex-col z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]"
+        >
             <div className="h-10 border-b flex items-center justify-between px-4 bg-muted/30 shrink-0">
                 <div className="flex items-center gap-2">
                     <TerminalSquare className="w-4 h-4 text-muted-foreground" />
                     <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Terminal Output</span>
                 </div>
-                <button onClick={clearLogs} className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+                <button
+                    data-testid="execution-footer-terminal-clear"
+                    onClick={clearLogs}
+                    className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
                     Clear
                 </button>
             </div>
             <ExplainabilityPanel />
-            <div className="flex-1 p-4 overflow-y-auto font-mono text-sm space-y-1">
+            <div data-testid="execution-footer-terminal-output" className="flex-1 p-4 overflow-y-auto font-mono text-sm space-y-1">
                 {logs.map((log, i) => (
                     <div key={i} className="flex gap-4 py-0.5 border-b border-border/50 last:border-0 hover:bg-muted/50 rounded px-2">
                         <span className="text-muted-foreground w-20 shrink-0 select-none">{log.time}</span>

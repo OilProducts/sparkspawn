@@ -39,7 +39,8 @@ export function ExecutionControls() {
     const setRuntimeStatus = useStore((state) => state.setRuntimeStatus)
     const selectedRunId = useStore((state) => state.selectedRunId)
 
-    const canCancel = runtimeStatus === 'running'
+    const shouldShowFooter = viewMode === 'execution' && (selectedRunId || runtimeStatus !== 'idle')
+    const canCancel = runtimeStatus === 'running' && Boolean(selectedRunId)
     const statusLabel = useMemo(
         () => STATUS_LABELS[runtimeStatus] || runtimeStatus,
         [runtimeStatus]
@@ -47,9 +48,13 @@ export function ExecutionControls() {
     const cancelActionLabel = CANCEL_ACTION_LABELS[runtimeStatus] || 'Cancel'
     const transitionHint = TRANSITION_HINTS[runtimeStatus] || null
 
-    if (viewMode !== 'execution' || !selectedRunId) return null
+    if (!shouldShowFooter) return null
 
     const requestCancel = async () => {
+        if (!selectedRunId) {
+            window.alert('Run id is still loading. Please try cancel again in a moment.')
+            return
+        }
         if (!window.confirm('Cancel this run? It will stop after the active node finishes.')) {
             return
         }
@@ -67,8 +72,11 @@ export function ExecutionControls() {
     }
 
     return (
-        <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-md border border-border bg-background/90 px-3 py-2 shadow-lg">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div
+            data-testid="execution-footer-controls"
+            className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-md border border-border bg-background/90 px-3 py-2 shadow-lg"
+        >
+            <span data-testid="execution-footer-run-status" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 {statusLabel}
             </span>
             <div className="h-4 w-px bg-border" />
@@ -78,7 +86,13 @@ export function ExecutionControls() {
             <button
                 onClick={requestCancel}
                 disabled={!canCancel}
-                title={canCancel ? undefined : transitionHint || 'Cancel is only available while the run is active.'}
+                title={
+                    canCancel
+                        ? undefined
+                        : selectedRunId
+                            ? transitionHint || 'Cancel is only available while the run is active.'
+                            : 'Run id is still loading.'
+                }
                 className="inline-flex h-8 items-center gap-2 rounded-md bg-destructive px-2 text-xs font-semibold uppercase tracking-wide text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
             >
                 <OctagonX className="h-3.5 w-3.5" />
