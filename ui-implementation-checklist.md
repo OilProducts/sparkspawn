@@ -19,7 +19,7 @@ Status key:
 - [x] [1.1-03] Add a baseline fixture set of spec-valid flows that currently require raw DOT edits.
 
 ### 1.2 Product Goal
-- [ ] [1.2-01] Define the parity-complete user journey (project-select, author, execute, inspect) as an end-to-end acceptance script.
+- [x] [1.2-01] Define the parity-complete user journey (project-select, author, execute, inspect) as an end-to-end acceptance script.
 - [ ] [1.2-02] Add CI acceptance checks proving the full journey works without raw DOT fallback.
 - [ ] [1.2-03] Add release criteria that fail when any required spec feature is unavailable in UI.
 
