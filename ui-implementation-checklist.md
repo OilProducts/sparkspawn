@@ -74,7 +74,7 @@ Status key:
 - [x] [4.3-04] Implement persistent active-project indicator in top navigation.
 - [x] [4.3-05] Implement recent/favorite project switching UX.
 - [x] [4.3-06] Implement glanceable project metadata (`name`, `directory`, current branch, last activity timestamp).
-- [ ] [4.3-07] Add deep-link and restore tests for active-project identity.
+- [x] [4.3-07] Add deep-link and restore tests for active-project identity.
 
 ---
 
