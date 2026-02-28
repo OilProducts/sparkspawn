@@ -69,7 +69,7 @@ Status key:
 - [x] [4.2-06] Expose project-scoped conversation/spec/plan entry points in the Projects area.
 
 ### 4.3 Projects Workspace Requirements
-- [ ] [4.3-01] Implement create/register project UX from local directory path.
+- [x] [4.3-01] Implement create/register project UX from local directory path.
 - [ ] [4.3-02] Implement duplicate-path prevention on project create/update.
 - [ ] [4.3-03] Implement Git verification UI with explicit initialize action path.
 - [ ] [4.3-04] Implement persistent active-project indicator in top navigation.

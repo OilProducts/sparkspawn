@@ -1,5 +1,5 @@
 import { useStore } from "@/store"
-import { useState } from "react"
+import { type FormEvent, useState } from "react"
 
 const buildProjectScopedArtifactId = (artifactType: "conversation" | "spec" | "plan", projectPath: string) => {
     const normalizedProjectKey = projectPath
@@ -30,6 +30,11 @@ export function ProjectsPanel() {
         if (result.ok) {
             setDirectoryPathInput("")
         }
+    }
+
+    const onSubmitProjectRegistration = (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        onRegisterProject()
     }
 
     const onOpenConversation = () => {
@@ -127,27 +132,32 @@ export function ProjectsPanel() {
                     )}
                 </div>
                 <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-                    <div className="mb-3 flex gap-2">
-                        <input
-                            data-testid="project-path-input"
-                            type="text"
-                            value={directoryPathInput}
-                            onChange={(event) => {
-                                setDirectoryPathInput(event.target.value)
-                                clearProjectRegistrationError()
-                            }}
-                            placeholder="/absolute/path/to/project"
-                            className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-                        />
-                        <button
-                            data-testid="project-register-button"
-                            type="button"
-                            onClick={onRegisterProject}
-                            className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                        >
-                            Register
-                        </button>
-                    </div>
+                    <form data-testid="project-register-form" onSubmit={onSubmitProjectRegistration}>
+                        <label htmlFor="project-path-input" className="mb-2 block text-xs font-medium text-foreground">
+                            Project directory path
+                        </label>
+                        <div className="mb-3 flex gap-2">
+                            <input
+                                id="project-path-input"
+                                data-testid="project-path-input"
+                                type="text"
+                                value={directoryPathInput}
+                                onChange={(event) => {
+                                    setDirectoryPathInput(event.target.value)
+                                    clearProjectRegistrationError()
+                                }}
+                                placeholder="/absolute/path/to/project"
+                                className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                            />
+                            <button
+                                data-testid="project-register-button"
+                                type="submit"
+                                className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                            >
+                                Register
+                            </button>
+                        </div>
+                    </form>
                     {projectRegistrationError ? (
                         <p data-testid="project-registration-error" className="mb-3 text-sm text-destructive">
                             {projectRegistrationError}

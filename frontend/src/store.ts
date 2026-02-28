@@ -118,6 +118,7 @@ const normalizeProjectPath = (path: string) => {
     const stripped = slashNormalized.replace(/\/+$/, "")
     return stripped || slashNormalized
 }
+const isAbsoluteProjectPath = (path: string) => path.startsWith("/") || /^[A-Za-z]:\//.test(path)
 
 interface RouteState {
     viewMode: ViewMode
@@ -379,6 +380,14 @@ export const useStore = create<AppState>((set) => ({
                 result = {
                     ok: false,
                     error: 'Project directory path is required.',
+                }
+                return { projectRegistrationError: result.error }
+            }
+            if (!isAbsoluteProjectPath(normalizedPath)) {
+                result = {
+                    ok: false,
+                    normalizedPath,
+                    error: 'Project directory path must be absolute.',
                 }
                 return { projectRegistrationError: result.error }
             }
