@@ -62,7 +62,7 @@ Status key:
 - [x] [4.1-04] Keep execution footer/stream visible and consistent during active runs.
 
 ### 4.2 Project Scope and Invariants
-- [ ] [4.2-01] Implement project registry keyed by unique directory path and reject duplicate registrations.
+- [x] [4.2-01] Implement project registry keyed by unique directory path and reject duplicate registrations.
 - [ ] [4.2-02] Enforce Git-repository requirement before workflow execution (with explicit initialize path when user confirms).
 - [ ] [4.2-03] Enforce exactly one active project for authoring/execution actions.
 - [ ] [4.2-04] Scope conversations/specs/plans/runs/artifacts to active project boundaries.

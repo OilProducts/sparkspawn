@@ -48,6 +48,16 @@ export interface GraphAttrs {
     ui_default_reasoning_effort?: string
 }
 
+export interface RegisteredProject {
+    directoryPath: string
+}
+
+export interface ProjectRegistrationResult {
+    ok: boolean
+    normalizedPath?: string
+    error?: string
+}
+
 export interface DiagnosticEntry {
     rule_id: string
     severity: DiagnosticSeverity
@@ -96,6 +106,13 @@ const DEFAULT_UI_DEFAULTS: UiDefaults = {
 const UI_DEFAULTS_STORAGE_KEY = "sparkspawn.ui_defaults"
 const ROUTE_STATE_STORAGE_KEY = "sparkspawn.ui_route_state"
 const VIEW_MODES: ViewMode[] = ['projects', 'editor', 'execution', 'settings', 'runs']
+const normalizeProjectPath = (path: string) => {
+    const trimmed = path.trim()
+    if (!trimmed) return ""
+    const slashNormalized = trimmed.replace(/\\/g, "/").replace(/\/{2,}/g, "/")
+    const stripped = slashNormalized.replace(/\/+$/, "")
+    return stripped || slashNormalized
+}
 
 interface RouteState {
     viewMode: ViewMode
@@ -171,6 +188,10 @@ interface AppState {
     setViewMode: (mode: ViewMode) => void
     activeProjectPath: string | null
     setActiveProjectPath: (projectPath: string | null) => void
+    projectRegistry: Record<string, RegisteredProject>
+    projectRegistrationError: string | null
+    registerProject: (directoryPath: string) => ProjectRegistrationResult
+    clearProjectRegistrationError: () => void
     activeFlow: string | null
     setActiveFlow: (flow: string | null) => void
     selectedNodeId: string | null
@@ -249,6 +270,56 @@ export const useStore = create<AppState>((set) => ({
             })
             return { activeProjectPath: projectPath }
         }),
+    projectRegistry: {},
+    projectRegistrationError: null,
+    registerProject: (directoryPath) => {
+        let result: ProjectRegistrationResult = {
+            ok: false,
+            error: 'Project directory path is required.',
+        }
+        set((state) => {
+            const normalizedPath = normalizeProjectPath(directoryPath)
+            if (!normalizedPath) {
+                result = {
+                    ok: false,
+                    error: 'Project directory path is required.',
+                }
+                return { projectRegistrationError: result.error }
+            }
+
+            const duplicate = Boolean(state.projectRegistry[normalizedPath])
+            if (duplicate) {
+                result = {
+                    ok: false,
+                    normalizedPath,
+                    error: `Project already registered: ${normalizedPath}`,
+                }
+                return { projectRegistrationError: result.error }
+            }
+
+            const nextActiveProjectPath = state.activeProjectPath ?? normalizedPath
+            saveRouteState({
+                viewMode: state.viewMode,
+                activeProjectPath: nextActiveProjectPath,
+                activeFlow: state.activeFlow,
+                selectedRunId: state.selectedRunId,
+            })
+            result = {
+                ok: true,
+                normalizedPath,
+            }
+            return {
+                projectRegistry: {
+                    ...state.projectRegistry,
+                    [normalizedPath]: { directoryPath: normalizedPath },
+                },
+                projectRegistrationError: null,
+                activeProjectPath: nextActiveProjectPath,
+            }
+        })
+        return result
+    },
+    clearProjectRegistrationError: () => set({ projectRegistrationError: null }),
     activeFlow: restoredRouteState.activeFlow,
     setActiveFlow: (flow) =>
         set((state) => {
