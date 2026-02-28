@@ -9,6 +9,26 @@ import { saveFlowContent } from "@/lib/flowPersistence"
 import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
 import { GraphSettings } from './GraphSettings'
 
+type InspectorScope = 'none' | 'graph' | 'node' | 'edge'
+
+function resolveInspectorScope({
+    viewMode,
+    activeFlow,
+    selectedNodeId,
+    selectedEdgeId,
+}: {
+    viewMode: string
+    activeFlow: string | null
+    selectedNodeId: string | null
+    selectedEdgeId: string | null
+}): InspectorScope {
+    if (viewMode !== 'editor') return 'none'
+    if (selectedEdgeId) return 'edge'
+    if (selectedNodeId) return 'node'
+    if (activeFlow) return 'graph'
+    return 'none'
+}
+
 export function Sidebar() {
     const { viewMode, activeFlow, setActiveFlow, selectedNodeId, selectedEdgeId } = useStore()
     const humanGate = useStore((state) => state.humanGate)
@@ -138,8 +158,14 @@ export function Sidebar() {
         (selectedNode?.data?.type as string) || ''
     )
     const visibility = getNodeFieldVisibility(handlerType)
-    const autoTab = selectedEdgeId ? 'edge' : selectedNodeId ? 'edit' : 'flows';
-    const activeTab = viewMode !== 'editor' ? 'flows' : autoTab;
+    const activeInspectorScope = resolveInspectorScope({
+        viewMode,
+        activeFlow,
+        selectedNodeId,
+        selectedEdgeId,
+    })
+    const activeTab = activeInspectorScope === 'edge' ? 'edge' : activeInspectorScope === 'node' ? 'edit' : 'flows'
+    const inspectorTitle = activeInspectorScope === 'edge' ? 'Edge' : activeInspectorScope === 'node' ? 'Node' : activeInspectorScope === 'graph' ? 'Graph' : 'Flows'
     const saveStateLabel =
         saveState === 'saving'
             ? 'Saving...'
@@ -190,10 +216,14 @@ export function Sidebar() {
     }, [flushPendingSave])
 
     return (
-        <nav className="w-72 border-r bg-background flex flex-col shrink-0 overflow-hidden z-40">
+        <nav
+            data-testid="inspector-panel"
+            data-inspector-active-scope={activeInspectorScope}
+            className="w-72 border-r bg-background flex flex-col shrink-0 overflow-hidden z-40"
+        >
             <div className="px-4 pb-2 pt-4">
                 <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-foreground">
-                    <span>{activeTab === 'flows' ? 'Flows' : activeTab === 'edit' ? 'Node' : 'Edge'}</span>
+                    <span>{inspectorTitle}</span>
                     <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
                 </div>
                 <div
@@ -251,7 +281,7 @@ export function Sidebar() {
                                 </div>
                             ))}
                         </div>
-                        {activeFlow && viewMode === 'editor' && (
+                        {activeInspectorScope === 'graph' && (
                             <GraphSettings inline />
                         )}
                     </div>
