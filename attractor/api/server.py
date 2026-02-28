@@ -19,7 +19,15 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field
 
-from attractor.dsl import DotParseError, Diagnostic, DiagnosticSeverity, parse_dot, validate_graph
+from attractor.dsl import (
+    DotParseError,
+    Diagnostic,
+    DiagnosticSeverity,
+    format_dot,
+    normalize_graph,
+    parse_dot,
+    validate_graph,
+)
 from attractor.engine import (
     Checkpoint,
     Context,
@@ -571,6 +579,7 @@ class PreviewRequest(BaseModel):
 class SaveFlowRequest(BaseModel):
     name: str
     content: str
+    expect_semantic_equivalence: bool = False
 
 
 class ResetRequest(BaseModel):
@@ -1656,6 +1665,13 @@ async def get_flow(name: str):
     return {"name": name, "content": flow_path.read_text()}
 
 
+def _semantic_signature(dot_content: str) -> str:
+    graph = _build_transform_pipeline().apply(parse_dot(dot_content))
+    normalized = normalize_graph(graph)
+    normalized.graph_id = "__semantic__"
+    return format_dot(normalized)
+
+
 @app.post("/api/flows")
 async def save_flow(req: SaveFlowRequest):
     try:
@@ -1701,8 +1717,28 @@ async def save_flow(req: SaveFlowRequest):
     flow_path = flows_dir / req.name
     if not flow_path.name.endswith(".dot"):
         flow_path = flow_path.with_suffix(".dot")
+
+    semantic_equivalent_to_existing: bool | None = None
+    if flow_path.exists():
+        try:
+            semantic_equivalent_to_existing = _semantic_signature(flow_path.read_text()) == _semantic_signature(req.content)
+        except DotParseError:
+            semantic_equivalent_to_existing = None
+
+        if req.expect_semantic_equivalence and semantic_equivalent_to_existing is False:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "semantic_mismatch",
+                    "error": "semantic equivalence check failed: output DOT would change flow behavior",
+                },
+            )
+
     flow_path.write_text(req.content)
-    return {"status": "saved", "name": flow_path.name}
+    response: Dict[str, object] = {"status": "saved", "name": flow_path.name}
+    if semantic_equivalent_to_existing is not None:
+        response["semantic_equivalent_to_existing"] = semantic_equivalent_to_existing
+    return response
 
 
 @app.delete("/api/flows/{flow_name}")

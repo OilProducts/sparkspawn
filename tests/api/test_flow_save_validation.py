@@ -90,3 +90,72 @@ def test_save_flow_persists_valid_dot(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert payload["status"] == "saved"
     assert payload["name"] == "good.dot"
     assert (tmp_path / "flows" / "good.dot").read_text(encoding="utf-8") == VALID_FLOW
+
+
+def test_save_flow_reports_semantic_equivalence_for_no_behavior_change(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    flows_dir = tmp_path / "flows"
+    flows_dir.mkdir(exist_ok=True)
+    (flows_dir / "good.dot").write_text(
+        """
+digraph ExistingFlow {
+    done [shape=Msquare]
+    start [shape=Mdiamond]
+    start -> done
+}
+""",
+        encoding="utf-8",
+    )
+
+    payload = asyncio.run(
+        server.save_flow(
+            server.SaveFlowRequest(
+                name="good.dot",
+                content=VALID_FLOW,
+                expect_semantic_equivalence=True,
+            )
+        )
+    )
+
+    assert payload["status"] == "saved"
+    assert payload["semantic_equivalent_to_existing"] is True
+
+
+def test_save_flow_rejects_semantic_mismatch_when_equivalence_is_expected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    flows_dir = tmp_path / "flows"
+    flows_dir.mkdir(exist_ok=True)
+    target = flows_dir / "good.dot"
+    target.write_text(VALID_FLOW, encoding="utf-8")
+
+    non_equivalent_flow = """
+digraph G {
+    start [shape=Mdiamond]
+    review [shape=box, prompt="Review intermediate output"]
+    done [shape=Msquare]
+    start -> review
+    review -> done
+}
+"""
+
+    with pytest.raises(HTTPException, match="semantic equivalence") as exc:
+        asyncio.run(
+            server.save_flow(
+                server.SaveFlowRequest(
+                    name="good.dot",
+                    content=non_equivalent_flow,
+                    expect_semantic_equivalence=True,
+                )
+            )
+        )
+
+    assert exc.value.status_code == 409
+    assert isinstance(exc.value.detail, dict)
+    assert exc.value.detail["status"] == "semantic_mismatch"
+    assert target.read_text(encoding="utf-8") == VALID_FLOW

@@ -93,7 +93,7 @@ Status key:
 ### 5.3 Save Semantics
 - [x] [5.3-01] Implement explicit save state indicator (saved/saving/error/conflict).
 - [x] [5.3-02] Surface save failures with actionable remediation and no silent drop.
-- [ ] [5.3-03] Add semantic-equivalence checks for output DOT where user behavior did not change.
+- [x] [5.3-03] Add semantic-equivalence checks for output DOT where user behavior did not change.
 
 ### 5.4 Project-Scoped Context and Isolation
 - [ ] [5.4-01] Require an active project for mutating flow edits and run start actions.
