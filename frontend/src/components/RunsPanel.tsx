@@ -71,7 +71,25 @@ const normalizeScopePath = (value: string) => {
     const trimmed = value.trim()
     if (!trimmed) return ''
     const slashNormalized = trimmed.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
-    return slashNormalized.replace(/\/+$/, '') || slashNormalized
+    const prefix = slashNormalized.startsWith('/') ? '/' : ''
+    const rawBody = prefix ? slashNormalized.slice(1) : slashNormalized
+    const parts = rawBody.split('/').filter((part) => part.length > 0)
+    const segments: string[] = []
+    for (const part of parts) {
+        if (part === '.') {
+            continue
+        }
+        if (part === '..') {
+            segments.pop()
+            continue
+        }
+        segments.push(part)
+    }
+    const normalizedBody = segments.join('/')
+    if (!normalizedBody && prefix) {
+        return prefix
+    }
+    return `${prefix}${normalizedBody}`
 }
 
 const runBelongsToProjectScope = (run: RunRecord, projectPath: string) => {

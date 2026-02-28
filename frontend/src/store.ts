@@ -325,6 +325,7 @@ export const useStore = create<AppState>((set) => ({
     projectScopedWorkspaces: initialProjectScopedWorkspaces,
     setActiveProjectPath: (projectPath) =>
         set((state) => {
+            const isProjectSwitch = projectPath !== state.activeProjectPath
             const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
             const currentScope = state.activeProjectPath
             if (currentScope) {
@@ -354,6 +355,12 @@ export const useStore = create<AppState>((set) => ({
                 activeFlow: projectPath ? nextProjectScope.activeFlow : null,
                 selectedRunId: projectPath ? nextProjectScope.selectedRunId : null,
                 workingDir: projectPath ? nextProjectScope.workingDir : DEFAULT_WORKING_DIRECTORY,
+                runtimeStatus: isProjectSwitch ? 'idle' : state.runtimeStatus,
+                nodeStatuses: isProjectSwitch ? {} : state.nodeStatuses,
+                humanGate: isProjectSwitch ? null : state.humanGate,
+                logs: isProjectSwitch ? [] : state.logs,
+                selectedNodeId: isProjectSwitch ? null : state.selectedNodeId,
+                selectedEdgeId: isProjectSwitch ? null : state.selectedEdgeId,
             }
         }),
     projectRegistry: {},

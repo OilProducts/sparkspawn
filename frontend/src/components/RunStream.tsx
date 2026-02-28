@@ -10,6 +10,42 @@ function classifyLog(message: string): 'info' | 'success' | 'error' {
     return 'info'
 }
 
+const normalizeScopePath = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) return ''
+    const slashNormalized = trimmed.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
+    const prefix = slashNormalized.startsWith('/') ? '/' : ''
+    const rawBody = prefix ? slashNormalized.slice(1) : slashNormalized
+    const parts = rawBody.split('/').filter((part) => part.length > 0)
+    const segments: string[] = []
+    for (const part of parts) {
+        if (part === '.') {
+            continue
+        }
+        if (part === '..') {
+            segments.pop()
+            continue
+        }
+        segments.push(part)
+    }
+    const normalizedBody = segments.join('/')
+    if (!normalizedBody && prefix) {
+        return prefix
+    }
+    return `${prefix}${normalizedBody}`
+}
+
+const runBelongsToProjectScope = (runWorkingDirectory: string, projectPath: string | null) => {
+    if (!projectPath) return false
+    const normalizedProjectPath = normalizeScopePath(projectPath)
+    if (!normalizedProjectPath) return false
+
+    const normalizedRunWorkingDirectory = normalizeScopePath(runWorkingDirectory)
+    if (!normalizedRunWorkingDirectory) return false
+    if (normalizedRunWorkingDirectory === normalizedProjectPath) return true
+    return normalizedRunWorkingDirectory.startsWith(`${normalizedProjectPath}/`)
+}
+
 export function RunStream() {
     const addLog = useStore((state) => state.addLog)
     const clearLogs = useStore((state) => state.clearLogs)
@@ -20,6 +56,7 @@ export function RunStream() {
     const setRuntimeStatus = useStore((state) => state.setRuntimeStatus)
     const selectedRunId = useStore((state) => state.selectedRunId)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
+    const activeProjectPath = useStore((state) => state.activeProjectPath)
     const saveState = useStore((state) => state.saveState)
     const saveErrorMessage = useStore((state) => state.saveErrorMessage)
     const saveStateLabel =
@@ -45,15 +82,21 @@ export function RunStream() {
             .then((res) => res.json())
             .then((data) => {
                 const runId = typeof data?.last_run_id === 'string' ? data.last_run_id : null
-                if (!selectedRunId && runId) {
+                const lastWorkingDirectory = typeof data?.last_working_directory === 'string' ? data.last_working_directory : ''
+                const statusRunInScope = runBelongsToProjectScope(lastWorkingDirectory, activeProjectPath)
+                if (!selectedRunId && runId && statusRunInScope) {
                     setSelectedRunId(runId)
                 }
-                if (data?.status && (!selectedRunId || runId === selectedRunId)) {
+                if (!selectedRunId && (!runId || !statusRunInScope)) {
+                    setRuntimeStatus('idle')
+                    return
+                }
+                if (data?.status && ((!selectedRunId && statusRunInScope) || runId === selectedRunId)) {
                     setRuntimeStatus(data.status)
                 }
             })
             .catch(() => null)
-    }, [selectedRunId, setRuntimeStatus, setSelectedRunId])
+    }, [selectedRunId, activeProjectPath, setRuntimeStatus, setSelectedRunId])
 
     useEffect(() => {
         if (!selectedRunId) return
