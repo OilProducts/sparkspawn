@@ -11,7 +11,8 @@ import { useStore } from "@/store"
 
 function App() {
   const viewMode = useStore((state) => state.viewMode)
-  const showSidebar = viewMode === 'editor' || viewMode === 'execution'
+  const isCanvasMode = viewMode === 'editor' || viewMode === 'execution'
+  const showSidebar = isCanvasMode
 
   return (
     <ReactFlowProvider>
@@ -21,20 +22,20 @@ function App() {
         <div className="flex-1 flex overflow-hidden">
           {showSidebar && <Sidebar />}
           <main data-testid="app-main" className="flex-1 relative flex flex-col overflow-hidden bg-muted/10">
-            {viewMode === 'settings' ? (
+            {isCanvasMode ? (
+              <div data-testid="canvas-workspace-primary" className="flex-1 flex flex-col overflow-hidden">
+                <div data-testid="editor-panel" className="flex-1 w-full h-full bg-background/50">
+                  <Editor />
+                </div>
+                <Terminal />
+              </div>
+            ) : viewMode === 'settings' ? (
               <SettingsPanel />
             ) : viewMode === 'projects' ? (
               <ProjectsPanel />
             ) : viewMode === 'runs' ? (
               <RunsPanel />
-            ) : (
-              <>
-                <div data-testid="editor-panel" className="flex-1 w-full h-full bg-background/50">
-                  <Editor />
-                </div>
-                <Terminal />
-              </>
-            )}
+            ) : null}
           </main>
         </div>
       </div>

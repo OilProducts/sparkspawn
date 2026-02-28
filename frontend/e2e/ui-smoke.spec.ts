@@ -20,10 +20,12 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
   await expect(page.getByTestId("nav-mode-editor")).toBeVisible()
   await expect(page.getByTestId("nav-mode-settings")).toBeVisible()
   await expect(page.getByTestId("nav-mode-runs")).toBeVisible()
+  await expect(page.getByTestId("canvas-workspace-primary")).toBeVisible()
   await page.screenshot({ path: screenshotPath("01-editor-shell.png"), fullPage: true })
 
   await page.getByTestId("nav-mode-projects").click()
   await expect(page.getByTestId("projects-panel")).toBeVisible()
+  await expect(page.getByTestId("canvas-workspace-primary")).toHaveCount(0)
   await page.screenshot({ path: screenshotPath("02-projects-panel.png"), fullPage: true })
 
   await page.getByTestId("nav-mode-editor").click()
@@ -31,6 +33,7 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
   await expect(firstFlowButton).toBeVisible()
   await firstFlowButton.click()
 
+  await expect(page.getByTestId("canvas-workspace-primary")).toBeVisible()
   await expect(page.locator('[data-inspector-scope="graph"]')).toBeVisible()
   await page.screenshot({ path: screenshotPath("03-graph-inspector.png"), fullPage: true })
 
@@ -48,14 +51,17 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
   await page.screenshot({ path: screenshotPath("05-edge-inspector.png"), fullPage: true })
 
   await page.getByTestId("nav-mode-execution").click()
+  await expect(page.getByTestId("canvas-workspace-primary")).toBeVisible()
   await expect(page.getByText("Terminal Output")).toBeVisible()
   await page.screenshot({ path: screenshotPath("06-execution-panel.png"), fullPage: true })
 
   await page.getByTestId("nav-mode-settings").click()
   await expect(page.getByTestId("settings-panel")).toBeVisible()
+  await expect(page.getByTestId("canvas-workspace-primary")).toHaveCount(0)
   await page.screenshot({ path: screenshotPath("07-settings-panel.png"), fullPage: true })
 
   await page.getByTestId("nav-mode-runs").click()
   await expect(page.getByTestId("runs-panel")).toBeVisible()
+  await expect(page.getByTestId("canvas-workspace-primary")).toHaveCount(0)
   await page.screenshot({ path: screenshotPath("08-runs-panel.png"), fullPage: true })
 })
