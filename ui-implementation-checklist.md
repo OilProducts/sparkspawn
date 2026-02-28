@@ -63,7 +63,6 @@ Status key:
 
 ### 4.2 Project Scope and Invariants
 - [x] [4.2-01] Implement project registry keyed by unique directory path and reject duplicate registrations.
-- [ ] [4.2-02] Enforce Git-repository requirement before workflow execution (with explicit initialize path when user confirms).
 - [ ] [4.2-03] Enforce exactly one active project for authoring/execution actions.
 - [ ] [4.2-04] Scope conversations/specs/plans/runs/artifacts to active project boundaries.
 - [ ] [4.2-05] Prevent cross-project context and file leakage across navigation and run transitions.
@@ -555,3 +554,5 @@ Status key:
   Deferred because the project-scoped conversation/spec/plan/build chain is not fully implemented, so coverage would only validate placeholders instead of the real workflow.
 - [ ] [4-02] Add deterministic deep-link state for active project/flow/run/conversation and panel selection.
   Deferred because active-project identity and project-scoped conversation state are not implemented yet, so full deep-link determinism cannot be validated end-to-end.
+- [ ] [4.2-02] Enforce Git-repository requirement before workflow execution (with explicit initialize path when user confirms).
+  Deferred because the current API/UI contract has no project Git verification/initialize endpoint path yet, so the required enforcement and explicit initialization flow cannot be implemented correctly.
