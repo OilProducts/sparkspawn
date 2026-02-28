@@ -1,6 +1,7 @@
 import { useStore } from "@/store"
 import { TerminalSquare } from "lucide-react"
 import { useEffect, useRef } from "react"
+import { ExplainabilityPanel } from "./ExplainabilityPanel"
 
 export function Terminal() {
     const viewMode = useStore((state) => state.viewMode)
@@ -25,6 +26,7 @@ export function Terminal() {
                     Clear
                 </button>
             </div>
+            <ExplainabilityPanel />
             <div className="flex-1 p-4 overflow-y-auto font-mono text-sm space-y-1">
                 {logs.map((log, i) => (
                     <div key={i} className="flex gap-4 py-0.5 border-b border-border/50 last:border-0 hover:bg-muted/50 rounded px-2">
