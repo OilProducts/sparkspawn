@@ -459,7 +459,7 @@ def _validate_retry_targets(graph: DotGraph) -> List[Diagnostic]:
         attr = graph.graph_attrs.get(key)
         if not attr:
             continue
-        target = str(attr.value)
+        target = str(attr.value).strip()
         if target and target not in graph.nodes:
             diagnostics.append(
                 Diagnostic(
@@ -475,7 +475,7 @@ def _validate_retry_targets(graph: DotGraph) -> List[Diagnostic]:
             attr = node.attrs.get(key)
             if not attr:
                 continue
-            target = str(attr.value)
+            target = str(attr.value).strip()
             if target and target not in graph.nodes:
                 diagnostics.append(
                     Diagnostic(

@@ -478,6 +478,25 @@ class TestDotValidator:
         assert "retry_target_exists" in warning_rules
         assert "fidelity_valid" in warning_rules
 
+    def test_retry_target_exists_ignores_surrounding_whitespace_for_valid_targets(self):
+        dot = """
+        digraph G {
+            graph [retry_target=" fix ", fallback_retry_target=" done "]
+            start [shape=Mdiamond]
+            gate [shape=box, type="tool", retry_target=" fix ", fallback_retry_target=" done "]
+            fix [shape=box, type="tool"]
+            done [shape=Msquare]
+            start -> gate
+            gate -> done
+            fix -> done
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+
+        retry_target_warnings = [d for d in diagnostics if d.rule_id == "retry_target_exists"]
+        assert retry_target_warnings == []
+
     def test_goal_gate_without_retry_targets_emits_warning(self):
         dot = """
         digraph G {
