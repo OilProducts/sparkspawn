@@ -291,6 +291,30 @@ class TestExecutor:
         assert result.status == "success"
         assert seen_thread_ids == ["start", "work-thread"]
 
+    def test_executor_uses_edge_thread_id_when_full_fidelity_node_has_no_thread_id(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [default_fidelity="full"]
+                start [shape=Mdiamond]
+                work [shape=box]
+                done [shape=Msquare]
+                start -> work [thread_id="edge-thread"]
+                work -> done
+            }
+            """
+        )
+        seen_thread_ids: list[str] = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            seen_thread_ids.append(str(context.get("_attractor.runtime.thread_id", "")))
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "success"
+        assert seen_thread_ids == ["start", "edge-thread"]
+
     def test_executor_uses_graph_thread_id_when_full_fidelity_has_no_node_or_edge_thread_id(self):
         graph = parse_dot(
             """
