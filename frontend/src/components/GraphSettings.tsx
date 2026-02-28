@@ -122,81 +122,83 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                 </div>
             </div>
 
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Graph Attributes
-            </div>
-            <div className="mt-3 space-y-3">
-                <div className="space-y-1">
-                    <label className="text-xs font-medium text-foreground">Goal</label>
-                    <input
-                        value={graphAttrs.goal || ''}
-                        onChange={(event) => updateGraphAttr('goal', event.target.value)}
-                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    />
+            <div data-testid="graph-structured-form">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Graph Attributes
                 </div>
-                <div className="space-y-1">
-                    <label className="text-xs font-medium text-foreground">Label</label>
-                    <input
-                        value={graphAttrs.label || ''}
-                        onChange={(event) => updateGraphAttr('label', event.target.value)}
-                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="mt-3 space-y-3">
                     <div className="space-y-1">
-                        <label className="text-xs font-medium text-foreground">Default Max Retry</label>
+                        <label className="text-xs font-medium text-foreground">Goal</label>
                         <input
-                            value={graphAttrs.default_max_retry ?? ''}
-                            onChange={(event) => updateGraphAttr('default_max_retry', event.target.value)}
+                            value={graphAttrs.goal || ''}
+                            onChange={(event) => updateGraphAttr('goal', event.target.value)}
                             className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         />
                     </div>
                     <div className="space-y-1">
-                        <label className="text-xs font-medium text-foreground">Default Fidelity</label>
+                        <label className="text-xs font-medium text-foreground">Label</label>
                         <input
-                            value={graphAttrs.default_fidelity || ''}
-                            onChange={(event) => updateGraphAttr('default_fidelity', event.target.value)}
+                            value={graphAttrs.label || ''}
+                            onChange={(event) => updateGraphAttr('label', event.target.value)}
                             className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            placeholder="full"
                         />
                     </div>
-                </div>
-                <button
-                    type="button"
-                    data-testid="graph-advanced-toggle"
-                    onClick={() => setShowAdvancedGraphAttrs((current) => !current)}
-                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                >
-                    {showAdvancedGraphAttrs ? 'Hide Advanced Fields' : 'Show Advanced Fields'}
-                </button>
-                {showAdvancedGraphAttrs && (
-                    <div className="space-y-3 rounded-md border border-border/80 bg-background/40 p-3">
+                    <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
-                            <label className="text-xs font-medium text-foreground">Model Stylesheet</label>
-                            <textarea
-                                value={graphAttrs.model_stylesheet || ''}
-                                onChange={(event) => updateGraphAttr('model_stylesheet', event.target.value)}
-                                className="h-20 w-full resize-none rounded-md border border-input bg-background px-2 py-1 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-foreground">Retry Target</label>
+                            <label className="text-xs font-medium text-foreground">Default Max Retry</label>
                             <input
-                                value={graphAttrs.retry_target || ''}
-                                onChange={(event) => updateGraphAttr('retry_target', event.target.value)}
+                                value={graphAttrs.default_max_retry ?? ''}
+                                onChange={(event) => updateGraphAttr('default_max_retry', event.target.value)}
                                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                             />
                         </div>
                         <div className="space-y-1">
-                            <label className="text-xs font-medium text-foreground">Fallback Retry Target</label>
+                            <label className="text-xs font-medium text-foreground">Default Fidelity</label>
                             <input
-                                value={graphAttrs.fallback_retry_target || ''}
-                                onChange={(event) => updateGraphAttr('fallback_retry_target', event.target.value)}
+                                value={graphAttrs.default_fidelity || ''}
+                                onChange={(event) => updateGraphAttr('default_fidelity', event.target.value)}
                                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                placeholder="full"
                             />
                         </div>
                     </div>
-                )}
+                    <button
+                        type="button"
+                        data-testid="graph-advanced-toggle"
+                        onClick={() => setShowAdvancedGraphAttrs((current) => !current)}
+                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                    >
+                        {showAdvancedGraphAttrs ? 'Hide Advanced Fields' : 'Show Advanced Fields'}
+                    </button>
+                    {showAdvancedGraphAttrs && (
+                        <div className="space-y-3 rounded-md border border-border/80 bg-background/40 p-3">
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Model Stylesheet</label>
+                                <textarea
+                                    value={graphAttrs.model_stylesheet || ''}
+                                    onChange={(event) => updateGraphAttr('model_stylesheet', event.target.value)}
+                                    className="h-20 w-full resize-none rounded-md border border-input bg-background px-2 py-1 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Retry Target</label>
+                                <input
+                                    value={graphAttrs.retry_target || ''}
+                                    onChange={(event) => updateGraphAttr('retry_target', event.target.value)}
+                                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Fallback Retry Target</label>
+                                <input
+                                    value={graphAttrs.fallback_retry_target || ''}
+                                    onChange={(event) => updateGraphAttr('fallback_retry_target', event.target.value)}
+                                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

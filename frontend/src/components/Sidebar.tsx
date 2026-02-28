@@ -290,7 +290,7 @@ export function Sidebar() {
                         {!selectedNodeId ? (
                             <InspectorEmptyState message="Select a component on the canvas to inspect and edit its properties." />
                         ) : (
-                            <>
+                            <div data-testid="node-structured-form" className="space-y-4">
                                 <div className="space-y-1.5">
                                     <label className="text-sm font-medium">Label</label>
                                     <input
@@ -541,7 +541,7 @@ export function Sidebar() {
                                         )}
                                     </div>
                                 )}
-                            </>
+                            </div>
                         )}
                     </InspectorScaffold>
                 </div>
@@ -559,7 +559,7 @@ export function Sidebar() {
                         {!selectedEdge ? (
                             <InspectorEmptyState message="Select an edge on the canvas to inspect and edit its properties." />
                         ) : (
-                            <>
+                            <div data-testid="edge-structured-form" className="space-y-4">
                                 <div className="space-y-1.5">
                                     <label className="text-sm font-medium">Label</label>
                                     <input
@@ -616,7 +616,7 @@ export function Sidebar() {
                                         Loop Restart
                                     </label>
                                 </div>
-                            </>
+                            </div>
                         )}
                     </InspectorScaffold>
                 </div>

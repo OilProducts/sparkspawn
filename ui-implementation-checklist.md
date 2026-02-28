@@ -87,7 +87,7 @@ Status key:
 
 ### 5.2 Editing Modalities
 - [x] [5.2-01] Implement direct manipulation for node move/connect/select with persistence hooks.
-- [ ] [5.2-02] Implement structured form editing for graph/node/edge properties.
+- [x] [5.2-02] Implement structured form editing for graph/node/edge properties.
 - [ ] [5.2-03] Implement raw DOT mode with safe handoff back to structured editing.
 
 ### 5.3 Save Semantics
