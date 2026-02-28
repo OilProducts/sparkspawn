@@ -14,6 +14,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const [isOpen, setIsOpen] = useState(false)
     const [showAdvancedGraphAttrs, setShowAdvancedGraphAttrs] = useState(false)
     const activeFlow = useStore((state) => state.activeFlow)
+    const activeProjectPath = useStore((state) => state.activeProjectPath)
     const graphAttrs = useStore((state) => state.graphAttrs)
     const updateGraphAttr = useStore((state) => state.updateGraphAttr)
     const model = useStore((state) => state.model)
@@ -26,17 +27,17 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const saveTimer = useRef<number | null>(null)
     const hasPendingSave = useRef(false)
     const flowProviderFallback = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || ''
-    const canApplyDefaults = !!activeFlow && viewMode === 'editor'
+    const canApplyDefaults = !!activeProjectPath && !!activeFlow && viewMode === 'editor'
 
     const flushPendingSave = useCallback(() => {
-        if (!activeFlow || !hasPendingSave.current) return
+        if (!activeProjectPath || !activeFlow || !hasPendingSave.current) return
         hasPendingSave.current = false
         const dot = generateDot(activeFlow, getNodes(), getEdges(), graphAttrs)
         void saveFlowContent(activeFlow, dot)
-    }, [activeFlow, getNodes, getEdges, graphAttrs])
+    }, [activeProjectPath, activeFlow, getNodes, getEdges, graphAttrs])
 
     const applyDefaultsToNodes = () => {
-        if (!activeFlow) return
+        if (!activeProjectPath || !activeFlow) return
         const defaultModel = graphAttrs.ui_default_llm_model || uiDefaults.llm_model || ''
         const defaultProvider = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || ''
         const defaultReasoning = graphAttrs.ui_default_reasoning_effort || uiDefaults.reasoning_effort || ''
@@ -61,7 +62,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     }
 
     useEffect(() => {
-        if (!activeFlow) return
+        if (!activeProjectPath || !activeFlow) return
         hasPendingSave.current = true
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current)
@@ -77,7 +78,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                 window.clearTimeout(saveTimer.current)
             }
         }
-    }, [activeFlow, graphAttrs, getNodes, getEdges])
+    }, [activeProjectPath, activeFlow, graphAttrs, getNodes, getEdges])
 
     useEffect(() => {
         const handleBeforeUnload = () => {

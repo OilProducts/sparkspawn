@@ -96,7 +96,7 @@ Status key:
 - [x] [5.3-03] Add semantic-equivalence checks for output DOT where user behavior did not change.
 
 ### 5.4 Project-Scoped Context and Isolation
-- [ ] [5.4-01] Require an active project for mutating flow edits and run start actions.
+- [x] [5.4-01] Require an active project for mutating flow edits and run start actions.
 - [ ] [5.4-02] Inject active project directory and repository metadata into AI conversation context.
 - [ ] [5.4-03] Reset flow/run/conversation selections correctly on project switch with no hidden state carryover.
 

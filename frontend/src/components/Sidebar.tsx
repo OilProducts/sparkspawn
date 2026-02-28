@@ -32,6 +32,7 @@ function resolveInspectorScope({
 
 export function Sidebar() {
     const { viewMode, activeFlow, setActiveFlow, selectedNodeId, selectedEdgeId } = useStore()
+    const activeProjectPath = useStore((state) => state.activeProjectPath)
     const humanGate = useStore((state) => state.humanGate)
     const graphAttrs = useStore((state) => state.graphAttrs)
     const uiDefaults = useStore((state) => state.uiDefaults)
@@ -58,6 +59,7 @@ export function Sidebar() {
     }, [])
 
     const createNewFlow = async () => {
+        if (!activeProjectPath) return
         const name = prompt("Enter flow name (e.g., demo.dot)");
         if (!name) return;
 
@@ -84,6 +86,7 @@ export function Sidebar() {
 
     const handleDeleteFlow = async (e: React.MouseEvent, fileName: string) => {
         e.stopPropagation();
+        if (!activeProjectPath) return
         if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
 
         await fetch(`/api/flows/${fileName}`, {
@@ -99,7 +102,7 @@ export function Sidebar() {
     };
 
     const scheduleSave = (nextNodes: Node[], nextEdges: Edge[]) => {
-        if (!activeFlow) return
+        if (!activeProjectPath || !activeFlow) return
 
         pendingSaveRef.current = { nodes: nextNodes, edges: nextEdges }
         if (saveTimer.current) {
@@ -114,7 +117,7 @@ export function Sidebar() {
     }
 
     const flushPendingSave = useCallback(() => {
-        if (!activeFlow || !pendingSaveRef.current) return
+        if (!activeProjectPath || !activeFlow || !pendingSaveRef.current) return
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current)
             saveTimer.current = null
@@ -123,10 +126,10 @@ export function Sidebar() {
         pendingSaveRef.current = null
         const dot = generateDot(activeFlow, pending.nodes, pending.edges, graphAttrs)
         void saveFlowContent(activeFlow, dot)
-    }, [activeFlow, graphAttrs])
+    }, [activeProjectPath, activeFlow, graphAttrs])
 
     const updateNodeProperty = (nodeId: string, key: string, value: string | boolean) => {
-        if (!activeFlow) return;
+        if (!activeProjectPath || !activeFlow) return;
 
         let newNodes: Node[] = [];
         setNodes(nds => {
@@ -182,7 +185,7 @@ export function Sidebar() {
     }
 
     const handleEdgePropertyChange = (key: string, value: string | boolean) => {
-        if (!selectedEdgeId || !activeFlow) return;
+        if (!activeProjectPath || !selectedEdgeId || !activeFlow) return;
 
         let newEdges: Edge[] = [];
         setEdges((eds) => {
@@ -271,7 +274,7 @@ export function Sidebar() {
                             {flows.map(f => (
                                 <div key={f} className="relative group">
                                     <button
-                                        onClick={() => setActiveFlow(f)}
+                                        onClick={() => activeProjectPath && setActiveFlow(f)}
                                         className={`w-full text-left px-3 py-2 pr-8 rounded-md text-sm transition-colors ${activeFlow === f
                                             ? 'bg-secondary text-secondary-foreground font-medium'
                                             : 'text-muted-foreground hover:bg-muted hover:text-foreground'

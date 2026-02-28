@@ -43,3 +43,53 @@ def test_checklist_marks_item_4_2_03_complete() -> None:
     checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
 
     assert "- [x] [4.2-03]" in checklist_text
+
+
+def test_mutating_flow_edits_require_active_project_item_5_4_01() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    editor_text = (repo_root / "frontend" / "src" / "components" / "Editor.tsx").read_text(encoding="utf-8")
+    graph_settings_text = (repo_root / "frontend" / "src" / "components" / "GraphSettings.tsx").read_text(encoding="utf-8")
+    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
+    store_text = (repo_root / "frontend" / "src" / "store.ts").read_text(encoding="utf-8")
+    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
+
+    editor_snippets = [
+        "const activeProjectPath = useStore((state) => state.activeProjectPath);",
+        "if (!activeProjectPath || !activeFlow) return;",
+        "if (activeProjectPath && normalizedContent !== data.content) {",
+    ]
+    graph_settings_snippets = [
+        "const activeProjectPath = useStore((state) => state.activeProjectPath)",
+        "if (!activeProjectPath || !activeFlow) return",
+    ]
+    sidebar_snippets = [
+        "const activeProjectPath = useStore((state) => state.activeProjectPath)",
+        "if (!activeProjectPath) return",
+        "onClick={() => activeProjectPath && setActiveFlow(f)}",
+    ]
+    store_snippets = [
+        "if (!state.activeProjectPath) {",
+        "activeFlow: null,",
+    ]
+    task_node_snippets = [
+        "const activeProjectPath = useStore((state) => state.activeProjectPath);",
+        "if (!activeProjectPath || !activeFlow) return;",
+    ]
+
+    for snippet in editor_snippets:
+        assert snippet in editor_text, f"missing editor active-project mutation guard snippet: {snippet}"
+    for snippet in graph_settings_snippets:
+        assert snippet in graph_settings_text, f"missing graph-settings active-project mutation guard snippet: {snippet}"
+    for snippet in sidebar_snippets:
+        assert snippet in sidebar_text, f"missing sidebar active-project mutation guard snippet: {snippet}"
+    for snippet in store_snippets:
+        assert snippet in store_text, f"missing store active-project mutation guard snippet: {snippet}"
+    for snippet in task_node_snippets:
+        assert snippet in task_node_text, f"missing task-node active-project mutation guard snippet: {snippet}"
+
+
+def test_checklist_marks_item_5_4_01_complete() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    assert "- [x] [5.4-01]" in checklist_text

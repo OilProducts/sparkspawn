@@ -591,13 +591,20 @@ export const useStore = create<AppState>((set) => ({
     activeFlow: restoredProjectScope ? restoredProjectScope.activeFlow : restoredRouteState.activeFlow,
     setActiveFlow: (flow) =>
         set((state) => {
+            if (!state.activeProjectPath) {
+                saveRouteState({
+                    viewMode: state.viewMode,
+                    activeProjectPath: null,
+                    activeFlow: null,
+                    selectedRunId: state.selectedRunId,
+                })
+                return { activeFlow: null }
+            }
             const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
-            if (state.activeProjectPath) {
-                const scoped = resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[state.activeProjectPath], state.activeProjectPath)
-                nextProjectScopedWorkspaces[state.activeProjectPath] = {
-                    ...scoped,
-                    activeFlow: flow,
-                }
+            const scoped = resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[state.activeProjectPath], state.activeProjectPath)
+            nextProjectScopedWorkspaces[state.activeProjectPath] = {
+                ...scoped,
+                activeFlow: flow,
             }
             saveRouteState({
                 viewMode: state.viewMode,

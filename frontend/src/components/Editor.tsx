@@ -141,6 +141,7 @@ async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<Node[]> {
 
 export function Editor() {
     const { activeFlow, viewMode, selectedNodeId, selectedEdgeId, setSelectedNodeId, setSelectedEdgeId } = useStore();
+    const activeProjectPath = useStore((state) => state.activeProjectPath);
     const nodeStatuses = useStore((state) => state.nodeStatuses);
     const graphAttrs = useStore((state) => state.graphAttrs);
     const uiDefaults = useStore((state) => state.uiDefaults);
@@ -185,13 +186,13 @@ export function Editor() {
     }, [setNodes, setSelectedEdgeId, setSelectedNodeId]);
 
     const saveFlow = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
-        if (!activeFlow) return;
+        if (!activeProjectPath || !activeFlow) return;
         const dot = generateDot(activeFlow, nextNodes, nextEdges, graphAttrs);
         void saveFlowContent(activeFlow, dot);
-    }, [activeFlow, graphAttrs]);
+    }, [activeProjectPath, activeFlow, graphAttrs]);
 
     const scheduleSave = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
-        if (!activeFlow) return;
+        if (!activeProjectPath || !activeFlow) return;
         pendingSaveRef.current = { nodes: nextNodes, edges: nextEdges };
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current);
@@ -200,10 +201,10 @@ export function Editor() {
             pendingSaveRef.current = null;
             saveFlow(nextNodes, nextEdges);
         }, 250);
-    }, [activeFlow, saveFlow]);
+    }, [activeProjectPath, activeFlow, saveFlow]);
 
     const flushPendingSave = useCallback(() => {
-        if (!activeFlow || !pendingSaveRef.current) return;
+        if (!activeProjectPath || !activeFlow || !pendingSaveRef.current) return;
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current);
             saveTimer.current = null;
@@ -211,7 +212,7 @@ export function Editor() {
         const pending = pendingSaveRef.current;
         pendingSaveRef.current = null;
         saveFlow(pending.nodes, pending.edges);
-    }, [activeFlow, saveFlow]);
+    }, [activeProjectPath, activeFlow, saveFlow]);
 
     const hydrateFromPreview = useCallback(async (preview: PreviewResponse) => {
         if (!preview.graph) return false;
@@ -335,7 +336,7 @@ export function Editor() {
             .then((data) => {
                 const normalizedContent = normalizeLegacyDot(data.content);
                 setRawDotDraft(normalizedContent);
-                if (normalizedContent !== data.content) {
+                if (activeProjectPath && normalizedContent !== data.content) {
                     void saveFlowContent(activeFlow, normalizedContent);
                 }
                 return requestPreview(normalizedContent);
@@ -344,6 +345,7 @@ export function Editor() {
             .catch(console.error);
     }, [
         activeFlow,
+        activeProjectPath,
         clearDiagnostics,
         hydrateFromPreview,
         requestPreview,
@@ -460,7 +462,7 @@ export function Editor() {
     );
 
     const onAddNode = useCallback(() => {
-        if (!activeFlow) return;
+        if (!activeProjectPath || !activeFlow) return;
         const defaultModel = graphAttrs.ui_default_llm_model || uiDefaults.llm_model || '';
         const defaultProvider = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || '';
         const defaultReasoning = graphAttrs.ui_default_reasoning_effort || uiDefaults.reasoning_effort || '';
@@ -484,20 +486,20 @@ export function Editor() {
             scheduleSave(newNodes, edges);
             return newNodes;
         });
-    }, [activeFlow, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
+    }, [activeProjectPath, activeFlow, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
 
     const enterRawDotMode = useCallback(() => {
-        if (!activeFlow) return;
+        if (!activeProjectPath || !activeFlow) return;
         if (editorMode === 'raw') return;
         flushPendingSave();
         const dot = generateDot(activeFlow, nodes, edges, graphAttrs);
         setRawDotDraft(dot);
         setRawHandoffError(null);
         setEditorMode('raw');
-    }, [activeFlow, editorMode, edges, flushPendingSave, graphAttrs, nodes]);
+    }, [activeProjectPath, activeFlow, editorMode, edges, flushPendingSave, graphAttrs, nodes]);
 
     const returnToStructuredMode = useCallback(async () => {
-        if (!activeFlow) return;
+        if (!activeProjectPath || !activeFlow) return;
         const saved = await saveFlowContent(activeFlow, rawDotDraft);
         if (!saved) {
             setRawHandoffError(`Safe handoff requires valid DOT. ${saveErrorMessage || 'Fix parse or validation errors before switching modes.'}`);
@@ -516,7 +518,7 @@ export function Editor() {
         } catch {
             setRawHandoffError('Safe handoff requires valid DOT. Failed to parse DOT preview for structured mode.');
         }
-    }, [activeFlow, hydrateFromPreview, rawDotDraft, requestPreview, saveErrorMessage]);
+    }, [activeProjectPath, activeFlow, hydrateFromPreview, rawDotDraft, requestPreview, saveErrorMessage]);
 
     const onSelectionChange = useCallback(({ nodes, edges }: OnSelectionChangeParams) => {
         const selectedNode = nodes.find(n => n.selected);
