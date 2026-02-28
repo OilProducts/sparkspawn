@@ -101,6 +101,8 @@ interface PreviewResponse {
     errors?: DiagnosticEntry[]
 }
 
+type EditorMode = 'structured' | 'raw'
+
 function normalizeLegacyDot(content: string): string {
     return content.replace(/\blabel=label=/g, 'label=');
 }
@@ -142,6 +144,7 @@ export function Editor() {
     const nodeStatuses = useStore((state) => state.nodeStatuses);
     const graphAttrs = useStore((state) => state.graphAttrs);
     const uiDefaults = useStore((state) => state.uiDefaults);
+    const saveErrorMessage = useStore((state) => state.saveErrorMessage);
     const setGraphAttrs = useStore((state) => state.setGraphAttrs);
     const setDiagnostics = useStore((state) => state.setDiagnostics);
     const clearDiagnostics = useStore((state) => state.clearDiagnostics);
@@ -153,6 +156,9 @@ export function Editor() {
     const saveTimer = useRef<number | null>(null);
     const pendingSaveRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
     const [isDragging, setIsDragging] = useState(false);
+    const [editorMode, setEditorMode] = useState<EditorMode>('structured');
+    const [rawDotDraft, setRawDotDraft] = useState('');
+    const [rawHandoffError, setRawHandoffError] = useState<string | null>(null);
 
     const enforceSingleSelectedNode = useCallback((nextNodes: Node[], selectedNodeId: string) => {
         setEdges((currentEdges) =>
@@ -207,6 +213,107 @@ export function Editor() {
         saveFlow(pending.nodes, pending.edges);
     }, [activeFlow, saveFlow]);
 
+    const hydrateFromPreview = useCallback(async (preview: PreviewResponse) => {
+        if (!preview.graph) return false;
+
+        if (preview.graph.graph_attrs) {
+            const nextGraphAttrs = { ...preview.graph.graph_attrs }
+            const shouldSeed = (value?: string | null) =>
+                value === undefined || value === null || value === ''
+            if (shouldSeed(nextGraphAttrs.ui_default_llm_model) && uiDefaults.llm_model) {
+                nextGraphAttrs.ui_default_llm_model = uiDefaults.llm_model
+            }
+            if (shouldSeed(nextGraphAttrs.ui_default_llm_provider) && uiDefaults.llm_provider) {
+                nextGraphAttrs.ui_default_llm_provider = uiDefaults.llm_provider
+            }
+            if (shouldSeed(nextGraphAttrs.ui_default_reasoning_effort) && uiDefaults.reasoning_effort) {
+                nextGraphAttrs.ui_default_reasoning_effort = uiDefaults.reasoning_effort
+            }
+            setGraphAttrs(nextGraphAttrs)
+        }
+
+        const rfNodes: Node[] = preview.graph.nodes.map((n, i: number) => ({
+            id: n.id,
+            type: 'customTask',
+            position: { x: 250, y: i * 150 },
+            data: {
+                label: n.label,
+                shape: n.shape ?? 'box',
+                prompt: n.prompt ?? '',
+                tool_command: n.tool_command ?? '',
+                join_policy: n.join_policy ?? 'wait_all',
+                error_policy: n.error_policy ?? 'continue',
+                max_parallel: n.max_parallel ?? 4,
+                type: n.type ?? '',
+                max_retries: n.max_retries ?? '',
+                goal_gate: n.goal_gate ?? false,
+                retry_target: n.retry_target ?? '',
+                fallback_retry_target: n.fallback_retry_target ?? '',
+                fidelity: n.fidelity ?? '',
+                thread_id: n.thread_id ?? '',
+                class: n.class ?? '',
+                timeout: n.timeout ?? '',
+                llm_model: n.llm_model ?? '',
+                llm_provider: n.llm_provider ?? '',
+                reasoning_effort: n.reasoning_effort ?? '',
+                auto_status: n.auto_status ?? false,
+                allow_partial: n.allow_partial ?? false,
+                status: 'idle'
+            },
+        }));
+
+        const rfEdges: Edge[] = preview.graph.edges.map((e, i: number) => ({
+            id: `e-${e.from}-${e.to}-${i}`,
+            source: e.from,
+            target: e.to,
+            type: EDGE_TYPE,
+            className: EDGE_CLASS,
+            interactionWidth: EDGE_INTERACTION_WIDTH,
+            label: e.label,
+            data: {
+                label: e.label ?? '',
+                condition: e.condition ?? '',
+                weight: e.weight ?? '',
+                fidelity: e.fidelity ?? '',
+                thread_id: e.thread_id ?? '',
+                loop_restart: e.loop_restart ?? false,
+            },
+        }));
+
+        try {
+            const layoutNodes = await layoutWithElk(rfNodes, rfEdges);
+            setNodes(layoutNodes);
+        } catch (error) {
+            console.error('ELK layout failed, using fallback positions.', error);
+            setNodes(rfNodes);
+        }
+        setEdges(rfEdges);
+        hydratedRef.current = true;
+        return true;
+    }, [
+        setEdges,
+        setGraphAttrs,
+        setNodes,
+        uiDefaults.llm_model,
+        uiDefaults.llm_provider,
+        uiDefaults.reasoning_effort,
+    ]);
+
+    const requestPreview = useCallback(async (dot: string): Promise<PreviewResponse> => {
+        const response = await fetch('/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ flow_content: dot }),
+        });
+        const preview = (await response.json()) as PreviewResponse;
+        if (preview.diagnostics) {
+            setDiagnostics(preview.diagnostics);
+        } else {
+            clearDiagnostics();
+        }
+        return preview;
+    }, [setDiagnostics, clearDiagnostics]);
+
     // Auto-load and sync with Backend Preview
     useEffect(() => {
         hydratedRef.current = false;
@@ -214,153 +321,59 @@ export function Editor() {
             setNodes([]);
             setEdges([]);
             clearDiagnostics();
+            setRawDotDraft('');
+            setRawHandoffError(null);
+            setEditorMode('structured');
             return;
         }
         clearDiagnostics();
+        setRawHandoffError(null);
+        setEditorMode('structured');
 
         fetch(`/api/flows/${activeFlow}`)
             .then((res) => res.json())
             .then((data) => {
                 const normalizedContent = normalizeLegacyDot(data.content);
+                setRawDotDraft(normalizedContent);
                 if (normalizedContent !== data.content) {
                     void saveFlowContent(activeFlow, normalizedContent);
                 }
-
-                return fetch('/preview', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ flow_content: normalizedContent }),
-                });
+                return requestPreview(normalizedContent);
             })
-            .then((res) => res.json())
-            .then(async (preview: PreviewResponse) => {
-                if (preview.diagnostics) {
-                    setDiagnostics(preview.diagnostics);
-                } else {
-                    clearDiagnostics();
-                }
-
-                if (!preview.graph) return;
-
-                if (preview.graph.graph_attrs) {
-                    const nextGraphAttrs = { ...preview.graph.graph_attrs }
-                    const shouldSeed = (value?: string | null) =>
-                        value === undefined || value === null || value === ''
-                    if (shouldSeed(nextGraphAttrs.ui_default_llm_model) && uiDefaults.llm_model) {
-                        nextGraphAttrs.ui_default_llm_model = uiDefaults.llm_model
-                    }
-                    if (shouldSeed(nextGraphAttrs.ui_default_llm_provider) && uiDefaults.llm_provider) {
-                        nextGraphAttrs.ui_default_llm_provider = uiDefaults.llm_provider
-                    }
-                    if (shouldSeed(nextGraphAttrs.ui_default_reasoning_effort) && uiDefaults.reasoning_effort) {
-                        nextGraphAttrs.ui_default_reasoning_effort = uiDefaults.reasoning_effort
-                    }
-                    setGraphAttrs(nextGraphAttrs)
-                }
-
-                // Convert Preview JSON graph to ReactFlow format
-                const rfNodes: Node[] = preview.graph.nodes.map((n, i: number) => ({
-                    id: n.id,
-                    type: 'customTask',
-                    position: { x: 250, y: i * 150 }, // Auto-layout stub
-                    data: {
-                        label: n.label,
-                        shape: n.shape ?? 'box',
-                        prompt: n.prompt ?? '',
-                        tool_command: n.tool_command ?? '',
-                        join_policy: n.join_policy ?? 'wait_all',
-                        error_policy: n.error_policy ?? 'continue',
-                        max_parallel: n.max_parallel ?? 4,
-                        type: n.type ?? '',
-                        max_retries: n.max_retries ?? '',
-                        goal_gate: n.goal_gate ?? false,
-                        retry_target: n.retry_target ?? '',
-                        fallback_retry_target: n.fallback_retry_target ?? '',
-                        fidelity: n.fidelity ?? '',
-                        thread_id: n.thread_id ?? '',
-                        class: n.class ?? '',
-                        timeout: n.timeout ?? '',
-                        llm_model: n.llm_model ?? '',
-                        llm_provider: n.llm_provider ?? '',
-                        reasoning_effort: n.reasoning_effort ?? '',
-                        auto_status: n.auto_status ?? false,
-                        allow_partial: n.allow_partial ?? false,
-                        status: 'idle'
-                    },
-                }));
-
-                const rfEdges: Edge[] = preview.graph.edges.map((e, i: number) => ({
-                    id: `e-${e.from}-${e.to}-${i}`,
-                    source: e.from,
-                    target: e.to,
-                    type: EDGE_TYPE,
-                    className: EDGE_CLASS,
-                    interactionWidth: EDGE_INTERACTION_WIDTH,
-                    label: e.label,
-                    data: {
-                        label: e.label ?? '',
-                        condition: e.condition ?? '',
-                        weight: e.weight ?? '',
-                        fidelity: e.fidelity ?? '',
-                        thread_id: e.thread_id ?? '',
-                        loop_restart: e.loop_restart ?? false,
-                    },
-                }));
-
-                try {
-                    const layoutNodes = await layoutWithElk(rfNodes, rfEdges);
-                    setNodes(layoutNodes);
-                } catch (error) {
-                    console.error('ELK layout failed, using fallback positions.', error);
-                    setNodes(rfNodes);
-                }
-                setEdges(rfEdges);
-                hydratedRef.current = true;
-            })
+            .then((preview) => hydrateFromPreview(preview))
             .catch(console.error);
     }, [
         activeFlow,
-        setNodes,
-        setEdges,
-        setGraphAttrs,
-        setDiagnostics,
         clearDiagnostics,
-        uiDefaults.llm_model,
-        uiDefaults.llm_provider,
-        uiDefaults.reasoning_effort,
+        hydrateFromPreview,
+        requestPreview,
+        setEdges,
+        setNodes,
     ]);
 
-    const requestPreview = useCallback((dot: string) => {
-        fetch('/preview', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ flow_content: dot }),
-        })
-            .then((res) => res.json())
-            .then((preview: PreviewResponse) => {
-                if (preview.diagnostics) {
-                    setDiagnostics(preview.diagnostics);
-                } else {
-                    clearDiagnostics();
-                }
-            })
-            .catch(console.error);
-    }, [setDiagnostics, clearDiagnostics]);
-
     useEffect(() => {
-        if (!activeFlow || !hydratedRef.current || viewMode === 'execution' || suppressPreview || isDragging) return;
+        if (
+            !activeFlow
+            || !hydratedRef.current
+            || viewMode === 'execution'
+            || suppressPreview
+            || isDragging
+            || editorMode === 'raw'
+        ) return;
         const dot = generateDot(activeFlow, nodes, edges, graphAttrs);
         if (previewTimer.current) {
             window.clearTimeout(previewTimer.current);
         }
-        previewTimer.current = window.setTimeout(() => requestPreview(dot), 600);
+        previewTimer.current = window.setTimeout(() => {
+            void requestPreview(dot).catch(console.error);
+        }, 600);
 
         return () => {
             if (previewTimer.current) {
                 window.clearTimeout(previewTimer.current);
             }
         };
-    }, [activeFlow, nodes, edges, graphAttrs, viewMode, requestPreview, suppressPreview, isDragging]);
+    }, [activeFlow, nodes, edges, graphAttrs, viewMode, requestPreview, suppressPreview, isDragging, editorMode]);
 
     useEffect(() => {
         const handleBeforeUnload = () => {
@@ -473,6 +486,38 @@ export function Editor() {
         });
     }, [activeFlow, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
 
+    const enterRawDotMode = useCallback(() => {
+        if (!activeFlow) return;
+        if (editorMode === 'raw') return;
+        flushPendingSave();
+        const dot = generateDot(activeFlow, nodes, edges, graphAttrs);
+        setRawDotDraft(dot);
+        setRawHandoffError(null);
+        setEditorMode('raw');
+    }, [activeFlow, editorMode, edges, flushPendingSave, graphAttrs, nodes]);
+
+    const returnToStructuredMode = useCallback(async () => {
+        if (!activeFlow) return;
+        const saved = await saveFlowContent(activeFlow, rawDotDraft);
+        if (!saved) {
+            setRawHandoffError(`Safe handoff requires valid DOT. ${saveErrorMessage || 'Fix parse or validation errors before switching modes.'}`);
+            return;
+        }
+
+        try {
+            const preview = await requestPreview(rawDotDraft);
+            const hydrated = await hydrateFromPreview(preview);
+            if (!hydrated) {
+                setRawHandoffError('Safe handoff requires valid DOT. Preview response did not include a graph.');
+                return;
+            }
+            setRawHandoffError(null);
+            setEditorMode('structured');
+        } catch {
+            setRawHandoffError('Safe handoff requires valid DOT. Failed to parse DOT preview for structured mode.');
+        }
+    }, [activeFlow, hydrateFromPreview, rawDotDraft, requestPreview, saveErrorMessage]);
+
     const onSelectionChange = useCallback(({ nodes, edges }: OnSelectionChangeParams) => {
         const selectedNode = nodes.find(n => n.selected);
         const selectedEdge = edges.find(e => e.selected);
@@ -507,49 +552,102 @@ export function Editor() {
 
     return (
         <div className="flow-surface w-full h-full relative">
-            <ReactFlow
-                className="flow-canvas"
-                style={{ background: 'transparent' }}
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                onSelectionChange={onSelectionChange}
-                nodeTypes={nodeTypes}
-                edgeTypes={edgeTypes}
-                defaultEdgeOptions={{
-                    type: EDGE_TYPE,
-                    className: EDGE_CLASS,
-                    interactionWidth: EDGE_INTERACTION_WIDTH,
-                }}
-                elevateEdgesOnSelect
-                fitView
-                colorMode="light"
-                minZoom={0.1}
-                maxZoom={1.5}
-            >
-                <Controls />
-                <MiniMap
-                    nodeColor="hsl(var(--muted))"
-                    maskColor="hsl(var(--background)/0.5)"
-                    className="flow-minimap"
-                />
-                <Background gap={20} size={1} color="hsl(var(--border))" />
-            </ReactFlow>
+            {editorMode === 'raw' ? (
+                <div className="h-full w-full p-4">
+                    <div className="h-full rounded-lg border border-border bg-background/80 p-3">
+                        <textarea
+                            data-testid="raw-dot-editor"
+                            value={rawDotDraft}
+                            onChange={(event) => {
+                                setRawDotDraft(event.target.value);
+                                setRawHandoffError(null);
+                            }}
+                            className="h-full w-full resize-none rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-5 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            spellCheck={false}
+                        />
+                    </div>
+                    {rawHandoffError ? (
+                        <p data-testid="raw-dot-handoff-error" className="mt-2 text-xs font-medium text-destructive">
+                            {rawHandoffError}
+                        </p>
+                    ) : null}
+                </div>
+            ) : (
+                <ReactFlow
+                    className="flow-canvas"
+                    style={{ background: 'transparent' }}
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
+                    onSelectionChange={onSelectionChange}
+                    nodeTypes={nodeTypes}
+                    edgeTypes={edgeTypes}
+                    defaultEdgeOptions={{
+                        type: EDGE_TYPE,
+                        className: EDGE_CLASS,
+                        interactionWidth: EDGE_INTERACTION_WIDTH,
+                    }}
+                    elevateEdgesOnSelect
+                    fitView
+                    colorMode="light"
+                    minZoom={0.1}
+                    maxZoom={1.5}
+                >
+                    <Controls />
+                    <MiniMap
+                        nodeColor="hsl(var(--muted))"
+                        maskColor="hsl(var(--background)/0.5)"
+                        className="flow-minimap"
+                    />
+                    <Background gap={20} size={1} color="hsl(var(--border))" />
+                </ReactFlow>
+            )}
 
             {viewMode === 'editor' && activeFlow && (
                 <div className="absolute left-4 top-4 z-10 flex gap-2">
-                    <button
-                        onClick={onAddNode}
-                        className="bg-primary text-primary-foreground shadow-sm px-3 py-1.5 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
-                    >
-                        Add Node
-                    </button>
+                    <div data-testid="editor-mode-toggle" className="flex rounded-md border border-border bg-background/90 p-1 shadow-sm">
+                        <button
+                            onClick={() => {
+                                if (editorMode === 'raw') {
+                                    void returnToStructuredMode();
+                                    return;
+                                }
+                                setEditorMode('structured');
+                            }}
+                            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                                editorMode === 'structured'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                        >
+                            Structured
+                        </button>
+                        <button
+                            onClick={enterRawDotMode}
+                            disabled={editorMode === 'raw'}
+                            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                                editorMode === 'raw'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                        >
+                            Raw DOT
+                        </button>
+                    </div>
+                    {editorMode === 'structured' && (
+                        <button
+                            onClick={onAddNode}
+                            className="bg-primary text-primary-foreground shadow-sm px-3 py-1.5 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
+                        >
+                            Add Node
+                        </button>
+                    )}
                 </div>
             )}
 
-            {activeFlow && <ValidationPanel />}
+            {activeFlow && editorMode === 'structured' && <ValidationPanel />}
             <ExecutionControls />
         </div>
     );
