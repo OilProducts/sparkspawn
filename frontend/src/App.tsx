@@ -5,6 +5,7 @@ import { Editor } from "./components/Editor"
 import { RunStream } from "./components/RunStream"
 import { SettingsPanel } from "./components/SettingsPanel"
 import { RunsPanel } from "./components/RunsPanel"
+import { ProjectsPanel } from "./components/ProjectsPanel"
 import { ReactFlowProvider } from "@xyflow/react"
 import { useStore } from "@/store"
 
@@ -15,18 +16,20 @@ function App() {
   return (
     <ReactFlowProvider>
       <RunStream />
-      <div className="h-screen flex flex-col antialiased bg-background text-foreground">
+      <div data-testid="app-shell" className="h-screen flex flex-col antialiased bg-background text-foreground">
         <Navbar />
         <div className="flex-1 flex overflow-hidden">
           {showSidebar && <Sidebar />}
-          <main className="flex-1 relative flex flex-col overflow-hidden bg-muted/10">
+          <main data-testid="app-main" className="flex-1 relative flex flex-col overflow-hidden bg-muted/10">
             {viewMode === 'settings' ? (
               <SettingsPanel />
+            ) : viewMode === 'projects' ? (
+              <ProjectsPanel />
             ) : viewMode === 'runs' ? (
               <RunsPanel />
             ) : (
               <>
-                <div className="flex-1 w-full h-full bg-background/50">
+                <div data-testid="editor-panel" className="flex-1 w-full h-full bg-background/50">
                   <Editor />
                 </div>
                 <Terminal />

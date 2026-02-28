@@ -49,15 +49,24 @@ export function Navbar() {
     }
 
     return (
-        <header className="h-14 border-b bg-background flex items-center justify-between px-6 shrink-0 z-50">
+        <header data-testid="top-nav" className="h-14 border-b bg-background flex items-center justify-between px-6 shrink-0 z-50">
             <div className="flex items-center gap-8">
                 <div className="flex items-center gap-2">
                     <Settings2 className="w-5 h-5" />
                     <span className="font-semibold tracking-tight">Attractor React</span>
                 </div>
 
-                <div className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground w-[380px]">
+                <div data-testid="view-mode-tabs" className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground w-[480px]">
                     <button
+                        data-testid="nav-mode-projects"
+                        onClick={() => setViewMode('projects')}
+                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1 ${viewMode === 'projects' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                            }`}
+                    >
+                        Projects
+                    </button>
+                    <button
+                        data-testid="nav-mode-editor"
                         onClick={() => setViewMode('editor')}
                         className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1 ${viewMode === 'editor' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
                             }`}
@@ -65,6 +74,7 @@ export function Navbar() {
                         Editor
                     </button>
                     <button
+                        data-testid="nav-mode-execution"
                         onClick={() => setViewMode('execution')}
                         className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1 ${viewMode === 'execution' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
                             }`}
@@ -72,6 +82,7 @@ export function Navbar() {
                         Execution
                     </button>
                     <button
+                        data-testid="nav-mode-settings"
                         onClick={() => setViewMode('settings')}
                         className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1 ${viewMode === 'settings' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
                             }`}
@@ -79,6 +90,7 @@ export function Navbar() {
                         Settings
                     </button>
                     <button
+                        data-testid="nav-mode-runs"
                         onClick={() => setViewMode('runs')}
                         className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1 ${viewMode === 'runs' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
                             }`}
@@ -90,6 +102,7 @@ export function Navbar() {
 
             <div className="flex items-center gap-4">
                 <button
+                    data-testid="execute-button"
                     onClick={runPipeline}
                     disabled={!activeFlow || hasValidationErrors}
                     title={hasValidationErrors ? 'Fix validation errors before running.' : undefined}

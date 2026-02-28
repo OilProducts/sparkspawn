@@ -46,14 +46,13 @@ Status key:
 - [x] [3.1-01] Capture author/operator/reviewer/project-owner persona scenarios with concrete UI success criteria. (See `ui-role-persona-scenarios.md`.)
 
 ### 3.2 Primary Workflows
-- [ ] [3.2-03] Ensure every step has a first-class UI surface (no hidden or CLI-only transition).
-- [ ] [3.2-04] Add explicit workflow coverage for project-scoped AI conversation -> spec refinement -> plan generation/approval -> build execution chain.
+- Deferred to `Deferred Tasks` until project-scoped conversation/spec/plan/build surfaces exist.
 
 ---
 
 ## 4. Information Architecture
 
-- [ ] [4-01] Ensure Projects, Editor, Execution, Runs, and Settings are first-class areas with stable navigation.
+- [x] [4-01] Ensure Projects, Editor, Execution, Runs, and Settings are first-class areas with stable navigation.
 - [ ] [4-02] Add deterministic deep-link state for active project/flow/run/conversation and panel selection.
 - [ ] [4-03] Add route restoration behavior on refresh/reopen.
 
@@ -551,3 +550,7 @@ Status key:
   Deferred because the required project-scoped workflow surfaces (project registry/Git gating, conversation/spec loop, and spec->plan->build chain) are not yet implemented in the UI.
 - [ ] [3.2-02] Add test coverage for the full 12-step primary workflow sequence (project registration/selection through re-run).
   Deferred because the project registration/Git gating and project-scoped conversation/spec/plan/run surfaces required by `ui-spec.md` section 3.2 are not yet implemented for behavioral end-to-end coverage.
+- [ ] [3.2-03] Ensure every step has a first-class UI surface (no hidden or CLI-only transition).
+  Deferred because the required project-scoped conversation/spec/plan/build surfaces are not implemented yet, so the workflow still has unavoidable non-UI transitions.
+- [ ] [3.2-04] Add explicit workflow coverage for project-scoped AI conversation -> spec refinement -> plan generation/approval -> build execution chain.
+  Deferred because the project-scoped conversation/spec/plan/build chain is not fully implemented, so coverage would only validate placeholders instead of the real workflow.
