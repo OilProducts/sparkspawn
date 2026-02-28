@@ -97,7 +97,6 @@ Status key:
 
 ### 5.4 Project-Scoped Context and Isolation
 - [x] [5.4-01] Require an active project for mutating flow edits and run start actions.
-- [ ] [5.4-02] Inject active project directory and repository metadata into AI conversation context.
 - [ ] [5.4-03] Reset flow/run/conversation selections correctly on project switch with no hidden state carryover.
 
 ### 5.5 AI Conversation and Spec Authoring Loop
@@ -557,3 +556,5 @@ Status key:
   Deferred because the current API/UI contract has no project Git verification/initialize endpoint path yet, so the required enforcement and explicit initialization flow cannot be implemented correctly.
 - [ ] [4.3-03] Implement Git verification UI with explicit initialize action path.
   Deferred because the frontend currently has no project Git verification/initialize API contract to drive real status checks or an explicit initialize action flow.
+- [ ] [5.4-02] Inject active project directory and repository metadata into AI conversation context.
+  Deferred because the AI conversation surface and request pipeline (`5.5-01` through `5.5-02`) are not implemented yet, so there is no concrete conversation payload path to inject this context into.
