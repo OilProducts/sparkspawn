@@ -1,16 +1,19 @@
 import { useStore } from "@/store"
 import { FilePlus, Trash2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } from "@xyflow/react"
 import { generateDot, sanitizeGraphId } from "@/lib/dotUtils"
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
 import { getHandlerType, getNodeFieldVisibility } from "@/lib/nodeVisibility"
+import { saveFlowContent } from "@/lib/flowPersistence"
 
 export function Sidebar() {
     const { viewMode, activeFlow, setActiveFlow, selectedNodeId, selectedEdgeId } = useStore()
     const humanGate = useStore((state) => state.humanGate)
     const graphAttrs = useStore((state) => state.graphAttrs)
     const uiDefaults = useStore((state) => state.uiDefaults)
+    const saveState = useStore((state) => state.saveState)
+    const saveErrorMessage = useStore((state) => state.saveErrorMessage)
     const setSuppressPreview = useStore((state) => state.setSuppressPreview)
     const [flows, setFlows] = useState<string[]>([])
     const [showAdvanced, setShowAdvanced] = useState(false)
@@ -18,6 +21,7 @@ export function Sidebar() {
     const nodes = useReactFlowStore((state) => state.nodes)
     const edges = useReactFlowStore((state) => state.edges)
     const saveTimer = useRef<number | null>(null)
+    const pendingSaveRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
     const promptNodeRef = useRef<string | null>(null)
     const promptRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -50,11 +54,8 @@ export function Sidebar() {
 
         const initialContent = `digraph ${graphName} {\n${graphAttrBlock}  start [shape=Mdiamond, label="Start"];\n  end [shape=Msquare, label="End"];\n  start -> end;\n}`;
 
-        await fetch('/api/flows', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: fileName, content: initialContent })
-        });
+        const saved = await saveFlowContent(fileName, initialContent)
+        if (!saved) return
 
         await loadFlows();
         setActiveFlow(fileName);
@@ -79,19 +80,29 @@ export function Sidebar() {
     const scheduleSave = (nextNodes: Node[], nextEdges: Edge[]) => {
         if (!activeFlow) return
 
+        pendingSaveRef.current = { nodes: nextNodes, edges: nextEdges }
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current)
         }
 
         saveTimer.current = window.setTimeout(() => {
+            pendingSaveRef.current = null
             const dot = generateDot(activeFlow, nextNodes, nextEdges, graphAttrs)
-            fetch('/api/flows', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: activeFlow, content: dot })
-            }).catch(console.error)
+            void saveFlowContent(activeFlow, dot)
         }, 600)
     }
+
+    const flushPendingSave = useCallback(() => {
+        if (!activeFlow || !pendingSaveRef.current) return
+        if (saveTimer.current) {
+            window.clearTimeout(saveTimer.current)
+            saveTimer.current = null
+        }
+        const pending = pendingSaveRef.current
+        pendingSaveRef.current = null
+        const dot = generateDot(activeFlow, pending.nodes, pending.edges, graphAttrs)
+        void saveFlowContent(activeFlow, dot)
+    }, [activeFlow, graphAttrs])
 
     const updateNodeProperty = (nodeId: string, key: string, value: string | boolean) => {
         if (!activeFlow) return;
@@ -127,6 +138,14 @@ export function Sidebar() {
     const visibility = getNodeFieldVisibility(handlerType)
     const autoTab = selectedEdgeId ? 'edge' : selectedNodeId ? 'edit' : 'flows';
     const activeTab = viewMode !== 'editor' ? 'flows' : autoTab;
+    const saveStateLabel =
+        saveState === 'saving'
+            ? 'Saving...'
+            : saveState === 'saved'
+                ? 'Saved'
+                : saveState === 'error'
+                    ? 'Save Failed'
+                    : 'Idle'
 
     const handleEdgePropertyChange = (key: string, value: string | boolean) => {
         if (!selectedEdgeId || !activeFlow) return;
@@ -157,12 +176,37 @@ export function Sidebar() {
         updateNodeProperty(nodeId, 'prompt', value)
     }
 
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            flushPendingSave()
+        }
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload)
+            flushPendingSave()
+        }
+    }, [flushPendingSave])
+
     return (
         <nav className="w-72 border-r bg-background flex flex-col shrink-0 overflow-hidden z-40">
             <div className="px-4 pb-2 pt-4">
                 <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-foreground">
                     <span>{activeTab === 'flows' ? 'Flows' : activeTab === 'edit' ? 'Node' : 'Edge'}</span>
                     <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
+                </div>
+                <div
+                    data-testid="save-state-indicator"
+                    className={`mt-2 rounded-md border px-2 py-1 text-[11px] font-medium ${
+                        saveState === 'error'
+                            ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                            : saveState === 'saved'
+                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
+                                : 'border-border bg-muted/30 text-muted-foreground'
+                    }`}
+                    title={saveErrorMessage || undefined}
+                >
+                    <span>{saveStateLabel}</span>
+                    {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
                 </div>
             </div>
 

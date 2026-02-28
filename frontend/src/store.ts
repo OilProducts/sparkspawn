@@ -13,6 +13,7 @@ export type RuntimeStatus =
     | 'failed'
     | 'validation_error'
     | 'success'
+export type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 export interface HumanGateOption {
     label: string
@@ -168,6 +169,12 @@ interface AppState {
     uiDefaults: UiDefaults
     setUiDefaults: (values: Partial<UiDefaults>) => void
     setUiDefault: (key: keyof UiDefaults, value: string) => void
+
+    saveState: SaveState
+    saveErrorMessage: string | null
+    markSaveInFlight: () => void
+    markSaveSuccess: () => void
+    markSaveFailure: (message: string) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -249,5 +256,15 @@ export const useStore = create<AppState>((set) => ({
             const next = { ...state.uiDefaults, [key]: value }
             saveUiDefaults(next)
             return { uiDefaults: next }
+        }),
+
+    saveState: 'idle',
+    saveErrorMessage: null,
+    markSaveInFlight: () => set({ saveState: 'saving', saveErrorMessage: null }),
+    markSaveSuccess: () => set({ saveState: 'saved', saveErrorMessage: null }),
+    markSaveFailure: (message) =>
+        set({
+            saveState: 'error',
+            saveErrorMessage: message || 'Flow save failed.',
         }),
 }))

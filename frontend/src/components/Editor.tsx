@@ -21,6 +21,7 @@ import { ValidationEdge } from './ValidationEdge';
 import { ValidationPanel } from './ValidationPanel';
 import { ExecutionControls } from './ExecutionControls';
 import { generateDot } from '@/lib/dotUtils';
+import { saveFlowContent } from '@/lib/flowPersistence';
 
 const nodeTypes = {
     customTask: TaskNode,
@@ -151,26 +152,36 @@ export function Editor() {
     const hydratedRef = useRef(false);
     const previewTimer = useRef<number | null>(null);
     const saveTimer = useRef<number | null>(null);
+    const pendingSaveRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
     const [isDragging, setIsDragging] = useState(false);
 
     const saveFlow = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
         if (!activeFlow) return;
         const dot = generateDot(activeFlow, nextNodes, nextEdges, graphAttrs);
-        fetch('/api/flows', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: activeFlow, content: dot }),
-        }).catch(console.error);
+        void saveFlowContent(activeFlow, dot);
     }, [activeFlow, graphAttrs]);
 
     const scheduleSave = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
         if (!activeFlow) return;
+        pendingSaveRef.current = { nodes: nextNodes, edges: nextEdges };
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current);
         }
         saveTimer.current = window.setTimeout(() => {
+            pendingSaveRef.current = null;
             saveFlow(nextNodes, nextEdges);
         }, 250);
+    }, [activeFlow, saveFlow]);
+
+    const flushPendingSave = useCallback(() => {
+        if (!activeFlow || !pendingSaveRef.current) return;
+        if (saveTimer.current) {
+            window.clearTimeout(saveTimer.current);
+            saveTimer.current = null;
+        }
+        const pending = pendingSaveRef.current;
+        pendingSaveRef.current = null;
+        saveFlow(pending.nodes, pending.edges);
     }, [activeFlow, saveFlow]);
 
     // Auto-load and sync with Backend Preview
@@ -189,11 +200,7 @@ export function Editor() {
             .then((data) => {
                 const normalizedContent = normalizeLegacyDot(data.content);
                 if (normalizedContent !== data.content) {
-                    fetch('/api/flows', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: activeFlow, content: normalizedContent }),
-                    }).catch(console.error);
+                    void saveFlowContent(activeFlow, normalizedContent);
                 }
 
                 return fetch('/preview', {
@@ -331,6 +338,17 @@ export function Editor() {
             }
         };
     }, [activeFlow, nodes, edges, graphAttrs, viewMode, requestPreview, suppressPreview, isDragging]);
+
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            flushPendingSave();
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            flushPendingSave();
+        };
+    }, [flushPendingSave]);
 
     // Handle new connections via UI
     const onNodesChange = useCallback((changes: NodeChange<Node>[]) => {

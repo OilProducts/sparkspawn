@@ -4,6 +4,7 @@ import { useStore } from '@/store';
 import { generateDot } from '@/lib/dotUtils';
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions';
 import { getHandlerType, getNodeFieldVisibility } from '@/lib/nodeVisibility';
+import { saveFlowContent } from '@/lib/flowPersistence';
 
 export function TaskNode({ id, data, selected }: NodeProps) {
     const { activeFlow, viewMode } = useStore();
@@ -80,11 +81,7 @@ export function TaskNode({ id, data, selected }: NodeProps) {
 
         if (updatedNodes.length > 0) {
             const dot = generateDot(activeFlow, updatedNodes, getEdges(), graphAttrs);
-            fetch('/api/flows', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: activeFlow, content: dot }),
-            }).catch(console.error);
+            void saveFlowContent(activeFlow, dot);
         }
     };
 

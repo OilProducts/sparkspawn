@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { useStore } from '@/store'
 import { generateDot } from '@/lib/dotUtils'
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions'
+import { saveFlowContent } from '@/lib/flowPersistence'
 
 export function GraphSettings() {
     const [isOpen, setIsOpen] = useState(false)
@@ -17,8 +18,16 @@ export function GraphSettings() {
     const uiDefaults = useStore((state) => state.uiDefaults)
     const { getNodes, getEdges, setNodes } = useReactFlow()
     const saveTimer = useRef<number | null>(null)
+    const hasPendingSave = useRef(false)
     const flowProviderFallback = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || ''
     const canApplyDefaults = !!activeFlow && viewMode === 'editor'
+
+    const flushPendingSave = useCallback(() => {
+        if (!activeFlow || !hasPendingSave.current) return
+        hasPendingSave.current = false
+        const dot = generateDot(activeFlow, getNodes(), getEdges(), graphAttrs)
+        void saveFlowContent(activeFlow, dot)
+    }, [activeFlow, getNodes, getEdges, graphAttrs])
 
     const applyDefaultsToNodes = () => {
         if (!activeFlow) return
@@ -42,25 +51,19 @@ export function GraphSettings() {
         setNodes(updatedNodes)
 
         const dot = generateDot(activeFlow, updatedNodes, getEdges(), graphAttrs)
-        fetch('/api/flows', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: activeFlow, content: dot }),
-        }).catch(console.error)
+        void saveFlowContent(activeFlow, dot)
     }
 
     useEffect(() => {
         if (!activeFlow) return
+        hasPendingSave.current = true
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current)
         }
         saveTimer.current = window.setTimeout(() => {
+            hasPendingSave.current = false
             const dot = generateDot(activeFlow, getNodes(), getEdges(), graphAttrs)
-            fetch('/api/flows', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: activeFlow, content: dot }),
-            }).catch(console.error)
+            void saveFlowContent(activeFlow, dot)
         }, 200)
 
         return () => {
@@ -69,6 +72,17 @@ export function GraphSettings() {
             }
         }
     }, [activeFlow, graphAttrs, getNodes, getEdges])
+
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            flushPendingSave()
+        }
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload)
+            flushPendingSave()
+        }
+    }, [flushPendingSave])
 
     return (
         <div className="absolute right-4 top-4 z-20 flex flex-col items-end">
