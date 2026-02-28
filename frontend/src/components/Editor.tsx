@@ -16,7 +16,6 @@ import ELK from 'elkjs/lib/elk.bundled.js';
 
 import { useStore, type DiagnosticEntry } from '@/store';
 import { TaskNode } from './TaskNode';
-import { GraphSettings } from './GraphSettings';
 import { ValidationEdge } from './ValidationEdge';
 import { ValidationPanel } from './ValidationPanel';
 import { ExecutionControls } from './ExecutionControls';
@@ -497,7 +496,6 @@ export function Editor() {
                 </div>
             )}
 
-            {activeFlow && <GraphSettings />}
             {activeFlow && <ValidationPanel />}
             <ExecutionControls />
         </div>
