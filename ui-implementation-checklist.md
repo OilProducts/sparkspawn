@@ -46,7 +46,6 @@ Status key:
 - [x] [3.1-01] Capture author/operator/reviewer/project-owner persona scenarios with concrete UI success criteria. (See `ui-role-persona-scenarios.md`.)
 
 ### 3.2 Primary Workflows
-- [ ] [3.2-02] Add test coverage for the full 12-step primary workflow sequence (project registration/selection through re-run).
 - [ ] [3.2-03] Ensure every step has a first-class UI surface (no hidden or CLI-only transition).
 - [ ] [3.2-04] Add explicit workflow coverage for project-scoped AI conversation -> spec refinement -> plan generation/approval -> build execution chain.
 
