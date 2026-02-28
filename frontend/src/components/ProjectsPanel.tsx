@@ -1,5 +1,5 @@
 import { useStore } from "@/store"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useEffect, useState } from "react"
 
 const buildProjectScopedArtifactId = (artifactType: "conversation" | "spec" | "plan", projectPath: string) => {
     const normalizedProjectKey = projectPath
@@ -28,11 +28,67 @@ export function ProjectsPanel() {
     const [directoryPathInput, setDirectoryPathInput] = useState("")
     const [editingProjectPath, setEditingProjectPath] = useState<string | null>(null)
     const [editingDirectoryPathInput, setEditingDirectoryPathInput] = useState("")
+    const [projectBranches, setProjectBranches] = useState<Record<string, string | null>>({})
     const activeProjectScope = activeProjectPath ? projectScopedWorkspaces[activeProjectPath] : null
     const favoriteProjects = projects.filter((project) => project.isFavorite)
     const recentProjects = recentProjectPaths
         .map((projectPath) => projectRegistry[projectPath])
         .filter((project): project is (typeof projects)[number] => Boolean(project))
+
+    useEffect(() => {
+        const projectPathsToFetch = projects
+            .map((project) => project.directoryPath)
+            .filter((projectPath) => !(projectPath in projectBranches))
+        if (projectPathsToFetch.length === 0) {
+            return
+        }
+
+        let isCancelled = false
+        const loadBranches = async () => {
+            const entries = await Promise.all(
+                projectPathsToFetch.map(async (projectPath) => {
+                    try {
+                        const response = await fetch(`/api/projects/metadata?directory=${encodeURIComponent(projectPath)}`)
+                        if (!response.ok) {
+                            return [projectPath, null] as const
+                        }
+                        const payload = (await response.json()) as { branch?: string | null }
+                        return [projectPath, typeof payload.branch === "string" ? payload.branch : null] as const
+                    } catch {
+                        return [projectPath, null] as const
+                    }
+                })
+            )
+
+            if (isCancelled) {
+                return
+            }
+
+            setProjectBranches((current) => {
+                const next = { ...current }
+                entries.forEach(([projectPath, branch]) => {
+                    next[projectPath] = branch
+                })
+                return next
+            })
+        }
+
+        void loadBranches()
+        return () => {
+            isCancelled = true
+        }
+    }, [projects, projectBranches])
+
+    const formatLastActivity = (value: string | null) => {
+        if (!value) {
+            return "No activity yet"
+        }
+        const parsed = new Date(value)
+        if (Number.isNaN(parsed.getTime())) {
+            return "Unknown activity time"
+        }
+        return parsed.toLocaleString()
+    }
 
     const onRegisterProject = () => {
         const result = registerProject(directoryPathInput)
@@ -292,7 +348,29 @@ export function ProjectsPanel() {
                                             </div>
                                         ) : (
                                             <div className="flex items-center justify-between gap-3">
-                                                <span className="truncate text-sm">{project.directoryPath}</span>
+                                                <div className="min-w-0 flex-1 space-y-1">
+                                                    {(() => {
+                                                        const projectName = project.directoryPath.split('/').filter(Boolean).pop() || project.directoryPath
+                                                        const branchLabel = projectBranches[project.directoryPath] || "Unknown branch"
+                                                        const lastActivityLabel = formatLastActivity(project.lastAccessedAt)
+                                                        return (
+                                                            <>
+                                                                <p data-testid="project-metadata-name" className="truncate text-sm font-medium text-foreground">
+                                                                    Name: {projectName}
+                                                                </p>
+                                                                <p data-testid="project-metadata-directory" className="truncate text-xs text-muted-foreground">
+                                                                    Directory: {project.directoryPath}
+                                                                </p>
+                                                                <p data-testid="project-metadata-branch" className="truncate text-xs text-muted-foreground">
+                                                                    Branch: {branchLabel}
+                                                                </p>
+                                                                <p data-testid="project-metadata-last-activity" className="truncate text-xs text-muted-foreground">
+                                                                    Last activity: {lastActivityLabel}
+                                                                </p>
+                                                            </>
+                                                        )
+                                                    })()}
+                                                </div>
                                                 <div className="flex items-center gap-2">
                                                     <button
                                                         data-testid="favorite-toggle-button"

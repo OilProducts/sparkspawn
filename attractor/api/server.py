@@ -1608,6 +1608,39 @@ async def reset_checkpoint(req: ResetRequest):
     return {"status": "reset"}
 
 
+def _resolve_project_git_branch(directory_path: Path) -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(directory_path), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+    branch = completed.stdout.strip()
+    return branch or None
+
+
+@app.get("/api/projects/metadata")
+async def get_project_metadata(directory: str):
+    requested_path = directory.strip()
+    if not requested_path:
+        raise HTTPException(status_code=400, detail="Project directory path is required.")
+
+    project_path = Path(requested_path).expanduser()
+    if not project_path.is_absolute():
+        raise HTTPException(status_code=400, detail="Project directory path must be absolute.")
+
+    normalized_path = project_path.resolve(strict=False)
+    return {
+        "name": normalized_path.name or str(normalized_path),
+        "directory": str(normalized_path),
+        "branch": _resolve_project_git_branch(normalized_path),
+    }
+
+
 @app.get("/api/flows")
 async def list_flows():
     flows_dir = Path("flows")
