@@ -50,6 +50,8 @@ export interface GraphAttrs {
 
 export interface RegisteredProject {
     directoryPath: string
+    isFavorite: boolean
+    lastAccessedAt: string | null
 }
 
 export interface ProjectRegistrationResult {
@@ -106,6 +108,7 @@ const DEFAULT_UI_DEFAULTS: UiDefaults = {
 const UI_DEFAULTS_STORAGE_KEY = "sparkspawn.ui_defaults"
 const ROUTE_STATE_STORAGE_KEY = "sparkspawn.ui_route_state"
 const DEFAULT_WORKING_DIRECTORY = "./test-app"
+const RECENT_PROJECT_LIMIT = 5
 const VIEW_MODES: ViewMode[] = ['projects', 'editor', 'execution', 'settings', 'runs']
 const modeRequiresActiveProject = (mode: ViewMode) => mode === 'editor' || mode === 'execution'
 const resolveViewModeForProjectScope = (mode: ViewMode, activeProjectPath: string | null): ViewMode => {
@@ -119,6 +122,13 @@ const normalizeProjectPath = (path: string) => {
     return stripped || slashNormalized
 }
 const isAbsoluteProjectPath = (path: string) => path.startsWith("/") || /^[A-Za-z]:\//.test(path)
+const pushRecentProjectPath = (recentProjectPaths: string[], projectPath: string | null) => {
+    if (!projectPath) {
+        return recentProjectPaths
+    }
+    const deduped = [projectPath, ...recentProjectPaths.filter((path) => path !== projectPath)]
+    return deduped.slice(0, RECENT_PROJECT_LIMIT)
+}
 
 interface RouteState {
     viewMode: ViewMode
@@ -232,10 +242,12 @@ interface AppState {
     activeProjectPath: string | null
     setActiveProjectPath: (projectPath: string | null) => void
     projectRegistry: Record<string, RegisteredProject>
+    recentProjectPaths: string[]
     projectScopedWorkspaces: Record<string, ProjectScopedWorkspace>
     projectRegistrationError: string | null
     registerProject: (directoryPath: string) => ProjectRegistrationResult
     updateProjectPath: (currentDirectoryPath: string, nextDirectoryPath: string) => ProjectRegistrationResult
+    toggleProjectFavorite: (projectPath: string) => void
     clearProjectRegistrationError: () => void
     activeFlow: string | null
     setActiveFlow: (flow: string | null) => void
@@ -328,10 +340,12 @@ export const useStore = create<AppState>((set) => ({
         }),
     activeProjectPath: restoredRouteState.activeProjectPath,
     projectScopedWorkspaces: initialProjectScopedWorkspaces,
+    recentProjectPaths: restoredRouteState.activeProjectPath ? [restoredRouteState.activeProjectPath] : [],
     setActiveProjectPath: (projectPath) =>
         set((state) => {
             const isProjectSwitch = projectPath !== state.activeProjectPath
             const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
+            const nextProjectRegistry = { ...state.projectRegistry }
             const currentScope = state.activeProjectPath
             if (currentScope) {
                 const existingScope = resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[currentScope], currentScope)
@@ -346,6 +360,12 @@ export const useStore = create<AppState>((set) => ({
             if (projectPath && nextProjectScope) {
                 nextProjectScopedWorkspaces[projectPath] = nextProjectScope
             }
+            if (projectPath && nextProjectRegistry[projectPath]) {
+                nextProjectRegistry[projectPath] = {
+                    ...nextProjectRegistry[projectPath],
+                    lastAccessedAt: new Date().toISOString(),
+                }
+            }
             const nextViewMode = resolveViewModeForProjectScope(state.viewMode, projectPath)
             saveRouteState({
                 viewMode: nextViewMode,
@@ -356,7 +376,9 @@ export const useStore = create<AppState>((set) => ({
             return {
                 activeProjectPath: projectPath,
                 viewMode: nextViewMode,
+                projectRegistry: nextProjectRegistry,
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
+                recentProjectPaths: pushRecentProjectPath(state.recentProjectPaths, projectPath),
                 activeFlow: projectPath ? nextProjectScope.activeFlow : null,
                 selectedRunId: projectPath ? nextProjectScope.selectedRunId : null,
                 workingDir: projectPath ? nextProjectScope.workingDir : DEFAULT_WORKING_DIRECTORY,
@@ -404,6 +426,8 @@ export const useStore = create<AppState>((set) => ({
             }
 
             const nextActiveProjectPath = state.activeProjectPath ?? normalizedPath
+            const shouldActivateNewProject = !state.activeProjectPath
+            const nowIso = shouldActivateNewProject ? new Date().toISOString() : null
             const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
             nextProjectScopedWorkspaces[normalizedPath] = resolveProjectScopedWorkspace(
                 nextProjectScopedWorkspaces[normalizedPath],
@@ -426,8 +450,16 @@ export const useStore = create<AppState>((set) => ({
             return {
                 projectRegistry: {
                     ...state.projectRegistry,
-                    [normalizedPath]: { directoryPath: normalizedPath },
+                    // [normalizedPath]: { directoryPath: normalizedPath },
+                    [normalizedPath]: {
+                        directoryPath: normalizedPath,
+                        isFavorite: false,
+                        lastAccessedAt: nowIso,
+                    },
                 },
+                recentProjectPaths: shouldActivateNewProject
+                    ? pushRecentProjectPath(state.recentProjectPaths, normalizedPath)
+                    : state.recentProjectPaths,
                 projectRegistrationError: null,
                 activeProjectPath: nextActiveProjectPath,
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
@@ -501,12 +533,18 @@ export const useStore = create<AppState>((set) => ({
 
             const nextProjectRegistry = { ...state.projectRegistry }
             delete nextProjectRegistry[normalizedCurrentPath]
-            nextProjectRegistry[normalizedNextPath] = { directoryPath: normalizedNextPath }
+            nextProjectRegistry[normalizedNextPath] = {
+                ...state.projectRegistry[normalizedCurrentPath],
+                directoryPath: normalizedNextPath,
+            }
             const activeProjectWasUpdated = state.activeProjectPath === normalizedCurrentPath
             const nextActiveProjectPath = activeProjectWasUpdated ? normalizedNextPath : state.activeProjectPath
             const nextWorkingDir = activeProjectWasUpdated && state.workingDir === normalizedCurrentPath
                 ? normalizedNextPath
                 : state.workingDir
+            const nextRecentProjectPaths = state.recentProjectPaths.map((path) =>
+                path === normalizedCurrentPath ? normalizedNextPath : path
+            )
 
             saveRouteState({
                 viewMode: state.viewMode,
@@ -523,11 +561,29 @@ export const useStore = create<AppState>((set) => ({
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
                 activeProjectPath: nextActiveProjectPath,
                 workingDir: nextWorkingDir,
+                recentProjectPaths: nextRecentProjectPaths,
                 projectRegistrationError: null,
             }
         })
         return result
     },
+    toggleProjectFavorite: (projectPath) =>
+        set((state) => {
+            const normalizedPath = normalizeProjectPath(projectPath)
+            const project = state.projectRegistry[normalizedPath]
+            if (!project) {
+                return state
+            }
+            return {
+                projectRegistry: {
+                    ...state.projectRegistry,
+                    [normalizedPath]: {
+                        ...project,
+                        isFavorite: !project.isFavorite,
+                    },
+                },
+            }
+        }),
     clearProjectRegistrationError: () => set({ projectRegistrationError: null }),
     activeFlow: restoredProjectScope ? restoredProjectScope.activeFlow : restoredRouteState.activeFlow,
     setActiveFlow: (flow) =>

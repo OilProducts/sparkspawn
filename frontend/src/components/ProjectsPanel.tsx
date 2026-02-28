@@ -13,11 +13,13 @@ const buildProjectScopedArtifactId = (artifactType: "conversation" | "spec" | "p
 export function ProjectsPanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
     const projects = Object.values(projectRegistry)
+    const recentProjectPaths = useStore((state) => state.recentProjectPaths)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const projectScopedWorkspaces = useStore((state) => state.projectScopedWorkspaces)
     const projectRegistrationError = useStore((state) => state.projectRegistrationError)
     const registerProject = useStore((state) => state.registerProject)
     const updateProjectPath = useStore((state) => state.updateProjectPath)
+    const toggleProjectFavorite = useStore((state) => state.toggleProjectFavorite)
     const clearProjectRegistrationError = useStore((state) => state.clearProjectRegistrationError)
     const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
     const setConversationId = useStore((state) => state.setConversationId)
@@ -27,6 +29,10 @@ export function ProjectsPanel() {
     const [editingProjectPath, setEditingProjectPath] = useState<string | null>(null)
     const [editingDirectoryPathInput, setEditingDirectoryPathInput] = useState("")
     const activeProjectScope = activeProjectPath ? projectScopedWorkspaces[activeProjectPath] : null
+    const favoriteProjects = projects.filter((project) => project.isFavorite)
+    const recentProjects = recentProjectPaths
+        .map((projectPath) => projectRegistry[projectPath])
+        .filter((project): project is (typeof projects)[number] => Boolean(project))
 
     const onRegisterProject = () => {
         const result = registerProject(directoryPathInput)
@@ -84,6 +90,64 @@ export function ProjectsPanel() {
                 </div>
                 <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm">
                     Projects workspace is now a first-class navigation area. Project registry and Git gating controls are tracked in the next checklist slices.
+                </div>
+                <div className="rounded-md border border-border bg-card p-4 shadow-sm">
+                    <div className="mb-3 space-y-1">
+                        <h3 className="text-sm font-semibold text-foreground">Quick Switch</h3>
+                        <p className="text-xs text-muted-foreground">Use favorites and recents to switch project context quickly.</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <p className="text-xs font-medium text-foreground">Favorites</p>
+                            <ul data-testid="favorite-projects-list" className="space-y-2">
+                                {favoriteProjects.length === 0 ? (
+                                    <li className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                                        No favorited projects yet.
+                                    </li>
+                                ) : (
+                                    favoriteProjects.map((project) => {
+                                        const projectPath = project.directoryPath
+                                        return (
+                                            <li key={`favorite-${projectPath}`}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setActiveProjectPath(projectPath)}
+                                                    className="w-full rounded border border-border px-3 py-2 text-left text-xs hover:bg-muted"
+                                                >
+                                                    {projectPath}
+                                                </button>
+                                            </li>
+                                        )
+                                    })
+                                )}
+                            </ul>
+                        </div>
+                        <div className="space-y-2">
+                            <p className="text-xs font-medium text-foreground">Recent</p>
+                            <ul data-testid="recent-projects-list" className="space-y-2">
+                                {recentProjects.length === 0 ? (
+                                    <li className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                                        No recent project switches yet.
+                                    </li>
+                                ) : (
+                                    recentProjects.map((project) => {
+                                        const projectPath = project.directoryPath
+                                        return (
+                                            <li key={`recent-${projectPath}`}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setActiveProjectPath(projectPath)}
+                                                    className="w-full rounded border border-border px-3 py-2 text-left text-xs hover:bg-muted"
+                                                >
+                                                    {projectPath}
+                                                </button>
+                                            </li>
+                                        )
+                                    })
+                                )}
+                            </ul>
+                        </div>
+                    </div>
                 </div>
                 <div data-testid="project-scope-entrypoints" className="rounded-md border border-border bg-card p-4 shadow-sm">
                     <div className="mb-3 space-y-1">
@@ -230,6 +294,14 @@ export function ProjectsPanel() {
                                             <div className="flex items-center justify-between gap-3">
                                                 <span className="truncate text-sm">{project.directoryPath}</span>
                                                 <div className="flex items-center gap-2">
+                                                    <button
+                                                        data-testid="favorite-toggle-button"
+                                                        type="button"
+                                                        onClick={() => toggleProjectFavorite(project.directoryPath)}
+                                                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                                                    >
+                                                        {project.isFavorite ? "Unfavorite" : "Favorite"}
+                                                    </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => setActiveProjectPath(project.directoryPath)}

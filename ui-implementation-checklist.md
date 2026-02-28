@@ -72,7 +72,7 @@ Status key:
 - [x] [4.3-01] Implement create/register project UX from local directory path.
 - [x] [4.3-02] Implement duplicate-path prevention on project create/update.
 - [x] [4.3-04] Implement persistent active-project indicator in top navigation.
-- [ ] [4.3-05] Implement recent/favorite project switching UX.
+- [x] [4.3-05] Implement recent/favorite project switching UX.
 - [ ] [4.3-06] Implement glanceable project metadata (`name`, `directory`, current branch, last activity timestamp).
 - [ ] [4.3-07] Add deep-link and restore tests for active-project identity.
 
