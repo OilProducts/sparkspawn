@@ -53,7 +53,7 @@ Status key:
 ## 4. Information Architecture
 
 - [x] [4-01] Ensure Projects, Editor, Execution, Runs, and Settings are first-class areas with stable navigation.
-- [ ] [4-03] Add route restoration behavior on refresh/reopen.
+- [x] [4-03] Add route restoration behavior on refresh/reopen.
 
 ### 4.1 Global Regions
 - [ ] [4.1-01] Keep top navigation persistent across modes with active-project, active-flow, and run action context.

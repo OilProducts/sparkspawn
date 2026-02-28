@@ -94,6 +94,48 @@ const DEFAULT_UI_DEFAULTS: UiDefaults = {
 }
 
 const UI_DEFAULTS_STORAGE_KEY = "sparkspawn.ui_defaults"
+const ROUTE_STATE_STORAGE_KEY = "sparkspawn.ui_route_state"
+const VIEW_MODES: ViewMode[] = ['projects', 'editor', 'execution', 'settings', 'runs']
+
+interface RouteState {
+    viewMode: ViewMode
+    activeFlow: string | null
+    selectedRunId: string | null
+}
+
+const DEFAULT_ROUTE_STATE: RouteState = {
+    viewMode: 'editor',
+    activeFlow: null,
+    selectedRunId: null,
+}
+
+const loadRouteState = (): RouteState => {
+    if (typeof window === "undefined") {
+        return { ...DEFAULT_ROUTE_STATE }
+    }
+    try {
+        const raw = window.localStorage.getItem(ROUTE_STATE_STORAGE_KEY)
+        if (!raw) return { ...DEFAULT_ROUTE_STATE }
+        const parsed = JSON.parse(raw) as Partial<RouteState>
+        const isValidViewMode = parsed.viewMode ? VIEW_MODES.includes(parsed.viewMode) : false
+        return {
+            viewMode: isValidViewMode ? parsed.viewMode! : DEFAULT_ROUTE_STATE.viewMode,
+            activeFlow: typeof parsed.activeFlow === "string" ? parsed.activeFlow : null,
+            selectedRunId: typeof parsed.selectedRunId === "string" ? parsed.selectedRunId : null,
+        }
+    } catch {
+        return { ...DEFAULT_ROUTE_STATE }
+    }
+}
+
+const saveRouteState = (state: RouteState) => {
+    if (typeof window === "undefined") return
+    try {
+        window.localStorage.setItem(ROUTE_STATE_STORAGE_KEY, JSON.stringify(state))
+    } catch {
+        // Ignore storage failures (private mode, quota, etc.)
+    }
+}
 
 const loadUiDefaults = (): UiDefaults => {
     if (typeof window === "undefined") {
@@ -177,17 +219,43 @@ interface AppState {
     markSaveFailure: (message: string) => void
 }
 
+const restoredRouteState = loadRouteState()
+
 export const useStore = create<AppState>((set) => ({
-    viewMode: 'editor',
-    setViewMode: (mode) => set({ viewMode: mode }),
-    activeFlow: null,
-    setActiveFlow: (flow) => set({ activeFlow: flow }),
+    viewMode: restoredRouteState.viewMode,
+    setViewMode: (mode) =>
+        set((state) => {
+            saveRouteState({
+                viewMode: mode,
+                activeFlow: state.activeFlow,
+                selectedRunId: state.selectedRunId,
+            })
+            return { viewMode: mode }
+        }),
+    activeFlow: restoredRouteState.activeFlow,
+    setActiveFlow: (flow) =>
+        set((state) => {
+            saveRouteState({
+                viewMode: state.viewMode,
+                activeFlow: flow,
+                selectedRunId: state.selectedRunId,
+            })
+            return { activeFlow: flow }
+        }),
     selectedNodeId: null,
     setSelectedNodeId: (id) => set({ selectedNodeId: id }),
     selectedEdgeId: null,
     setSelectedEdgeId: (id) => set({ selectedEdgeId: id }),
-    selectedRunId: null,
-    setSelectedRunId: (id) => set({ selectedRunId: id }),
+    selectedRunId: restoredRouteState.selectedRunId,
+    setSelectedRunId: (id) =>
+        set((state) => {
+            saveRouteState({
+                viewMode: state.viewMode,
+                activeFlow: state.activeFlow,
+                selectedRunId: id,
+            })
+            return { selectedRunId: id }
+        }),
 
     logs: [],
     addLog: (entry) => set((state) => ({ logs: [...state.logs, entry] })),
