@@ -123,21 +123,41 @@ export function RunsPanel() {
         setViewMode('execution')
     }
 
-    const requestCancel = async (runId: string) => {
+    const requestCancel = async (runId: string, currentStatus: string) => {
+        if (currentStatus !== 'running') {
+            return
+        }
         if (!window.confirm('Cancel this run? It will stop after the active node finishes.')) {
             return
         }
+        setRuns((current) =>
+            current.map((run) => (
+                run.run_id === runId
+                    ? { ...run, status: 'cancel_requested' }
+                    : run
+            ))
+        )
         try {
-            await fetch(`/pipelines/${encodeURIComponent(runId)}/cancel`, { method: 'POST' })
+            const response = await fetch(`/pipelines/${encodeURIComponent(runId)}/cancel`, { method: 'POST' })
+            if (!response.ok) {
+                throw new Error(`cancel failed with HTTP ${response.status}`)
+            }
             fetchRuns()
         } catch (err) {
             console.error(err)
+            setRuns((current) =>
+                current.map((run) => (
+                    run.run_id === runId
+                        ? { ...run, status: currentStatus }
+                        : run
+                ))
+            )
             window.alert('Failed to cancel run')
         }
     }
 
     return (
-        <div className="flex-1 overflow-auto p-6">
+        <div data-testid="runs-panel" className="flex-1 overflow-auto p-6">
             <div className="mx-auto w-full max-w-6xl space-y-6">
                 <div className="flex items-center justify-between">
                     <div className="space-y-1">
@@ -179,64 +199,80 @@ export function RunsPanel() {
                     ) : (
                         <div className="divide-y">
                             {runs.map((run) => (
-                                <div
-                                    key={run.run_id}
-                                    className={`grid grid-cols-[120px_120px_1.5fr_160px_160px_110px_120px_170px] gap-2 px-4 py-3 text-sm ${
-                                        selectedRunId === run.run_id ? 'bg-muted/40' : ''
-                                    }`}
-                                >
-                                    <span
-                                        className={`inline-flex h-6 items-center rounded-md px-2 text-[11px] font-semibold uppercase tracking-wide ${
-                                            STATUS_STYLES[run.status] || 'bg-muted text-muted-foreground'
-                                        }`}
-                                    >
-                                        {STATUS_LABELS[run.status] || run.status}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {run.result || '—'}
-                                    </span>
-                                    <div>
-                                        <div className="font-medium text-foreground">
-                                            {run.flow_name || 'Untitled'}
-                                        </div>
-                                        <div className="text-[11px] text-muted-foreground">
-                                            {run.model || 'default model'} · {run.run_id}
-                                        </div>
-                                    </div>
-                                    <span className="text-xs text-muted-foreground">
-                                        {formatTimestamp(run.started_at)}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {formatTimestamp(run.ended_at)}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {formatDuration(run.started_at, run.ended_at, run.status, now)}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {typeof run.token_usage === 'number' ? run.token_usage.toLocaleString() : '—'}
-                                    </span>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={() => openRun(run)}
-                                            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                                (() => {
+                                    const canCancel = run.status === 'running'
+                                    const cancelActionLabel = canCancel ? 'Cancel' : (
+                                        run.status === 'cancel_requested' || run.status === 'abort_requested'
+                                            ? 'Canceling…'
+                                            : run.status === 'canceled' || run.status === 'aborted'
+                                                ? 'Canceled'
+                                                : 'Cancel'
+                                    )
+                                    const cancelDisabledReason =
+                                        run.status === 'cancel_requested' || run.status === 'abort_requested'
+                                            ? 'Cancel already requested for this run.'
+                                            : run.status === 'canceled' || run.status === 'aborted'
+                                                ? 'This run is already canceled.'
+                                                : 'Cancel is only available while the run is active.'
+
+                                    return (
+                                        <div
+                                            key={run.run_id}
+                                            className={`grid grid-cols-[120px_120px_1.5fr_160px_160px_110px_120px_170px] gap-2 px-4 py-3 text-sm ${
+                                                selectedRunId === run.run_id ? 'bg-muted/40' : ''
+                                            }`}
                                         >
-                                            <Eye className="h-3.5 w-3.5" />
-                                            Open
-                                        </button>
-                                        <button
-                                            onClick={() => requestCancel(run.run_id)}
-                                            disabled={!(
-                                                run.status === 'running'
-                                                || run.status === 'cancel_requested'
-                                                || run.status === 'abort_requested'
-                                            )}
-                                            className="inline-flex h-7 items-center gap-1.5 rounded-md bg-destructive px-2 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
-                                        >
-                                            <OctagonX className="h-3.5 w-3.5" />
-                                            Cancel
-                                        </button>
-                                    </div>
-                                </div>
+                                            <span
+                                                className={`inline-flex h-6 items-center rounded-md px-2 text-[11px] font-semibold uppercase tracking-wide ${
+                                                    STATUS_STYLES[run.status] || 'bg-muted text-muted-foreground'
+                                                }`}
+                                            >
+                                                {STATUS_LABELS[run.status] || run.status}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {run.result || '—'}
+                                            </span>
+                                            <div>
+                                                <div className="font-medium text-foreground">
+                                                    {run.flow_name || 'Untitled'}
+                                                </div>
+                                                <div className="text-[11px] text-muted-foreground">
+                                                    {run.model || 'default model'} · {run.run_id}
+                                                </div>
+                                            </div>
+                                            <span className="text-xs text-muted-foreground">
+                                                {formatTimestamp(run.started_at)}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {formatTimestamp(run.ended_at)}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {formatDuration(run.started_at, run.ended_at, run.status, now)}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {typeof run.token_usage === 'number' ? run.token_usage.toLocaleString() : '—'}
+                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => openRun(run)}
+                                                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                                                >
+                                                    <Eye className="h-3.5 w-3.5" />
+                                                    Open
+                                                </button>
+                                                <button
+                                                    onClick={() => requestCancel(run.run_id, run.status)}
+                                                    disabled={!canCancel}
+                                                    title={canCancel ? undefined : cancelDisabledReason}
+                                                    className="inline-flex h-7 items-center gap-1.5 rounded-md bg-destructive px-2 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
+                                                >
+                                                    <OctagonX className="h-3.5 w-3.5" />
+                                                    {cancelActionLabel}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )
+                                })()
                             ))}
                         </div>
                     )}

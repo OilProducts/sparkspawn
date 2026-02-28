@@ -35,7 +35,7 @@ Status key:
 - [x] [2-02] Add no-silent-loss save protections and user-visible failure states.
 - [x] [2-03] Ensure progressive disclosure for advanced fields while preserving full editability.
 - [x] [2-04] Add explainability views for routing, retry, and failure decisions.
-- [ ] [2-05] Add confirmations and clear status transitions for destructive/operational actions.
+- [x] [2-05] Add confirmations and clear status transitions for destructive/operational actions.
 - [ ] [2-06] Standardize graph/node/edge inspector interaction patterns.
 
 ---
