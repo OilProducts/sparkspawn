@@ -1,0 +1,13 @@
+digraph reference_1_1_03_manager_and_human {
+  graph [label="Raw DOT manager and human baseline", stack.child_dotfile="child/manager.dot", stack.child_workdir="/tmp/project-child"];
+  approval [human.default_choice="Approve", prompt="Approve rollout?", shape="hexagon"];
+  exit [shape="Msquare"];
+  implement [prompt="Implement approved updates", shape="box"];
+  manager [manager.actions="observe,steer", manager.max_cycles=3, manager.poll_interval=5s, manager.stop_condition="context.done=true", shape="house", type="stack.manager_loop"];
+  start [shape="Mdiamond"];
+  approval -> exit [label="Cancel"];
+  approval -> implement [label="Approve"];
+  implement -> exit;
+  manager -> approval;
+  start -> manager;
+}

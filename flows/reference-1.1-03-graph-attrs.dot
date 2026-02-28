@@ -1,0 +1,8 @@
+digraph reference_1_1_03_graph_attrs {
+  graph [label="Raw DOT graph attrs baseline", stack.child_dotfile="child/manager.dot", stack.child_workdir="/tmp/project-child", tool_hooks.post="echo post-hook", tool_hooks.pre="echo pre-hook"];
+  exit [shape="Msquare"];
+  plan [prompt="Plan with advanced graph attrs", shape="box"];
+  start [shape="Mdiamond"];
+  plan -> exit;
+  start -> plan;
+}
