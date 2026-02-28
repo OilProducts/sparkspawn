@@ -5,7 +5,8 @@ import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } fro
 import { generateDot, sanitizeGraphId } from "@/lib/dotUtils"
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
 import { getHandlerType, getNodeFieldVisibility } from "@/lib/nodeVisibility"
-import { saveFlowContent } from "@/lib/flowPersistence"
+import { retryLastSaveContent, saveFlowContent } from "@/lib/flowPersistence"
+import { resolveSaveRemediation } from "@/lib/saveRemediation"
 import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
 import { GraphSettings } from './GraphSettings'
 
@@ -36,6 +37,7 @@ export function Sidebar() {
     const uiDefaults = useStore((state) => state.uiDefaults)
     const saveState = useStore((state) => state.saveState)
     const saveErrorMessage = useStore((state) => state.saveErrorMessage)
+    const saveErrorKind = useStore((state) => state.saveErrorKind)
     const [flows, setFlows] = useState<string[]>([])
     const [showAdvanced, setShowAdvanced] = useState(false)
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
@@ -173,6 +175,11 @@ export function Sidebar() {
                 : saveState === 'error'
                     ? 'Save Failed'
                     : 'Idle'
+    const remediation = resolveSaveRemediation(saveState, saveErrorKind)
+
+    const handleRetrySave = () => {
+        void retryLastSaveContent()
+    }
 
     const handleEdgePropertyChange = (key: string, value: string | boolean) => {
         if (!selectedEdgeId || !activeFlow) return;
@@ -233,6 +240,21 @@ export function Sidebar() {
                 >
                     <span>{saveStateLabel}</span>
                     {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
+                    {remediation ? (
+                        <p data-testid="save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
+                            {remediation.message}
+                        </p>
+                    ) : null}
+                    {remediation?.allowRetry ? (
+                        <button
+                            type="button"
+                            data-testid="save-remediation-retry"
+                            onClick={handleRetrySave}
+                            className="mt-2 inline-flex rounded border border-current px-2 py-0.5 text-[10px] font-semibold hover:bg-current/10"
+                        >
+                            Retry Save
+                        </button>
+                    ) : null}
                 </div>
             </div>
 

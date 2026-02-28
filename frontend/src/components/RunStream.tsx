@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from '@/store'
+import { resolveSaveRemediation } from '@/lib/saveRemediation'
 
 function classifyLog(message: string): 'info' | 'success' | 'error' {
     const lower = message.toLowerCase()
@@ -59,6 +60,7 @@ export function RunStream() {
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const saveState = useStore((state) => state.saveState)
     const saveErrorMessage = useStore((state) => state.saveErrorMessage)
+    const saveErrorKind = useStore((state) => state.saveErrorKind)
     const saveStateLabel =
         saveState === 'saving'
             ? 'Saving...'
@@ -69,6 +71,7 @@ export function RunStream() {
                 : saveState === 'error'
                     ? 'Save Failed'
                     : 'Idle'
+    const remediation = resolveSaveRemediation(saveState, saveErrorKind)
 
     useEffect(() => {
         resetNodeStatuses()
@@ -177,6 +180,11 @@ export function RunStream() {
             >
                 <span>{saveStateLabel}</span>
                 {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
+                {remediation ? (
+                    <p data-testid="global-save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
+                        {remediation.message}
+                    </p>
+                ) : null}
             </div>
         </div>
     )

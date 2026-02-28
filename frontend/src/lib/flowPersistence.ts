@@ -1,4 +1,4 @@
-import { useStore } from '@/store'
+import { useStore, type SaveErrorKind } from '@/store'
 
 interface SaveFlowErrorDetail {
     status?: string
@@ -6,6 +6,7 @@ interface SaveFlowErrorDetail {
 }
 
 const FALLBACK_SAVE_FAILURE_MESSAGE = 'Flow save failed before confirmation from backend.'
+let lastSaveRequest: { name: string; content: string } | null = null
 
 function parseErrorDetail(payload: unknown): SaveFlowErrorDetail {
     if (!payload || typeof payload !== 'object') {
@@ -33,8 +34,14 @@ function buildErrorMessage(status: string | undefined, error: string | undefined
     return `Flow save failed with HTTP ${statusCode}.`
 }
 
+export async function retryLastSaveContent(): Promise<boolean> {
+    if (!lastSaveRequest) return false
+    return saveFlowContent(lastSaveRequest.name, lastSaveRequest.content)
+}
+
 export async function saveFlowContent(name: string, content: string): Promise<boolean> {
     const { markSaveInFlight, markSaveSuccess, markSaveFailure, markSaveConflict } = useStore.getState()
+    lastSaveRequest = { name, content }
     markSaveInFlight()
 
     let response: Response
@@ -46,7 +53,7 @@ export async function saveFlowContent(name: string, content: string): Promise<bo
         })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'network error while saving flow'
-        markSaveFailure(`Flow save failed: ${message}`)
+        markSaveFailure(`Flow save failed: ${message}`, 'network')
         return false
     }
 
@@ -64,7 +71,13 @@ export async function saveFlowContent(name: string, content: string): Promise<bo
             markSaveConflict(message)
             return false
         }
-        markSaveFailure(message)
+        let errorKind: SaveErrorKind = 'http'
+        if (detail.status === 'parse_error') {
+            errorKind = 'parse_error'
+        } else if (detail.status === 'validation_error') {
+            errorKind = 'validation_error'
+        }
+        markSaveFailure(message, errorKind)
         return false
     }
 
@@ -76,7 +89,7 @@ export async function saveFlowContent(name: string, content: string): Promise<bo
             markSaveConflict(buildErrorMessage(status, undefined, response.status))
             return false
         }
-        markSaveFailure(FALLBACK_SAVE_FAILURE_MESSAGE)
+        markSaveFailure(FALLBACK_SAVE_FAILURE_MESSAGE, 'unknown')
         return false
     }
 

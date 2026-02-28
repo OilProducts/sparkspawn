@@ -14,6 +14,7 @@ export type RuntimeStatus =
     | 'validation_error'
     | 'success'
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict'
+export type SaveErrorKind = 'parse_error' | 'validation_error' | 'conflict' | 'network' | 'http' | 'unknown'
 
 export interface HumanGateOption {
     label: string
@@ -300,10 +301,11 @@ interface AppState {
 
     saveState: SaveState
     saveErrorMessage: string | null
+    saveErrorKind: SaveErrorKind | null
     markSaveInFlight: () => void
     markSaveSuccess: () => void
     markSaveConflict: (message: string) => void
-    markSaveFailure: (message: string) => void
+    markSaveFailure: (message: string, kind?: SaveErrorKind) => void
 }
 
 const restoredRouteState = loadRouteState()
@@ -766,16 +768,19 @@ export const useStore = create<AppState>((set) => ({
 
     saveState: 'idle',
     saveErrorMessage: null,
-    markSaveInFlight: () => set({ saveState: 'saving', saveErrorMessage: null }),
-    markSaveSuccess: () => set({ saveState: 'saved', saveErrorMessage: null }),
+    saveErrorKind: null,
+    markSaveInFlight: () => set({ saveState: 'saving', saveErrorMessage: null, saveErrorKind: null }),
+    markSaveSuccess: () => set({ saveState: 'saved', saveErrorMessage: null, saveErrorKind: null }),
     markSaveConflict: (message) =>
         set({
             saveState: 'conflict',
             saveErrorMessage: message || 'Flow save conflict detected.',
+            saveErrorKind: 'conflict',
         }),
-    markSaveFailure: (message) =>
+    markSaveFailure: (message, kind = 'unknown') =>
         set({
             saveState: 'error',
             saveErrorMessage: message || 'Flow save failed.',
+            saveErrorKind: kind,
         }),
 }))
