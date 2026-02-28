@@ -43,7 +43,7 @@ Status key:
 ## 3. Users and Primary Workflows
 
 ### 3.1 User Roles
-- [ ] [3.1-01] Capture author/operator/reviewer/project-owner persona scenarios with concrete UI success criteria.
+- [x] [3.1-01] Capture author/operator/reviewer/project-owner persona scenarios with concrete UI success criteria. (See `ui-role-persona-scenarios.md`.)
 - [ ] [3.1-02] Add role-oriented smoke tests (project onboarding, authoring, live operation, post-run audit).
 
 ### 3.2 Primary Workflows
