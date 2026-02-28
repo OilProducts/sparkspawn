@@ -67,8 +67,27 @@ const formatDuration = (start?: string, end?: string | null, status?: string, no
     return `${remSeconds}s`
 }
 
+const normalizeScopePath = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) return ''
+    const slashNormalized = trimmed.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
+    return slashNormalized.replace(/\/+$/, '') || slashNormalized
+}
+
+const runBelongsToProjectScope = (run: RunRecord, projectPath: string) => {
+    const normalizedProjectPath = normalizeScopePath(projectPath)
+    if (!normalizedProjectPath) return false
+
+    const runWorkingDirectory = normalizeScopePath(run.working_directory || '')
+    if (!runWorkingDirectory) return false
+    if (runWorkingDirectory === normalizedProjectPath) return true
+
+    return runWorkingDirectory.startsWith(`${normalizedProjectPath}/`)
+}
+
 export function RunsPanel() {
     const viewMode = useStore((state) => state.viewMode)
+    const activeProjectPath = useStore((state) => state.activeProjectPath)
     const selectedRunId = useStore((state) => state.selectedRunId)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const setViewMode = useStore((state) => state.setViewMode)
@@ -107,13 +126,18 @@ export function RunsPanel() {
         return () => window.clearInterval(interval)
     }, [viewMode])
 
+    const scopedRuns = useMemo(() => {
+        if (!activeProjectPath) return []
+        return runs.filter((run) => runBelongsToProjectScope(run, activeProjectPath))
+    }, [runs, activeProjectPath])
+
     const summary = useMemo(() => {
-        const total = runs.length
-        const running = runs.filter(
+        const total = scopedRuns.length
+        const running = scopedRuns.filter(
             (run) => run.status === 'running' || run.status === 'cancel_requested' || run.status === 'abort_requested'
         ).length
         return { total, running }
-    }, [runs])
+    }, [scopedRuns])
 
     const openRun = (run: RunRecord) => {
         setSelectedRunId(run.run_id)
@@ -180,6 +204,11 @@ export function RunsPanel() {
                         {error}
                     </div>
                 )}
+                {!activeProjectPath && (
+                    <div className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+                        Select an active project to view run history for that project.
+                    </div>
+                )}
 
                 <div className="rounded-md border border-border bg-card shadow-sm">
                     <div className="grid grid-cols-[120px_120px_1.5fr_160px_160px_110px_120px_170px] gap-2 border-b px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -192,13 +221,13 @@ export function RunsPanel() {
                         <span>Tokens</span>
                         <span>Actions</span>
                     </div>
-                    {runs.length === 0 ? (
+                    {scopedRuns.length === 0 ? (
                         <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                            No runs yet.
+                            {activeProjectPath ? 'No runs for the active project yet.' : 'No runs yet.'}
                         </div>
                     ) : (
                         <div className="divide-y">
-                            {runs.map((run) => (
+                            {scopedRuns.map((run) => (
                                 (() => {
                                     const canCancel = run.status === 'running'
                                     const cancelActionLabel = canCancel ? 'Cancel' : (
