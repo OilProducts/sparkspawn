@@ -86,6 +86,9 @@ export function generateDot(
         const managerActionsValue = typeof n.data['manager.actions'] === 'string'
             ? n.data['manager.actions']
             : '';
+        const humanDefaultChoiceValue = typeof n.data['human.default_choice'] === 'string'
+            ? n.data['human.default_choice']
+            : '';
 
         const label = `"${escapeDotString(labelValue)}"`;
         const shape = shapeValue ? `shape=${formatAttrValue(shapeValue)}` : '';
@@ -121,6 +124,7 @@ export function generateDot(
             _formatIntAttr('manager.max_cycles', managerMaxCyclesValue),
             managerStopConditionValue ? `manager.stop_condition="${escapeDotString(managerStopConditionValue)}"` : '',
             managerActionsValue ? `manager.actions="${escapeDotString(managerActionsValue)}"` : '',
+            humanDefaultChoiceValue ? `human.default_choice=${formatAttrValue(humanDefaultChoiceValue)}` : '',
         ].filter(Boolean).join(', ');
 
         dot += `  ${n.id} [${attrs}];\n`;

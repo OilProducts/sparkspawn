@@ -119,7 +119,7 @@ Status key:
 
 ### 6.2 Node Authoring and Editing
 - [x] [6.2-01] Add full handler type support including `stack.manager_loop` authoring controls.
-- [ ] [6.2-02] Add complete advanced node attributes editor for all spec node attrs.
+- [x] [6.2-02] Add complete advanced node attributes editor for all spec node attrs.
 - [ ] [6.2-03] Support shape-derived defaults with explicit `type` override behavior.
 - [ ] [6.2-04] Add tests for node attribute round-trip across all handler types.
 

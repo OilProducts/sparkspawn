@@ -65,6 +65,9 @@ export function TaskNode({ id, data, selected }: NodeProps) {
     const [draftManagerActions, setDraftManagerActions] = useState<string>(
         (data['manager.actions'] as string) || ''
     );
+    const [draftHumanDefaultChoice, setDraftHumanDefaultChoice] = useState<string>(
+        (data['human.default_choice'] as string) || ''
+    );
     const status = (data.status as string) || 'idle';
     const handlerType = getHandlerType(draftShape, draftType);
     const visibility = getNodeFieldVisibility(handlerType);
@@ -153,6 +156,7 @@ export function TaskNode({ id, data, selected }: NodeProps) {
         setDraftManagerMaxCycles(data['manager.max_cycles'] !== undefined ? String(data['manager.max_cycles']) : '');
         setDraftManagerStopCondition((data['manager.stop_condition'] as string) || '');
         setDraftManagerActions((data['manager.actions'] as string) || '');
+        setDraftHumanDefaultChoice((data['human.default_choice'] as string) || '');
         setIsEditingDetails(true);
     };
 
@@ -186,6 +190,7 @@ export function TaskNode({ id, data, selected }: NodeProps) {
             'manager.max_cycles': draftManagerMaxCycles,
             'manager.stop_condition': draftManagerStopCondition,
             'manager.actions': draftManagerActions,
+            'human.default_choice': draftHumanDefaultChoice,
         });
         setIsEditingDetails(false);
     };
@@ -389,6 +394,17 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                     />
                                 </div>
                             </>
+                        )}
+                        {visibility.showHumanDefaultChoice && (
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Human Default Choice</label>
+                                <input
+                                    value={draftHumanDefaultChoice}
+                                    onChange={(event) => setDraftHumanDefaultChoice(event.target.value)}
+                                    className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    placeholder="target node id"
+                                />
+                            </div>
                         )}
                         {visibility.showAdvanced && (
                             <button

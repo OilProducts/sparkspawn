@@ -1148,6 +1148,7 @@ def _graph_payload(graph) -> dict:
                 "manager.max_cycles": _attr_value(n.attrs, "manager.max_cycles"),
                 "manager.stop_condition": _attr_value(n.attrs, "manager.stop_condition"),
                 "manager.actions": _attr_value(n.attrs, "manager.actions"),
+                "human.default_choice": _attr_value(n.attrs, "human.default_choice"),
             }
             for n in graph.nodes.values()
         ],

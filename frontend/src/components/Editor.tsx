@@ -70,6 +70,7 @@ interface PreviewNode {
     'manager.max_cycles'?: number | string
     'manager.stop_condition'?: string
     'manager.actions'?: string
+    'human.default_choice'?: string
 }
 
 interface PreviewEdge {
@@ -271,6 +272,7 @@ export function Editor() {
                 'manager.max_cycles': n['manager.max_cycles'] ?? '',
                 'manager.stop_condition': n['manager.stop_condition'] ?? '',
                 'manager.actions': n['manager.actions'] ?? '',
+                'human.default_choice': n['human.default_choice'] ?? '',
                 status: 'idle'
             },
         }));

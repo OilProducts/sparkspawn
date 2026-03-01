@@ -447,6 +447,17 @@ export function Sidebar() {
                                         </div>
                                     </>
                                 )}
+                                {visibility.showHumanDefaultChoice && (
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-medium">Human Default Choice</label>
+                                        <input
+                                            value={(selectedNode?.data?.['human.default_choice'] as string) || ''}
+                                            onChange={(e) => handlePropertyChange('human.default_choice', e.target.value)}
+                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            placeholder="target node id"
+                                        />
+                                    </div>
+                                )}
                                 {visibility.showAdvanced && (
                                     <button
                                         onClick={() => setShowAdvanced((prev) => !prev)}
