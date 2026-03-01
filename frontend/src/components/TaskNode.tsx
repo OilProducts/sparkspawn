@@ -23,6 +23,8 @@ export function TaskNode({ id, data, selected }: NodeProps) {
     const [draftShape, setDraftShape] = useState<string>((data.shape as string) || 'box');
     const [draftPrompt, setDraftPrompt] = useState<string>((data.prompt as string) || '');
     const [draftToolCommand, setDraftToolCommand] = useState<string>((data.tool_command as string) || '');
+    const [draftToolHooksPre, setDraftToolHooksPre] = useState<string>((data['tool_hooks.pre'] as string) || '');
+    const [draftToolHooksPost, setDraftToolHooksPost] = useState<string>((data['tool_hooks.post'] as string) || '');
     const [draftJoinPolicy, setDraftJoinPolicy] = useState<string>((data.join_policy as string) || 'wait_all');
     const [draftErrorPolicy, setDraftErrorPolicy] = useState<string>((data.error_policy as string) || 'continue');
     const [draftMaxParallel, setDraftMaxParallel] = useState<string>(
@@ -135,6 +137,8 @@ export function TaskNode({ id, data, selected }: NodeProps) {
         setDraftShape((data.shape as string) || 'box');
         setDraftPrompt((data.prompt as string) || '');
         setDraftToolCommand((data.tool_command as string) || '');
+        setDraftToolHooksPre((data['tool_hooks.pre'] as string) || '');
+        setDraftToolHooksPost((data['tool_hooks.post'] as string) || '');
         setDraftJoinPolicy((data.join_policy as string) || 'wait_all');
         setDraftErrorPolicy((data.error_policy as string) || 'continue');
         setDraftMaxParallel(data.max_parallel !== undefined ? String(data.max_parallel) : '4');
@@ -169,6 +173,8 @@ export function TaskNode({ id, data, selected }: NodeProps) {
             shape: draftShape,
             prompt: draftPrompt,
             tool_command: draftToolCommand,
+            'tool_hooks.pre': draftToolHooksPre,
+            'tool_hooks.post': draftToolHooksPost,
             join_policy: draftJoinPolicy,
             error_policy: draftErrorPolicy,
             max_parallel: draftMaxParallel,
@@ -476,6 +482,30 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                                 className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                             />
                                         </div>
+                                        {visibility.showToolCommand && (
+                                            <>
+                                                <div className="space-y-1">
+                                                    <label className="text-xs font-medium text-foreground">Pre Hook Override</label>
+                                                    <input
+                                                        data-testid="node-toolbar-attr-input-tool_hooks.pre"
+                                                        value={draftToolHooksPre}
+                                                        onChange={(event) => setDraftToolHooksPre(event.target.value)}
+                                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        placeholder="e.g. ./hooks/pre.sh"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-xs font-medium text-foreground">Post Hook Override</label>
+                                                    <input
+                                                        data-testid="node-toolbar-attr-input-tool_hooks.post"
+                                                        value={draftToolHooksPost}
+                                                        onChange={(event) => setDraftToolHooksPost(event.target.value)}
+                                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        placeholder="e.g. ./hooks/post.sh"
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
                                         <div className="grid grid-cols-2 gap-2">
                                             <div className="space-y-1">
                                                 <label className="text-xs font-medium text-foreground">Fidelity</label>

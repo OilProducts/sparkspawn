@@ -51,6 +51,8 @@ export function generateDot(
         const shapeValue = typeof n.data.shape === 'string' ? n.data.shape : '';
         const promptValue = typeof n.data.prompt === 'string' ? n.data.prompt : '';
         const toolCommandValue = typeof n.data.tool_command === 'string' ? n.data.tool_command : '';
+        const toolHooksPreValue = typeof n.data['tool_hooks.pre'] === 'string' ? n.data['tool_hooks.pre'] : '';
+        const toolHooksPostValue = typeof n.data['tool_hooks.post'] === 'string' ? n.data['tool_hooks.post'] : '';
         const joinPolicyValue = typeof n.data.join_policy === 'string' ? n.data.join_policy : '';
         const errorPolicyValue = typeof n.data.error_policy === 'string' ? n.data.error_policy : '';
         const maxParallelValue = typeof n.data.max_parallel === 'string' || typeof n.data.max_parallel === 'number'
@@ -94,6 +96,8 @@ export function generateDot(
         const shape = shapeValue ? `shape=${formatAttrValue(shapeValue)}` : '';
         const prompt = promptValue ? `prompt="${escapeDotString(promptValue)}"` : '';
         const toolCommand = toolCommandValue ? `tool_command="${escapeDotString(toolCommandValue)}"` : '';
+        const toolHooksPre = toolHooksPreValue ? `tool_hooks.pre="${escapeDotString(toolHooksPreValue)}"` : '';
+        const toolHooksPost = toolHooksPostValue ? `tool_hooks.post="${escapeDotString(toolHooksPostValue)}"` : '';
         const joinPolicy = joinPolicyValue ? `join_policy=${formatAttrValue(joinPolicyValue)}` : '';
         const errorPolicy = errorPolicyValue ? `error_policy=${formatAttrValue(errorPolicyValue)}` : '';
         const maxParallel = _formatIntAttr('max_parallel', maxParallelValue);
@@ -103,6 +107,8 @@ export function generateDot(
             shape,
             prompt,
             toolCommand,
+            toolHooksPre,
+            toolHooksPost,
             joinPolicy,
             errorPolicy,
             maxParallel,

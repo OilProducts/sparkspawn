@@ -49,6 +49,8 @@ interface PreviewNode {
     shape?: string
     prompt?: string
     tool_command?: string
+    'tool_hooks.pre'?: string
+    'tool_hooks.post'?: string
     join_policy?: string
     error_policy?: string
     max_parallel?: number | string
@@ -251,6 +253,8 @@ export function Editor() {
                 shape: n.shape ?? 'box',
                 prompt: n.prompt ?? '',
                 tool_command: n.tool_command ?? '',
+                'tool_hooks.pre': n['tool_hooks.pre'] ?? '',
+                'tool_hooks.post': n['tool_hooks.post'] ?? '',
                 join_policy: n.join_policy ?? 'wait_all',
                 error_policy: n.error_policy ?? 'continue',
                 max_parallel: n.max_parallel ?? 4,

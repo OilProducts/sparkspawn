@@ -535,6 +535,30 @@ export function Sidebar() {
                                                         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                                     />
                                                 </div>
+                                                {visibility.showToolCommand && (
+                                                    <>
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-sm font-medium">Pre Hook Override</label>
+                                                            <input
+                                                                data-testid="node-attr-input-tool_hooks.pre"
+                                                                value={(selectedNode?.data?.['tool_hooks.pre'] as string) || ''}
+                                                                onChange={(e) => handlePropertyChange('tool_hooks.pre', e.target.value)}
+                                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                                placeholder="e.g. ./hooks/pre.sh"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-sm font-medium">Post Hook Override</label>
+                                                            <input
+                                                                data-testid="node-attr-input-tool_hooks.post"
+                                                                value={(selectedNode?.data?.['tool_hooks.post'] as string) || ''}
+                                                                onChange={(e) => handlePropertyChange('tool_hooks.post', e.target.value)}
+                                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                                placeholder="e.g. ./hooks/post.sh"
+                                                            />
+                                                        </div>
+                                                    </>
+                                                )}
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1.5">
                                                         <label className="text-sm font-medium">Fidelity</label>
