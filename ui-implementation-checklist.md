@@ -101,7 +101,7 @@ Status key:
 
 ### 5.5 AI Conversation and Spec Authoring Loop
 - [x] [5.5-01] Implement project-scoped AI conversation surface for start/continue flows.
-- [ ] [5.5-02] Persist and render conversation history per project.
+- [x] [5.5-02] Persist and render conversation history per project.
 - [ ] [5.5-03] Implement explicit proposal UX for AI-generated spec edits (preview before apply).
 - [ ] [5.5-04] Require explicit user confirmation before applying proposed spec edits.
 - [ ] [5.5-05] Ensure reject actions do not mutate spec files.
@@ -557,4 +557,4 @@ Status key:
 - [ ] [4.3-03] Implement Git verification UI with explicit initialize action path.
   Deferred because the frontend currently has no project Git verification/initialize API contract to drive real status checks or an explicit initialize action flow.
 - [ ] [5.4-02] Inject active project directory and repository metadata into AI conversation context.
-  Deferred because the AI conversation surface and request pipeline (`5.5-01` through `5.5-02`) are not implemented yet, so there is no concrete conversation payload path to inject this context into.
+  Deferred because the request pipeline for real AI conversation payloads is still not implemented, so there is no concrete backend-bound conversation context path to inject this metadata into yet.

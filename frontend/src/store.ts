@@ -61,6 +61,12 @@ export interface ProjectRegistrationResult {
     error?: string
 }
 
+export interface ConversationHistoryEntry {
+    role: 'user' | 'assistant' | 'system'
+    content: string
+    timestamp: string
+}
+
 export interface DiagnosticEntry {
     rule_id: string
     severity: DiagnosticSeverity
@@ -108,6 +114,7 @@ const DEFAULT_UI_DEFAULTS: UiDefaults = {
 
 const UI_DEFAULTS_STORAGE_KEY = "sparkspawn.ui_defaults"
 const ROUTE_STATE_STORAGE_KEY = "sparkspawn.ui_route_state"
+const PROJECT_CONVERSATION_STATE_STORAGE_KEY = "sparkspawn.project_conversation_state"
 const DEFAULT_WORKING_DIRECTORY = "./test-app"
 const RECENT_PROJECT_LIMIT = 5
 const VIEW_MODES: ViewMode[] = ['projects', 'editor', 'execution', 'settings', 'runs']
@@ -143,28 +150,114 @@ interface ProjectScopedWorkspace {
     selectedRunId: string | null
     workingDir: string
     conversationId: string | null
+    conversationHistory: ConversationHistoryEntry[]
     specId: string | null
     planId: string | null
     artifactRunId: string | null
 }
+
+type PersistedProjectConversationState = Record<
+    string,
+    {
+        conversationId: string | null
+        conversationHistory: ConversationHistoryEntry[]
+    }
+>
 
 const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
     activeFlow: null,
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     conversationId: null,
+    conversationHistory: [],
     specId: null,
     planId: null,
     artifactRunId: null,
 }
 
+const coerceConversationHistoryEntry = (value: unknown): ConversationHistoryEntry | null => {
+    if (!value || typeof value !== "object") {
+        return null
+    }
+    const candidate = value as Partial<ConversationHistoryEntry>
+    if (
+        (candidate.role === "user" || candidate.role === "assistant" || candidate.role === "system")
+        && typeof candidate.content === "string"
+        && typeof candidate.timestamp === "string"
+    ) {
+        return {
+            role: candidate.role,
+            content: candidate.content,
+            timestamp: candidate.timestamp,
+        }
+    }
+    return null
+}
+
+const loadProjectConversationState = (): PersistedProjectConversationState => {
+    if (typeof window === "undefined") {
+        return {}
+    }
+    try {
+        const raw = window.localStorage.getItem(PROJECT_CONVERSATION_STATE_STORAGE_KEY)
+        if (!raw) {
+            return {}
+        }
+        const parsed = JSON.parse(raw) as Record<string, unknown>
+        const restored: PersistedProjectConversationState = {}
+        Object.entries(parsed).forEach(([projectPath, value]) => {
+            if (!value || typeof value !== "object") {
+                return
+            }
+            const scope = value as {
+                conversationId?: unknown
+                conversationHistory?: unknown
+            }
+            const history = Array.isArray(scope.conversationHistory)
+                ? scope.conversationHistory
+                    .map(coerceConversationHistoryEntry)
+                    .filter((entry): entry is ConversationHistoryEntry => entry !== null)
+                : []
+            restored[projectPath] = {
+                conversationId: typeof scope.conversationId === "string" ? scope.conversationId : null,
+                conversationHistory: history,
+            }
+        })
+        return restored
+    } catch {
+        return {}
+    }
+}
+
+const saveProjectConversationState = (projectScopedWorkspaces: Record<string, ProjectScopedWorkspace>) => {
+    if (typeof window === "undefined") {
+        return
+    }
+    try {
+        const persisted: PersistedProjectConversationState = {}
+        Object.entries(projectScopedWorkspaces).forEach(([projectPath, workspace]) => {
+            persisted[projectPath] = {
+                conversationId: workspace.conversationId,
+                conversationHistory: workspace.conversationHistory,
+            }
+        })
+        window.localStorage.setItem(PROJECT_CONVERSATION_STATE_STORAGE_KEY, JSON.stringify(persisted))
+    } catch {
+        // Ignore storage failures (private mode, quota, etc.)
+    }
+}
+
+const restoredProjectConversationState = loadProjectConversationState()
+
 const resolveProjectScopedWorkspace = (
-    workspace: ProjectScopedWorkspace | undefined,
+    workspace: Partial<ProjectScopedWorkspace> | undefined,
     projectPath: string | null
 ): ProjectScopedWorkspace => {
     const defaultWorkingDir = projectPath || DEFAULT_WORKING_DIRECTORY
+    const restoredConversationState = projectPath ? restoredProjectConversationState[projectPath] : undefined
     return {
         ...DEFAULT_PROJECT_SCOPED_WORKSPACE,
+        ...restoredConversationState,
         ...workspace,
         workingDir: workspace?.workingDir || defaultWorkingDir,
     }
@@ -259,6 +352,7 @@ interface AppState {
     selectedRunId: string | null
     setSelectedRunId: (id: string | null) => void
     setConversationId: (id: string | null) => void
+    appendConversationHistoryEntry: (entry: ConversationHistoryEntry) => void
     setSpecId: (id: string | null) => void
     setPlanId: (id: string | null) => void
 
@@ -313,7 +407,6 @@ const initialProjectScopedWorkspaces: Record<string, ProjectScopedWorkspace> = r
     ? {
         [restoredRouteState.activeProjectPath]: resolveProjectScopedWorkspace(
             {
-                ...DEFAULT_PROJECT_SCOPED_WORKSPACE,
                 activeFlow: restoredRouteState.activeFlow,
                 selectedRunId: restoredRouteState.selectedRunId,
             },
@@ -563,6 +656,7 @@ export const useStore = create<AppState>((set) => ({
                 activeFlow: state.activeFlow,
                 selectedRunId: state.selectedRunId,
             })
+            saveProjectConversationState(nextProjectScopedWorkspaces)
             result = {
                 ok: true,
                 normalizedPath: normalizedNextPath,
@@ -663,6 +757,23 @@ export const useStore = create<AppState>((set) => ({
                 ...scoped,
                 conversationId: id,
             }
+            saveProjectConversationState(nextProjectScopedWorkspaces)
+            return {
+                projectScopedWorkspaces: nextProjectScopedWorkspaces,
+            }
+        }),
+    appendConversationHistoryEntry: (entry) =>
+        set((state) => {
+            if (!state.activeProjectPath) {
+                return {}
+            }
+            const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
+            const scoped = resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[state.activeProjectPath], state.activeProjectPath)
+            nextProjectScopedWorkspaces[state.activeProjectPath] = {
+                ...scoped,
+                conversationHistory: [...scoped.conversationHistory, entry],
+            }
+            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }

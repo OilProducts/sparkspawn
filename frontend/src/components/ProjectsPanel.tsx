@@ -1,4 +1,4 @@
-import { useStore } from "@/store"
+import { type ConversationHistoryEntry, useStore } from "@/store"
 import { type FormEvent, useEffect, useState } from "react"
 
 const buildProjectScopedArtifactId = (artifactType: "conversation" | "spec" | "plan", projectPath: string) => {
@@ -23,6 +23,7 @@ export function ProjectsPanel() {
     const clearProjectRegistrationError = useStore((state) => state.clearProjectRegistrationError)
     const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
     const setConversationId = useStore((state) => state.setConversationId)
+    const appendConversationHistoryEntry = useStore((state) => state.appendConversationHistoryEntry)
     const setSpecId = useStore((state) => state.setSpecId)
     const setPlanId = useStore((state) => state.setPlanId)
     const [directoryPathInput, setDirectoryPathInput] = useState("")
@@ -34,6 +35,7 @@ export function ProjectsPanel() {
     const recentProjects = recentProjectPaths
         .map((projectPath) => projectRegistry[projectPath])
         .filter((project): project is (typeof projects)[number] => Boolean(project))
+    const activeConversationHistory = activeProjectScope?.conversationHistory || []
 
     useEffect(() => {
         const projectPathsToFetch = projects
@@ -125,7 +127,14 @@ export function ProjectsPanel() {
         if (!activeProjectPath) {
             return
         }
-        setConversationId(buildProjectScopedArtifactId("conversation", activeProjectPath))
+        const conversationId = buildProjectScopedArtifactId("conversation", activeProjectPath)
+        setConversationId(conversationId)
+        const entry: ConversationHistoryEntry = {
+            role: "system",
+            content: `Started conversation ${conversationId}.`,
+            timestamp: new Date().toISOString(),
+        }
+        appendConversationHistoryEntry(entry)
     }
 
     const onContinueConversation = () => {
@@ -133,6 +142,12 @@ export function ProjectsPanel() {
             return
         }
         setConversationId(activeProjectScope.conversationId)
+        const entry: ConversationHistoryEntry = {
+            role: "system",
+            content: `Continued conversation ${activeProjectScope.conversationId}.`,
+            timestamp: new Date().toISOString(),
+        }
+        appendConversationHistoryEntry(entry)
     }
 
     const onOpenSpec = () => {
@@ -147,6 +162,14 @@ export function ProjectsPanel() {
             return
         }
         setPlanId(activeProjectScope?.planId || buildProjectScopedArtifactId("plan", activeProjectPath))
+    }
+
+    const formatConversationTimestamp = (value: string) => {
+        const parsed = new Date(value)
+        if (Number.isNaN(parsed.getTime())) {
+            return value
+        }
+        return parsed.toLocaleString()
     }
 
     return (
@@ -314,6 +337,26 @@ export function ProjectsPanel() {
                                 >
                                     Continue conversation
                                 </button>
+                            </div>
+                            <div data-testid="project-ai-conversation-history" className="rounded-md border border-border px-3 py-2">
+                                <p className="text-xs font-medium text-foreground">Conversation history</p>
+                                <p className="mb-2 text-xs text-muted-foreground">
+                                    Conversation history is scoped to the active project and remains discoverable when you return.
+                                </p>
+                                {activeConversationHistory.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground">No conversation history for this project yet.</p>
+                                ) : (
+                                    <ol data-testid="project-ai-conversation-history-list" className="space-y-2">
+                                        {activeConversationHistory.map((entry, index) => (
+                                            <li key={`${entry.timestamp}-${index}`} className="rounded border border-border px-2 py-1">
+                                                <p className="text-[11px] text-muted-foreground">{formatConversationTimestamp(entry.timestamp)}</p>
+                                                <p className="text-xs text-foreground">
+                                                    <span className="font-medium">{entry.role}:</span> {entry.content}
+                                                </p>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                )}
                             </div>
                         </div>
                     )}
