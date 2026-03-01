@@ -53,6 +53,18 @@ export function TaskNode({ id, data, selected }: NodeProps) {
     const [draftAllowPartial, setDraftAllowPartial] = useState<boolean>(
         data.allow_partial === true || data.allow_partial === 'true'
     );
+    const [draftManagerPollInterval, setDraftManagerPollInterval] = useState<string>(
+        (data['manager.poll_interval'] as string) || ''
+    );
+    const [draftManagerMaxCycles, setDraftManagerMaxCycles] = useState<string>(
+        data['manager.max_cycles'] !== undefined ? String(data['manager.max_cycles']) : ''
+    );
+    const [draftManagerStopCondition, setDraftManagerStopCondition] = useState<string>(
+        (data['manager.stop_condition'] as string) || ''
+    );
+    const [draftManagerActions, setDraftManagerActions] = useState<string>(
+        (data['manager.actions'] as string) || ''
+    );
     const status = (data.status as string) || 'idle';
     const handlerType = getHandlerType(draftShape, draftType);
     const visibility = getNodeFieldVisibility(handlerType);
@@ -137,6 +149,10 @@ export function TaskNode({ id, data, selected }: NodeProps) {
         setDraftReasoningEffort((data.reasoning_effort as string) || '');
         setDraftAutoStatus(data.auto_status === true || data.auto_status === 'true');
         setDraftAllowPartial(data.allow_partial === true || data.allow_partial === 'true');
+        setDraftManagerPollInterval((data['manager.poll_interval'] as string) || '');
+        setDraftManagerMaxCycles(data['manager.max_cycles'] !== undefined ? String(data['manager.max_cycles']) : '');
+        setDraftManagerStopCondition((data['manager.stop_condition'] as string) || '');
+        setDraftManagerActions((data['manager.actions'] as string) || '');
         setIsEditingDetails(true);
     };
 
@@ -166,6 +182,10 @@ export function TaskNode({ id, data, selected }: NodeProps) {
             reasoning_effort: draftReasoningEffort,
             auto_status: draftAutoStatus,
             allow_partial: draftAllowPartial,
+            'manager.poll_interval': draftManagerPollInterval,
+            'manager.max_cycles': draftManagerMaxCycles,
+            'manager.stop_condition': draftManagerStopCondition,
+            'manager.actions': draftManagerActions,
         });
         setIsEditingDetails(false);
     };
@@ -266,6 +286,7 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                 <option value="component">Parallel (Fan Out)</option>
                                 <option value="tripleoctagon">Parallel (Fan In)</option>
                                 <option value="parallelogram">Tool</option>
+                                <option value="house">Manager Loop</option>
                                 <option value="Mdiamond">Start Node</option>
                                 <option value="Msquare">End Node</option>
                             </select>
@@ -325,6 +346,46 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                         onChange={(event) => setDraftMaxParallel(event.target.value)}
                                         className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                         placeholder="4"
+                                    />
+                                </div>
+                            </>
+                        )}
+                        {visibility.showManagerOptions && (
+                            <>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Manager Poll Interval</label>
+                                    <input
+                                        value={draftManagerPollInterval}
+                                        onChange={(event) => setDraftManagerPollInterval(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        placeholder="25ms"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Manager Max Cycles</label>
+                                    <input
+                                        value={draftManagerMaxCycles}
+                                        onChange={(event) => setDraftManagerMaxCycles(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        placeholder="3"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Manager Stop Condition</label>
+                                    <input
+                                        value={draftManagerStopCondition}
+                                        onChange={(event) => setDraftManagerStopCondition(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        placeholder='child.status == \"success\"'
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">Manager Actions</label>
+                                    <input
+                                        value={draftManagerActions}
+                                        onChange={(event) => setDraftManagerActions(event.target.value)}
+                                        className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        placeholder="observe,steer"
                                     />
                                 </div>
                             </>

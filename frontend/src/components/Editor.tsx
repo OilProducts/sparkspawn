@@ -66,6 +66,10 @@ interface PreviewNode {
     reasoning_effort?: string
     auto_status?: boolean | string
     allow_partial?: boolean | string
+    'manager.poll_interval'?: string
+    'manager.max_cycles'?: number | string
+    'manager.stop_condition'?: string
+    'manager.actions'?: string
 }
 
 interface PreviewEdge {
@@ -263,6 +267,10 @@ export function Editor() {
                 reasoning_effort: n.reasoning_effort ?? '',
                 auto_status: n.auto_status ?? false,
                 allow_partial: n.allow_partial ?? false,
+                'manager.poll_interval': n['manager.poll_interval'] ?? '',
+                'manager.max_cycles': n['manager.max_cycles'] ?? '',
+                'manager.stop_condition': n['manager.stop_condition'] ?? '',
+                'manager.actions': n['manager.actions'] ?? '',
                 status: 'idle'
             },
         }));

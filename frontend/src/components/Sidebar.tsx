@@ -342,6 +342,7 @@ export function Sidebar() {
                                         <option value="component">Parallel (Fan Out)</option>
                                         <option value="tripleoctagon">Parallel (Fan In)</option>
                                         <option value="parallelogram">Tool</option>
+                                        <option value="house">Manager Loop</option>
                                         <option value="Mdiamond">Start Node</option>
                                         <option value="Msquare">End Node</option>
                                     </select>
@@ -402,6 +403,46 @@ export function Sidebar() {
                                                 value={(selectedNode?.data?.max_parallel as number | string | undefined) ?? 4}
                                                 onChange={(e) => handlePropertyChange('max_parallel', e.target.value)}
                                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                        </div>
+                                    </>
+                                )}
+                                {visibility.showManagerOptions && (
+                                    <>
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">Manager Poll Interval</label>
+                                            <input
+                                                value={(selectedNode?.data?.['manager.poll_interval'] as string) || ''}
+                                                onChange={(e) => handlePropertyChange('manager.poll_interval', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                placeholder="25ms"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">Manager Max Cycles</label>
+                                            <input
+                                                value={(selectedNode?.data?.['manager.max_cycles'] as number | string | undefined) ?? ''}
+                                                onChange={(e) => handlePropertyChange('manager.max_cycles', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                placeholder="3"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">Manager Stop Condition</label>
+                                            <input
+                                                value={(selectedNode?.data?.['manager.stop_condition'] as string) || ''}
+                                                onChange={(e) => handlePropertyChange('manager.stop_condition', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                placeholder='child.status == "success"'
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-medium">Manager Actions</label>
+                                            <input
+                                                value={(selectedNode?.data?.['manager.actions'] as string) || ''}
+                                                onChange={(e) => handlePropertyChange('manager.actions', e.target.value)}
+                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                placeholder="observe,steer"
                                             />
                                         </div>
                                     </>

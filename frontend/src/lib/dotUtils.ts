@@ -74,6 +74,18 @@ export function generateDot(
         const reasoningEffortValue = typeof n.data.reasoning_effort === 'string' ? n.data.reasoning_effort : '';
         const autoStatusValue = n.data.auto_status === true || n.data.auto_status === 'true';
         const allowPartialValue = n.data.allow_partial === true || n.data.allow_partial === 'true';
+        const managerPollIntervalValue = typeof n.data['manager.poll_interval'] === 'string'
+            ? n.data['manager.poll_interval']
+            : '';
+        const managerMaxCyclesValue = typeof n.data['manager.max_cycles'] === 'string' || typeof n.data['manager.max_cycles'] === 'number'
+            ? n.data['manager.max_cycles']
+            : '';
+        const managerStopConditionValue = typeof n.data['manager.stop_condition'] === 'string'
+            ? n.data['manager.stop_condition']
+            : '';
+        const managerActionsValue = typeof n.data['manager.actions'] === 'string'
+            ? n.data['manager.actions']
+            : '';
 
         const label = `"${escapeDotString(labelValue)}"`;
         const shape = shapeValue ? `shape=${formatAttrValue(shapeValue)}` : '';
@@ -104,7 +116,11 @@ export function generateDot(
             llmProviderValue ? `llm_provider=${formatAttrValue(llmProviderValue)}` : '',
             reasoningEffortValue ? `reasoning_effort=${formatAttrValue(reasoningEffortValue)}` : '',
             autoStatusValue ? `auto_status=true` : '',
-            allowPartialValue ? `allow_partial=true` : ''
+            allowPartialValue ? `allow_partial=true` : '',
+            managerPollIntervalValue ? _formatDurationAttr('manager.poll_interval', managerPollIntervalValue) : '',
+            _formatIntAttr('manager.max_cycles', managerMaxCyclesValue),
+            managerStopConditionValue ? `manager.stop_condition="${escapeDotString(managerStopConditionValue)}"` : '',
+            managerActionsValue ? `manager.actions="${escapeDotString(managerActionsValue)}"` : '',
         ].filter(Boolean).join(', ');
 
         dot += `  ${n.id} [${attrs}];\n`;

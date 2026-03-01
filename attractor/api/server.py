@@ -1144,6 +1144,10 @@ def _graph_payload(graph) -> dict:
                 "reasoning_effort": _attr_value(n.attrs, "reasoning_effort"),
                 "auto_status": _attr_value(n.attrs, "auto_status"),
                 "allow_partial": _attr_value(n.attrs, "allow_partial"),
+                "manager.poll_interval": _attr_value(n.attrs, "manager.poll_interval"),
+                "manager.max_cycles": _attr_value(n.attrs, "manager.max_cycles"),
+                "manager.stop_condition": _attr_value(n.attrs, "manager.stop_condition"),
+                "manager.actions": _attr_value(n.attrs, "manager.actions"),
             }
             for n in graph.nodes.values()
         ],
