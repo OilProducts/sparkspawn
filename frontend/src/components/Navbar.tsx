@@ -12,14 +12,21 @@ export function Navbar() {
     const showValidationWarningBanner = hasValidationWarnings && !hasValidationErrors
     const runtimeStatus = useStore((state) => state.runtimeStatus)
     const selectedRunId = useStore((state) => state.selectedRunId)
+    const runInitiationForm = {
+        projectPath: activeProjectPath || '',
+        flowSource: activeFlow || '',
+        workingDirectory: workingDir,
+        backend: 'codex',
+        model: model.trim() || null,
+    }
 
     const runPipeline = async () => {
         if (!activeProjectPath || !activeFlow || hasValidationErrors) return
 
         try {
-            const flowRes = await fetch(`/api/flows/${encodeURIComponent(activeFlow)}`)
+            const flowRes = await fetch(`/api/flows/${encodeURIComponent(runInitiationForm.flowSource)}`)
             if (!flowRes.ok) {
-                throw new Error(`Failed to load flow: ${activeFlow}`)
+                throw new Error(`Failed to load flow: ${runInitiationForm.flowSource}`)
             }
 
             const flow = await flowRes.json()
@@ -28,10 +35,10 @@ export function Navbar() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     flow_content: flow.content,
-                    working_directory: workingDir,
-                    backend: 'codex',
-                    model: model.trim() || null,
-                    flow_name: activeFlow,
+                    working_directory: runInitiationForm.workingDirectory,
+                    backend: runInitiationForm.backend,
+                    model: runInitiationForm.model,
+                    flow_name: runInitiationForm.flowSource,
                 }),
             })
             if (!runRes.ok) {
@@ -125,6 +132,26 @@ export function Navbar() {
             </div>
 
             <div className="flex items-center gap-2">
+                <div
+                    data-testid="run-initiation-form"
+                    className="hidden max-w-[560px] items-center gap-2 truncate rounded-md border border-border bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground xl:flex"
+                >
+                    <span data-testid="run-initiation-project" className="truncate">
+                        <span className="font-medium text-foreground">Project:</span> {runInitiationForm.projectPath || 'none'}
+                    </span>
+                    <span className="text-muted-foreground/70">|</span>
+                    <span data-testid="run-initiation-flow-source" className="truncate">
+                        <span className="font-medium text-foreground">Flow Source:</span> {runInitiationForm.flowSource || 'none'}
+                    </span>
+                    <span className="text-muted-foreground/70">|</span>
+                    <span data-testid="run-initiation-working-directory" className="truncate font-mono">
+                        <span className="font-medium text-foreground not-italic">WD:</span> {runInitiationForm.workingDirectory}
+                    </span>
+                    <span className="text-muted-foreground/70">|</span>
+                    <span data-testid="run-initiation-backend-model" className="truncate">
+                        <span className="font-medium text-foreground">Backend/Model:</span> {runInitiationForm.backend} / {runInitiationForm.model || 'default'}
+                    </span>
+                </div>
                 {showValidationWarningBanner ? (
                     <p
                         data-testid="execute-warning-banner"
