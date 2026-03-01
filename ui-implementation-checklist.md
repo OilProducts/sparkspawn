@@ -97,7 +97,7 @@ Status key:
 
 ### 5.4 Project-Scoped Context and Isolation
 - [x] [5.4-01] Require an active project for mutating flow edits and run start actions.
-- [ ] [5.4-03] Reset flow/run/conversation selections correctly on project switch with no hidden state carryover.
+- [x] [5.4-03] Reset flow/run/conversation selections correctly on project switch with no hidden state carryover.
 
 ### 5.5 AI Conversation and Spec Authoring Loop
 - [ ] [5.5-01] Implement project-scoped AI conversation surface for start/continue flows.
