@@ -120,6 +120,22 @@ def test_manager_loop_shape_and_type_are_selectable_item_6_7_01() -> None:
     assert '<option value="stack.manager_loop">stack.manager_loop</option>' in task_node_text
 
 
+def test_manager_loop_control_fields_present_item_6_7_02() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
+    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
+
+    required_labels = (
+        "Manager Poll Interval",
+        "Manager Max Cycles",
+        "Manager Stop Condition",
+        "Manager Actions",
+    )
+    for label in required_labels:
+        assert label in sidebar_text
+        assert label in task_node_text
+
+
 
 def test_manager_loop_attrs_round_trip_through_preview_item_6_2_01() -> None:
     flow = _generate_dot_with_manager_loop_attrs()
@@ -148,3 +164,10 @@ def test_checklist_marks_item_6_7_01_complete() -> None:
     checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
 
     assert "- [x] [6.7-01]" in checklist_text
+
+
+def test_checklist_marks_item_6_7_02_complete() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    assert "- [x] [6.7-02]" in checklist_text
