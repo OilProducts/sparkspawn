@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useReactFlow } from '@xyflow/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNodes, useReactFlow } from '@xyflow/react'
 import { useStore } from '@/store'
 import { generateDot } from '@/lib/dotUtils'
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions'
 import { GRAPH_FIDELITY_OPTIONS } from '@/lib/graphAttrValidation'
 import { saveFlowContent } from '@/lib/flowPersistence'
+import { resolveModelStylesheetPreview, type ModelValueSource } from '@/lib/modelStylesheetPreview'
 import { InspectorScaffold } from './InspectorScaffold'
 import { StylesheetEditor } from './StylesheetEditor'
 
@@ -26,6 +27,13 @@ const GRAPH_ATTR_HELP: Record<string, string> = {
     'tool_hooks.post': 'Command run after tool execution unless runtime/node-level override replaces it.',
 }
 
+const MODEL_VALUE_SOURCE_LABEL: Record<ModelValueSource, string> = {
+    node: 'node',
+    stylesheet: 'stylesheet',
+    graph_default: 'graph default',
+    system_default: 'system default',
+}
+
 export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const [isOpen, setIsOpen] = useState(false)
     const [showAdvancedGraphAttrs, setShowAdvancedGraphAttrs] = useState(false)
@@ -42,6 +50,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const viewMode = useStore((state) => state.viewMode)
     const uiDefaults = useStore((state) => state.uiDefaults)
     const { getNodes, getEdges, setNodes } = useReactFlow()
+    const flowNodes = useNodes()
     const saveTimer = useRef<number | null>(null)
     const hasPendingSave = useRef(false)
     const flowProviderFallback = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || ''
@@ -49,6 +58,32 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const stylesheetDiagnostics = diagnostics.filter((diag) => diag.rule_id === 'stylesheet_syntax')
     const hasStylesheetValue = Boolean(graphAttrs.model_stylesheet?.trim())
     const showStylesheetFeedback = hasStylesheetValue || stylesheetDiagnostics.length > 0
+    const stylesheetPreview = useMemo(() => {
+        return resolveModelStylesheetPreview(
+            graphAttrs.model_stylesheet || '',
+            flowNodes.map((node) => ({
+                id: node.id,
+                class: typeof node.data?.class === 'string' ? node.data.class : '',
+                llm_model: typeof node.data?.llm_model === 'string' ? node.data.llm_model : '',
+                llm_provider: typeof node.data?.llm_provider === 'string' ? node.data.llm_provider : '',
+                reasoning_effort: typeof node.data?.reasoning_effort === 'string' ? node.data.reasoning_effort : '',
+            })),
+            {
+                llm_model: graphAttrs.ui_default_llm_model || uiDefaults.llm_model || '',
+                llm_provider: graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || '',
+                reasoning_effort: graphAttrs.ui_default_reasoning_effort || uiDefaults.reasoning_effort || 'high',
+            },
+        )
+    }, [
+        graphAttrs.model_stylesheet,
+        graphAttrs.ui_default_llm_model,
+        graphAttrs.ui_default_llm_provider,
+        graphAttrs.ui_default_reasoning_effort,
+        flowNodes,
+        uiDefaults.llm_model,
+        uiDefaults.llm_provider,
+        uiDefaults.reasoning_effort,
+    ])
 
     const flushPendingSave = useCallback(() => {
         if (!activeProjectPath || !activeFlow || !hasPendingSave.current) return
@@ -281,6 +316,64 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                                         )}
                                     </div>
                                 )}
+                                <div
+                                    data-testid="graph-model-stylesheet-selector-preview"
+                                    className="rounded-md border border-border/70 bg-background px-2 py-2"
+                                >
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Matching selectors
+                                    </p>
+                                    {stylesheetPreview.selectorPreview.length > 0 ? (
+                                        <div className="mt-2 space-y-1">
+                                            {stylesheetPreview.selectorPreview.map((entry, index) => (
+                                                <p key={`${entry.selector}-${index}`} className="text-[11px] text-foreground">
+                                                    <span className="font-mono">{entry.selector}</span>
+                                                    {' -> '}
+                                                    {entry.matchedNodeIds.length > 0 ? entry.matchedNodeIds.join(', ') : 'No nodes matched'}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="mt-2 text-[11px] text-muted-foreground">
+                                            No valid selectors parsed yet.
+                                        </p>
+                                    )}
+                                </div>
+                                <div
+                                    data-testid="graph-model-stylesheet-effective-preview"
+                                    className="rounded-md border border-border/70 bg-background px-2 py-2"
+                                >
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Effective per-node values
+                                    </p>
+                                    {stylesheetPreview.nodePreview.length > 0 ? (
+                                        <div className="mt-2 space-y-2">
+                                            {stylesheetPreview.nodePreview.map((node) => (
+                                                <div key={node.nodeId} className="rounded border border-border/60 bg-muted/10 px-2 py-1">
+                                                    <p className="text-[11px] text-foreground">
+                                                        <span className="font-mono">{node.nodeId}</span>
+                                                        {node.matchedSelectors.length > 0
+                                                            ? ` • selectors: ${node.matchedSelectors.join(', ')}`
+                                                            : ' • selectors: none'}
+                                                    </p>
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                        llm_model: {node.effective.llm_model.value || '(empty)'} ({MODEL_VALUE_SOURCE_LABEL[node.effective.llm_model.source]})
+                                                    </p>
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                        llm_provider: {node.effective.llm_provider.value || '(empty)'} ({MODEL_VALUE_SOURCE_LABEL[node.effective.llm_provider.source]})
+                                                    </p>
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                        reasoning_effort: {node.effective.reasoning_effort.value || '(empty)'} ({MODEL_VALUE_SOURCE_LABEL[node.effective.reasoning_effort.source]})
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="mt-2 text-[11px] text-muted-foreground">
+                                            No nodes available yet.
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-foreground">Retry Target</label>

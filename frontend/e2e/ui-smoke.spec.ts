@@ -204,3 +204,30 @@ test("stylesheet parse diagnostics render in graph settings for item 6.5-02", as
   await expect(page.getByTestId("graph-model-stylesheet-diagnostics").getByText(diagnosticMessage)).toBeVisible()
   await page.screenshot({ path: screenshotPath("10-stylesheet-diagnostics.png"), fullPage: true })
 })
+
+test("stylesheet selector/effective previews render in graph settings for item 6.5-03", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-stylesheet-preview-${Date.now()}`
+  const stylesheetToken = "* { llm_provider: openai; } .critical { llm_model: gpt-5.2; }"
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-editor").click()
+
+  const firstFlowButton = page.locator("button").filter({ hasText: ".dot" }).first()
+  await expect(firstFlowButton).toBeVisible()
+  await firstFlowButton.click()
+
+  await expect(page.locator('[data-inspector-scope="graph"]')).toBeVisible()
+  const advancedToggle = page.getByTestId("graph-advanced-toggle")
+  await expect(advancedToggle).toBeVisible()
+  await advancedToggle.click()
+
+  const stylesheetInput = page.getByTestId("model-stylesheet-editor").locator("textarea")
+  await stylesheetInput.fill(stylesheetToken)
+
+  await expect(page.getByTestId("graph-model-stylesheet-selector-preview")).toBeVisible()
+  await expect(page.getByTestId("graph-model-stylesheet-effective-preview")).toBeVisible()
+  await expect(page.getByTestId("graph-model-stylesheet-selector-preview")).toContainText(".critical")
+  await page.screenshot({ path: screenshotPath("11-stylesheet-selector-effective-preview.png"), fullPage: true })
+})
