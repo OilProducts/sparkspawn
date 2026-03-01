@@ -134,3 +134,28 @@ def test_run_initiation_working_directory_defaults_to_active_project_unless_over
         assert snippet in navbar_text, f"missing working directory defaulting snippet: {snippet}"
 
     assert "- [x] [8.1-04]" in checklist_text
+
+
+def test_run_start_surfaces_git_policy_warning_path_item_8_1_05() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    navbar_text = (repo_root / "frontend" / "src" / "components" / "Navbar.tsx").read_text(encoding="utf-8")
+
+    required_snippets = [
+        "const [runStartGitPolicyWarning, setRunStartGitPolicyWarning] = useState<string | null>(null)",
+        "const metadataRes = await fetch(`/api/projects/metadata?directory=${encodeURIComponent(runInitiationForm.projectPath)}`)",
+        "const branch = typeof metadata?.branch === 'string' ? metadata.branch.trim() : ''",
+        "const warning = 'Project Git policy check failed: active project is not a Git repository.'",
+        "setRunStartGitPolicyWarning(warning)",
+        "const allowNonGitRun = window.confirm(`${warning} Continue with run start anyway?`)",
+        "if (!allowNonGitRun) {",
+        'data-testid="run-start-git-policy-warning-banner"',
+    ]
+    for snippet in required_snippets:
+        assert snippet in navbar_text, f"missing git policy warning run-start snippet: {snippet}"
+
+
+def test_checklist_marks_item_8_1_05_complete() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    assert "- [x] [8.1-05]" in checklist_text

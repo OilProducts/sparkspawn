@@ -177,7 +177,7 @@ Status key:
 - [x] [8.1-02] Ensure payload parity with `/pipelines` request contract.
 - [x] [8.1-03] Add failure handling UI for rejected run start requests.
 - [x] [8.1-04] Default working directory to active project directory unless user overrides.
-- [ ] [8.1-05] Add run-start policy gate/warning path for project Git-state violations.
+- [x] [8.1-05] Add run-start policy gate/warning path for project Git-state violations.
 
 ### 8.2 Runtime Controls
 - [ ] [8.2-01] Provide Start and Cancel controls for supported backend behavior.

@@ -13,6 +13,7 @@ export function Navbar() {
     const hasValidationWarnings = diagnostics.some((diag) => diag.severity === 'warning')
     const showValidationWarningBanner = hasValidationWarnings && !hasValidationErrors
     const [runStartError, setRunStartError] = useState<string | null>(null)
+    const [runStartGitPolicyWarning, setRunStartGitPolicyWarning] = useState<string | null>(null)
     const runtimeStatus = useStore((state) => state.runtimeStatus)
     const selectedRunId = useStore((state) => state.selectedRunId)
     const runInitiationForm = {
@@ -23,11 +24,46 @@ export function Navbar() {
         model: model.trim() || null,
     }
 
+    const confirmGitPolicyGate = async () => {
+        try {
+            const metadataRes = await fetch(`/api/projects/metadata?directory=${encodeURIComponent(runInitiationForm.projectPath)}`)
+            if (!metadataRes.ok) {
+                const warning = 'Unable to verify project Git state before run start.'
+                setRunStartGitPolicyWarning(warning)
+                return window.confirm(`${warning} Continue with run start anyway?`)
+            }
+
+            const metadata = (await metadataRes.json()) as { branch?: string | null }
+            const branch = typeof metadata?.branch === 'string' ? metadata.branch.trim() : ''
+            if (branch) {
+                setRunStartGitPolicyWarning(null)
+                return true
+            }
+
+            const warning = 'Project Git policy check failed: active project is not a Git repository.'
+            setRunStartGitPolicyWarning(warning)
+            const allowNonGitRun = window.confirm(`${warning} Continue with run start anyway?`)
+            if (!allowNonGitRun) {
+                return false
+            }
+            return true
+        } catch {
+            const warning = 'Unable to verify project Git state before run start.'
+            setRunStartGitPolicyWarning(warning)
+            return window.confirm(`${warning} Continue with run start anyway?`)
+        }
+    }
+
     const runPipeline = async () => {
         if (!activeProjectPath || !activeFlow || hasValidationErrors) return
 
         setRunStartError(null)
         try {
+            const gitPolicyGateAllowed = await confirmGitPolicyGate()
+            if (!gitPolicyGateAllowed) {
+                return
+            }
+
             const flowRes = await fetch(`/api/flows/${encodeURIComponent(runInitiationForm.flowSource)}`)
             if (!flowRes.ok) {
                 throw new Error(`Failed to load flow: ${runInitiationForm.flowSource}`)
@@ -172,6 +208,14 @@ export function Navbar() {
                         className="rounded border border-amber-400 bg-amber-50 px-2 py-1 text-[11px] font-medium leading-none text-amber-900"
                     >
                         Warnings present; run allowed.
+                    </p>
+                ) : null}
+                {runStartGitPolicyWarning ? (
+                    <p
+                        data-testid="run-start-git-policy-warning-banner"
+                        className="max-w-sm truncate rounded border border-amber-400 bg-amber-50 px-2 py-1 text-[11px] font-medium leading-none text-amber-900"
+                    >
+                        {runStartGitPolicyWarning}
                     </p>
                 ) : null}
                 {runStartError ? (
