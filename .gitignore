@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .attractor/
 codex-app-server.schema/
+.DS_Store
+artifacts/
+frontend/.tmp-*/

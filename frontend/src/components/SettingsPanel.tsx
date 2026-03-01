@@ -6,7 +6,7 @@ export function SettingsPanel() {
     const setUiDefault = useStore((state) => state.setUiDefault)
 
     return (
-        <div className="flex-1 overflow-auto p-6">
+        <div data-testid="settings-panel" className="flex-1 overflow-auto p-6">
             <div className="mx-auto w-full max-w-2xl space-y-6">
                 <div className="space-y-1">
                     <h2 className="text-lg font-semibold">Settings</h2>
