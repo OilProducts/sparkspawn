@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useStore } from '@/store'
 import { resolveSaveRemediation } from '@/lib/saveRemediation'
 
@@ -16,6 +16,12 @@ const RUNTIME_STAGE_STATUS_MAP: Record<string, 'running' | 'success' | 'failed'>
     StageRetrying: 'running',
     StageCompleted: 'success',
     StageFailed: 'failed',
+}
+
+interface RuntimeStageCursor {
+    stageIndex: number
+    status: 'running' | 'success' | 'failed'
+    pendingRetry: boolean
 }
 
 const normalizeScopePath = (value: string) => {
@@ -68,6 +74,7 @@ export function RunStream() {
     const saveState = useStore((state) => state.saveState)
     const saveErrorMessage = useStore((state) => state.saveErrorMessage)
     const saveErrorKind = useStore((state) => state.saveErrorKind)
+    const stageCursorsRef = useRef<Record<string, RuntimeStageCursor>>({})
     const saveStateLabel =
         saveState === 'saving'
             ? 'Saving...'
@@ -81,6 +88,7 @@ export function RunStream() {
     const remediation = resolveSaveRemediation(saveState, saveErrorKind)
 
     useEffect(() => {
+        stageCursorsRef.current = {}
         resetNodeStatuses()
         clearHumanGate()
         clearLogs()
@@ -129,11 +137,50 @@ export function RunStream() {
                 const data = JSON.parse(event.data)
                 const runtimeNodeId = typeof data.node_id === 'string' ? data.node_id : null
                 const runtimeNodeStatus = RUNTIME_STAGE_STATUS_MAP[data.type]
+                const runtimeStageIndex = typeof data.index === 'number' && Number.isFinite(data.index) ? data.index : null
                 if (runtimeNodeId && runtimeNodeStatus) {
-                    setNodeStatus(runtimeNodeId, runtimeNodeStatus)
-                    const currentGate = useStore.getState().humanGate
-                    if (runtimeNodeStatus !== 'waiting' && currentGate?.nodeId === runtimeNodeId) {
-                        clearHumanGate()
+                    const previousCursor = stageCursorsRef.current[runtimeNodeId]
+                    let shouldApplyStageStatus = true
+                    if (runtimeStageIndex !== null && previousCursor) {
+                        if (runtimeStageIndex < previousCursor.stageIndex) {
+                            shouldApplyStageStatus = false
+                        } else if (runtimeStageIndex === previousCursor.stageIndex) {
+                            const previousIsTerminal = previousCursor.status === 'success' || previousCursor.status === 'failed'
+                            if (runtimeNodeStatus === 'running' && previousCursor.status !== 'running') {
+                                const retryContinuation = data.type === 'StageRetrying'
+                                    || (data.type === 'StageStarted' && previousCursor.pendingRetry)
+                                if (!retryContinuation) {
+                                    shouldApplyStageStatus = false
+                                }
+                            }
+                            if ((runtimeNodeStatus === 'success' || runtimeNodeStatus === 'failed') && previousIsTerminal && !previousCursor.pendingRetry) {
+                                shouldApplyStageStatus = false
+                            }
+                        }
+                    }
+
+                    if (shouldApplyStageStatus) {
+                        setNodeStatus(runtimeNodeId, runtimeNodeStatus)
+                        if (runtimeStageIndex !== null) {
+                            const stageAdvanced = previousCursor ? runtimeStageIndex > previousCursor.stageIndex : true
+                            let pendingRetry = stageAdvanced ? false : (previousCursor?.pendingRetry ?? false)
+                            if (data.type === 'StageFailed') {
+                                pendingRetry = data.will_retry === true
+                            } else if (data.type === 'StageRetrying') {
+                                pendingRetry = true
+                            } else if (data.type === 'StageStarted' || data.type === 'StageCompleted') {
+                                pendingRetry = false
+                            }
+                            stageCursorsRef.current[runtimeNodeId] = {
+                                stageIndex: runtimeStageIndex,
+                                status: runtimeNodeStatus,
+                                pendingRetry,
+                            }
+                        }
+                        const currentGate = useStore.getState().humanGate
+                        if (runtimeNodeStatus !== 'waiting' && currentGate?.nodeId === runtimeNodeId) {
+                            clearHumanGate()
+                        }
                     }
                 }
                 if (data.type === 'log') {
@@ -144,10 +191,33 @@ export function RunStream() {
                     })
                 }
                 if (data.type === 'state' && data.node && data.status) {
-                    setNodeStatus(data.node, data.status)
-                    const currentGate = useStore.getState().humanGate
-                    if (data.status !== 'waiting' && currentGate?.nodeId === data.node) {
-                        clearHumanGate()
+                    const stateNodeId = typeof data.node === 'string' ? data.node : null
+                    const stateNodeStatus = typeof data.status === 'string' ? data.status : null
+                    if (stateNodeId && stateNodeStatus) {
+                        const previousCursor = stageCursorsRef.current[stateNodeId]
+                        const stateRegression = stateNodeStatus === 'running'
+                            && Boolean(previousCursor)
+                            && previousCursor!.status !== 'running'
+                            && !previousCursor!.pendingRetry
+                        const stateTerminalFlip =
+                            (stateNodeStatus === 'success' || stateNodeStatus === 'failed')
+                            && Boolean(previousCursor)
+                            && (previousCursor!.status === 'success' || previousCursor!.status === 'failed')
+                            && !previousCursor!.pendingRetry
+                        if (!stateRegression && !stateTerminalFlip) {
+                            setNodeStatus(stateNodeId, stateNodeStatus)
+                            if (previousCursor && (stateNodeStatus === 'running' || stateNodeStatus === 'success' || stateNodeStatus === 'failed')) {
+                                stageCursorsRef.current[stateNodeId] = {
+                                    ...previousCursor,
+                                    status: stateNodeStatus,
+                                    pendingRetry: stateNodeStatus === 'running' ? previousCursor.pendingRetry : false,
+                                }
+                            }
+                            const currentGate = useStore.getState().humanGate
+                            if (stateNodeStatus !== 'waiting' && currentGate?.nodeId === stateNodeId) {
+                                clearHumanGate()
+                            }
+                        }
                     }
                 }
                 if (data.type === 'human_gate') {
