@@ -403,6 +403,91 @@ test("inspector field-level diagnostics map to matching fields for item 7.1-03",
   await page.screenshot({ path: screenshotPath("15-inspector-field-level-diagnostics.png"), fullPage: true })
 })
 
+test("validation diagnostics navigate to matching canvas entities for item 7.3-03", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-diagnostic-nav-${Date.now()}`
+  const promptToken = `diagnostic-nav-${Date.now()}`
+  const nodeDiagnosticMessage = `Node navigation diagnostic ${Date.now()}`
+  const edgeDiagnosticMessage = `Edge navigation diagnostic ${Date.now()}`
+  const edgeSource = "audit_human_gate"
+  const edgeTarget = "audit_rework"
+  let selectedNodeId: string | null = null
+
+  await page.route("**/preview", async (route) => {
+    const body = route.request().postData() || ""
+    if (body.includes(promptToken) && selectedNodeId) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "ok",
+          diagnostics: [
+            {
+              rule_id: "node_navigation",
+              severity: "warning",
+              message: nodeDiagnosticMessage,
+              node_id: selectedNodeId,
+            },
+            {
+              rule_id: "edge_navigation",
+              severity: "error",
+              message: edgeDiagnosticMessage,
+              edge: [edgeSource, edgeTarget],
+            },
+          ],
+        }),
+      })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-editor").click()
+
+  const flowButton = page.getByRole("button", { name: "implement-spec.dot" })
+  await expect(flowButton).toBeVisible()
+  await flowButton.click()
+
+  const promptNode = page
+    .locator(".react-flow__node")
+    .filter({ hasText: "Extract Testable Declarations" })
+    .first()
+  await expect(promptNode).toBeVisible()
+  await promptNode.click()
+  selectedNodeId = await promptNode.getAttribute("data-id")
+  if (!selectedNodeId) {
+    throw new Error("Expected selected node to expose data-id for diagnostic navigation smoke test.")
+  }
+
+  const promptField = page.getByPlaceholder("Enter system prompt instructions...")
+  await expect(promptField).toBeVisible()
+  const previewRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes("/preview") &&
+      request.method() === "POST" &&
+      (request.postData() || "").includes(promptToken),
+  )
+  await promptField.fill(promptToken)
+  await previewRequest
+
+  const diagnostics = page.getByTestId("validation-diagnostic-item")
+  await expect(diagnostics.filter({ hasText: nodeDiagnosticMessage })).toHaveCount(1)
+  await expect(diagnostics.filter({ hasText: edgeDiagnosticMessage })).toHaveCount(1)
+
+  await diagnostics.filter({ hasText: nodeDiagnosticMessage }).first().click()
+  await expect(page.locator(".react-flow__node.selected")).toHaveCount(1)
+  await expect(page.locator(`.react-flow__node[data-id="${selectedNodeId}"]`)).toHaveClass(/selected/)
+  await expect(page.locator('[data-inspector-scope="node"]')).toBeVisible()
+
+  await diagnostics.filter({ hasText: edgeDiagnosticMessage }).first().click()
+  await expect(page.locator(".react-flow__edge.selected")).toHaveCount(1)
+  await expect(page.locator('[data-inspector-scope="edge"]')).toBeVisible()
+
+  await page.screenshot({ path: screenshotPath("18-diagnostic-navigation-to-canvas.png"), fullPage: true })
+})
+
 test("warning-only diagnostics still allow execute with explicit banner for item 7.2-02", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-warning-only-${Date.now()}`
   const promptToken = `warning-only-${Date.now()}`

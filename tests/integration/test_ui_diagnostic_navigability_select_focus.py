@@ -49,3 +49,21 @@ def test_validation_panel_provides_unmapped_diagnostic_fallback_item_7_3_02() ->
 
     for snippet in required_snippets:
         assert snippet in validation_panel_text, f"missing unmapped diagnostic fallback snippet: {snippet}"
+
+
+def test_ui_smoke_covers_diagnostic_to_canvas_navigation_item_7_3_03() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    ui_smoke_text = (repo_root / "frontend" / "e2e" / "ui-smoke.spec.ts").read_text(encoding="utf-8")
+
+    assert "validation diagnostics navigate to matching canvas entities for item 7.3-03" in ui_smoke_text
+    assert "18-diagnostic-navigation-to-canvas.png" in ui_smoke_text
+    assert "validation-diagnostic-item" in ui_smoke_text
+    assert "react-flow__node.selected" in ui_smoke_text
+    assert "react-flow__edge.selected" in ui_smoke_text
+
+
+def test_checklist_marks_item_7_3_03_complete() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    assert "- [x] [7.3-03]" in checklist_text
