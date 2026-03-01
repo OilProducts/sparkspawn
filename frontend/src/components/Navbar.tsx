@@ -1,4 +1,5 @@
 import { useStore } from "@/store"
+import { buildPipelineStartPayload } from "@/lib/pipelineStartPayload"
 import { Play, Settings2 } from "lucide-react"
 
 export function Navbar() {
@@ -30,16 +31,11 @@ export function Navbar() {
             }
 
             const flow = await flowRes.json()
+            const startPayload = buildPipelineStartPayload(runInitiationForm, flow.content)
             const runRes = await fetch('/pipelines', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    flow_content: flow.content,
-                    working_directory: runInitiationForm.workingDirectory,
-                    backend: runInitiationForm.backend,
-                    model: runInitiationForm.model,
-                    flow_name: runInitiationForm.flowSource,
-                }),
+                body: JSON.stringify(startPayload),
             })
             if (!runRes.ok) {
                 throw new Error('Run request failed')
