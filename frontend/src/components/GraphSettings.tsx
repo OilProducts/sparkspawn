@@ -197,6 +197,40 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                                     className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 />
                             </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Stack Child Dotfile</label>
+                                <input
+                                    value={graphAttrs['stack.child_dotfile'] || ''}
+                                    onChange={(event) => updateGraphAttr('stack.child_dotfile', event.target.value)}
+                                    className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    placeholder="child/flow.dot"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Stack Child Workdir</label>
+                                <input
+                                    value={graphAttrs['stack.child_workdir'] || ''}
+                                    onChange={(event) => updateGraphAttr('stack.child_workdir', event.target.value)}
+                                    className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    placeholder="/abs/path/to/child"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Tool Hooks Pre</label>
+                                <input
+                                    value={graphAttrs['tool_hooks.pre'] || ''}
+                                    onChange={(event) => updateGraphAttr('tool_hooks.pre', event.target.value)}
+                                    className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-foreground">Tool Hooks Post</label>
+                                <input
+                                    value={graphAttrs['tool_hooks.post'] || ''}
+                                    onChange={(event) => updateGraphAttr('tool_hooks.post', event.target.value)}
+                                    className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
                         </div>
                     )}
                 </div>
