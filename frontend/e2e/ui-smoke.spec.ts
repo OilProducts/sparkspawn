@@ -38,6 +38,16 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
   await expect(page.getByTestId("top-nav-active-project")).toContainText("/tmp/ui-smoke-project")
   await page.screenshot({ path: screenshotPath("02-projects-panel.png"), fullPage: true })
 
+  const proposalPreviewButton = page.getByTestId("project-spec-edit-proposal-preview-button")
+  await expect(proposalPreviewButton).toBeVisible()
+  await proposalPreviewButton.click()
+  const proposalPreview = page.getByTestId("project-spec-edit-proposal-preview")
+  await expect(proposalPreview).toBeVisible()
+  await expect(proposalPreview).toContainText("Proposal preview")
+  await expect(proposalPreview).toContainText("Before:")
+  await expect(proposalPreview).toContainText("After:")
+  await page.screenshot({ path: screenshotPath("02b-spec-edit-proposal-preview.png"), fullPage: true })
+
   await page.getByTestId("nav-mode-editor").click()
   const firstFlowButton = page.locator("button").filter({ hasText: ".dot" }).first()
   await expect(firstFlowButton).toBeVisible()

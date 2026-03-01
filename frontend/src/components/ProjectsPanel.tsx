@@ -10,6 +10,19 @@ const buildProjectScopedArtifactId = (artifactType: "conversation" | "spec" | "p
     return `${artifactType}-${suffix}-${Date.now()}`
 }
 
+interface SpecEditProposalChange {
+    path: string
+    before: string
+    after: string
+}
+
+interface SpecEditProposalPreview {
+    id: string
+    createdAt: string
+    summary: string
+    changes: SpecEditProposalChange[]
+}
+
 export function ProjectsPanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
     const projects = Object.values(projectRegistry)
@@ -30,7 +43,9 @@ export function ProjectsPanel() {
     const [editingProjectPath, setEditingProjectPath] = useState<string | null>(null)
     const [editingDirectoryPathInput, setEditingDirectoryPathInput] = useState("")
     const [projectBranches, setProjectBranches] = useState<Record<string, string | null>>({})
+    const [projectSpecEditProposals, setProjectSpecEditProposals] = useState<Record<string, SpecEditProposalPreview>>({})
     const activeProjectScope = activeProjectPath ? projectScopedWorkspaces[activeProjectPath] : null
+    const activeProjectProposalPreview = activeProjectPath ? projectSpecEditProposals[activeProjectPath] || null : null
     const favoriteProjects = projects.filter((project) => project.isFavorite)
     const recentProjects = recentProjectPaths
         .map((projectPath) => projectRegistry[projectPath])
@@ -170,6 +185,42 @@ export function ProjectsPanel() {
             return value
         }
         return parsed.toLocaleString()
+    }
+
+    const truncateProposalSource = (value: string, maxLength = 72) => {
+        if (value.length <= maxLength) {
+            return value
+        }
+        return `${value.slice(0, maxLength - 1)}...`
+    }
+
+    const onPreviewSpecEditProposal = () => {
+        if (!activeProjectPath) {
+            return
+        }
+        const sourceEntry = [...activeConversationHistory].reverse().find((entry) => entry.role !== "system")
+        const sourceText = sourceEntry?.content || "Capture baseline project scope and constraints."
+        const proposal: SpecEditProposalPreview = {
+            id: `proposal-${Date.now()}`,
+            createdAt: new Date().toISOString(),
+            summary: "Suggested spec refinements generated from the latest project-scoped conversation turn.",
+            changes: [
+                {
+                    path: "spec/goals.md#scope",
+                    before: "Document high-level feature scope.",
+                    after: `Document scope anchored to: ${truncateProposalSource(sourceText)}`
+                },
+                {
+                    path: "spec/acceptance.md#checks",
+                    before: "List acceptance checks for UI behavior.",
+                    after: "List acceptance checks for project-scoped proposal preview and explicit apply gating."
+                },
+            ],
+        }
+        setProjectSpecEditProposals((current) => ({
+            ...current,
+            [activeProjectPath]: proposal,
+        }))
     }
 
     return (
@@ -358,6 +409,55 @@ export function ProjectsPanel() {
                                     </ol>
                                 )}
                             </div>
+                        </div>
+                    )}
+                </div>
+                <div data-testid="project-spec-edit-proposal-surface" className="rounded-md border border-border bg-card p-4 shadow-sm">
+                    <div className="mb-3 space-y-1">
+                        <h3 className="text-sm font-semibold text-foreground">Spec Edit Proposals</h3>
+                        <p className="text-xs text-muted-foreground">
+                            AI-generated spec edits appear here as explicit, reviewable proposals before any apply action.
+                        </p>
+                    </div>
+                    {!activeProjectPath ? (
+                        <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+                            Select an active project to review AI-generated spec edit proposals.
+                        </p>
+                    ) : (
+                        <div className="space-y-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    data-testid="project-spec-edit-proposal-preview-button"
+                                    type="button"
+                                    onClick={onPreviewSpecEditProposal}
+                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                                >
+                                    Preview proposed spec edits
+                                </button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                Proposal artifacts are scoped to the active project context.
+                            </p>
+                            {activeProjectProposalPreview ? (
+                                <div data-testid="project-spec-edit-proposal-preview" className="rounded-md border border-border px-3 py-2">
+                                    <p className="text-xs font-medium text-foreground">Proposal preview</p>
+                                    <p className="text-[11px] text-muted-foreground">
+                                        Generated {formatConversationTimestamp(activeProjectProposalPreview.createdAt)} ({activeProjectProposalPreview.id})
+                                    </p>
+                                    <p className="mt-1 text-xs text-foreground">{activeProjectProposalPreview.summary}</p>
+                                    <ul className="mt-2 space-y-2">
+                                        {activeProjectProposalPreview.changes.map((change) => (
+                                            <li key={`${activeProjectProposalPreview.id}-${change.path}`} className="rounded border border-border px-2 py-1">
+                                                <p className="text-[11px] font-medium text-foreground">{change.path}</p>
+                                                <p className="text-[11px] text-muted-foreground">Before: {change.before}</p>
+                                                <p className="text-[11px] text-foreground">After: {change.after}</p>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            ) : (
+                                <p className="text-xs text-muted-foreground">No proposed spec edits for this project yet.</p>
+                            )}
                         </div>
                     )}
                 </div>

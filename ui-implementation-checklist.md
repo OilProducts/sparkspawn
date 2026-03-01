@@ -102,7 +102,7 @@ Status key:
 ### 5.5 AI Conversation and Spec Authoring Loop
 - [x] [5.5-01] Implement project-scoped AI conversation surface for start/continue flows.
 - [x] [5.5-02] Persist and render conversation history per project.
-- [ ] [5.5-03] Implement explicit proposal UX for AI-generated spec edits (preview before apply).
+- [x] [5.5-03] Implement explicit proposal UX for AI-generated spec edits (preview before apply).
 - [ ] [5.5-04] Require explicit user confirmation before applying proposed spec edits.
 - [ ] [5.5-05] Ensure reject actions do not mutate spec files.
 - [ ] [5.5-06] Add tests proving proposal artifacts and conversation context remain project-isolated.
