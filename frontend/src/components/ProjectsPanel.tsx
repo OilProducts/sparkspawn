@@ -223,6 +223,28 @@ export function ProjectsPanel() {
         }))
     }
 
+    const onApplySpecEditProposal = () => {
+        if (!activeProjectPath || !activeProjectProposalPreview) {
+            return
+        }
+        if (!window.confirm('Apply these proposed spec edits to the active project spec?')) {
+            return
+        }
+
+        const specId = activeProjectScope?.specId || buildProjectScopedArtifactId("spec", activeProjectPath)
+        setSpecId(specId)
+        appendConversationHistoryEntry({
+            role: "system",
+            content: `Applied spec edit proposal ${activeProjectProposalPreview.id} to ${specId}.`,
+            timestamp: new Date().toISOString(),
+        })
+        setProjectSpecEditProposals((current) => {
+            const next = { ...current }
+            delete next[activeProjectPath]
+            return next
+        })
+    }
+
     return (
         <section data-testid="projects-panel" className="flex-1 overflow-auto p-6">
             <div className="mx-auto w-full max-w-3xl space-y-6">
@@ -454,6 +476,19 @@ export function ProjectsPanel() {
                                             </li>
                                         ))}
                                     </ul>
+                                    <div className="mt-3 flex items-center gap-2">
+                                        <button
+                                            data-testid="project-spec-edit-proposal-apply-button"
+                                            type="button"
+                                            onClick={onApplySpecEditProposal}
+                                            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                                        >
+                                            Apply proposal
+                                        </button>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Applying proposed edits requires explicit confirmation.
+                                        </p>
+                                    </div>
                                 </div>
                             ) : (
                                 <p className="text-xs text-muted-foreground">No proposed spec edits for this project yet.</p>
