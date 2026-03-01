@@ -62,3 +62,46 @@ export const validateGraphAttrValue = (key: keyof GraphAttrs, value: string): st
     }
     return null
 }
+
+const detectUnmatchedQuotes = (value: string): { single: boolean; double: boolean } => {
+    let inSingle = false
+    let inDouble = false
+    let escaped = false
+    for (const char of value) {
+        if (escaped) {
+            escaped = false
+            continue
+        }
+        if (char === '\\' && inDouble) {
+            escaped = true
+            continue
+        }
+        if (char === "'" && !inDouble) {
+            inSingle = !inSingle
+            continue
+        }
+        if (char === '"' && !inSingle) {
+            inDouble = !inDouble
+            continue
+        }
+    }
+    return { single: inSingle, double: inDouble }
+}
+
+export const getToolHookCommandWarning = (value: string): string | null => {
+    const trimmed = value.trim()
+    if (!trimmed) {
+        return null
+    }
+    if (/[\r\n]/.test(trimmed)) {
+        return 'Tool hook command should be a single line shell command.'
+    }
+    const unmatchedQuotes = detectUnmatchedQuotes(trimmed)
+    if (unmatchedQuotes.single) {
+        return 'Tool hook command appears malformed: unmatched single quote.'
+    }
+    if (unmatchedQuotes.double) {
+        return 'Tool hook command appears malformed: unmatched double quote.'
+    }
+    return null
+}

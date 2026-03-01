@@ -4,6 +4,7 @@ import { useStore } from '@/store';
 import { generateDot } from '@/lib/dotUtils';
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions';
 import { getHandlerType, getNodeFieldVisibility } from '@/lib/nodeVisibility';
+import { getToolHookCommandWarning } from '@/lib/graphAttrValidation';
 import { saveFlowContent } from '@/lib/flowPersistence';
 
 export function TaskNode({ id, data, selected }: NodeProps) {
@@ -73,6 +74,8 @@ export function TaskNode({ id, data, selected }: NodeProps) {
     const status = (data.status as string) || 'idle';
     const handlerType = getHandlerType(draftShape, draftType);
     const visibility = getNodeFieldVisibility(handlerType);
+    const draftToolHooksPreWarning = getToolHookCommandWarning(draftToolHooksPre);
+    const draftToolHooksPostWarning = getToolHookCommandWarning(draftToolHooksPost);
     const diagnosticsForNode = nodeDiagnostics[id] || [];
     const diagnosticsCount = diagnosticsForNode.length;
     const hasDiagnosticError = diagnosticsForNode.some((diag) => diag.severity === 'error');
@@ -493,6 +496,11 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                                         className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                                         placeholder="e.g. ./hooks/pre.sh"
                                                     />
+                                                    {draftToolHooksPreWarning && (
+                                                        <p data-testid="node-toolbar-attr-warning-tool_hooks.pre" className="text-[11px] text-amber-700">
+                                                            {draftToolHooksPreWarning}
+                                                        </p>
+                                                    )}
                                                 </div>
                                                 <div className="space-y-1">
                                                     <label className="text-xs font-medium text-foreground">Post Hook Override</label>
@@ -503,6 +511,11 @@ export function TaskNode({ id, data, selected }: NodeProps) {
                                                         className="nodrag h-8 w-full rounded-md border border-input bg-background px-2 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                                         placeholder="e.g. ./hooks/post.sh"
                                                     />
+                                                    {draftToolHooksPostWarning && (
+                                                        <p data-testid="node-toolbar-attr-warning-tool_hooks.post" className="text-[11px] text-amber-700">
+                                                            {draftToolHooksPostWarning}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </>
                                         )}

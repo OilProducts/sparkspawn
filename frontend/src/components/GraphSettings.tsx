@@ -3,7 +3,7 @@ import { useNodes, useReactFlow } from '@xyflow/react'
 import { useStore } from '@/store'
 import { generateDot } from '@/lib/dotUtils'
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions'
-import { GRAPH_FIDELITY_OPTIONS } from '@/lib/graphAttrValidation'
+import { GRAPH_FIDELITY_OPTIONS, getToolHookCommandWarning } from '@/lib/graphAttrValidation'
 import { saveFlowContent } from '@/lib/flowPersistence'
 import { resolveModelStylesheetPreview, type ModelValueSource } from '@/lib/modelStylesheetPreview'
 import { InspectorScaffold } from './InspectorScaffold'
@@ -55,6 +55,8 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const hasPendingSave = useRef(false)
     const flowProviderFallback = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || ''
     const canApplyDefaults = !!activeProjectPath && !!activeFlow && viewMode === 'editor'
+    const toolHookPreWarning = getToolHookCommandWarning(graphAttrs['tool_hooks.pre'] || '')
+    const toolHookPostWarning = getToolHookCommandWarning(graphAttrs['tool_hooks.post'] || '')
     const stylesheetDiagnostics = diagnostics.filter((diag) => diag.rule_id === 'stylesheet_syntax')
     const hasStylesheetValue = Boolean(graphAttrs.model_stylesheet?.trim())
     const showStylesheetFeedback = hasStylesheetValue || stylesheetDiagnostics.length > 0
@@ -438,6 +440,11 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                                 <p data-testid="graph-attr-help-tool_hooks.pre" className="text-[11px] text-muted-foreground">
                                     {GRAPH_ATTR_HELP['tool_hooks.pre']}
                                 </p>
+                                {toolHookPreWarning && (
+                                    <p data-testid="graph-attr-warning-tool_hooks.pre" className="text-[11px] text-amber-700">
+                                        {toolHookPreWarning}
+                                    </p>
+                                )}
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-foreground">Tool Hooks Post</label>
@@ -450,6 +457,11 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                                 <p data-testid="graph-attr-help-tool_hooks.post" className="text-[11px] text-muted-foreground">
                                     {GRAPH_ATTR_HELP['tool_hooks.post']}
                                 </p>
+                                {toolHookPostWarning && (
+                                    <p data-testid="graph-attr-warning-tool_hooks.post" className="text-[11px] text-amber-700">
+                                        {toolHookPostWarning}
+                                    </p>
+                                )}
                             </div>
                         </div>
                     )}

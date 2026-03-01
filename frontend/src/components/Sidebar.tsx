@@ -5,6 +5,7 @@ import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } fro
 import { generateDot, sanitizeGraphId } from "@/lib/dotUtils"
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
 import { getHandlerType, getNodeFieldVisibility } from "@/lib/nodeVisibility"
+import { getToolHookCommandWarning } from "@/lib/graphAttrValidation"
 import { retryLastSaveContent, saveFlowContent } from "@/lib/flowPersistence"
 import { resolveSaveRemediation } from "@/lib/saveRemediation"
 import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
@@ -167,6 +168,8 @@ export function Sidebar() {
         (selectedNode?.data?.type as string) || ''
     )
     const visibility = getNodeFieldVisibility(handlerType)
+    const selectedNodeToolHookPreWarning = getToolHookCommandWarning((selectedNode?.data?.["tool_hooks.pre"] as string) || "")
+    const selectedNodeToolHookPostWarning = getToolHookCommandWarning((selectedNode?.data?.["tool_hooks.post"] as string) || "")
     const activeInspectorScope = resolveInspectorScope({
         viewMode,
         activeFlow,
@@ -546,6 +549,11 @@ export function Sidebar() {
                                                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                                                 placeholder="e.g. ./hooks/pre.sh"
                                                             />
+                                                            {selectedNodeToolHookPreWarning && (
+                                                                <p data-testid="node-attr-warning-tool_hooks.pre" className="text-xs text-amber-700">
+                                                                    {selectedNodeToolHookPreWarning}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                         <div className="space-y-1.5">
                                                             <label className="text-sm font-medium">Post Hook Override</label>
@@ -556,6 +564,11 @@ export function Sidebar() {
                                                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                                                 placeholder="e.g. ./hooks/post.sh"
                                                             />
+                                                            {selectedNodeToolHookPostWarning && (
+                                                                <p data-testid="node-attr-warning-tool_hooks.post" className="text-xs text-amber-700">
+                                                                    {selectedNodeToolHookPostWarning}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                     </>
                                                 )}

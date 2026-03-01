@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import tempfile
@@ -130,6 +131,95 @@ def test_node_tool_hook_override_controls_present_item_6_6_02() -> None:
     assert "'tool_hooks.post': draftToolHooksPost" in task_node_text
 
 
+def test_tool_hook_warning_surfaces_present_item_6_6_03() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    graph_settings_text = (repo_root / "frontend" / "src" / "components" / "GraphSettings.tsx").read_text(encoding="utf-8")
+    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
+    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
+
+    assert "getToolHookCommandWarning" in graph_settings_text
+    assert 'data-testid="graph-attr-warning-tool_hooks.pre"' in graph_settings_text
+    assert 'data-testid="graph-attr-warning-tool_hooks.post"' in graph_settings_text
+
+    assert "getToolHookCommandWarning" in sidebar_text
+    assert 'data-testid="node-attr-warning-tool_hooks.pre"' in sidebar_text
+    assert 'data-testid="node-attr-warning-tool_hooks.post"' in sidebar_text
+
+    assert "getToolHookCommandWarning" in task_node_text
+    assert 'data-testid="node-toolbar-attr-warning-tool_hooks.pre"' in task_node_text
+    assert 'data-testid="node-toolbar-attr-warning-tool_hooks.post"' in task_node_text
+
+
+def _probe_tool_hook_command_warning() -> dict[str, str | None]:
+    repo_root = Path(__file__).resolve().parents[2]
+    frontend_dir = repo_root / "frontend"
+
+    with tempfile.TemporaryDirectory(prefix=".tmp-tool-hook-warning-", dir=frontend_dir) as temp_dir:
+        out_dir = Path(temp_dir) / "compiled"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        subprocess.run(
+            [
+                "npm",
+                "--prefix",
+                str(frontend_dir),
+                "exec",
+                "--",
+                "tsc",
+                "--pretty",
+                "false",
+                "--target",
+                "ES2022",
+                "--module",
+                "ESNext",
+                "--moduleResolution",
+                "bundler",
+                "--skipLibCheck",
+                "--outDir",
+                str(out_dir),
+                str(frontend_dir / "src" / "lib" / "graphAttrValidation.ts"),
+            ],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        probe_script = """
+import { pathToFileURL } from 'node:url'
+const mod = await import(pathToFileURL(process.env.GRAPH_ATTR_VALIDATION_JS_PATH).href)
+console.log(JSON.stringify({
+  valid: mod.getToolHookCommandWarning('echo hello'),
+  embeddedApostrophe: mod.getToolHookCommandWarning(`echo "it's ok"`),
+  newline: mod.getToolHookCommandWarning('echo hi\\necho there'),
+  singleQuote: mod.getToolHookCommandWarning(\"echo 'unterminated\"),
+  doubleQuote: mod.getToolHookCommandWarning('echo \"unterminated'),
+}))
+""".strip()
+
+        env = os.environ.copy()
+        env["GRAPH_ATTR_VALIDATION_JS_PATH"] = str(out_dir / "lib" / "graphAttrValidation.js")
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", probe_script],
+            cwd=frontend_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+        return json.loads(result.stdout)
+
+
+def test_tool_hook_warning_heuristics_item_6_6_03() -> None:
+    probe = _probe_tool_hook_command_warning()
+
+    assert probe["valid"] is None
+    assert probe["embeddedApostrophe"] is None
+    assert probe["newline"] is not None and "single line" in probe["newline"].lower()
+    assert probe["singleQuote"] is not None and "single quote" in probe["singleQuote"].lower()
+    assert probe["doubleQuote"] is not None and "double quote" in probe["doubleQuote"].lower()
+
+
 def test_node_tool_hook_overrides_round_trip_through_preview_item_6_6_02() -> None:
     flow = _generate_dot_with_node_tool_hook_overrides()
     payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
@@ -158,3 +248,10 @@ def test_checklist_marks_item_6_6_02_complete() -> None:
     checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
 
     assert "- [x] [6.6-02]" in checklist_text
+
+
+def test_checklist_marks_item_6_6_03_complete() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    assert "- [x] [6.6-03]" in checklist_text

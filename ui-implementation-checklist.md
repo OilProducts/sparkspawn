@@ -140,7 +140,7 @@ Status key:
 ### 6.6 Tool Hook Authoring
 - [x] [6.6-01] Add UI for `tool_hooks.pre` and `tool_hooks.post` at graph scope.
 - [x] [6.6-02] Add node-level override UX if supported by parser/runtime contract.
-- [ ] [6.6-03] Add validation and warnings for malformed hook command values.
+- [x] [6.6-03] Add validation and warnings for malformed hook command values.
 - [ ] [6.6-04] Add save/load tests for hook definitions.
 
 ### 6.7 Manager Loop Authoring
