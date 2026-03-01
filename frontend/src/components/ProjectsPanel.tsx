@@ -121,6 +121,20 @@ export function ProjectsPanel() {
         setConversationId(activeProjectScope?.conversationId || buildProjectScopedArtifactId("conversation", activeProjectPath))
     }
 
+    const onStartConversation = () => {
+        if (!activeProjectPath) {
+            return
+        }
+        setConversationId(buildProjectScopedArtifactId("conversation", activeProjectPath))
+    }
+
+    const onContinueConversation = () => {
+        if (!activeProjectScope?.conversationId) {
+            return
+        }
+        setConversationId(activeProjectScope.conversationId)
+    }
+
     const onOpenSpec = () => {
         if (!activeProjectPath) {
             return
@@ -262,6 +276,44 @@ export function ProjectsPanel() {
                                 <p className="truncate text-xs text-muted-foreground">
                                     {activeProjectScope?.planId || "No plan artifact selected yet."}
                                 </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <div data-testid="project-ai-conversation-surface" className="rounded-md border border-border bg-card p-4 shadow-sm">
+                    <div className="mb-3 space-y-1">
+                        <h3 className="text-sm font-semibold text-foreground">Project-Scoped AI Conversation</h3>
+                        <p className="text-xs text-muted-foreground">
+                            Start a new project conversation or continue an existing one in the active project scope.
+                        </p>
+                    </div>
+                    {!activeProjectPath ? (
+                        <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+                            Select an active project to start or continue a project-scoped AI conversation.
+                        </p>
+                    ) : (
+                        <div className="space-y-3">
+                            <p className="truncate rounded-md border border-border px-3 py-2 text-xs text-muted-foreground">
+                                Active conversation artifact: {activeProjectScope?.conversationId || "No project conversation selected yet."}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    data-testid="project-ai-conversation-start-button"
+                                    type="button"
+                                    onClick={onStartConversation}
+                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                                >
+                                    Start conversation
+                                </button>
+                                <button
+                                    data-testid="project-ai-conversation-continue-button"
+                                    type="button"
+                                    onClick={onContinueConversation}
+                                    disabled={!activeProjectScope?.conversationId}
+                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    Continue conversation
+                                </button>
                             </div>
                         </div>
                     )}

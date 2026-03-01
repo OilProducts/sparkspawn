@@ -100,7 +100,7 @@ Status key:
 - [x] [5.4-03] Reset flow/run/conversation selections correctly on project switch with no hidden state carryover.
 
 ### 5.5 AI Conversation and Spec Authoring Loop
-- [ ] [5.5-01] Implement project-scoped AI conversation surface for start/continue flows.
+- [x] [5.5-01] Implement project-scoped AI conversation surface for start/continue flows.
 - [ ] [5.5-02] Persist and render conversation history per project.
 - [ ] [5.5-03] Implement explicit proposal UX for AI-generated spec edits (preview before apply).
 - [ ] [5.5-04] Require explicit user confirmation before applying proposed spec edits.
