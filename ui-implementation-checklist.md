@@ -129,7 +129,6 @@ Status key:
 - [x] [6.3-03] Add tests for edge attr serialization and execution-side effect visibility.
 
 ### 6.4 Subgraphs and Default Blocks
-- [ ] [6.4-03] Visualize inherited vs explicit attrs at node/edge level.
 - [ ] [6.4-04] Add support for derived class behavior from subgraph labels.
 - [ ] [6.4-05] Add round-trip tests preserving subgraph/default-block semantics.
 
@@ -560,3 +559,5 @@ Status key:
   Deferred because the current frontend/API flow model only returns flattened nodes/edges and lacks subgraph/default-scope structures needed for first-class membership editing.
 - [ ] [6.4-02] Add scoped `node[...]` and `edge[...]` defaults authoring controls.
   Deferred because the current frontend/API payload and DOT serializer do not model scoped default blocks, so this control cannot be implemented without first adding subgraph/default-scope primitives.
+- [ ] [6.4-03] Visualize inherited vs explicit attrs at node/edge level.
+  Deferred because inherited-versus-explicit visualization depends on subgraph membership and scoped defaults that are currently flattened out by the frontend/API model and serializer.
