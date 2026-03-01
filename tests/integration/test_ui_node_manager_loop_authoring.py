@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import tempfile
@@ -95,6 +96,92 @@ console.log(dot)
         return probe_result.stdout
 
 
+def _generate_dot_from_preview_graph(graph_payload: dict[str, object]) -> str:
+    repo_root = Path(__file__).resolve().parents[2]
+    frontend_dir = repo_root / "frontend"
+
+    with tempfile.TemporaryDirectory(prefix=".tmp-dotutils-manager-loop-roundtrip-", dir=frontend_dir) as temp_dir:
+        temp_path = Path(temp_dir)
+        out_dir = temp_path / "out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        probe_tsconfig = temp_path / "tsconfig.json"
+        probe_tsconfig.write_text(
+            """{
+  "extends": "../tsconfig.app.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "noEmitOnError": false,
+    "allowImportingTsExtensions": false,
+    "outDir": "./out"
+  },
+  "include": ["../src/lib/dotUtils.ts"]
+}
+""",
+            encoding="utf-8",
+        )
+
+        compile_result = subprocess.run(
+            [
+                "npm",
+                "--prefix",
+                str(frontend_dir),
+                "exec",
+                "--",
+                "tsc",
+                "--pretty",
+                "false",
+                "--project",
+                str(probe_tsconfig),
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        dot_utils_js = out_dir / "lib" / "dotUtils.js"
+        if not dot_utils_js.exists():
+            raise AssertionError(
+                "Failed to compile dotUtils.ts for manager-loop fixture round-trip probe.\n"
+                f"stdout:\n{compile_result.stdout}\n"
+                f"stderr:\n{compile_result.stderr}"
+            )
+
+        probe_script = """
+import { pathToFileURL } from 'node:url'
+const mod = await import(pathToFileURL(process.env.DOT_UTILS_JS_PATH).href)
+const payload = JSON.parse(process.env.PREVIEW_GRAPH_JSON)
+const nodes = payload.nodes.map((node) => {
+  const { id, ...attrs } = node
+  return { id, data: attrs }
+})
+const edges = payload.edges.map((edge) => {
+  const { source, target, ...attrs } = edge
+  return { source, target, data: attrs }
+})
+const dot = mod.generateDot('manager_loop_fixture_round_trip_probe', nodes, edges, payload.graph_attrs ?? {})
+console.log(dot)
+""".strip()
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "DOT_UTILS_JS_PATH": str(dot_utils_js),
+                "PREVIEW_GRAPH_JSON": json.dumps(graph_payload),
+            }
+        )
+        probe_result = subprocess.run(
+            ["node", "--input-type=module", "-e", probe_script],
+            cwd=frontend_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+        return probe_result.stdout
+
+
 def test_manager_loop_authoring_controls_present_item_6_2_01() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
@@ -162,6 +249,28 @@ def test_manager_loop_attrs_round_trip_through_preview_item_6_2_01() -> None:
     assert manager_node["manager.actions"] == "observe,steer"
 
 
+def test_manager_loop_fixture_round_trip_item_6_7_04() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    fixture_path = repo_root / "tests" / "fixtures" / "manager_loop_authoring_round_trip.dot"
+    assert fixture_path.exists(), f"Missing manager-loop fixture: {fixture_path}"
+
+    fixture_payload = asyncio.run(
+        server.preview_pipeline(server.PreviewRequest(flow_content=fixture_path.read_text(encoding="utf-8")))
+    )
+    round_trip_flow = _generate_dot_from_preview_graph(fixture_payload["graph"])
+    round_trip_payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=round_trip_flow)))
+
+    fixture_graph_attrs = fixture_payload["graph"]["graph_attrs"]
+    round_trip_graph_attrs = round_trip_payload["graph"]["graph_attrs"]
+    assert round_trip_graph_attrs["stack.child_dotfile"] == fixture_graph_attrs["stack.child_dotfile"]
+    assert round_trip_graph_attrs["stack.child_workdir"] == fixture_graph_attrs["stack.child_workdir"]
+
+    fixture_manager = next(node for node in fixture_payload["graph"]["nodes"] if node["id"] == "manager")
+    round_trip_manager = next(node for node in round_trip_payload["graph"]["nodes"] if node["id"] == "manager")
+    for key in ("shape", "type", "manager.poll_interval", "manager.max_cycles", "manager.stop_condition", "manager.actions"):
+        assert round_trip_manager[key] == fixture_manager[key]
+
+
 def test_checklist_marks_item_6_2_01_complete() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
@@ -188,3 +297,10 @@ def test_checklist_marks_item_6_7_03_complete() -> None:
     checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
 
     assert "- [x] [6.7-03]" in checklist_text
+
+
+def test_checklist_marks_item_6_7_04_complete() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    assert "- [x] [6.7-04]" in checklist_text
