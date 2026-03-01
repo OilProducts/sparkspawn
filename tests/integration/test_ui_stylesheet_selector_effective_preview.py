@@ -147,8 +147,84 @@ def test_stylesheet_preview_resolves_selector_matches_and_effective_values_item_
     assert node_preview["review"]["effective"]["reasoning_effort"] == {"value": "low", "source": "stylesheet"}
 
 
+def test_graph_settings_exposes_precedence_rendering_guidance_item_6_5_04() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    graph_settings_text = (
+        repo_root / "frontend" / "src" / "components" / "GraphSettings.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert 'data-testid="graph-model-stylesheet-precedence-guidance"' in graph_settings_text
+    assert "Precedence: node attr &gt; stylesheet &gt; graph default &gt; system default." in graph_settings_text
+
+
+def test_stylesheet_preview_resolves_precedence_sources_item_6_5_04() -> None:
+    preview = _resolve_stylesheet_preview(
+        stylesheet=".style { llm_model: style-model; llm_provider: style-provider; }",
+        nodes=[
+            {
+                "id": "node_override",
+                "class": "style",
+                "llm_model": "node-model",
+                "llm_provider": "",
+                "reasoning_effort": "",
+            },
+            {
+                "id": "stylesheet_only",
+                "class": "style",
+                "llm_model": "",
+                "llm_provider": "",
+                "reasoning_effort": "",
+            },
+            {
+                "id": "graph_default_only",
+                "class": "",
+                "llm_model": "",
+                "llm_provider": "",
+                "reasoning_effort": "",
+            },
+            {
+                "id": "system_default_only",
+                "class": "",
+                "llm_model": "",
+                "llm_provider": "",
+                "reasoning_effort": "",
+            },
+        ],
+        graph_defaults={
+            "llm_model": "graph-model",
+            "llm_provider": "",
+            "reasoning_effort": "",
+        },
+    )
+
+    node_preview = {entry["nodeId"]: entry for entry in preview["nodePreview"]}
+    assert node_preview["node_override"]["effective"]["llm_model"] == {"value": "node-model", "source": "node"}
+    assert node_preview["stylesheet_only"]["effective"]["llm_provider"] == {"value": "style-provider", "source": "stylesheet"}
+    assert node_preview["graph_default_only"]["effective"]["llm_model"] == {"value": "graph-model", "source": "graph_default"}
+    assert node_preview["system_default_only"]["effective"]["reasoning_effort"] == {"value": "high", "source": "system_default"}
+
+
+def test_graph_settings_renders_effective_source_labels_item_6_5_04() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    graph_settings_text = (
+        repo_root / "frontend" / "src" / "components" / "GraphSettings.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert "MODEL_VALUE_SOURCE_LABEL[node.effective.llm_model.source]" in graph_settings_text
+    assert "MODEL_VALUE_SOURCE_LABEL[node.effective.llm_provider.source]" in graph_settings_text
+    assert "MODEL_VALUE_SOURCE_LABEL[node.effective.reasoning_effort.source]" in graph_settings_text
+    assert "graph_default: 'graph default'" in graph_settings_text
+
+
 def test_checklist_marks_item_6_5_03_complete() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
 
     assert "- [x] [6.5-03]" in checklist_text
+
+
+def test_checklist_marks_item_6_5_04_complete() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    assert "- [x] [6.5-04]" in checklist_text

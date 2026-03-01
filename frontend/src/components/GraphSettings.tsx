@@ -346,6 +346,12 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                                     <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                                         Effective per-node values
                                     </p>
+                                    <p
+                                        data-testid="graph-model-stylesheet-precedence-guidance"
+                                        className="mt-1 text-[11px] text-muted-foreground"
+                                    >
+                                        Precedence: node attr &gt; stylesheet &gt; graph default &gt; system default.
+                                    </p>
                                     {stylesheetPreview.nodePreview.length > 0 ? (
                                         <div className="mt-2 space-y-2">
                                             {stylesheetPreview.nodePreview.map((node) => (

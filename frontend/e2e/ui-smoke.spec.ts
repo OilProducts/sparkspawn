@@ -228,6 +228,12 @@ test("stylesheet selector/effective previews render in graph settings for item 6
 
   await expect(page.getByTestId("graph-model-stylesheet-selector-preview")).toBeVisible()
   await expect(page.getByTestId("graph-model-stylesheet-effective-preview")).toBeVisible()
+  await expect(page.getByTestId("graph-model-stylesheet-precedence-guidance")).toBeVisible()
   await expect(page.getByTestId("graph-model-stylesheet-selector-preview")).toContainText(".critical")
+  await expect(page.getByTestId("graph-model-stylesheet-effective-preview")).toContainText("(stylesheet)")
+  await expect(page.getByTestId("graph-model-stylesheet-effective-preview")).toContainText("(graph default)")
+  await page
+    .getByTestId("graph-model-stylesheet-effective-preview")
+    .screenshot({ path: screenshotPath("12-stylesheet-precedence-rendering.png") })
   await page.screenshot({ path: screenshotPath("11-stylesheet-selector-effective-preview.png"), fullPage: true })
 })
