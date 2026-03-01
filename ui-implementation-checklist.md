@@ -115,7 +115,7 @@ Status key:
 - [x] [6.1-01] Add graph editor fields for all required graph attrs (including `stack.child_*`, `tool_hooks.*`).
 - [x] [6.1-02] Add type-aware validation and normalization for graph attrs.
 - [x] [6.1-03] Add inline help and precedence notes for graph attrs.
-- [ ] [6.1-04] Add tests that graph-level edits serialize correctly to DOT and rehydrate cleanly.
+- [x] [6.1-04] Add tests that graph-level edits serialize correctly to DOT and rehydrate cleanly.
 
 ### 6.2 Node Authoring and Editing
 - [ ] [6.2-01] Add full handler type support including `stack.manager_loop` authoring controls.
