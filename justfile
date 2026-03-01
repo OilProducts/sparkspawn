@@ -21,3 +21,6 @@ parser-unsupported-grammar:
 
 test:
   uv run pytest -q
+
+ui-smoke:
+  npm --prefix frontend run ui:smoke
