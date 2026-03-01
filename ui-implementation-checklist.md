@@ -154,7 +154,7 @@ Status key:
 ## 7. Validation and Diagnostics UX
 
 ### 7.1 Diagnostic Surfaces
-- [ ] [7.1-01] Implement centralized validation panel with filtering/sorting.
+- [x] [7.1-01] Implement centralized validation panel with filtering/sorting.
 - [ ] [7.1-02] Implement inline node and edge diagnostic badges.
 - [ ] [7.1-03] Implement field-level diagnostic mapping in inspectors.
 

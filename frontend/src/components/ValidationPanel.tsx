@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useStore } from '@/store';
 
@@ -7,6 +8,22 @@ const severityStyles: Record<string, string> = {
     info: 'bg-sky-500/15 text-sky-700',
 };
 
+type SeverityFilter = 'all' | 'error' | 'warning' | 'info';
+type SortMode = 'severity' | 'line' | 'rule';
+
+const severityRank: Record<string, number> = {
+    error: 0,
+    warning: 1,
+    info: 2,
+};
+
+const filterTestIds: Record<SeverityFilter, string> = {
+    all: 'validation-filter-all',
+    error: 'validation-filter-error',
+    warning: 'validation-filter-warning',
+    info: 'validation-filter-info',
+};
+
 export function ValidationPanel() {
     const diagnostics = useStore((state) => state.diagnostics);
     const viewMode = useStore((state) => state.viewMode);
@@ -14,10 +31,35 @@ export function ValidationPanel() {
     const setSelectedNodeId = useStore((state) => state.setSelectedNodeId);
     const setSelectedEdgeId = useStore((state) => state.setSelectedEdgeId);
     const { getNode, getEdges, setCenter, setNodes, setEdges } = useReactFlow();
+    const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
+    const [sortMode, setSortMode] = useState<SortMode>('severity');
 
     if (viewMode !== 'editor' || diagnostics.length === 0) {
         return null;
     }
+
+    const filteredDiagnostics = diagnostics.filter((diag) =>
+        severityFilter === 'all' ? true : diag.severity === severityFilter,
+    );
+
+    const sortedDiagnostics = [...filteredDiagnostics].sort((left, right) => {
+        if (sortMode === 'line') {
+            const leftLine = left.line ?? Number.MAX_SAFE_INTEGER;
+            const rightLine = right.line ?? Number.MAX_SAFE_INTEGER;
+            if (leftLine !== rightLine) return leftLine - rightLine;
+        }
+        if (sortMode === 'rule') {
+            const byRule = left.rule_id.localeCompare(right.rule_id);
+            if (byRule !== 0) return byRule;
+        }
+        const leftRank = severityRank[left.severity] ?? Number.MAX_SAFE_INTEGER;
+        const rightRank = severityRank[right.severity] ?? Number.MAX_SAFE_INTEGER;
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        if ((left.line ?? Number.MAX_SAFE_INTEGER) !== (right.line ?? Number.MAX_SAFE_INTEGER)) {
+            return (left.line ?? Number.MAX_SAFE_INTEGER) - (right.line ?? Number.MAX_SAFE_INTEGER);
+        }
+        return left.message.localeCompare(right.message);
+    });
 
     const centerOnNode = (nodeId: string) => {
         const node = getNode(nodeId);
@@ -69,17 +111,52 @@ export function ValidationPanel() {
     };
 
     return (
-        <div className="absolute left-4 bottom-4 z-20 w-80 rounded-md border border-border bg-card/95 p-3 shadow-lg">
+        <div
+            data-testid="validation-panel"
+            className="absolute left-4 bottom-4 z-20 w-80 rounded-md border border-border bg-card/95 p-3 shadow-lg"
+        >
             <div className="flex items-center justify-between">
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validation</div>
                 <div className="text-[11px] font-medium text-muted-foreground">
                     {hasValidationErrors ? 'Errors present' : 'Warnings only'}
                 </div>
             </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+                <select
+                    data-testid="validation-sort-select"
+                    value={sortMode}
+                    onChange={(event) => setSortMode(event.target.value as SortMode)}
+                    className="h-7 rounded border border-border bg-background px-2 text-[11px]"
+                >
+                    <option value="severity">Sort: Severity</option>
+                    <option value="line">Sort: Line</option>
+                    <option value="rule">Sort: Rule</option>
+                </select>
+                <div data-testid="validation-visible-count" className="text-[11px] text-muted-foreground">
+                    {sortedDiagnostics.length} visible
+                </div>
+            </div>
+            <div className="mt-2 grid grid-cols-4 gap-1">
+                {(['all', 'error', 'warning', 'info'] as SeverityFilter[]).map((filterValue) => (
+                    <button
+                        key={filterValue}
+                        data-testid={filterTestIds[filterValue]}
+                        onClick={() => setSeverityFilter(filterValue)}
+                        className={`rounded border px-1.5 py-1 text-[10px] font-medium uppercase tracking-wide ${
+                            severityFilter === filterValue
+                                ? 'border-foreground/50 bg-muted text-foreground'
+                                : 'border-border/60 bg-background text-muted-foreground hover:bg-muted/50'
+                        }`}
+                    >
+                        {filterValue}
+                    </button>
+                ))}
+            </div>
             <div className="mt-2 max-h-44 space-y-2 overflow-y-auto pr-1">
-                {diagnostics.map((diag, index) => (
+                {sortedDiagnostics.map((diag, index) => (
                     <button
                         key={`${diag.rule_id}-${index}`}
+                        data-testid="validation-diagnostic-item"
                         onClick={() => {
                             if (diag.node_id) {
                                 selectNode(diag.node_id);
@@ -107,6 +184,11 @@ export function ValidationPanel() {
                         </div>
                     </button>
                 ))}
+                {sortedDiagnostics.length === 0 && (
+                    <div className="rounded-md border border-dashed border-border/60 bg-background/80 px-2 py-2 text-xs text-muted-foreground">
+                        No diagnostics for current filter.
+                    </div>
+                )}
             </div>
         </div>
     );

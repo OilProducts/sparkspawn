@@ -146,6 +146,90 @@ test("prompt edits trigger live preview diagnostics before blur for item 5.1-03"
   await page.screenshot({ path: screenshotPath("09-live-prompt-diagnostics.png"), fullPage: true })
 })
 
+test("validation panel supports filter and sort controls for item 7.1-01", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-validation-panel-${Date.now()}`
+  const promptToken = `validation-panel-${Date.now()}`
+  const warningLateMessage = `Validation warning late ${Date.now()}`
+  const warningEarlyMessage = `Validation warning early ${Date.now()}`
+  const errorMessage = `Validation error ${Date.now()}`
+
+  await page.route("**/preview", async (route) => {
+    const body = route.request().postData() || ""
+    if (body.includes(promptToken)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "ok",
+          diagnostics: [
+            {
+              rule_id: "warning_late",
+              severity: "warning",
+              message: warningLateMessage,
+              line: 14,
+            },
+            {
+              rule_id: "error_mid",
+              severity: "error",
+              message: errorMessage,
+              line: 6,
+            },
+            {
+              rule_id: "warning_early",
+              severity: "warning",
+              message: warningEarlyMessage,
+              line: 2,
+            },
+          ],
+        }),
+      })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-editor").click()
+
+  const firstFlowButton = page.locator("button").filter({ hasText: ".dot" }).first()
+  await expect(firstFlowButton).toBeVisible()
+  await firstFlowButton.click()
+
+  await expect(page.getByRole("button", { name: "Add Node" })).toBeVisible()
+  await page.getByRole("button", { name: "Add Node" }).click()
+
+  const newNode = page.locator(".react-flow__node").filter({ hasText: "New Node" }).last()
+  await expect(newNode).toBeVisible()
+  await newNode.click()
+
+  const promptField = page.getByPlaceholder("Enter system prompt instructions...")
+  await expect(promptField).toBeVisible()
+
+  const previewRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes("/preview") &&
+      request.method() === "POST" &&
+      (request.postData() || "").includes(promptToken),
+  )
+
+  await promptField.fill(promptToken)
+  await previewRequest
+
+  const diagnostics = page.getByTestId("validation-diagnostic-item")
+  await expect(diagnostics).toHaveCount(3)
+  await expect(diagnostics.first()).toContainText(errorMessage)
+
+  await page.getByTestId("validation-filter-warning").click()
+  await expect(diagnostics).toHaveCount(2)
+  await expect(diagnostics.filter({ hasText: errorMessage })).toHaveCount(0)
+
+  await page.getByTestId("validation-sort-select").selectOption("line")
+  await expect(diagnostics.first()).toContainText(warningEarlyMessage)
+  await page.screenshot({ path: screenshotPath("13-validation-panel-filter-sort.png"), fullPage: true })
+})
+
 test("stylesheet parse diagnostics render in graph settings for item 6.5-02", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-stylesheet-${Date.now()}`
   const stylesheetToken = ".bad$class { llm_model: gpt-5; }"
