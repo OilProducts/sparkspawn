@@ -181,7 +181,7 @@ Status key:
 
 ### 8.2 Runtime Controls
 - [x] [8.2-01] Provide Start and Cancel controls for supported backend behavior.
-- [ ] [8.2-02] Provide Pause/Resume controls when backend/API supports them.
+- Deferred to `Deferred Tasks` until backend runtime control API exposes pause/resume capability.
 - [ ] [8.2-03] Show disabled reason text for unsupported controls.
 - [ ] [8.2-04] Add tests for control enable/disable state transitions.
 
@@ -564,3 +564,5 @@ Status key:
   Deferred because derived class behavior depends on subgraph creation/membership and scoped default infrastructure (`6.4-01` to `6.4-03`) that is not yet modeled in the frontend.
 - [ ] [6.4-05] Add round-trip tests preserving subgraph/default-block semantics.
   Deferred because the current frontend/API model and serializer flatten subgraph/default scopes, so the test would fail on known model loss instead of catching regressions.
+- [ ] [8.2-02] Provide Pause/Resume controls when backend/API supports them.
+  Deferred because the current UI/API contract only exposes `/pipelines/{id}/cancel` with no pause/resume endpoint or capability metadata to drive those controls safely.
