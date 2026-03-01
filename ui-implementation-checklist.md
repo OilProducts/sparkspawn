@@ -186,7 +186,7 @@ Status key:
 - [x] [8.2-04] Add tests for control enable/disable state transitions.
 
 ### 8.3 Live State Updates
-- [ ] [8.3-01] Stream and render live node status transitions from runtime events.
+- [x] [8.3-01] Stream and render live node status transitions from runtime events.
 - [ ] [8.3-02] Resolve event ordering/race handling for rapid transitions.
 - [ ] [8.3-03] Add tests for state reset and run switching behavior.
 

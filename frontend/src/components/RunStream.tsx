@@ -11,6 +11,13 @@ function classifyLog(message: string): 'info' | 'success' | 'error' {
     return 'info'
 }
 
+const RUNTIME_STAGE_STATUS_MAP: Record<string, 'running' | 'success' | 'failed'> = {
+    StageStarted: 'running',
+    StageRetrying: 'running',
+    StageCompleted: 'success',
+    StageFailed: 'failed',
+}
+
 const normalizeScopePath = (value: string) => {
     const trimmed = value.trim()
     if (!trimmed) return ''
@@ -120,6 +127,15 @@ export function RunStream() {
         source.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data)
+                const runtimeNodeId = typeof data.node_id === 'string' ? data.node_id : null
+                const runtimeNodeStatus = RUNTIME_STAGE_STATUS_MAP[data.type]
+                if (runtimeNodeId && runtimeNodeStatus) {
+                    setNodeStatus(runtimeNodeId, runtimeNodeStatus)
+                    const currentGate = useStore.getState().humanGate
+                    if (runtimeNodeStatus !== 'waiting' && currentGate?.nodeId === runtimeNodeId) {
+                        clearHumanGate()
+                    }
+                }
                 if (data.type === 'log') {
                     addLog({
                         time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
