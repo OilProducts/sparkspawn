@@ -403,6 +403,68 @@ test("inspector field-level diagnostics map to matching fields for item 7.1-03",
   await page.screenshot({ path: screenshotPath("15-inspector-field-level-diagnostics.png"), fullPage: true })
 })
 
+test("warning-only diagnostics still allow execute with explicit banner for item 7.2-02", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-warning-only-${Date.now()}`
+  const promptToken = `warning-only-${Date.now()}`
+  const warningMessage = `Warning-only diagnostic ${Date.now()}`
+
+  await page.route("**/preview", async (route) => {
+    const body = route.request().postData() || ""
+    if (body.includes(promptToken)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "ok",
+          diagnostics: [
+            {
+              rule_id: "warning_only_state",
+              severity: "warning",
+              message: warningMessage,
+            },
+          ],
+        }),
+      })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-editor").click()
+
+  const flowButton = page.getByRole("button", { name: "implement-spec.dot" })
+  await expect(flowButton).toBeVisible()
+  await flowButton.click()
+
+  const promptNode = page
+    .locator(".react-flow__node")
+    .filter({ hasText: "Extract Testable Declarations" })
+    .first()
+  await expect(promptNode).toBeVisible()
+  await promptNode.click()
+
+  const promptField = page.getByPlaceholder("Enter system prompt instructions...")
+  await expect(promptField).toBeVisible()
+
+  const previewRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes("/preview") &&
+      request.method() === "POST" &&
+      (request.postData() || "").includes(promptToken),
+  )
+
+  await promptField.fill(promptToken)
+  await previewRequest
+
+  await expect(page.getByTestId("execute-button")).toBeEnabled()
+  await expect(page.getByTestId("execute-warning-banner")).toBeVisible()
+  await expect(page.getByTestId("execute-warning-banner")).toContainText("Warnings present; run allowed.")
+  await page.screenshot({ path: screenshotPath("16-warning-only-execute-banner.png"), fullPage: true })
+})
+
 test("stylesheet parse diagnostics render in graph settings for item 6.5-02", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-stylesheet-${Date.now()}`
   const stylesheetToken = ".bad$class { llm_model: gpt-5; }"

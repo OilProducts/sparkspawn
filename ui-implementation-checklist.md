@@ -160,7 +160,7 @@ Status key:
 
 ### 7.2 Blocking Rules
 - [x] [7.2-01] Block run start on error-level diagnostics.
-- [ ] [7.2-02] Allow run start on warning-only state with explicit warning banner.
+- [x] [7.2-02] Allow run start on warning-only state with explicit warning banner.
 - [ ] [7.2-03] Add tests for blocking/unblocking transitions as diagnostics change.
 
 ### 7.3 Navigability

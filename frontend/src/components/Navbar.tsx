@@ -6,7 +6,10 @@ export function Navbar() {
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const model = useStore((state) => state.model)
     const workingDir = useStore((state) => state.workingDir)
+    const diagnostics = useStore((state) => state.diagnostics)
     const hasValidationErrors = useStore((state) => state.hasValidationErrors)
+    const hasValidationWarnings = diagnostics.some((diag) => diag.severity === 'warning')
+    const showValidationWarningBanner = hasValidationWarnings && !hasValidationErrors
     const runtimeStatus = useStore((state) => state.runtimeStatus)
     const selectedRunId = useStore((state) => state.selectedRunId)
 
@@ -121,7 +124,15 @@ export function Navbar() {
                 </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+                {showValidationWarningBanner ? (
+                    <p
+                        data-testid="execute-warning-banner"
+                        className="rounded border border-amber-400 bg-amber-50 px-2 py-1 text-[11px] font-medium leading-none text-amber-900"
+                    >
+                        Warnings present; run allowed.
+                    </p>
+                ) : null}
                 <button
                     data-testid="execute-button"
                     onClick={runPipeline}
@@ -131,6 +142,8 @@ export function Navbar() {
                             ? 'Select an active project before running.'
                             : hasValidationErrors
                                 ? 'Fix validation errors before running.'
+                                : showValidationWarningBanner
+                                    ? 'Warnings are present. Review diagnostics before running.'
                                 : undefined
                     }
                     className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2"
