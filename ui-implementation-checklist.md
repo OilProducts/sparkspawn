@@ -125,7 +125,7 @@ Status key:
 
 ### 6.3 Edge Authoring and Editing
 - [x] [6.3-01] Add complete edge attributes editor (`label`, `condition`, `weight`, `fidelity`, `thread_id`, `loop_restart`).
-- [ ] [6.3-02] Add condition syntax hints and preview validation feedback.
+- [x] [6.3-02] Add condition syntax hints and preview validation feedback.
 - [ ] [6.3-03] Add tests for edge attr serialization and execution-side effect visibility.
 
 ### 6.4 Subgraphs and Default Blocks

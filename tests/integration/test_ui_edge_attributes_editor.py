@@ -142,3 +142,27 @@ def test_checklist_marks_item_6_3_01_complete() -> None:
     checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
 
     assert "- [x] [6.3-01]" in checklist_text
+
+
+def test_edge_condition_field_exposes_syntax_hints_and_preview_feedback_item_6_3_02() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
+
+    assert 'data-testid="edge-condition-syntax-hints"' in sidebar_text
+    assert "Use && to join clauses" in sidebar_text
+    assert "Supported keys: outcome, preferred_label, context.<path>" in sidebar_text
+    assert "Operators: = or !=" in sidebar_text
+
+    assert "const edgeDiagnostics = useStore((state) => state.edgeDiagnostics)" in sidebar_text
+    assert "const selectedEdgeDiagnosticKey = selectedEdge ? `${selectedEdge.source}->${selectedEdge.target}` : null" in sidebar_text
+    assert "const selectedEdgeConditionDiagnostics = selectedEdgeDiagnosticKey" in sidebar_text
+    assert "diag.rule_id === 'condition_syntax'" in sidebar_text
+    assert 'data-testid="edge-condition-preview-feedback"' in sidebar_text
+    assert "Condition syntax looks valid in preview." in sidebar_text
+
+
+def test_checklist_marks_item_6_3_02_complete() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    assert "- [x] [6.3-02]" in checklist_text

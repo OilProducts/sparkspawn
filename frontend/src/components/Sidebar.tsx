@@ -33,6 +33,7 @@ function resolveInspectorScope({
 export function Sidebar() {
     const { viewMode, activeFlow, setActiveFlow, selectedNodeId, selectedEdgeId } = useStore()
     const activeProjectPath = useStore((state) => state.activeProjectPath)
+    const edgeDiagnostics = useStore((state) => state.edgeDiagnostics)
     const humanGate = useStore((state) => state.humanGate)
     const graphAttrs = useStore((state) => state.graphAttrs)
     const uiDefaults = useStore((state) => state.uiDefaults)
@@ -154,6 +155,12 @@ export function Sidebar() {
 
     const selectedNode = nodes.find(n => n.id === selectedNodeId);
     const selectedEdge = edges.find(e => e.id === selectedEdgeId);
+    const selectedEdgeDiagnosticKey = selectedEdge ? `${selectedEdge.source}->${selectedEdge.target}` : null
+    const selectedEdgeConditionDiagnostics = selectedEdgeDiagnosticKey
+        ? (edgeDiagnostics[selectedEdgeDiagnosticKey] || []).filter((diag) => diag.rule_id === 'condition_syntax')
+        : []
+    const conditionPreviewHasError = selectedEdgeConditionDiagnostics.some((diag) => diag.severity === 'error')
+    const conditionPreviewHasWarning = selectedEdgeConditionDiagnostics.some((diag) => diag.severity === 'warning')
     const isTrue = (value: unknown) => value === true || value === 'true';
     const handlerType = getHandlerType(
         (selectedNode?.data?.shape as string) || '',
@@ -660,6 +667,31 @@ export function Sidebar() {
                                         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                         placeholder='e.g. outcome = "success"'
                                     />
+                                    <div data-testid="edge-condition-syntax-hints" className="space-y-1 rounded-md border border-border/80 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+                                        <p>Use && to join clauses.</p>
+                                        <p>{'Supported keys: outcome, preferred_label, context.<path>'}</p>
+                                        <p>Operators: = or !=</p>
+                                    </div>
+                                    <div
+                                        data-testid="edge-condition-preview-feedback"
+                                        className={`rounded-md border px-3 py-2 text-[11px] ${
+                                            conditionPreviewHasError
+                                                ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                                                : conditionPreviewHasWarning
+                                                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-700'
+                                                    : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
+                                        }`}
+                                    >
+                                        {selectedEdgeConditionDiagnostics.length > 0 ? (
+                                            <ul className="space-y-1">
+                                                {selectedEdgeConditionDiagnostics.map((diag, index) => (
+                                                    <li key={`${diag.rule_id}-${diag.message}-${index}`}>{diag.message}</li>
+                                                ))}
+                                            </ul>
+                                        ) : (
+                                            <p>Condition syntax looks valid in preview.</p>
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-sm font-medium">Weight</label>
