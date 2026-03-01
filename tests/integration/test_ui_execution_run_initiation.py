@@ -119,3 +119,18 @@ def test_run_start_rejection_surfaces_failure_handling_ui_item_8_1_03() -> None:
         assert snippet in navbar_text, f"missing run start rejection failure UI snippet: {snippet}"
 
     assert "- [x] [8.1-03]" in checklist_text
+
+
+def test_run_initiation_working_directory_defaults_to_active_project_unless_overridden_item_8_1_04() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    navbar_text = (repo_root / "frontend" / "src" / "components" / "Navbar.tsx").read_text(encoding="utf-8")
+    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
+
+    required_snippets = [
+        "const resolvedWorkingDirectory = runInitiationForm.workingDirectory.trim() || runInitiationForm.projectPath",
+        "runInitiationForm.workingDirectory = resolvedWorkingDirectory",
+    ]
+    for snippet in required_snippets:
+        assert snippet in navbar_text, f"missing working directory defaulting snippet: {snippet}"
+
+    assert "- [x] [8.1-04]" in checklist_text

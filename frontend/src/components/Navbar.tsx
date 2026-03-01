@@ -34,6 +34,8 @@ export function Navbar() {
             }
 
             const flow = await flowRes.json()
+            const resolvedWorkingDirectory = runInitiationForm.workingDirectory.trim() || runInitiationForm.projectPath
+            runInitiationForm.workingDirectory = resolvedWorkingDirectory
             const startPayload = buildPipelineStartPayload(runInitiationForm, flow.content)
             const runRes = await fetch('/pipelines', {
                 method: 'POST',
