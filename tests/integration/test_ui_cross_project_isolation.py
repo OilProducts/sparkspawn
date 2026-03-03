@@ -177,3 +177,26 @@ def test_run_stream_rejects_selected_run_metadata_outside_active_project_scope_i
 
     for snippet in required_snippets:
         assert snippet in run_stream_text, f"missing run-stream selected-run scope-guard snippet: {snippet}"
+
+
+def test_run_stream_defers_event_source_until_scope_preflight_item_4_2_05() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    run_stream_text = (repo_root / "frontend" / "src" / "components" / "RunStream.tsx").read_text(encoding="utf-8")
+
+    required_snippets = [
+        "let eventSource: EventSource | null = null",
+        "const metadataAbort = new AbortController()",
+        "const source = {",
+        "metadataAbort.abort()",
+        "eventSource?.close()",
+        "const startScopedStream = async () => {",
+        "signal: metadataAbort.signal",
+        "if (metadataAbort.signal.aborted) return",
+        "const source = new EventSource(`/pipelines/${encodeURIComponent(selectedRunId)}/events`)",
+        "eventSource = source",
+        "startScopedStream()",
+        "source.close()",
+    ]
+
+    for snippet in required_snippets:
+        assert snippet in run_stream_text, f"missing run-stream scope-preflight sequencing snippet: {snippet}"

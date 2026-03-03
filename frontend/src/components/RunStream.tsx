@@ -119,25 +119,16 @@ export function RunStream() {
     useEffect(() => {
         if (!selectedRunId) return
 
-        fetch(`/pipelines/${encodeURIComponent(selectedRunId)}`)
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                const selectedRunWorkingDirectory = typeof data?.working_directory === 'string' ? data.working_directory : ''
-                const selectedRunInScope = runBelongsToProjectScope(selectedRunWorkingDirectory, activeProjectPath)
-                if (!selectedRunInScope) {
-                    setSelectedRunId(null)
-                    setRuntimeStatus('idle')
-                    return
-                }
-                if (data?.status) {
-                    setRuntimeStatus(data.status)
-                }
-            })
-            .catch(() => null)
+        let eventSource: EventSource | null = null
+        const metadataAbort = new AbortController()
+        const source = {
+            close: () => {
+                metadataAbort.abort()
+                eventSource?.close()
+            },
+        }
 
-        const source = new EventSource(`/pipelines/${encodeURIComponent(selectedRunId)}/events`)
-
-        source.onmessage = (event) => {
+        const handleMessage = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data)
                 const runtimeNodeId = typeof data.node_id === 'string' ? data.node_id : null
@@ -248,6 +239,32 @@ export function RunStream() {
                 // ignore malformed events
             }
         }
+
+        const startScopedStream = async () => {
+            const response = await fetch(`/pipelines/${encodeURIComponent(selectedRunId)}`, {
+                signal: metadataAbort.signal,
+            })
+            const data = response.ok ? await response.json() : null
+            if (metadataAbort.signal.aborted) return
+
+            const selectedRunWorkingDirectory = typeof data?.working_directory === 'string' ? data.working_directory : ''
+            const selectedRunInScope = runBelongsToProjectScope(selectedRunWorkingDirectory, activeProjectPath)
+            if (!selectedRunInScope) {
+                setSelectedRunId(null)
+                setRuntimeStatus('idle')
+                return
+            }
+            if (data?.status) {
+                setRuntimeStatus(data.status)
+            }
+            if (metadataAbort.signal.aborted) return
+
+            const source = new EventSource(`/pipelines/${encodeURIComponent(selectedRunId)}/events`)
+            source.onmessage = handleMessage
+            eventSource = source
+        }
+
+        startScopedStream().catch(() => null)
 
         return () => {
             source.close()
