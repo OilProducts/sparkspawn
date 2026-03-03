@@ -11,6 +11,15 @@ def test_raw_dot_required_config_report_exists_with_required_coverage() -> None:
 
     required_snippets = [
         "[1.1-01]",
+        "subgraph",
+        "node[...] defaults",
+        "edge[...] defaults",
+        "Current Required Raw-DOT Surfaces",
+    ]
+    for snippet in required_snippets:
+        assert snippet in report_text, f"missing required report coverage: {snippet}"
+
+    no_longer_required_snippets = [
         "stack.child_dotfile",
         "stack.child_workdir",
         "tool_hooks.pre",
@@ -20,14 +29,7 @@ def test_raw_dot_required_config_report_exists_with_required_coverage() -> None:
         "manager.stop_condition",
         "manager.actions",
         "human.default_choice",
-        "subgraph",
-        "node[...] defaults",
-        "edge[...] defaults",
     ]
-    for snippet in required_snippets:
-        assert snippet in report_text, f"missing required report coverage: {snippet}"
-
-    assert "Manager-loop authoring (`house` / `stack.manager_loop`)" not in report_text
-    assert "`type` override" in report_text
-
+    for snippet in no_longer_required_snippets:
+        assert snippet not in report_text, f"report still marks UI-supported attr as raw-DOT-only: {snippet}"
 

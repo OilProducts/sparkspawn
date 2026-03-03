@@ -14,7 +14,7 @@ Status key:
 ## 1. Overview and Goals
 
 ### 1.1 Problem Statement
-- [ ] [1.1-01] Document all places where users must leave the UI to raw DOT for required configuration. (See `ui-raw-dot-required-config.md`.)
+- [x] [1.1-01] Document all places where users must leave the UI to raw DOT for required configuration. (See `ui-raw-dot-required-config.md`.)
 - [x] [1.1-02] Add a parity-risk report that identifies current behavior-loss and hidden-config failure modes. (See `ui-parity-risk-report.md`.)
 - [ ] [1.1-03] Add a baseline fixture set of spec-valid flows that currently require raw DOT edits.
 
