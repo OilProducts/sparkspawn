@@ -21,6 +21,7 @@ from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
+from tests.contracts.frontend.frontend_behavior_runner import assert_frontend_behavior_test_passed
 
 
 def _run_dot_utils_probe(probe_script: str, *, temp_prefix: str) -> str:
@@ -161,23 +162,9 @@ console.log(dot)
 
 
 def test_edge_editor_exposes_all_required_edge_attrs_item_6_3_01() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-
-    assert 'data-testid="edge-structured-form"' in sidebar_text
-    assert "Label" in sidebar_text
-    assert "Condition" in sidebar_text
-    assert "Weight" in sidebar_text
-    assert "Fidelity" in sidebar_text
-    assert "Thread ID" in sidebar_text
-    assert "Loop Restart" in sidebar_text
-
-    assert "handleEdgePropertyChange('label'" in sidebar_text
-    assert "handleEdgePropertyChange('condition'" in sidebar_text
-    assert "handleEdgePropertyChange('weight'" in sidebar_text
-    assert "handleEdgePropertyChange('fidelity'" in sidebar_text
-    assert "handleEdgePropertyChange('thread_id'" in sidebar_text
-    assert "handleEdgePropertyChange('loop_restart'" in sidebar_text
+    assert_frontend_behavior_test_passed(
+        "renders edge inspector controls and updates condition preview feedback from diagnostics"
+    )
 
 
 def test_edge_attrs_round_trip_through_preview_item_6_3_01() -> None:
@@ -196,20 +183,9 @@ def test_edge_attrs_round_trip_through_preview_item_6_3_01() -> None:
 
 
 def test_edge_condition_field_exposes_syntax_hints_and_preview_feedback_item_6_3_02() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-
-    assert 'data-testid="edge-condition-syntax-hints"' in sidebar_text
-    assert "Use && to join clauses" in sidebar_text
-    assert "Supported keys: outcome, preferred_label, context.<path>" in sidebar_text
-    assert "Operators: = or !=" in sidebar_text
-
-    assert "const edgeDiagnostics = useStore((state) => state.edgeDiagnostics)" in sidebar_text
-    assert "const selectedEdgeDiagnosticKey = selectedEdge ? `${selectedEdge.source}->${selectedEdge.target}` : null" in sidebar_text
-    assert "const selectedEdgeConditionDiagnostics = selectedEdgeDiagnosticKey" in sidebar_text
-    assert "diag.rule_id === 'condition_syntax'" in sidebar_text
-    assert 'data-testid="edge-condition-preview-feedback"' in sidebar_text
-    assert "Condition syntax looks valid in preview." in sidebar_text
+    assert_frontend_behavior_test_passed(
+        "renders edge inspector controls and updates condition preview feedback from diagnostics"
+    )
 
 
 def test_edge_attr_serialization_and_execution_side_effect_visibility_item_6_3_03() -> None:
@@ -531,39 +507,9 @@ console.log(dot)
 
 
 def test_node_advanced_attr_controls_present_item_6_2_02() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
-
-    assert "Max Retries" in sidebar_text
-    assert "Goal Gate" in sidebar_text
-    assert "Retry Target" in sidebar_text
-    assert "Fallback Retry Target" in sidebar_text
-    assert "Fidelity" in sidebar_text
-    assert "Thread ID" in sidebar_text
-    assert "Class" in sidebar_text
-    assert "Timeout" in sidebar_text
-    assert "LLM Model" in sidebar_text
-    assert "LLM Provider" in sidebar_text
-    assert "Reasoning Effort" in sidebar_text
-    assert "Auto Status" in sidebar_text
-    assert "Allow Partial" in sidebar_text
-    assert "Human Default Choice" in sidebar_text
-
-    assert "Max Retries" in task_node_text
-    assert "Goal Gate" in task_node_text
-    assert "Retry Target" in task_node_text
-    assert "Fallback Retry Target" in task_node_text
-    assert "Fidelity" in task_node_text
-    assert "Thread ID" in task_node_text
-    assert "Class" in task_node_text
-    assert "Timeout" in task_node_text
-    assert "LLM Model" in task_node_text
-    assert "LLM Provider" in task_node_text
-    assert "Reasoning Effort" in task_node_text
-    assert "Auto Status" in task_node_text
-    assert "Allow Partial" in task_node_text
-    assert "Human Default Choice" in task_node_text
+    assert_frontend_behavior_test_passed(
+        "renders advanced node controls for codergen and wait.human in sidebar inspector"
+    )
 
 
 def test_node_advanced_attrs_round_trip_through_preview_item_6_2_02() -> None:
@@ -997,54 +943,27 @@ console.log(dot)
 
 
 def test_manager_loop_authoring_controls_present_item_6_2_01() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
-
-    assert '<option value="house">Manager Loop</option>' in sidebar_text
-    assert '<option value="house">Manager Loop</option>' in task_node_text
-
-    assert "Manager Poll Interval" in sidebar_text
-    assert "Manager Max Cycles" in sidebar_text
-    assert "Manager Stop Condition" in sidebar_text
-    assert "Manager Actions" in sidebar_text
+    assert_frontend_behavior_test_passed(
+        "renders manager-loop authoring controls and child-linkage affordance in sidebar inspector"
+    )
 
 
 def test_manager_loop_shape_and_type_are_selectable_item_6_7_01() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
-
-    assert '<option value="house">Manager Loop</option>' in sidebar_text
-    assert '<option value="house">Manager Loop</option>' in task_node_text
-    assert '<option value="stack.manager_loop">stack.manager_loop</option>' in sidebar_text
-    assert '<option value="stack.manager_loop">stack.manager_loop</option>' in task_node_text
+    assert_frontend_behavior_test_passed(
+        "renders manager-loop shape and type options in task node toolbar"
+    )
 
 
 def test_manager_loop_control_fields_present_item_6_7_02() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
-
-    required_labels = (
-        "Manager Poll Interval",
-        "Manager Max Cycles",
-        "Manager Stop Condition",
-        "Manager Actions",
+    assert_frontend_behavior_test_passed(
+        "renders manager-loop authoring controls and child-linkage affordance in sidebar inspector"
     )
-    for label in required_labels:
-        assert label in sidebar_text
-        assert label in task_node_text
 
 
 def test_manager_loop_child_linkage_controls_present_item_6_7_03() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-
-    assert "Child Pipeline Linkage" in sidebar_text
-    assert "Open Graph Child Settings" in sidebar_text
-    assert "stack.child_dotfile" in sidebar_text
-    assert "stack.child_workdir" in sidebar_text
+    assert_frontend_behavior_test_passed(
+        "renders manager-loop authoring controls and child-linkage affordance in sidebar inspector"
+    )
 
 
 
@@ -1103,13 +1022,9 @@ import attractor.api.server as server
 
 
 def test_graph_settings_exposes_graph_scope_tool_hook_fields_item_6_6_01() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    graph_settings_text = (repo_root / "frontend" / "src" / "components" / "GraphSettings.tsx").read_text(encoding="utf-8")
-
-    assert 'data-testid="graph-attr-input-tool_hooks.pre"' in graph_settings_text
-    assert 'data-testid="graph-attr-input-tool_hooks.post"' in graph_settings_text
-    assert "updateGraphAttr('tool_hooks.pre'" in graph_settings_text
-    assert "updateGraphAttr('tool_hooks.post'" in graph_settings_text
+    assert_frontend_behavior_test_passed(
+        "renders graph settings feedback for stylesheet diagnostics and tool hook warnings"
+    )
 
 
 def _generate_dot_with_node_tool_hook_overrides() -> str:
@@ -1208,38 +1123,18 @@ console.log(dot)
 
 
 def test_node_tool_hook_override_controls_present_item_6_6_02() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
-
-    assert 'data-testid="node-attr-input-tool_hooks.pre"' in sidebar_text
-    assert 'data-testid="node-attr-input-tool_hooks.post"' in sidebar_text
-    assert "handlePropertyChange('tool_hooks.pre'" in sidebar_text
-    assert "handlePropertyChange('tool_hooks.post'" in sidebar_text
-
-    assert 'data-testid="node-toolbar-attr-input-tool_hooks.pre"' in task_node_text
-    assert 'data-testid="node-toolbar-attr-input-tool_hooks.post"' in task_node_text
-    assert "'tool_hooks.pre': draftToolHooksPre" in task_node_text
-    assert "'tool_hooks.post': draftToolHooksPost" in task_node_text
+    assert_frontend_behavior_test_passed(
+        "renders node-level tool hook override controls and warnings in sidebar and node toolbar"
+    )
 
 
 def test_tool_hook_warning_surfaces_present_item_6_6_03() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    graph_settings_text = (repo_root / "frontend" / "src" / "components" / "GraphSettings.tsx").read_text(encoding="utf-8")
-    sidebar_text = (repo_root / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-    task_node_text = (repo_root / "frontend" / "src" / "components" / "TaskNode.tsx").read_text(encoding="utf-8")
-
-    assert "getToolHookCommandWarning" in graph_settings_text
-    assert 'data-testid="graph-attr-warning-tool_hooks.pre"' in graph_settings_text
-    assert 'data-testid="graph-attr-warning-tool_hooks.post"' in graph_settings_text
-
-    assert "getToolHookCommandWarning" in sidebar_text
-    assert 'data-testid="node-attr-warning-tool_hooks.pre"' in sidebar_text
-    assert 'data-testid="node-attr-warning-tool_hooks.post"' in sidebar_text
-
-    assert "getToolHookCommandWarning" in task_node_text
-    assert 'data-testid="node-toolbar-attr-warning-tool_hooks.pre"' in task_node_text
-    assert 'data-testid="node-toolbar-attr-warning-tool_hooks.post"' in task_node_text
+    assert_frontend_behavior_test_passed(
+        "renders graph settings feedback for stylesheet diagnostics and tool hook warnings"
+    )
+    assert_frontend_behavior_test_passed(
+        "renders node-level tool hook override controls and warnings in sidebar and node toolbar"
+    )
 
 
 def _probe_tool_hook_command_warning() -> dict[str, str | None]:
@@ -1463,4 +1358,3 @@ digraph tool_hook_save_load {
 
 
 # ---- end tests/integration/test_ui_tool_hook_authoring.py ----
-

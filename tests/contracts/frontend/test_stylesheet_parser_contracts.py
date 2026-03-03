@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import attractor.api.server as server
+from tests.contracts.frontend.frontend_behavior_runner import assert_frontend_behavior_test_passed
 
 
 INVALID_STYLESHEET_FLOW = '''
@@ -26,17 +26,7 @@ digraph stylesheet_probe_whitespace {
 
 
 def test_graph_settings_exposes_stylesheet_parse_lint_feedback_item_6_5_02() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    graph_settings_text = (
-        repo_root / "frontend" / "src" / "components" / "GraphSettings.tsx"
-    ).read_text(encoding="utf-8")
-
-    assert "const diagnostics = useStore((state) => state.diagnostics)" in graph_settings_text
-    assert "const stylesheetDiagnostics = diagnostics.filter((diag) => diag.rule_id === 'stylesheet_syntax')" in graph_settings_text
-    assert "const showStylesheetFeedback = hasStylesheetValue || stylesheetDiagnostics.length > 0" in graph_settings_text
-    assert 'data-testid="graph-model-stylesheet-selector-guidance"' in graph_settings_text
-    assert 'data-testid="graph-model-stylesheet-diagnostics"' in graph_settings_text
-    assert "Stylesheet parse and selector lint checks passed in preview." in graph_settings_text
+    assert_frontend_behavior_test_passed("renders graph settings feedback for stylesheet diagnostics and tool hook warnings")
 
 
 def test_preview_exposes_stylesheet_syntax_diagnostics_item_6_5_02() -> None:
@@ -55,5 +45,4 @@ def test_preview_exposes_stylesheet_syntax_diagnostics_for_whitespace_stylesheet
     stylesheet_diags = [diag for diag in diagnostics if diag["rule_id"] == "stylesheet_syntax"]
     assert stylesheet_diags, "whitespace stylesheet should surface stylesheet_syntax diagnostics"
     assert any(diag["severity"] == "error" for diag in stylesheet_diags)
-
 
