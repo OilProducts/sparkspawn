@@ -983,6 +983,129 @@ test("run event timeline groups and correlates retry and interview sequences for
   await timelinePanel.screenshot({ path: screenshotPath("08k-runs-panel-event-timeline-grouping-correlation.png") })
 })
 
+test("run event timeline replays stream history and appends live events for item 9.4-04", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-runs-event-timeline-replay-live-${Date.now()}`
+  const runId = `run-event-timeline-replay-live-${Date.now()}`
+
+  await page.addInitScript((targetRunId: string) => {
+    class MockEventSource {
+      url: string
+      withCredentials = false
+      readyState = 1
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        const expectedPath = `/pipelines/${encodeURIComponent(targetRunId)}/events`
+        if (!url.includes(expectedPath)) {
+          return
+        }
+
+        const emit = (payload: Record<string, unknown>) => {
+          this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(payload) }))
+        }
+
+        setTimeout(() => {
+          this.onopen?.(new Event("open"))
+          // Simulate replayed history emitted on initial connection.
+          emit({ type: "PipelineStarted", current_node: "start" })
+          emit({ type: "StageStarted", node_id: "plan", index: 1 })
+          emit({ type: "StageCompleted", node_id: "plan", index: 1, outcome: "ok" })
+        }, 0)
+
+        // Simulate a live append that arrives after replay completion.
+        setTimeout(() => {
+          emit({ type: "PipelineCompleted", result: "success" })
+        }, 500)
+      }
+
+      close() {
+        this.readyState = 2
+      }
+
+      addEventListener() {}
+
+      removeEventListener() {}
+
+      dispatchEvent() {
+        return false
+      }
+    }
+
+    ;(window as typeof window & { EventSource: typeof EventSource }).EventSource = MockEventSource as unknown as typeof EventSource
+  }, runId)
+
+  await page.route("**/runs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        runs: [
+          {
+            run_id: runId,
+            flow_name: "TimelineReplayFlow",
+            status: "running",
+            result: "running",
+            working_directory: `${projectPath}/workspace`,
+            project_path: projectPath,
+            git_branch: "main",
+            git_commit: "time904",
+            model: "gpt-5",
+            started_at: "2026-03-03T14:00:00Z",
+            ended_at: null,
+            last_error: "",
+            token_usage: 17,
+          },
+        ],
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        pipeline_id: runId,
+        checkpoint: {
+          current_node: "plan",
+          completed_nodes: ["start"],
+          retry_counts: {},
+        },
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        pipeline_id: runId,
+        context: {
+          "graph.goal": "Timeline replay smoke",
+        },
+      }),
+    })
+  })
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-runs").click()
+
+  await expect(page.getByTestId("run-event-timeline-panel")).toBeVisible()
+  await expect(page.getByTestId("run-event-timeline-row-type")).toHaveCount(3)
+  await expect(page.getByTestId("run-event-timeline-row-type").first()).toContainText("StageCompleted")
+  await expect(page.getByTestId("run-event-timeline-row-type")).toHaveCount(4)
+  await expect(page.getByTestId("run-event-timeline-row-type").first()).toContainText("PipelineCompleted")
+  const timelinePanel = page.getByTestId("run-event-timeline-panel")
+  await timelinePanel.scrollIntoViewIfNeeded()
+  await timelinePanel.screenshot({ path: screenshotPath("08l-runs-panel-event-timeline-replay-live-append.png") })
+})
+
 test("semantic-equivalence save blocks mismatch and confirms no-op round-trip for item 5.3-03", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-semantic-equivalence-${Date.now()}`
   const semanticSaveBodies: string[] = []

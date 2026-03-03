@@ -237,7 +237,8 @@ Status key:
   - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` now supports event type/node-stage/category/severity filtering with UI smoke coverage and visual QA in `frontend/artifacts/ui-smoke/08j-runs-panel-event-timeline-filters.png`.
 - [x] [9.4-03] Add timeline grouping/correlation for retries and interview sequences.
   - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` now groups correlated retry/interview timeline sequences with per-row correlation context, covered by `tests/integration/test_ui_run_event_timeline_panel.py` and UI-smoke visual QA in `frontend/artifacts/ui-smoke/08k-runs-panel-event-timeline-grouping-correlation.png`.
-- [ ] [9.4-04] Add tests for timeline replay and live append behavior.
+- [x] [9.4-04] Add tests for timeline replay and live append behavior.
+  - Evidence (2026-03-03): Evaluator `pass`; added replay/live-append timeline smoke scenario with count/order assertions and screenshot `frontend/artifacts/ui-smoke/08l-runs-panel-event-timeline-replay-live-append.png`, plus guard coverage in `tests/integration/test_ui_run_event_timeline_panel.py`.
 
 ### 9.5 Artifact Browser
 - [ ] [9.5-01] Add artifact listing and file viewer/download actions for run outputs.

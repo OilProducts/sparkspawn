@@ -104,3 +104,15 @@ def test_ui_smoke_includes_timeline_grouping_visual_qa_item_9_4_03() -> None:
     assert "run-event-timeline-group-label" in ui_smoke_text
     assert "run-event-timeline-row-correlation" in ui_smoke_text
     assert "08k-runs-panel-event-timeline-grouping-correlation.png" in ui_smoke_text
+
+
+def test_ui_smoke_covers_timeline_replay_and_live_append_item_9_4_04() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    ui_smoke_text = (repo_root / "frontend" / "e2e" / "ui-smoke.spec.ts").read_text(encoding="utf-8")
+
+    assert "run event timeline replays stream history and appends live events for item 9.4-04" in ui_smoke_text
+    assert "await expect(page.getByTestId(\"run-event-timeline-row-type\")).toHaveCount(3)" in ui_smoke_text
+    assert "await expect(page.getByTestId(\"run-event-timeline-row-type\").first()).toContainText(\"StageCompleted\")" in ui_smoke_text
+    assert "await expect(page.getByTestId(\"run-event-timeline-row-type\")).toHaveCount(4)" in ui_smoke_text
+    assert "await expect(page.getByTestId(\"run-event-timeline-row-type\").first()).toContainText(\"PipelineCompleted\")" in ui_smoke_text
+    assert "08l-runs-panel-event-timeline-replay-live-append.png" in ui_smoke_text
