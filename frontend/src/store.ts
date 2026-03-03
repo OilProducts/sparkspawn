@@ -276,11 +276,15 @@ interface ProjectScopedWorkspace {
     artifactRunId: string | null
 }
 
-type PersistedProjectConversationState = Record<
+type PersistedProjectWorkspaceState = Record<
     string,
     {
         conversationId: string | null
         conversationHistory: ConversationHistoryEntry[]
+        specId: string | null
+        specStatus: 'draft' | 'approved'
+        planId: string | null
+        planStatus: PlanStatus
     }
 >
 
@@ -316,7 +320,7 @@ const coerceConversationHistoryEntry = (value: unknown): ConversationHistoryEntr
     return null
 }
 
-const loadProjectConversationState = (): PersistedProjectConversationState => {
+const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
     if (typeof window === "undefined") {
         return {}
     }
@@ -326,7 +330,7 @@ const loadProjectConversationState = (): PersistedProjectConversationState => {
             return {}
         }
         const parsed = JSON.parse(raw) as Record<string, unknown>
-        const restored: PersistedProjectConversationState = {}
+        const restored: PersistedProjectWorkspaceState = {}
         Object.entries(parsed).forEach(([projectPath, value]) => {
             if (!value || typeof value !== "object") {
                 return
@@ -334,6 +338,10 @@ const loadProjectConversationState = (): PersistedProjectConversationState => {
             const scope = value as {
                 conversationId?: unknown
                 conversationHistory?: unknown
+                specId?: unknown
+                specStatus?: unknown
+                planId?: unknown
+                planStatus?: unknown
             }
             const history = Array.isArray(scope.conversationHistory)
                 ? scope.conversationHistory
@@ -343,6 +351,14 @@ const loadProjectConversationState = (): PersistedProjectConversationState => {
             restored[projectPath] = {
                 conversationId: typeof scope.conversationId === "string" ? scope.conversationId : null,
                 conversationHistory: history,
+                specId: typeof scope.specId === "string" ? scope.specId : null,
+                specStatus: scope.specStatus === "approved" ? "approved" : "draft",
+                planId: typeof scope.planId === "string" ? scope.planId : null,
+                planStatus: scope.planStatus === "approved"
+                    || scope.planStatus === "rejected"
+                    || scope.planStatus === "revision-requested"
+                    ? scope.planStatus
+                    : "draft",
             }
         })
         return restored
@@ -356,11 +372,15 @@ const saveProjectConversationState = (projectScopedWorkspaces: Record<string, Pr
         return
     }
     try {
-        const persisted: PersistedProjectConversationState = {}
+        const persisted: PersistedProjectWorkspaceState = {}
         Object.entries(projectScopedWorkspaces).forEach(([projectPath, workspace]) => {
             persisted[projectPath] = {
                 conversationId: workspace.conversationId,
                 conversationHistory: workspace.conversationHistory,
+                specId: workspace.specId,
+                specStatus: workspace.specStatus,
+                planId: workspace.planId,
+                planStatus: workspace.planStatus,
             }
         })
         window.localStorage.setItem(PROJECT_CONVERSATION_STATE_STORAGE_KEY, JSON.stringify(persisted))
@@ -915,6 +935,7 @@ export const useStore = create<AppState>((set) => ({
                 ...scoped,
                 specId: id,
             }
+            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -930,6 +951,7 @@ export const useStore = create<AppState>((set) => ({
                 ...scoped,
                 specStatus: status,
             }
+            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -945,6 +967,7 @@ export const useStore = create<AppState>((set) => ({
                 ...scoped,
                 planId: id,
             }
+            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -960,6 +983,7 @@ export const useStore = create<AppState>((set) => ({
                 ...scoped,
                 planStatus: status,
             }
+            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }

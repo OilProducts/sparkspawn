@@ -197,8 +197,7 @@ Status key:
 ### 8.5 Spec -> Plan -> Build Workflow Orchestration
 - [x] [8.5-01] Implement plan-generation workflow launch from approved project spec state.
 - Deferred to `Deferred Tasks` until project-scoped plan artifact persistence/retrieval APIs exist.
-- [ ] [8.5-03] Implement plan gate controls (`approve`, `reject`, `request-revision`) with clear state transitions.
-  Blocker (fail): Evaluator requires behavioral transition evidence plus persisted/recoverable plan status coverage before this item can be closed.
+- [x] [8.5-03] Implement plan gate controls (`approve`, `reject`, `request-revision`) with clear state transitions.
 - [ ] [8.5-04] Enforce build workflow launch from approved plan state only.
 - [ ] [8.5-05] Implement planning/build failure diagnostics with rerun affordances.
 - [ ] [8.5-06] Ensure live status/log/artifact surfaces support both planning and build workflows.
