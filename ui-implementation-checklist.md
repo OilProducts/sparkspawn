@@ -196,7 +196,7 @@ Status key:
 
 ### 8.5 Spec -> Plan -> Build Workflow Orchestration
 - [x] [8.5-01] Implement plan-generation workflow launch from approved project spec state.
-- [ ] [8.5-02] Persist generated implementation plans to project files with visible status/provenance.
+- Deferred to `Deferred Tasks` until project-scoped plan artifact persistence/retrieval APIs exist.
 - [ ] [8.5-03] Implement plan gate controls (`approve`, `reject`, `request-revision`) with clear state transitions.
 - [ ] [8.5-04] Enforce build workflow launch from approved plan state only.
 - [ ] [8.5-05] Implement planning/build failure diagnostics with rerun affordances.
@@ -566,3 +566,5 @@ Status key:
   Deferred because the current frontend/API model and serializer flatten subgraph/default scopes, so the test would fail on known model loss instead of catching regressions.
 - [ ] [8.2-02] Provide Pause/Resume controls when backend/API supports them.
   Deferred because the current UI/API contract only exposes `/pipelines/{id}/cancel` with no pause/resume endpoint or capability metadata to drive those controls safely.
+- [ ] [8.5-02] Persist generated implementation plans to project files with visible status/provenance.
+  Deferred because the current API/UI contract has no project-scoped plan artifact write/read endpoint (only flow save and pipeline launch), so file persistence with visible status/provenance cannot be implemented correctly yet.
