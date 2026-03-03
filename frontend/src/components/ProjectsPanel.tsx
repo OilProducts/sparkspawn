@@ -26,7 +26,7 @@ const PLAN_STATUS_TRANSITIONS: Record<PlanStatus, PlanStatus[]> = {
 }
 
 const canTransitionPlanStatus = (from: PlanStatus, to: PlanStatus) =>
-    from === to || PLAN_STATUS_TRANSITIONS[from].includes(to)
+    from !== to && PLAN_STATUS_TRANSITIONS[from].includes(to)
 
 export function ProjectsPanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
