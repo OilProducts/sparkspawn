@@ -315,6 +315,91 @@ test("run checkpoint viewer handles unavailable checkpoint for item 9.2-03", asy
   await page.screenshot({ path: screenshotPath("08e-runs-panel-checkpoint-unavailable.png"), fullPage: true })
 })
 
+test("run context viewer supports searchable key/value inspection for item 9.3-01", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-runs-context-${Date.now()}`
+  const runId = `run-context-${Date.now()}`
+  let contextFetchCount = 0
+
+  await page.route("**/runs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        runs: [
+          {
+            run_id: runId,
+            flow_name: "ContextFlow",
+            status: "success",
+            result: "success",
+            working_directory: `${projectPath}/workspace`,
+            project_path: projectPath,
+            git_branch: "main",
+            git_commit: "feed999",
+            model: "gpt-5",
+            started_at: "2026-03-03T12:10:00Z",
+            ended_at: "2026-03-03T12:11:00Z",
+            last_error: "",
+            token_usage: 24,
+          },
+        ],
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        pipeline_id: runId,
+        checkpoint: {
+          current_node: "inspect",
+          completed_nodes: ["start", "plan", "build"],
+          retry_counts: {},
+        },
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+    contextFetchCount += 1
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        pipeline_id: runId,
+        context: {
+          "graph.goal": "Ship context panel",
+          "context.plan.ready": true,
+          "context.retries": 2,
+          summary: {
+            stage: "inspect",
+            owner: "ops",
+          },
+        },
+      }),
+    })
+  })
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-runs").click()
+
+  await expect(page.getByTestId("run-context-panel")).toBeVisible()
+  await expect(page.getByTestId("run-context-table")).toBeVisible()
+  await expect(page.getByTestId("run-context-row")).toHaveCount(4)
+  await expect.poll(() => contextFetchCount).toBeGreaterThanOrEqual(1)
+
+  await page.getByTestId("run-context-search-input").fill("graph.goal")
+  await expect(page.getByTestId("run-context-row")).toHaveCount(1)
+  await expect(page.getByTestId("run-context-table")).toContainText("Ship context panel")
+
+  await page.getByTestId("run-context-search-input").fill("missing-key")
+  await expect(page.getByTestId("run-context-empty")).toContainText("No context entries match the current search.")
+  await page.screenshot({ path: screenshotPath("08f-runs-panel-context-viewer.png"), fullPage: true })
+})
+
 test("semantic-equivalence save blocks mismatch and confirms no-op round-trip for item 5.3-03", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-semantic-equivalence-${Date.now()}`
   const semanticSaveBodies: string[] = []

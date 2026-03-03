@@ -224,6 +224,7 @@ Status key:
 
 ### 9.3 Context View
 - [ ] [9.3-01] Add searchable context key/value inspector backed by `/pipelines/{id}/context`.
+  - Blocker (2026-03-03): Evaluator verdict is `fail` because current evidence does not yet prove searchable table row/empty-state visibility and type-aware value rendering coverage in runtime-focused tests.
 - [ ] [9.3-02] Add typed rendering for scalar and structured values.
 - [ ] [9.3-03] Add copy/export actions for context inspection.
 

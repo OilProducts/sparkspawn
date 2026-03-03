@@ -28,7 +28,17 @@ interface CheckpointResponse {
     checkpoint: Record<string, unknown>
 }
 
+interface ContextResponse {
+    pipeline_id: string
+    context: Record<string, unknown>
+}
+
 interface CheckpointErrorState {
+    message: string
+    help: string
+}
+
+interface ContextErrorState {
     message: string
     help: string
 }
@@ -68,6 +78,26 @@ const checkpointErrorFromResponse = (status: number, detail: string | null): Che
     }
     return {
         message: `Unable to load checkpoint (HTTP ${status}).`,
+        help: detail ? `Backend returned: ${detail}.` : 'Retry, and check backend availability if this keeps failing.',
+    }
+}
+
+const contextErrorFromResponse = (status: number, detail: string | null): ContextErrorState => {
+    const normalizedDetail = detail?.toLowerCase()
+    if (status === 404 && normalizedDetail === 'context unavailable') {
+        return {
+            message: 'Context unavailable for this run.',
+            help: 'Run may still be in progress or did not persist context data yet.',
+        }
+    }
+    if (status === 404 && normalizedDetail === 'unknown pipeline') {
+        return {
+            message: 'Run is no longer available.',
+            help: 'The selected run could not be found. Refresh run history and pick a different run.',
+        }
+    }
+    return {
+        message: `Unable to load context (HTTP ${status}).`,
         help: detail ? `Backend returned: ${detail}.` : 'Retry, and check backend availability if this keeps failing.',
     }
 }
@@ -175,6 +205,10 @@ export function RunsPanel() {
     const [checkpointData, setCheckpointData] = useState<CheckpointResponse | null>(null)
     const [isCheckpointLoading, setIsCheckpointLoading] = useState(false)
     const [checkpointError, setCheckpointError] = useState<CheckpointErrorState | null>(null)
+    const [contextData, setContextData] = useState<ContextResponse | null>(null)
+    const [isContextLoading, setIsContextLoading] = useState(false)
+    const [contextError, setContextError] = useState<ContextErrorState | null>(null)
+    const [contextSearchQuery, setContextSearchQuery] = useState('')
     const [metadataStaleAfterMs] = useState(() => {
         const override = (globalThis as typeof globalThis & { __RUNS_METADATA_STALE_AFTER_MS__?: unknown })
             .__RUNS_METADATA_STALE_AFTER_MS__
@@ -301,6 +335,43 @@ export function RunsPanel() {
         }
     }, [selectedRunSummary])
 
+    const fetchContext = useCallback(async () => {
+        if (!selectedRunSummary) {
+            setContextData(null)
+            setContextError(null)
+            setIsContextLoading(false)
+            return
+        }
+        setIsContextLoading(true)
+        setContextError(null)
+        try {
+            const res = await fetch(`/pipelines/${encodeURIComponent(selectedRunSummary.run_id)}/context`)
+            if (!res.ok) {
+                let detail: string | null = null
+                try {
+                    const errorBody = await res.json()
+                    detail = asErrorDetail(errorBody)
+                } catch {
+                    detail = null
+                }
+                setContextData(null)
+                setContextError(contextErrorFromResponse(res.status, detail))
+                return
+            }
+            const payload = await res.json() as ContextResponse
+            setContextData(payload)
+        } catch (err) {
+            console.error(err)
+            setContextData(null)
+            setContextError({
+                message: 'Unable to load context.',
+                help: 'Check your network/backend connection and retry.',
+            })
+        } finally {
+            setIsContextLoading(false)
+        }
+    }, [selectedRunSummary])
+
     useEffect(() => {
         if (viewMode !== 'runs' || !selectedRunSummary) {
             setCheckpointData(null)
@@ -310,6 +381,18 @@ export function RunsPanel() {
         }
         void fetchCheckpoint()
     }, [viewMode, selectedRunSummary, fetchCheckpoint])
+
+    useEffect(() => {
+        if (viewMode !== 'runs' || !selectedRunSummary) {
+            setContextData(null)
+            setContextError(null)
+            setIsContextLoading(false)
+            setContextSearchQuery('')
+            return
+        }
+        setContextSearchQuery('')
+        void fetchContext()
+    }, [viewMode, selectedRunSummary, fetchContext])
 
     const checkpointSnapshot = useMemo(() => asRecord(checkpointData?.checkpoint), [checkpointData])
     const checkpointCurrentNode = useMemo(() => {
@@ -336,6 +419,35 @@ export function RunsPanel() {
             })
         return pairs.length > 0 ? pairs.join(', ') : '—'
     }, [checkpointSnapshot])
+    const contextSnapshot = useMemo(() => asRecord(contextData?.context), [contextData])
+    const contextRows = useMemo(() => {
+        if (!contextSnapshot) return []
+        return Object.entries(contextSnapshot)
+            .map(([key, value]) => {
+                let renderedValue = ''
+                if (value === null) {
+                    renderedValue = 'null'
+                } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                    renderedValue = String(value)
+                } else {
+                    try {
+                        renderedValue = JSON.stringify(value) ?? String(value)
+                    } catch {
+                        renderedValue = String(value)
+                    }
+                }
+                return { key, renderedValue }
+            })
+            .sort((a, b) => a.key.localeCompare(b.key))
+    }, [contextSnapshot])
+    const filteredContextRows = useMemo(() => {
+        const normalizedQuery = contextSearchQuery.trim().toLowerCase()
+        if (!normalizedQuery) return contextRows
+        return contextRows.filter((row) => (
+            row.key.toLowerCase().includes(normalizedQuery)
+            || row.renderedValue.toLowerCase().includes(normalizedQuery)
+        ))
+    }, [contextRows, contextSearchQuery])
 
     const openRun = (run: RunRecord) => {
         setSelectedRunId(run.run_id)
@@ -486,6 +598,65 @@ export function RunsPanel() {
                                 >
                                     {JSON.stringify(checkpointData, null, 2)}
                                 </pre>
+                            </div>
+                        )}
+                    </div>
+                )}
+                {selectedRunSummary && (
+                    <div data-testid="run-context-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Context</h3>
+                            <button
+                                onClick={() => void fetchContext()}
+                                data-testid="run-context-refresh-button"
+                                className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                            >
+                                {isContextLoading ? 'Refreshing…' : 'Refresh'}
+                            </button>
+                        </div>
+                        <div className="mb-3">
+                            <input
+                                value={contextSearchQuery}
+                                onChange={(event) => setContextSearchQuery(event.target.value)}
+                                placeholder="Search context key or value..."
+                                data-testid="run-context-search-input"
+                                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                            />
+                        </div>
+                        {contextError && (
+                            <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                <div data-testid="run-context-error">{contextError.message}</div>
+                                <div data-testid="run-context-error-help" className="text-xs text-destructive/90">
+                                    {contextError.help}
+                                </div>
+                            </div>
+                        )}
+                        {!contextError && (
+                            <div className="overflow-hidden rounded-md border border-border/80">
+                                <table data-testid="run-context-table" className="w-full table-fixed border-collapse text-sm">
+                                    <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                                        <tr>
+                                            <th className="w-2/5 px-3 py-2 font-semibold">Key</th>
+                                            <th className="px-3 py-2 font-semibold">Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredContextRows.length > 0 ? (
+                                            filteredContextRows.map((row) => (
+                                                <tr key={row.key} data-testid="run-context-row" className="border-t border-border/70 align-top">
+                                                    <td className="px-3 py-2 font-mono text-xs text-foreground">{row.key}</td>
+                                                    <td className="px-3 py-2 font-mono text-xs text-foreground break-all">{row.renderedValue}</td>
+                                                </tr>
+                                            ))
+                                        ) : (
+                                            <tr>
+                                                <td data-testid="run-context-empty" colSpan={2} className="px-3 py-4 text-sm text-muted-foreground">
+                                                    No context entries match the current search.
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </div>
