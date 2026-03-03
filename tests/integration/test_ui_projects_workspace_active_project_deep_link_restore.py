@@ -177,8 +177,3 @@ def test_store_downgrades_view_mode_when_active_project_cleared_item_4_3_07() ->
     assert persisted["selectedRunId"] is None
 
 
-def test_checklist_marks_item_4_3_07_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [4.3-07]" in checklist_text

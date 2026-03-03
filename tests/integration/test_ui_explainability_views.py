@@ -26,7 +26,3 @@ def test_ui_exposes_routing_retry_and_failure_explainability_views_item_2_04() -
     assert "<ExplainabilityPanel />" in terminal_text
 
 
-def test_checklist_marks_item_2_04_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-    assert "- [x] [2-04]" in checklist_text

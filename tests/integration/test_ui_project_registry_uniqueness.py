@@ -38,8 +38,3 @@ def test_projects_panel_exposes_registration_and_duplicate_feedback_item_4_2_01(
         assert snippet in projects_panel_text, f"missing project registration UI snippet: {snippet}"
 
 
-def test_checklist_marks_item_4_2_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [4.2-01]" in checklist_text

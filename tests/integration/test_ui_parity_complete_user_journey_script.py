@@ -25,8 +25,3 @@ def test_parity_complete_user_journey_acceptance_script_exists_with_required_cov
         assert snippet in script_text, f"missing acceptance-script coverage: {snippet}"
 
 
-def test_checklist_marks_item_1_2_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [1.2-01]" in checklist_text

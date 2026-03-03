@@ -24,13 +24,6 @@ def test_validation_panel_click_selects_and_focuses_graph_entities_item_7_3_01()
         assert snippet in validation_panel_text, f"missing diagnostic navigability snippet: {snippet}"
 
 
-def test_checklist_marks_item_7_3_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [7.3-01]" in checklist_text
-
-
 def test_validation_panel_provides_unmapped_diagnostic_fallback_item_7_3_02() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     validation_panel_text = (
@@ -62,8 +55,3 @@ def test_ui_smoke_covers_diagnostic_to_canvas_navigation_item_7_3_03() -> None:
     assert "react-flow__edge.selected" in ui_smoke_text
 
 
-def test_checklist_marks_item_7_3_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [7.3-03]" in checklist_text

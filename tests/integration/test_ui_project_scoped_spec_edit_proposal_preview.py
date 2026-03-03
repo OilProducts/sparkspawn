@@ -31,8 +31,3 @@ def test_projects_panel_requires_active_project_for_spec_edit_proposal_preview_i
         assert snippet in projects_panel_text, f"missing active-project proposal preview scoping snippet: {snippet}"
 
 
-def test_checklist_marks_item_5_5_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [5.5-03]" in checklist_text

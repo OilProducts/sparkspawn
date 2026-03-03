@@ -32,8 +32,3 @@ def test_inspector_scaffold_is_shared_across_graph_node_and_edge_item_2_06() -> 
     assert "<GraphSettings />" not in editor_text
 
 
-def test_checklist_marks_item_2_06_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [2-06]" in checklist_text

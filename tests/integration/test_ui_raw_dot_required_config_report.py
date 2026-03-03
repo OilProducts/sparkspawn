@@ -31,8 +31,3 @@ def test_raw_dot_required_config_report_exists_with_required_coverage() -> None:
     assert "`type` override" in report_text
 
 
-def test_checklist_marks_item_1_1_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [1.1-01]" in checklist_text

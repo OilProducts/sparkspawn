@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 import attractor.api.server as server
+from attractor.dsl import canonicalize_dot
 
 
 VALID_FLOW = """
@@ -89,7 +90,9 @@ def test_save_flow_persists_valid_dot(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     assert payload["status"] == "saved"
     assert payload["name"] == "good.dot"
-    assert (tmp_path / "flows" / "good.dot").read_text(encoding="utf-8") == VALID_FLOW
+    assert (tmp_path / "flows" / "good.dot").read_text(encoding="utf-8") == canonicalize_dot(
+        VALID_FLOW
+    )
 
 
 def test_save_flow_reports_semantic_equivalence_for_no_behavior_change(

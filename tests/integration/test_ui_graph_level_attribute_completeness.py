@@ -44,8 +44,3 @@ def test_store_and_dot_generation_include_required_graph_attributes_item_6_1_01(
     assert "'tool_hooks.post'?: string" in store_text
 
 
-def test_checklist_marks_item_6_1_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.1-01]" in checklist_text

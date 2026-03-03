@@ -77,8 +77,3 @@ def test_ui_release_gate_cli_entrypoint_succeeds_for_checked_checklist(tmp_path)
     assert main(["--checklist", str(checklist_path)]) == 0
 
 
-def test_checklist_marks_item_1_2_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [1.2-03]" in checklist_text

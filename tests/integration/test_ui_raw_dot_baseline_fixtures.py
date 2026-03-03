@@ -42,8 +42,3 @@ def test_raw_dot_baseline_fixture_set_exists_and_is_spec_valid() -> None:
         assert error_rules == set(), f"Fixture {rel_path} has validation errors: {sorted(error_rules)}"
 
 
-def test_checklist_marks_item_1_1_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [1.1-03]" in checklist_text

@@ -271,36 +271,3 @@ def test_manager_loop_fixture_round_trip_item_6_7_04() -> None:
         assert round_trip_manager[key] == fixture_manager[key]
 
 
-def test_checklist_marks_item_6_2_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.2-01]" in checklist_text
-
-
-def test_checklist_marks_item_6_7_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.7-01]" in checklist_text
-
-
-def test_checklist_marks_item_6_7_02_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.7-02]" in checklist_text
-
-
-def test_checklist_marks_item_6_7_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.7-03]" in checklist_text
-
-
-def test_checklist_marks_item_6_7_04_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.7-04]" in checklist_text

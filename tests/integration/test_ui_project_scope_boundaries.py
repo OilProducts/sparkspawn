@@ -53,8 +53,3 @@ def test_runs_panel_filters_history_to_active_project_scope_item_4_2_04() -> Non
         assert snippet in runs_panel_text, f"missing run-history project-scope snippet: {snippet}"
 
 
-def test_checklist_marks_item_4_2_04_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [4.2-04]" in checklist_text

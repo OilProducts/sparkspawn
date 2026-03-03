@@ -38,8 +38,3 @@ def test_route_state_persists_active_project_identity_for_top_nav_context_item_4
         assert snippet in store_text, f"missing active-project route persistence snippet: {snippet}"
 
 
-def test_checklist_marks_item_4_1_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [4.1-01]" in checklist_text

@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field
 
 from attractor.dsl import (
+    canonicalize_dot,
     DotParseError,
     Diagnostic,
     DiagnosticSeverity,
@@ -1685,8 +1686,10 @@ def _semantic_signature(dot_content: str) -> str:
 
 @app.post("/api/flows")
 async def save_flow(req: SaveFlowRequest):
+    canonical_content: str
     try:
         graph = parse_dot(req.content)
+        canonical_content = canonicalize_dot(req.content)
     except DotParseError as exc:
         parse_diag = {
             "rule": "parse_error",
@@ -1745,7 +1748,7 @@ async def save_flow(req: SaveFlowRequest):
                 },
             )
 
-    flow_path.write_text(req.content)
+    flow_path.write_text(canonical_content, encoding="utf-8")
     response: Dict[str, object] = {"status": "saved", "name": flow_path.name}
     if semantic_equivalent_to_existing is not None:
         response["semantic_equivalent_to_existing"] = semantic_equivalent_to_existing

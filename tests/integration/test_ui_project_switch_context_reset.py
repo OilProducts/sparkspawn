@@ -185,8 +185,3 @@ def test_store_project_switch_resets_flow_run_conversation_and_hidden_state_item
     assert restored["activeProjectConversationId"] == "conversation-alpha"
 
 
-def test_checklist_marks_item_5_4_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [5.4-03]" in checklist_text

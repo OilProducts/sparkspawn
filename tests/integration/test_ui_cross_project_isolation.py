@@ -53,8 +53,3 @@ def test_runs_panel_scope_filter_canonicalizes_parent_path_segments_item_4_2_05(
         assert snippet in runs_panel_text, f"missing runs-panel canonical scope normalization snippet: {snippet}"
 
 
-def test_checklist_marks_item_4_2_05_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [4.2-05]" in checklist_text

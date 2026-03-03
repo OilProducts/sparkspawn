@@ -22,8 +22,3 @@ def test_advanced_feature_access_doc_exists_with_required_coverage() -> None:
         assert snippet in doc_text, f"missing required advanced-feature coverage: {snippet}"
 
 
-def test_checklist_marks_item_1_3_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [1.3-03]" in checklist_text

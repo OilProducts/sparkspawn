@@ -39,13 +39,6 @@ def test_run_initiation_captures_project_flow_source_workdir_and_backend_model_i
         assert snippet in payload_builder_text, f"missing run initiation payload snippet: {snippet}"
 
 
-def test_checklist_marks_item_8_1_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [8.1-01]" in checklist_text
-
-
 def test_run_initiation_payload_parity_with_pipelines_contract_item_8_1_02() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     server_text = (repo_root / "attractor" / "api" / "server.py").read_text(encoding="utf-8")
@@ -154,8 +147,3 @@ def test_run_start_surfaces_git_policy_warning_path_item_8_1_05() -> None:
         assert snippet in navbar_text, f"missing git policy warning run-start snippet: {snippet}"
 
 
-def test_checklist_marks_item_8_1_05_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [8.1-05]" in checklist_text

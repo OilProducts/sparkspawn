@@ -25,8 +25,3 @@ def test_role_persona_scenarios_doc_exists_with_required_success_criteria() -> N
         assert snippet in doc_text, f"missing required persona scenario coverage: {snippet}"
 
 
-def test_checklist_marks_item_3_1_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [3.1-01]" in checklist_text

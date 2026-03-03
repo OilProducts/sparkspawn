@@ -30,8 +30,3 @@ def test_cancel_controls_show_confirmation_and_transition_states_item_2_05() -> 
     assert "if (!response.ok)" in runs_panel_text
 
 
-def test_checklist_marks_item_2_05_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [2-05]" in checklist_text

@@ -24,7 +24,3 @@ def test_ui_save_state_indicator_supports_conflict_state_for_item_5_3_01() -> No
     assert "Save Conflict" in run_stream_text
 
 
-def test_checklist_marks_item_5_3_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-    assert "- [x] [5.3-01]" in checklist_text

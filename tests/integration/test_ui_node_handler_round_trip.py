@@ -207,8 +207,3 @@ def test_node_attributes_round_trip_across_all_handler_types_item_6_2_04() -> No
     assert nodes_by_id["manager"]["manager.actions"] == "observe,steer"
 
 
-def test_checklist_marks_item_6_2_04_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.2-04]" in checklist_text

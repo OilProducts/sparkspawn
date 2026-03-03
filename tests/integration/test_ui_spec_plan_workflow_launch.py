@@ -33,8 +33,3 @@ def test_projects_panel_launches_plan_generation_only_from_approved_spec_state_i
         assert snippet in projects_panel_text, f"missing plan-generation launch workflow snippet: {snippet}"
 
 
-def test_checklist_marks_item_8_5_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [8.5-01]" in checklist_text

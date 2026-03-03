@@ -134,8 +134,3 @@ def test_store_normalizes_and_validates_graph_attrs_item_6_1_02() -> None:
     assert "must be one of" in after_update_errors["default_fidelity"]
 
 
-def test_checklist_marks_item_6_1_02_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.1-02]" in checklist_text

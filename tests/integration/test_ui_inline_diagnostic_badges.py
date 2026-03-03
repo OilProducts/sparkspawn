@@ -29,8 +29,3 @@ def test_ui_smoke_covers_inline_node_and_edge_badges_item_7_1_02() -> None:
     assert "edge-diagnostic-badge" in ui_smoke_text
 
 
-def test_checklist_marks_item_7_1_02_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [7.1-02]" in checklist_text

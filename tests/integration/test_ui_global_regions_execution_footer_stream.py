@@ -27,13 +27,6 @@ def test_execution_footer_and_stream_regions_remain_consistent_during_active_run
     assert 'data-testid="execution-runtime-stream-indicator"' in run_stream_text
 
 
-def test_checklist_marks_item_4_1_04_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [4.1-04]" in checklist_text
-
-
 def test_execution_footer_visibility_tracks_active_runtime_states_item_8_4_01() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     execution_controls_text = (repo_root / "frontend" / "src" / "components" / "ExecutionControls.tsx").read_text(

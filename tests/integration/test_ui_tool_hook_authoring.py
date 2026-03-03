@@ -369,29 +369,3 @@ digraph tool_hook_save_load {
     assert tool_node["tool_hooks.post"] == 'python -c "print(\'done\')"'
 
 
-def test_checklist_marks_item_6_6_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.6-01]" in checklist_text
-
-
-def test_checklist_marks_item_6_6_02_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.6-02]" in checklist_text
-
-
-def test_checklist_marks_item_6_6_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.6-03]" in checklist_text
-
-
-def test_checklist_marks_item_6_6_04_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.6-04]" in checklist_text

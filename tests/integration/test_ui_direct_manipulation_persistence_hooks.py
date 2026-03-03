@@ -28,8 +28,3 @@ def test_editor_supports_direct_manipulation_with_persistence_hooks_item_5_2_01(
         assert snippet in editor_text, f"missing direct manipulation + persistence snippet: {snippet}"
 
 
-def test_checklist_marks_item_5_2_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [5.2-01]" in checklist_text

@@ -19,8 +19,3 @@ def test_structured_form_editing_surfaces_graph_node_and_edge_item_5_2_02() -> N
     assert '<label className="text-sm font-medium">Weight</label>' in sidebar_text
 
 
-def test_checklist_marks_item_5_2_02_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [5.2-02]" in checklist_text

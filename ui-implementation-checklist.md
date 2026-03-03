@@ -14,9 +14,9 @@ Status key:
 ## 1. Overview and Goals
 
 ### 1.1 Problem Statement
-- [x] [1.1-01] Document all places where users must leave the UI to raw DOT for required configuration. (See `ui-raw-dot-required-config.md`.)
+- [ ] [1.1-01] Document all places where users must leave the UI to raw DOT for required configuration. (See `ui-raw-dot-required-config.md`.)
 - [x] [1.1-02] Add a parity-risk report that identifies current behavior-loss and hidden-config failure modes. (See `ui-parity-risk-report.md`.)
-- [x] [1.1-03] Add a baseline fixture set of spec-valid flows that currently require raw DOT edits.
+- [ ] [1.1-03] Add a baseline fixture set of spec-valid flows that currently require raw DOT edits.
 
 ### 1.2 Product Goal
 - [x] [1.2-01] Define the parity-complete user journey (project-select, author, execute, inspect) as an end-to-end acceptance script.
@@ -31,7 +31,7 @@ Status key:
 
 ## 2. Design Principles
 
-- [x] [2-01] Implement spec-first behavior mapping for each UI control with direct spec references. (See `ui-spec-first-behavior-map.md`.)
+- [ ] [2-01] Implement spec-first behavior mapping for each UI control with direct spec references. (See `ui-spec-first-behavior-map.md`.)
 - [x] [2-02] Add no-silent-loss save protections and user-visible failure states.
 - [x] [2-03] Ensure progressive disclosure for advanced fields while preserving full editability.
 - [x] [2-04] Add explainability views for routing, retry, and failure decisions.
@@ -65,7 +65,7 @@ Status key:
 - [x] [4.2-01] Implement project registry keyed by unique directory path and reject duplicate registrations.
 - [x] [4.2-03] Enforce exactly one active project for authoring/execution actions.
 - [x] [4.2-04] Scope conversations/specs/plans/runs/artifacts to active project boundaries.
-- [x] [4.2-05] Prevent cross-project context and file leakage across navigation and run transitions.
+- [ ] [4.2-05] Prevent cross-project context and file leakage across navigation and run transitions.
 - [x] [4.2-06] Expose project-scoped conversation/spec/plan entry points in the Projects area.
 
 ### 4.3 Projects Workspace Requirements
@@ -83,7 +83,7 @@ Status key:
 ### 5.1 Selection and Editing
 - [x] [5.1-01] Enforce single-select semantics for nodes/edges across canvas and inspector.
 - [x] [5.1-02] Sync selection state bidirectionally between canvas and inspector.
-- [x] [5.1-03] Reflect unsaved edits immediately in local graph model and diagnostics.
+- [ ] [5.1-03] Reflect unsaved edits immediately in local graph model and diagnostics.
 
 ### 5.2 Editing Modalities
 - [x] [5.2-01] Implement direct manipulation for node move/connect/select with persistence hooks.
@@ -93,7 +93,7 @@ Status key:
 ### 5.3 Save Semantics
 - [x] [5.3-01] Implement explicit save state indicator (saved/saving/error/conflict).
 - [x] [5.3-02] Surface save failures with actionable remediation and no silent drop.
-- [x] [5.3-03] Add semantic-equivalence checks for output DOT where user behavior did not change.
+- [ ] [5.3-03] Add semantic-equivalence checks for output DOT where user behavior did not change.
 
 ### 5.4 Project-Scoped Context and Isolation
 - [x] [5.4-01] Require an active project for mutating flow edits and run start actions.

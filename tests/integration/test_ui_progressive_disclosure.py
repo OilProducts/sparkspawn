@@ -20,8 +20,3 @@ def test_graph_settings_uses_progressive_disclosure_for_advanced_fields_item_2_0
     assert "updateGraphAttr('fallback_retry_target'" in graph_settings_text
 
 
-def test_checklist_marks_item_2_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [2-03]" in checklist_text

@@ -29,7 +29,3 @@ def test_ui_save_failures_offer_actionable_remediation_for_item_5_3_02() -> None
     assert "resolveSaveRemediation" in run_stream_text
 
 
-def test_checklist_marks_item_5_3_02_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-    assert "- [x] [5.3-02]" in checklist_text

@@ -123,8 +123,3 @@ def test_node_inspectors_expose_type_override_control_item_6_2_03() -> None:
     assert "Handler Type" in task_node_text
 
 
-def test_checklist_marks_item_6_2_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.2-03]" in checklist_text

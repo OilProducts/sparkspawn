@@ -24,8 +24,3 @@ def test_graph_settings_exposes_inline_help_and_precedence_notes_item_6_1_03() -
     assert 'Leave blank to omit this attr from DOT output.' in graph_settings_text
 
 
-def test_checklist_marks_item_6_1_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.1-03]" in checklist_text

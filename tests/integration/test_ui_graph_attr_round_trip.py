@@ -119,8 +119,3 @@ def test_graph_attr_edit_round_trip_serializes_and_rehydrates_item_6_1_04() -> N
     assert graph_attrs["tool_hooks.post"] == "echo post-hook"
 
 
-def test_checklist_marks_item_6_1_04_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.1-04]" in checklist_text

@@ -38,13 +38,6 @@ def test_execute_action_requires_active_project_item_4_2_03() -> None:
         assert snippet in navbar_text, f"missing execute active-project guard snippet: {snippet}"
 
 
-def test_checklist_marks_item_4_2_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [4.2-03]" in checklist_text
-
-
 def test_mutating_flow_edits_require_active_project_item_5_4_01() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     editor_text = (repo_root / "frontend" / "src" / "components" / "Editor.tsx").read_text(encoding="utf-8")
@@ -88,8 +81,3 @@ def test_mutating_flow_edits_require_active_project_item_5_4_01() -> None:
         assert snippet in task_node_text, f"missing task-node active-project mutation guard snippet: {snippet}"
 
 
-def test_checklist_marks_item_5_4_01_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [5.4-01]" in checklist_text

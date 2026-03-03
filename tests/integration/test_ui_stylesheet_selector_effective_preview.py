@@ -216,15 +216,3 @@ def test_graph_settings_renders_effective_source_labels_item_6_5_04() -> None:
     assert "graph_default: 'graph default'" in graph_settings_text
 
 
-def test_checklist_marks_item_6_5_03_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.5-03]" in checklist_text
-
-
-def test_checklist_marks_item_6_5_04_complete() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    checklist_text = (repo_root / "ui-implementation-checklist.md").read_text(encoding="utf-8")
-
-    assert "- [x] [6.5-04]" in checklist_text
