@@ -86,9 +86,13 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
   await page.screenshot({ path: screenshotPath("08-runs-panel.png"), fullPage: true })
 })
 
-test("no-op semantic-equivalence save paths send guarded requests for item 5.3-03", async ({ page }) => {
+test("semantic-equivalence save blocks mismatch and confirms no-op round-trip for item 5.3-03", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-semantic-equivalence-${Date.now()}`
   const semanticSaveBodies: string[] = []
+  const semanticMismatchBodies: string[] = []
+  const semanticEquivalentSavedBodies: string[] = []
+  let mismatchInjected = false
+  let mismatchTargetContent: string | null = null
 
   await page.route("**/api/flows", async (route) => {
     const request = route.request()
@@ -103,8 +107,31 @@ test("no-op semantic-equivalence save paths send guarded requests for item 5.3-0
 
     if (request.method() === "POST") {
       const body = request.postData() || ""
-      if (body.includes('"expect_semantic_equivalence":true')) {
+      const hasSemanticEquivalenceGuard = body.includes('"expect_semantic_equivalence":true')
+      let payload: { expect_semantic_equivalence?: boolean; content?: string } = {}
+      try {
+        payload = JSON.parse(body) as { expect_semantic_equivalence?: boolean; content?: string }
+      } catch {
+        payload = {}
+      }
+
+      if (payload.expect_semantic_equivalence === true || hasSemanticEquivalenceGuard) {
         semanticSaveBodies.push(body)
+        if (
+          mismatchTargetContent !== null
+          && mismatchInjected === false
+          && payload.content === mismatchTargetContent
+        ) {
+          mismatchInjected = true
+          semanticMismatchBodies.push(body)
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: '{"detail":{"status":"semantic_mismatch","error":"semantic equivalence check failed: output DOT would change flow behavior"}}',
+          })
+          return
+        }
+        semanticEquivalentSavedBodies.push(body)
       }
       await route.fulfill({
         status: 200,
@@ -169,11 +196,26 @@ test("no-op semantic-equivalence save paths send guarded requests for item 5.3-0
   await expect.poll(() => semanticSaveBodies.length).toBeGreaterThanOrEqual(1)
 
   await page.getByRole("button", { name: "Raw DOT" }).click()
-  await expect(page.getByTestId("raw-dot-editor")).toBeVisible()
+  const rawDotEditor = page.getByTestId("raw-dot-editor")
+  await expect(rawDotEditor).toBeVisible()
+  const rawDotEntry = await rawDotEditor.inputValue()
+  mismatchTargetContent = rawDotEntry
+  await page.getByRole("button", { name: "Structured" }).click()
+  await expect(rawDotEditor).toBeVisible()
+  const rawHandoffError = page.getByTestId("raw-dot-handoff-error")
+  if ((await rawHandoffError.count()) > 0) {
+    await expect(rawHandoffError).toContainText("Safe handoff requires valid DOT.")
+  }
+  await expect(page.getByRole("button", { name: "Add Node" })).toHaveCount(0)
+  await expect.poll(() => semanticMismatchBodies.length).toBeGreaterThanOrEqual(1)
+  await page.screenshot({ path: screenshotPath("19a-semantic-equivalence-mismatch-blocked.png"), fullPage: true })
+
+  const equivalentSavesBeforeRoundTrip = semanticEquivalentSavedBodies.length
+  await rawDotEditor.fill(rawDotEntry)
   await page.getByRole("button", { name: "Structured" }).click()
   await expect(page.getByRole("button", { name: "Add Node" })).toBeVisible()
-  await expect.poll(() => semanticSaveBodies.length).toBeGreaterThanOrEqual(2)
-  await page.screenshot({ path: screenshotPath("19-semantic-equivalence-noop-save.png"), fullPage: true })
+  await expect.poll(() => semanticEquivalentSavedBodies.length).toBeGreaterThan(equivalentSavesBeforeRoundTrip)
+  await page.screenshot({ path: screenshotPath("19b-semantic-equivalence-round-trip-saved.png"), fullPage: true })
 })
 
 test("prompt edits trigger live preview diagnostics before blur for item 5.1-03", async ({ page }) => {

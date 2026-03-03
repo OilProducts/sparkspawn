@@ -93,8 +93,7 @@ Status key:
 ### 5.3 Save Semantics
 - [x] [5.3-01] Implement explicit save state indicator (saved/saving/error/conflict).
 - [x] [5.3-02] Surface save failures with actionable remediation and no silent drop.
-- [ ] [5.3-03] Add semantic-equivalence checks for output DOT where user behavior did not change.
-  Blocked: runtime UI coverage now asserts guarded no-op save requests, but evaluator marked this item `fail` because tests still do not prove semantic-mismatch blocking and end-to-end semantic re-parse/compare outcomes.
+- [x] [5.3-03] Add semantic-equivalence checks for output DOT where user behavior did not change.
 
 ### 5.4 Project-Scoped Context and Isolation
 - [x] [5.4-01] Require an active project for mutating flow edits and run start actions.

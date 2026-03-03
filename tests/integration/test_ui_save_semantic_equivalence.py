@@ -31,6 +31,9 @@ def test_ui_smoke_exercises_runtime_semantic_equivalence_noop_paths_item_5_3_03(
     repo_root = Path(__file__).resolve().parents[2]
     smoke_text = (repo_root / "frontend" / "e2e" / "ui-smoke.spec.ts").read_text(encoding="utf-8")
 
-    assert "no-op semantic-equivalence save paths send guarded requests for item 5.3-03" in smoke_text
+    assert "semantic-equivalence save blocks mismatch and confirms no-op round-trip for item 5.3-03" in smoke_text
     assert '"expect_semantic_equivalence":true' in smoke_text
-    assert "19-semantic-equivalence-noop-save.png" in smoke_text
+    assert '"status":"semantic_mismatch"' in smoke_text
+    assert "raw-dot-handoff-error" in smoke_text
+    assert "19a-semantic-equivalence-mismatch-blocked.png" in smoke_text
+    assert "19b-semantic-equivalence-round-trip-saved.png" in smoke_text
