@@ -28,11 +28,48 @@ interface CheckpointResponse {
     checkpoint: Record<string, unknown>
 }
 
+interface CheckpointErrorState {
+    message: string
+    help: string
+}
+
 const asRecord = (value: unknown): Record<string, unknown> | null => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return null
     }
     return value as Record<string, unknown>
+}
+
+const asErrorDetail = (value: unknown): string | null => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null
+    }
+    const detail = (value as Record<string, unknown>).detail
+    if (typeof detail !== 'string') {
+        return null
+    }
+    const trimmed = detail.trim()
+    return trimmed.length > 0 ? trimmed : null
+}
+
+const checkpointErrorFromResponse = (status: number, detail: string | null): CheckpointErrorState => {
+    const normalizedDetail = detail?.toLowerCase()
+    if (status === 404 && normalizedDetail === 'checkpoint unavailable') {
+        return {
+            message: 'Checkpoint unavailable for this run.',
+            help: 'Run may still be in progress or did not persist checkpoint data yet.',
+        }
+    }
+    if (status === 404 && normalizedDetail === 'unknown pipeline') {
+        return {
+            message: 'Run is no longer available.',
+            help: 'The selected run could not be found. Refresh run history and pick a different run.',
+        }
+    }
+    return {
+        message: `Unable to load checkpoint (HTTP ${status}).`,
+        help: detail ? `Backend returned: ${detail}.` : 'Retry, and check backend availability if this keeps failing.',
+    }
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -137,7 +174,7 @@ export function RunsPanel() {
     const [lastFetchedAtMs, setLastFetchedAtMs] = useState<number | null>(null)
     const [checkpointData, setCheckpointData] = useState<CheckpointResponse | null>(null)
     const [isCheckpointLoading, setIsCheckpointLoading] = useState(false)
-    const [checkpointError, setCheckpointError] = useState<string | null>(null)
+    const [checkpointError, setCheckpointError] = useState<CheckpointErrorState | null>(null)
     const [metadataStaleAfterMs] = useState(() => {
         const override = (globalThis as typeof globalThis & { __RUNS_METADATA_STALE_AFTER_MS__?: unknown })
             .__RUNS_METADATA_STALE_AFTER_MS__
@@ -239,14 +276,26 @@ export function RunsPanel() {
         try {
             const res = await fetch(`/pipelines/${encodeURIComponent(selectedRunSummary.run_id)}/checkpoint`)
             if (!res.ok) {
-                throw new Error(`failed to load checkpoint: HTTP ${res.status}`)
+                let detail: string | null = null
+                try {
+                    const errorBody = await res.json()
+                    detail = asErrorDetail(errorBody)
+                } catch {
+                    detail = null
+                }
+                setCheckpointData(null)
+                setCheckpointError(checkpointErrorFromResponse(res.status, detail))
+                return
             }
             const payload = await res.json() as CheckpointResponse
             setCheckpointData(payload)
         } catch (err) {
             console.error(err)
             setCheckpointData(null)
-            setCheckpointError('Unable to load checkpoint')
+            setCheckpointError({
+                message: 'Unable to load checkpoint.',
+                help: 'Check your network/backend connection and retry.',
+            })
         } finally {
             setIsCheckpointLoading(false)
         }
@@ -411,8 +460,11 @@ export function RunsPanel() {
                             </button>
                         </div>
                         {checkpointError && (
-                            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                {checkpointError}
+                            <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                <div data-testid="run-checkpoint-error">{checkpointError.message}</div>
+                                <div data-testid="run-checkpoint-error-help" className="text-xs text-destructive/90">
+                                    {checkpointError.help}
+                                </div>
                             </div>
                         )}
                         {!checkpointError && checkpointData && (

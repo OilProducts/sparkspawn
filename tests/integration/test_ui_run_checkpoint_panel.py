@@ -39,3 +39,26 @@ def test_runs_panel_renders_checkpoint_progress_fields_item_9_2_02() -> None:
 
     for snippet in required_snippets:
         assert snippet in runs_panel_text, f"missing checkpoint progress field snippet: {snippet}"
+
+
+def test_runs_panel_adds_checkpoint_unavailable_error_handling_item_9_2_03() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runs_panel_text = (repo_root / "frontend" / "src" / "components" / "RunsPanel.tsx").read_text(encoding="utf-8")
+
+    required_snippets = [
+        "data-testid=\"run-checkpoint-error\"",
+        "data-testid=\"run-checkpoint-error-help\"",
+        "Checkpoint unavailable for this run.",
+        "Run may still be in progress or did not persist checkpoint data yet.",
+    ]
+
+    for snippet in required_snippets:
+        assert snippet in runs_panel_text, f"missing checkpoint unavailable handling snippet: {snippet}"
+
+
+def test_ui_smoke_includes_checkpoint_unavailable_visual_qa_item_9_2_03() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    ui_smoke_text = (repo_root / "frontend" / "e2e" / "ui-smoke.spec.ts").read_text(encoding="utf-8")
+
+    assert "run checkpoint viewer handles unavailable checkpoint for item 9.2-03" in ui_smoke_text
+    assert "08e-runs-panel-checkpoint-unavailable.png" in ui_smoke_text

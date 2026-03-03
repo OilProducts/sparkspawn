@@ -219,7 +219,8 @@ Status key:
   - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` now fetches and renders checkpoint payloads with refresh control, covered by integration guard tests and UI-smoke screenshot `frontend/artifacts/ui-smoke/08d-runs-panel-checkpoint-viewer.png`.
 - [x] [9.2-02] Render current node, completed nodes, retry counters, and raw checkpoint payload.
   - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` now renders checkpoint progress fields (`current_node`, `completed_nodes`, `retry_counts`) above raw payload JSON, covered by integration guard test `test_runs_panel_renders_checkpoint_progress_fields_item_9_2_02` and UI-smoke visual QA in `frontend/artifacts/ui-smoke/08d-runs-panel-checkpoint-viewer.png`.
-- [ ] [9.2-03] Add missing/unavailable checkpoint error handling UX.
+- [x] [9.2-03] Add missing/unavailable checkpoint error handling UX.
+  - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` now renders explicit degraded-state UX for missing/unavailable checkpoints with refresh retry, covered by `tests/integration/test_ui_run_checkpoint_panel.py::test_runs_panel_adds_checkpoint_unavailable_error_handling_item_9_2_03` and UI-smoke screenshot `frontend/artifacts/ui-smoke/08e-runs-panel-checkpoint-unavailable.png`.
 
 ### 9.3 Context View
 - [ ] [9.3-01] Add searchable context key/value inspector backed by `/pipelines/{id}/context`.

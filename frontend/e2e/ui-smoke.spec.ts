@@ -258,6 +258,63 @@ test("run checkpoint viewer fetches checkpoint payload for item 9.2-01", async (
   await page.screenshot({ path: screenshotPath("08d-runs-panel-checkpoint-viewer.png"), fullPage: true })
 })
 
+test("run checkpoint viewer handles unavailable checkpoint for item 9.2-03", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-runs-checkpoint-unavailable-${Date.now()}`
+  const runId = `run-checkpoint-unavailable-${Date.now()}`
+  let checkpointFetchCount = 0
+
+  await page.route("**/runs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        runs: [
+          {
+            run_id: runId,
+            flow_name: "CheckpointMissingFlow",
+            status: "running",
+            result: "running",
+            working_directory: `${projectPath}/workspace`,
+            project_path: projectPath,
+            git_branch: "main",
+            git_commit: "bead456",
+            model: "gpt-5",
+            started_at: "2026-03-03T12:05:00Z",
+            ended_at: null,
+            last_error: "",
+            token_usage: 3,
+          },
+        ],
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+    checkpointFetchCount += 1
+    await route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Checkpoint unavailable" }),
+    })
+  })
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-runs").click()
+
+  await expect(page.getByTestId("run-checkpoint-panel")).toBeVisible()
+  await expect(page.getByTestId("run-checkpoint-error")).toContainText("Checkpoint unavailable for this run.")
+  await expect(page.getByTestId("run-checkpoint-error-help")).toContainText(
+    "Run may still be in progress or did not persist checkpoint data yet."
+  )
+  await expect.poll(() => checkpointFetchCount).toBeGreaterThanOrEqual(1)
+
+  await page.getByTestId("run-checkpoint-refresh-button").click()
+  await expect.poll(() => checkpointFetchCount).toBeGreaterThanOrEqual(2)
+  await page.screenshot({ path: screenshotPath("08e-runs-panel-checkpoint-unavailable.png"), fullPage: true })
+})
+
 test("semantic-equivalence save blocks mismatch and confirms no-op round-trip for item 5.3-03", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-semantic-equivalence-${Date.now()}`
   const semanticSaveBodies: string[] = []
