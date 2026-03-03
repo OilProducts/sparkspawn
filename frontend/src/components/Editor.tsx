@@ -356,7 +356,7 @@ export function Editor() {
                 const normalizedContent = normalizeLegacyDot(data.content);
                 setRawDotDraft(normalizedContent);
                 if (activeProjectPath && normalizedContent !== data.content) {
-                    void saveFlowContent(activeFlow, normalizedContent);
+                    void saveFlowContent(activeFlow, normalizedContent, { expectSemanticEquivalence: true });
                 }
                 return requestPreview(normalizedContent);
             })

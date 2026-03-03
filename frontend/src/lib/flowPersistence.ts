@@ -5,8 +5,12 @@ interface SaveFlowErrorDetail {
     error?: string
 }
 
+interface SaveFlowOptions {
+    expectSemanticEquivalence?: boolean
+}
+
 const FALLBACK_SAVE_FAILURE_MESSAGE = 'Flow save failed before confirmation from backend.'
-let lastSaveRequest: { name: string; content: string } | null = null
+let lastSaveRequest: { name: string; content: string; options?: SaveFlowOptions } | null = null
 
 function parseErrorDetail(payload: unknown): SaveFlowErrorDetail {
     if (!payload || typeof payload !== 'object') {
@@ -25,6 +29,9 @@ function buildErrorMessage(status: string | undefined, error: string | undefined
     if (status === 'validation_error') {
         return `Save blocked by validation errors: ${error ?? FALLBACK_SAVE_FAILURE_MESSAGE}`
     }
+    if (status === 'semantic_mismatch') {
+        return `Save blocked by semantic equivalence check: ${error ?? 'A no-op save would change flow behavior.'}`
+    }
     if (status === 'conflict' || statusCode === 409) {
         return `Save conflict detected: ${error ?? 'The flow was modified elsewhere. Refresh and re-apply your changes.'}`
     }
@@ -36,12 +43,12 @@ function buildErrorMessage(status: string | undefined, error: string | undefined
 
 export async function retryLastSaveContent(): Promise<boolean> {
     if (!lastSaveRequest) return false
-    return saveFlowContent(lastSaveRequest.name, lastSaveRequest.content)
+    return saveFlowContent(lastSaveRequest.name, lastSaveRequest.content, lastSaveRequest.options)
 }
 
-export async function saveFlowContent(name: string, content: string): Promise<boolean> {
+export async function saveFlowContent(name: string, content: string, options?: SaveFlowOptions): Promise<boolean> {
     const { markSaveInFlight, markSaveSuccess, markSaveFailure, markSaveConflict } = useStore.getState()
-    lastSaveRequest = { name, content }
+    lastSaveRequest = { name, content, options }
     markSaveInFlight()
 
     let response: Response
@@ -49,7 +56,11 @@ export async function saveFlowContent(name: string, content: string): Promise<bo
         response = await fetch('/api/flows', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, content }),
+            body: JSON.stringify({
+                name,
+                content,
+                expect_semantic_equivalence: options?.expectSemanticEquivalence === true,
+            }),
         })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'network error while saving flow'
@@ -67,7 +78,7 @@ export async function saveFlowContent(name: string, content: string): Promise<bo
     if (!response.ok) {
         const detail = parseErrorDetail(payload)
         const message = buildErrorMessage(detail.status, detail.error, response.status)
-        if (detail.status === 'conflict' || response.status === 409) {
+        if (detail.status === 'conflict' || (response.status === 409 && detail.status !== 'semantic_mismatch')) {
             markSaveConflict(message)
             return false
         }
