@@ -28,11 +28,15 @@ This document maps current UI controls to their expected behavior with direct re
 | Node quick-edit controls | `frontend/src/components/TaskNode.tsx` | Supports inline node label edit and a focused node detail editor (`Edit` control) with the same node attribute semantics as sidebar editing. | `ui-spec.md` 5.1, 5.2, 6.2 |
 | Edge inspector fields | `frontend/src/components/Sidebar.tsx` | Edge attributes (`label`, `condition`, `weight`, `fidelity`, `thread_id`, `loop_restart`) remain editable and persisted. | `ui-spec.md` 5.2, 6.3, Appendix A.3 |
 | Validation panel entries | `frontend/src/components/ValidationPanel.tsx` | Diagnostics are visible, severity-tagged, and selectable to focus graph entities; error diagnostics block run start. | `ui-spec.md` 7.1, 7.2, 7.3 |
+| Explainability panel controls | `frontend/src/components/ExplainabilityPanel.tsx` | Shows routing/retry/failure reasoning from live runtime events with clear fallback messaging when no events are available. | `ui-spec.md` 2 (principle 4), 9.4 |
 | Canvas controls (pan/zoom/fit/minimap) | `frontend/src/components/Editor.tsx` | Maintains direct-manipulation canvas navigation controls with consistent graph context while editing and inspecting. | `ui-spec.md` 4.1, 5.2 |
+| Stylesheet editor controls | `frontend/src/components/StylesheetEditor.tsx` | Supports graph stylesheet authoring with lint/diagnostic feedback and preview-oriented editing affordances. | `ui-spec.md` 6.5, 7.1 |
 | Run history refresh/open/cancel actions | `frontend/src/components/RunsPanel.tsx` | Supports run list refresh, run selection/open, and cancel requests with explicit operator action. | `ui-spec.md` 8.2, 9.1, 9.6 |
+| Run stream panel controls | `frontend/src/components/RunStream.tsx` | Renders live event/log stream with stable run association during active execution and run inspection. | `ui-spec.md` 8.3, 8.4, 9.4 |
 | Execution footer cancel control | `frontend/src/components/ExecutionControls.tsx` | Keeps runtime status/control visible during execution and requires confirmation before cancel request. | `ui-spec.md` 8.2, 8.4, 2 (principle 5) |
 | Terminal clear action | `frontend/src/components/Terminal.tsx` | Allows explicit operator clearing of runtime log stream without changing runtime state. | `ui-spec.md` 8.4, 9.4 |
 | Global default settings controls | `frontend/src/components/SettingsPanel.tsx` | Maintains global default model/provider/reasoning settings for new flow snapshots. | `ui-spec.md` 4, 11.5, 12 |
+| Projects workspace controls | `frontend/src/components/ProjectsPanel.tsx` | Maintains project registration/selection context and project-scoped workflow entry points without cross-project leakage. | `ui-spec.md` 4.2, 4.3, 5.4 |
 
 ## Spec references used during control behavior decisions
 
