@@ -1240,6 +1240,103 @@ test("run artifact browser lists run outputs and supports view/download for item
   await artifactPanel.screenshot({ path: screenshotPath("08m-runs-panel-artifact-browser.png") })
 })
 
+test("run graphviz viewer renders /pipelines/{id}/graph output for item 9.5-02", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-runs-graphviz-${Date.now()}`
+  const runId = `run-graphviz-${Date.now()}`
+
+  await page.route("**/runs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        runs: [
+          {
+            run_id: runId,
+            flow_name: "GraphvizFlow",
+            status: "success",
+            result: "success",
+            working_directory: `${projectPath}/workspace`,
+            project_path: projectPath,
+            git_branch: "main",
+            git_commit: "graph9502",
+            model: "gpt-5",
+            started_at: "2026-03-03T15:05:00Z",
+            ended_at: "2026-03-03T15:06:00Z",
+            last_error: "",
+            token_usage: 22,
+          },
+        ],
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        pipeline_id: runId,
+        checkpoint: {
+          current_node: "done",
+          completed_nodes: ["start", "plan"],
+          retry_counts: {},
+        },
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        pipeline_id: runId,
+        context: {
+          "graph.goal": "Graphviz viewer smoke",
+        },
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/artifacts`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        pipeline_id: runId,
+        artifacts: [],
+      }),
+    })
+  })
+
+  await page.route(`**/pipelines/${runId}/graph`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: [
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 420 120\">",
+        "<rect x=\"1\" y=\"1\" width=\"418\" height=\"118\" fill=\"#ffffff\" stroke=\"#0f172a\" />",
+        "<text x=\"24\" y=\"64\" font-family=\"monospace\" font-size=\"20\" fill=\"#0f172a\">Graphviz Smoke: ",
+        runId,
+        "</text>",
+        "</svg>",
+      ].join(""),
+    })
+  })
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-runs").click()
+
+  const graphvizPanel = page.getByTestId("run-graphviz-panel")
+  await expect(graphvizPanel).toBeVisible()
+  await expect(page.getByTestId("run-graphviz-viewer-image")).toBeVisible()
+  await expect(page.getByTestId("run-graphviz-viewer-image")).toHaveAttribute("src", /data:image\/svg\+xml/)
+  await graphvizPanel.scrollIntoViewIfNeeded()
+  await graphvizPanel.screenshot({ path: screenshotPath("08n-runs-panel-graphviz-viewer.png") })
+})
+
 test("semantic-equivalence save blocks mismatch and confirms no-op round-trip for item 5.3-03", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-semantic-equivalence-${Date.now()}`
   const semanticSaveBodies: string[] = []

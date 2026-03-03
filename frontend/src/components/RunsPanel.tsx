@@ -60,6 +60,11 @@ interface ArtifactErrorState {
     help: string
 }
 
+interface GraphvizErrorState {
+    message: string
+    help: string
+}
+
 interface FormattedContextValue {
     renderedValue: string
     valueType: string
@@ -216,6 +221,26 @@ const artifactErrorFromResponse = (status: number, detail: string | null): Artif
     }
     return {
         message: `Unable to load artifacts (HTTP ${status}).`,
+        help: detail ? `Backend returned: ${detail}.` : 'Retry, and check backend availability if this keeps failing.',
+    }
+}
+
+const graphvizErrorFromResponse = (status: number, detail: string | null): GraphvizErrorState => {
+    const normalizedDetail = detail?.toLowerCase()
+    if (status === 404 && normalizedDetail === 'unknown pipeline') {
+        return {
+            message: 'Run is no longer available.',
+            help: 'The selected run could not be found. Refresh run history and pick a different run.',
+        }
+    }
+    if (status === 404 && normalizedDetail === 'graph visualization unavailable') {
+        return {
+            message: 'Graph visualization unavailable for this run.',
+            help: 'This run may not have produced a Graphviz SVG yet.',
+        }
+    }
+    return {
+        message: `Unable to load graph visualization (HTTP ${status}).`,
         help: detail ? `Backend returned: ${detail}.` : 'Retry, and check backend availability if this keeps failing.',
     }
 }
@@ -570,6 +595,9 @@ export function RunsPanel() {
     const [artifactViewerPayload, setArtifactViewerPayload] = useState('')
     const [artifactViewerError, setArtifactViewerError] = useState<string | null>(null)
     const [isArtifactViewerLoading, setIsArtifactViewerLoading] = useState(false)
+    const [graphvizMarkup, setGraphvizMarkup] = useState('')
+    const [isGraphvizLoading, setIsGraphvizLoading] = useState(false)
+    const [graphvizError, setGraphvizError] = useState<GraphvizErrorState | null>(null)
     const [timelineEvents, setTimelineEvents] = useState<TimelineEventEntry[]>([])
     const [timelineError, setTimelineError] = useState<string | null>(null)
     const [isTimelineLive, setIsTimelineLive] = useState(false)
@@ -797,6 +825,43 @@ export function RunsPanel() {
         }
     }, [selectedRunSummary])
 
+    const fetchGraphviz = useCallback(async () => {
+        if (!selectedRunSummary) {
+            setGraphvizMarkup('')
+            setGraphvizError(null)
+            setIsGraphvizLoading(false)
+            return
+        }
+        setIsGraphvizLoading(true)
+        setGraphvizError(null)
+        try {
+            const res = await fetch(`/pipelines/${encodeURIComponent(selectedRunSummary.run_id)}/graph`)
+            if (!res.ok) {
+                let detail: string | null = null
+                try {
+                    const errorBody = await res.json()
+                    detail = asErrorDetail(errorBody)
+                } catch {
+                    detail = null
+                }
+                setGraphvizMarkup('')
+                setGraphvizError(graphvizErrorFromResponse(res.status, detail))
+                return
+            }
+            const svgMarkup = await res.text()
+            setGraphvizMarkup(svgMarkup)
+        } catch (err) {
+            console.error(err)
+            setGraphvizMarkup('')
+            setGraphvizError({
+                message: 'Unable to load graph visualization.',
+                help: 'Check your network/backend connection and retry.',
+            })
+        } finally {
+            setIsGraphvizLoading(false)
+        }
+    }, [selectedRunSummary])
+
     useEffect(() => {
         if (viewMode !== 'runs' || !selectedRunSummary) {
             setCheckpointData(null)
@@ -838,6 +903,19 @@ export function RunsPanel() {
         setIsArtifactViewerLoading(false)
         void fetchArtifacts()
     }, [viewMode, selectedRunSummary, fetchArtifacts])
+
+    useEffect(() => {
+        if (viewMode !== 'runs' || !selectedRunSummary) {
+            setGraphvizMarkup('')
+            setGraphvizError(null)
+            setIsGraphvizLoading(false)
+            return
+        }
+        setGraphvizMarkup('')
+        setGraphvizError(null)
+        setIsGraphvizLoading(false)
+        void fetchGraphviz()
+    }, [viewMode, selectedRunSummary, fetchGraphviz])
 
     const selectedRunTimelineId = selectedRunSummary?.run_id ?? null
 
@@ -1010,6 +1088,10 @@ export function RunsPanel() {
         const encodedPath = encodeArtifactPath(artifactPath)
         return `/pipelines/${encodeURIComponent(selectedRunSummary.run_id)}/artifacts/${encodedPath}?download=1`
     }, [selectedRunSummary])
+    const graphvizViewerSrc = useMemo(() => {
+        if (!graphvizMarkup) return ''
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(graphvizMarkup)}`
+    }, [graphvizMarkup])
     const timelineTypeOptions = useMemo(() => {
         return Array.from(new Set(timelineEvents.map((event) => event.type))).sort((left, right) => left.localeCompare(right))
     }, [timelineEvents])
@@ -1447,6 +1529,45 @@ export function RunsPanel() {
                                 </div>
                             </div>
                         )}
+                    </div>
+                )}
+                {selectedRunSummary && (
+                    <div data-testid="run-graphviz-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Graphviz Render</h3>
+                            <button
+                                onClick={() => {
+                                    void fetchGraphviz()
+                                }}
+                                data-testid="run-graphviz-refresh-button"
+                                className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                            >
+                                {isGraphvizLoading ? 'Refreshing…' : 'Refresh'}
+                            </button>
+                        </div>
+                        <div data-testid="run-graphviz-viewer" className="rounded-md border border-border/80 bg-muted/30 p-3">
+                            {isGraphvizLoading && (
+                                <div data-testid="run-graphviz-viewer-loading" className="text-xs text-muted-foreground">
+                                    Loading graph visualization...
+                                </div>
+                            )}
+                            {!isGraphvizLoading && graphvizError && (
+                                <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                    <div data-testid="run-graphviz-viewer-error">{graphvizError.message}</div>
+                                    <div data-testid="run-graphviz-viewer-error-help" className="text-xs text-destructive/90">
+                                        {graphvizError.help}
+                                    </div>
+                                </div>
+                            )}
+                            {!isGraphvizLoading && !graphvizError && graphvizViewerSrc && (
+                                <img
+                                    data-testid="run-graphviz-viewer-image"
+                                    src={graphvizViewerSrc}
+                                    alt={`Graphviz render for run ${selectedRunSummary.run_id}`}
+                                    className="w-full rounded-md border border-border/70 bg-background"
+                                />
+                            )}
+                        </div>
                     </div>
                 )}
                 {selectedRunSummary && (

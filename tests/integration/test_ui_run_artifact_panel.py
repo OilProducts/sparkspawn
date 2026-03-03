@@ -30,3 +30,28 @@ def test_ui_smoke_includes_run_artifact_browser_visual_qa_item_9_5_01() -> None:
     assert "run artifact browser lists run outputs and supports view/download for item 9.5-01" in ui_smoke_text
     assert "08m-runs-panel-artifact-browser.png" in ui_smoke_text
     assert "run-artifact-view-button" in ui_smoke_text
+
+
+def test_runs_panel_adds_graphviz_render_viewer_for_item_9_5_02() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runs_panel_text = (repo_root / "frontend" / "src" / "components" / "RunsPanel.tsx").read_text(encoding="utf-8")
+
+    required_snippets = [
+        "fetch(`/pipelines/${encodeURIComponent(selectedRunSummary.run_id)}/graph`)",
+        "data-testid=\"run-graphviz-panel\"",
+        "data-testid=\"run-graphviz-refresh-button\"",
+        "data-testid=\"run-graphviz-viewer\"",
+        "data-testid=\"run-graphviz-viewer-image\"",
+    ]
+
+    for snippet in required_snippets:
+        assert snippet in runs_panel_text, f"missing run graphviz viewer snippet: {snippet}"
+
+
+def test_ui_smoke_includes_graphviz_render_viewer_visual_qa_item_9_5_02() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    ui_smoke_text = (repo_root / "frontend" / "e2e" / "ui-smoke.spec.ts").read_text(encoding="utf-8")
+
+    assert "run graphviz viewer renders /pipelines/{id}/graph output for item 9.5-02" in ui_smoke_text
+    assert "08n-runs-panel-graphviz-viewer.png" in ui_smoke_text
+    assert "run-graphviz-viewer-image" in ui_smoke_text

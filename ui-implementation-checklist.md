@@ -243,7 +243,8 @@ Status key:
 ### 9.5 Artifact Browser
 - [x] [9.5-01] Add artifact listing and file viewer/download actions for run outputs.
   - Evidence (2026-03-03): Evaluator `pass`; added backend artifact list/file endpoints with traversal guards, plus `RunsPanel` artifact table + view/download UX, covered by `tests/api/test_pipeline_artifact_endpoints.py`, `tests/integration/test_ui_run_artifact_panel.py`, and UI-smoke visual QA `frontend/artifacts/ui-smoke/08m-runs-panel-artifact-browser.png`.
-- [ ] [9.5-02] Add Graphviz render viewer for `/pipelines/{id}/graph`.
+- [x] [9.5-02] Add Graphviz render viewer for `/pipelines/{id}/graph`.
+  - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` now fetches and renders `/pipelines/{id}/graph` SVG output with refresh + degraded-state messaging, covered by `tests/integration/test_ui_run_artifact_panel.py` and UI-smoke screenshot `frontend/artifacts/ui-smoke/08n-runs-panel-graphviz-viewer.png`.
 - [ ] [9.5-03] Add graceful handling for missing artifact files and partial runs.
 
 ### 9.6 Project Run History and Traceability
