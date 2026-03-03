@@ -39,3 +39,40 @@ def test_ui_smoke_includes_event_timeline_visual_qa_item_9_4_01() -> None:
     assert "08i-runs-panel-event-timeline.png" in ui_smoke_text
     assert "run-event-timeline-row-type" in ui_smoke_text
     assert "run-event-timeline-row-category" in ui_smoke_text
+
+
+def test_runs_panel_adds_timeline_filters_for_type_node_stage_and_severity_item_9_4_02() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runs_panel_text = (repo_root / "frontend" / "src" / "components" / "RunsPanel.tsx").read_text(encoding="utf-8")
+
+    required_snippets = [
+        "type TimelineSeverity = 'info' | 'warning' | 'error'",
+        "const timelineSeverityFromEvent = (type: string, payload: Record<string, unknown>): TimelineSeverity => {",
+        "const [timelineTypeFilter, setTimelineTypeFilter] = useState('all')",
+        "const [timelineNodeStageFilter, setTimelineNodeStageFilter] = useState('')",
+        "const [timelineCategoryFilter, setTimelineCategoryFilter] = useState<'all' | TimelineEventCategory>('all')",
+        "const [timelineSeverityFilter, setTimelineSeverityFilter] = useState<'all' | TimelineSeverity>('all')",
+        "const filteredTimelineEvents = useMemo(() => {",
+        "data-testid=\"run-event-timeline-filter-type\"",
+        "data-testid=\"run-event-timeline-filter-node-stage\"",
+        "data-testid=\"run-event-timeline-filter-category\"",
+        "data-testid=\"run-event-timeline-filter-severity\"",
+        "data-testid=\"run-event-timeline-row-severity\"",
+        "filteredTimelineEvents.length === 0",
+        "filteredTimelineEvents.map((event) => (",
+    ]
+
+    for snippet in required_snippets:
+        assert snippet in runs_panel_text, f"missing timeline filter snippet: {snippet}"
+
+
+def test_ui_smoke_includes_event_timeline_filter_visual_qa_item_9_4_02() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    ui_smoke_text = (repo_root / "frontend" / "e2e" / "ui-smoke.spec.ts").read_text(encoding="utf-8")
+
+    assert "run event timeline filtering supports type, node/stage, category, and severity for item 9.4-02" in ui_smoke_text
+    assert "run-event-timeline-filter-type" in ui_smoke_text
+    assert "run-event-timeline-filter-node-stage" in ui_smoke_text
+    assert "run-event-timeline-filter-category" in ui_smoke_text
+    assert "run-event-timeline-filter-severity" in ui_smoke_text
+    assert "08j-runs-panel-event-timeline-filters.png" in ui_smoke_text

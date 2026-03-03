@@ -55,11 +55,13 @@ interface ContextExportEntry {
 }
 
 type TimelineEventCategory = 'lifecycle' | 'stage' | 'parallel' | 'interview' | 'checkpoint'
+type TimelineSeverity = 'info' | 'warning' | 'error'
 
 interface TimelineEventEntry {
     id: string
     type: string
     category: TimelineEventCategory
+    severity: TimelineSeverity
     nodeId: string | null
     stageIndex: number | null
     summary: string
@@ -91,6 +93,18 @@ const TIMELINE_CATEGORY_LABELS: Record<TimelineEventCategory, string> = {
     parallel: 'Parallel',
     interview: 'Interview',
     checkpoint: 'Checkpoint',
+}
+
+const TIMELINE_SEVERITY_LABELS: Record<TimelineSeverity, string> = {
+    info: 'Info',
+    warning: 'Warning',
+    error: 'Error',
+}
+
+const TIMELINE_SEVERITY_STYLES: Record<TimelineSeverity, string> = {
+    info: 'border-border/80 bg-background text-muted-foreground',
+    warning: 'border-amber-500/40 bg-amber-500/10 text-amber-700',
+    error: 'border-destructive/40 bg-destructive/10 text-destructive',
 }
 
 const TIMELINE_MAX_ITEMS = 200
@@ -224,6 +238,26 @@ const timelineNodeIdFromEvent = (payload: Record<string, unknown>): string | nul
     return null
 }
 
+const timelineSeverityFromEvent = (type: string, payload: Record<string, unknown>): TimelineSeverity => {
+    const severityValue = typeof payload.severity === 'string'
+        ? payload.severity
+        : typeof payload.level === 'string'
+            ? payload.level
+            : ''
+    const normalized = severityValue.trim().toLowerCase()
+    if (normalized === 'info' || normalized === 'warning' || normalized === 'error') {
+        return normalized
+    }
+
+    if (type === 'PipelineFailed' || type === 'StageFailed') {
+        return 'error'
+    }
+    if (type === 'StageRetrying' || type === 'InterviewTimeout') {
+        return 'warning'
+    }
+    return 'info'
+}
+
 const timelineSummaryFromEvent = (type: string, payload: Record<string, unknown>, nodeId: string | null): string => {
     if (type === 'PipelineStarted') {
         return `Pipeline started at ${nodeId || 'start'}`
@@ -325,6 +359,7 @@ const toTimelineEvent = (value: unknown, sequence: number): TimelineEventEntry |
         id: `${type}-${sequence}`,
         type,
         category,
+        severity: timelineSeverityFromEvent(type, payload),
         nodeId,
         stageIndex,
         summary: timelineSummaryFromEvent(type, payload, nodeId),
@@ -444,6 +479,10 @@ export function RunsPanel() {
     const [timelineEvents, setTimelineEvents] = useState<TimelineEventEntry[]>([])
     const [timelineError, setTimelineError] = useState<string | null>(null)
     const [isTimelineLive, setIsTimelineLive] = useState(false)
+    const [timelineTypeFilter, setTimelineTypeFilter] = useState('all')
+    const [timelineNodeStageFilter, setTimelineNodeStageFilter] = useState('')
+    const [timelineCategoryFilter, setTimelineCategoryFilter] = useState<'all' | TimelineEventCategory>('all')
+    const [timelineSeverityFilter, setTimelineSeverityFilter] = useState<'all' | TimelineSeverity>('all')
     const timelineSequenceRef = useRef(0)
     const [metadataStaleAfterMs] = useState(() => {
         const override = (globalThis as typeof globalThis & { __RUNS_METADATA_STALE_AFTER_MS__?: unknown })
@@ -640,6 +679,10 @@ export function RunsPanel() {
             setTimelineEvents([])
             setTimelineError(null)
             setIsTimelineLive(false)
+            setTimelineTypeFilter('all')
+            setTimelineNodeStageFilter('')
+            setTimelineCategoryFilter('all')
+            setTimelineSeverityFilter('all')
             return
         }
 
@@ -647,6 +690,10 @@ export function RunsPanel() {
         setTimelineEvents([])
         setTimelineError(null)
         setIsTimelineLive(false)
+        setTimelineTypeFilter('all')
+        setTimelineNodeStageFilter('')
+        setTimelineCategoryFilter('all')
+        setTimelineSeverityFilter('all')
 
         const source = new EventSource(`/pipelines/${encodeURIComponent(selectedRunTimelineId)}/events`)
         source.onopen = () => {
@@ -744,6 +791,31 @@ export function RunsPanel() {
             setContextCopyStatus('Copy failed. Clipboard access is unavailable.')
         }
     }, [contextExportPayload, filteredContextRows])
+    const timelineTypeOptions = useMemo(() => {
+        return Array.from(new Set(timelineEvents.map((event) => event.type))).sort((left, right) => left.localeCompare(right))
+    }, [timelineEvents])
+    const filteredTimelineEvents = useMemo(() => {
+        const normalizedNodeStageFilter = timelineNodeStageFilter.trim().toLowerCase()
+
+        return timelineEvents.filter((event) => {
+            if (timelineTypeFilter !== 'all' && event.type !== timelineTypeFilter) {
+                return false
+            }
+            if (timelineCategoryFilter !== 'all' && event.category !== timelineCategoryFilter) {
+                return false
+            }
+            if (timelineSeverityFilter !== 'all' && event.severity !== timelineSeverityFilter) {
+                return false
+            }
+            if (!normalizedNodeStageFilter) {
+                return true
+            }
+
+            const nodeIdMatch = (event.nodeId ?? '').toLowerCase().includes(normalizedNodeStageFilter)
+            const stageIndexMatch = event.stageIndex !== null && String(event.stageIndex).includes(normalizedNodeStageFilter)
+            return nodeIdMatch || stageIndexMatch
+        })
+    }, [timelineCategoryFilter, timelineEvents, timelineNodeStageFilter, timelineSeverityFilter, timelineTypeFilter])
 
     const openRun = (run: RunRecord) => {
         setSelectedRunId(run.run_id)
@@ -1032,14 +1104,75 @@ export function RunsPanel() {
                                 {timelineError}
                             </div>
                         )}
+                        {!timelineError && (
+                            <div className="mb-3 grid gap-2 md:grid-cols-2">
+                                <label className="space-y-1 text-xs text-muted-foreground">
+                                    <span>Event Type</span>
+                                    <select
+                                        data-testid="run-event-timeline-filter-type"
+                                        value={timelineTypeFilter}
+                                        onChange={(event) => setTimelineTypeFilter(event.target.value)}
+                                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                                    >
+                                        <option value="all">All event types</option>
+                                        {timelineTypeOptions.map((type) => (
+                                            <option key={type} value={type}>{type}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label className="space-y-1 text-xs text-muted-foreground">
+                                    <span>Node/Stage</span>
+                                    <input
+                                        data-testid="run-event-timeline-filter-node-stage"
+                                        value={timelineNodeStageFilter}
+                                        onChange={(event) => setTimelineNodeStageFilter(event.target.value)}
+                                        placeholder="Node id or stage index..."
+                                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                                    />
+                                </label>
+                                <label className="space-y-1 text-xs text-muted-foreground">
+                                    <span>Category</span>
+                                    <select
+                                        data-testid="run-event-timeline-filter-category"
+                                        value={timelineCategoryFilter}
+                                        onChange={(event) => setTimelineCategoryFilter(event.target.value as 'all' | TimelineEventCategory)}
+                                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                                    >
+                                        <option value="all">All categories</option>
+                                        {Object.entries(TIMELINE_CATEGORY_LABELS).map(([category, label]) => (
+                                            <option key={category} value={category}>{label}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label className="space-y-1 text-xs text-muted-foreground">
+                                    <span>Severity</span>
+                                    <select
+                                        data-testid="run-event-timeline-filter-severity"
+                                        value={timelineSeverityFilter}
+                                        onChange={(event) => setTimelineSeverityFilter(event.target.value as 'all' | TimelineSeverity)}
+                                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                                    >
+                                        <option value="all">All severities</option>
+                                        <option value="info">Info</option>
+                                        <option value="warning">Warning</option>
+                                        <option value="error">Error</option>
+                                    </select>
+                                </label>
+                            </div>
+                        )}
                         {!timelineError && timelineEvents.length === 0 && (
                             <div data-testid="run-event-timeline-empty" className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
                                 No typed timeline events yet.
                             </div>
                         )}
-                        {timelineEvents.length > 0 && (
+                        {!timelineError && timelineEvents.length > 0 && filteredTimelineEvents.length === 0 && (
+                            <div data-testid="run-event-timeline-empty" className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                                No timeline events match the current filters.
+                            </div>
+                        )}
+                        {filteredTimelineEvents.length > 0 && (
                             <div data-testid="run-event-timeline-list" className="max-h-80 space-y-2 overflow-auto pr-1">
-                                {timelineEvents.map((event) => (
+                                {filteredTimelineEvents.map((event) => (
                                     <article
                                         key={event.id}
                                         data-testid="run-event-timeline-row"
@@ -1057,6 +1190,12 @@ export function RunsPanel() {
                                                 className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 uppercase tracking-wide text-muted-foreground"
                                             >
                                                 {TIMELINE_CATEGORY_LABELS[event.category]}
+                                            </span>
+                                            <span
+                                                data-testid="run-event-timeline-row-severity"
+                                                className={`inline-flex rounded border px-1.5 py-0.5 uppercase tracking-wide ${TIMELINE_SEVERITY_STYLES[event.severity]}`}
+                                            >
+                                                {TIMELINE_SEVERITY_LABELS[event.severity]}
                                             </span>
                                             <span data-testid="run-event-timeline-row-time" className="text-muted-foreground">
                                                 {formatTimestamp(event.receivedAt)}
