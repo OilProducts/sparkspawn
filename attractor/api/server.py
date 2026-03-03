@@ -1901,17 +1901,39 @@ async def get_project_metadata(directory: str):
 
 @app.get("/api/flows")
 async def list_flows():
-    flows_dir = Path("flows")
-    flows_dir.mkdir(exist_ok=True)
+    flows_dir = _flows_dir()
     return [f.name for f in flows_dir.glob("*.dot")]
+
+
+def _flows_dir() -> Path:
+    flows_dir = PROJECT_ROOT / "flows"
+    flows_dir.mkdir(exist_ok=True)
+    return flows_dir
+
+
+def _resolve_flow_path(flow_name: str) -> Path:
+    raw_name = flow_name.strip()
+    if not raw_name:
+        raise HTTPException(status_code=400, detail="Flow name is required.")
+
+    # Keep flow paths scoped to the project `flows/` directory.
+    candidate = Path(raw_name)
+    if candidate.is_absolute() or ".." in candidate.parts or len(candidate.parts) != 1:
+        raise HTTPException(status_code=400, detail="Flow name must be a single file name.")
+
+    normalized_name = candidate.name
+    if not normalized_name.endswith(".dot"):
+        normalized_name = f"{normalized_name}.dot"
+
+    return _flows_dir() / normalized_name
 
 
 @app.get("/api/flows/{name}")
 async def get_flow(name: str):
-    flow_path = Path("flows") / name
+    flow_path = _resolve_flow_path(name)
     if not flow_path.exists():
-        return {"error": "Flow not found"}, 404
-    return {"name": name, "content": flow_path.read_text()}
+        raise HTTPException(status_code=404, detail="Flow not found.")
+    return {"name": flow_path.name, "content": flow_path.read_text(encoding="utf-8")}
 
 
 def _semantic_signature(dot_content: str) -> str:
@@ -1963,11 +1985,7 @@ async def save_flow(req: SaveFlowRequest):
             },
         )
 
-    flows_dir = Path("flows")
-    flows_dir.mkdir(exist_ok=True)
-    flow_path = flows_dir / req.name
-    if not flow_path.name.endswith(".dot"):
-        flow_path = flow_path.with_suffix(".dot")
+    flow_path = _resolve_flow_path(req.name)
 
     semantic_equivalent_to_existing: bool | None = None
     if flow_path.exists():
@@ -1994,8 +2012,8 @@ async def save_flow(req: SaveFlowRequest):
 
 @app.delete("/api/flows/{flow_name}")
 async def delete_flow(flow_name: str):
-    filepath = Path("flows") / flow_name
+    filepath = _resolve_flow_path(flow_name)
     if filepath.exists():
         filepath.unlink()
         return {"status": "deleted"}
-    return {"error": "Flow not found"}, 404
+    raise HTTPException(status_code=404, detail="Flow not found.")
