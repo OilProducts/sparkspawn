@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '@/store'
 import { resolveSaveRemediation } from '@/lib/saveRemediation'
+import { resolveSelectedRunScopePreflight, resolveStatusHydrationDecision } from '@/lib/runScope'
 
 function classifyLog(message: string): 'info' | 'success' | 'error' {
     const lower = message.toLowerCase()
@@ -102,15 +103,26 @@ export function RunStream() {
                 const runId = typeof data?.last_run_id === 'string' ? data.last_run_id : null
                 const lastWorkingDirectory = typeof data?.last_working_directory === 'string' ? data.last_working_directory : ''
                 const statusRunInScope = runBelongsToProjectScope(lastWorkingDirectory, activeProjectPath)
+                const statusHydrationDecision = resolveStatusHydrationDecision({
+                    selectedRunId,
+                    statusRunId: runId,
+                    statusRunWorkingDirectory: lastWorkingDirectory,
+                    activeProjectPath,
+                    statusRuntimeStatus: typeof data?.status === 'string' ? data.status : null,
+                })
                 if (!selectedRunId && runId && statusRunInScope) {
-                    setSelectedRunId(runId)
+                    if (statusHydrationDecision.nextSelectedRunId) {
+                        setSelectedRunId(statusHydrationDecision.nextSelectedRunId)
+                    }
                 }
                 if (!selectedRunId && (!runId || !statusRunInScope)) {
                     setRuntimeStatus('idle')
                     return
                 }
                 if (data?.status && ((!selectedRunId && statusRunInScope) || runId === selectedRunId)) {
-                    setRuntimeStatus(data.status)
+                    if (statusHydrationDecision.nextRuntimeStatus) {
+                        setRuntimeStatus(statusHydrationDecision.nextRuntimeStatus)
+                    }
                 }
             })
             .catch(() => null)
@@ -249,13 +261,22 @@ export function RunStream() {
 
             const selectedRunWorkingDirectory = typeof data?.working_directory === 'string' ? data.working_directory : ''
             const selectedRunInScope = runBelongsToProjectScope(selectedRunWorkingDirectory, activeProjectPath)
+            const preflightDecision = resolveSelectedRunScopePreflight({
+                selectedRunWorkingDirectory,
+                activeProjectPath,
+                selectedRunStatus: typeof data?.status === 'string' ? data.status : null,
+            })
             if (!selectedRunInScope) {
-                setSelectedRunId(null)
-                setRuntimeStatus('idle')
+                if (preflightDecision.clearSelectedRun) {
+                    setSelectedRunId(null)
+                }
+                if (preflightDecision.nextRuntimeStatus) {
+                    setRuntimeStatus(preflightDecision.nextRuntimeStatus)
+                }
                 return
             }
-            if (data?.status) {
-                setRuntimeStatus(data.status)
+            if (preflightDecision.nextRuntimeStatus) {
+                setRuntimeStatus(preflightDecision.nextRuntimeStatus)
             }
             if (metadataAbort.signal.aborted) return
 
