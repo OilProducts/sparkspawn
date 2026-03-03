@@ -82,7 +82,7 @@ checklist_hash() {
 extract_evaluator_verdict() {
   local log_file="$1"
   local verdict
-  verdict="$(rg -N -o 'EVALUATOR_VERDICT:\s*(pass|fail|needs-human)' "$log_file" | tail -n1 | awk -F': ' '{print $2}' || true)"
+  verdict="$(rg -N -o 'EVALUATOR_VERDICT:\s*`?(pass|fail|needs-human)`?' "$log_file" | tail -n1 | sed -E 's/^EVALUATOR_VERDICT:[[:space:]]*`?//; s/`?$//' || true)"
   if [[ -z "${verdict:-}" ]]; then
     verdict="unknown"
   fi
@@ -92,7 +92,7 @@ extract_evaluator_verdict() {
 extract_checklist_status_update() {
   local log_file="$1"
   local status
-  status="$(rg -N -o 'CHECKLIST_STATUS_UPDATE:\s*(checked|unchecked|deferred)' "$log_file" | tail -n1 | awk -F': ' '{print $2}' || true)"
+  status="$(rg -N -o 'CHECKLIST_STATUS_UPDATE:\s*`?(checked|unchecked|deferred)`?' "$log_file" | tail -n1 | sed -E 's/^CHECKLIST_STATUS_UPDATE:[[:space:]]*`?//; s/`?$//' || true)"
   if [[ -z "${status:-}" ]]; then
     status="unknown"
   fi
@@ -127,8 +127,8 @@ Output:
 - Commands run + outcomes
 - If `frontend/` changed: UI smoke result and screenshot paths under `frontend/artifacts/ui-smoke/`
 - Sub-agent verdict (verbatim). If `frontend/` changed, this verdict must include screenshot-based visual QA findings.
-- EVALUATOR_VERDICT: `pass` | `fail` | `needs-human`
-- CHECKLIST_STATUS_UPDATE: `checked` | `unchecked` | `deferred`
+- EVALUATOR_VERDICT: pass | fail | needs-human (plain token, no backticks)
+- CHECKLIST_STATUS_UPDATE: checked | unchecked | deferred (plain token, no backticks)
 - Difficulties and workflow improvements
 - Commit hash
 EOF
@@ -162,8 +162,8 @@ Output:
 - Commands run + outcomes
 - If `frontend/` changed: UI smoke result and screenshot paths under `frontend/artifacts/ui-smoke/`
 - Sub-agent verdict (verbatim). If `frontend/` changed, this verdict must include screenshot-based visual QA findings.
-- EVALUATOR_VERDICT: `pass` | `fail` | `needs-human`
-- CHECKLIST_STATUS_UPDATE: `checked` | `unchecked` | `deferred`
+- EVALUATOR_VERDICT: pass | fail | needs-human (plain token, no backticks)
+- CHECKLIST_STATUS_UPDATE: checked | unchecked | deferred (plain token, no backticks)
 - Difficulties and workflow improvements
 - Commit hash
 EOF
