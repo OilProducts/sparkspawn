@@ -31,6 +31,7 @@ const edgeTypes = {
 const EDGE_TYPE: Edge['type'] = 'validation';
 const EDGE_CLASS = 'flow-edge';
 const EDGE_INTERACTION_WIDTH = 16;
+const LIVE_PREVIEW_DEBOUNCE_MS = 300;
 const elk = new ELK();
 
 const DEFAULT_NODE_WIDTH = 220;
@@ -386,7 +387,7 @@ export function Editor() {
         }
         previewTimer.current = window.setTimeout(() => {
             void requestPreview(dot).catch(console.error);
-        }, 600);
+        }, LIVE_PREVIEW_DEBOUNCE_MS);
 
         return () => {
             if (previewTimer.current) {

@@ -13,6 +13,7 @@ import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
 import { GraphSettings } from './GraphSettings'
 
 type InspectorScope = 'none' | 'graph' | 'node' | 'edge'
+const INSPECTOR_SAVE_DEBOUNCE_MS = 600
 
 function resolveInspectorScope({
     viewMode,
@@ -117,7 +118,7 @@ export function Sidebar() {
             pendingSaveRef.current = null
             const dot = generateDot(activeFlow, nextNodes, nextEdges, graphAttrs)
             void saveFlowContent(activeFlow, dot)
-        }, 600)
+        }, INSPECTOR_SAVE_DEBOUNCE_MS)
     }
 
     const flushPendingSave = useCallback(() => {
