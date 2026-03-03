@@ -231,7 +231,8 @@ Status key:
   - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` now exposes filtered-context `Copy JSON` + `Export JSON` actions (clipboard and download) with coverage in `tests/integration/test_ui_run_context_panel.py` and UI-smoke visual QA at `frontend/artifacts/ui-smoke/08h-runs-panel-context-copy-export.png`.
 
 ### 9.4 Event Timeline
-- [ ] [9.4-01] Render typed lifecycle/stage/parallel/interview/checkpoint events from SSE history + stream.
+- [x] [9.4-01] Render typed lifecycle/stage/parallel/interview/checkpoint events from SSE history + stream.
+  - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` now streams typed timeline rows from `/pipelines/{id}/events` with lifecycle/stage/parallel/interview/checkpoint categories, covered by `tests/integration/test_ui_run_event_timeline_panel.py` and UI-smoke visual QA in `frontend/artifacts/ui-smoke/08i-runs-panel-event-timeline.png`.
 - [ ] [9.4-02] Add filters by event type, node/stage, and severity/category.
 - [ ] [9.4-03] Add timeline grouping/correlation for retries and interview sequences.
 - [ ] [9.4-04] Add tests for timeline replay and live append behavior.

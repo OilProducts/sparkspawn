@@ -54,11 +54,59 @@ interface ContextExportEntry {
     value: unknown
 }
 
+type TimelineEventCategory = 'lifecycle' | 'stage' | 'parallel' | 'interview' | 'checkpoint'
+
+interface TimelineEventEntry {
+    id: string
+    type: string
+    category: TimelineEventCategory
+    nodeId: string | null
+    stageIndex: number | null
+    summary: string
+    receivedAt: string
+    payload: Record<string, unknown>
+}
+
+const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
+    PipelineStarted: 'lifecycle',
+    PipelineCompleted: 'lifecycle',
+    PipelineFailed: 'lifecycle',
+    StageStarted: 'stage',
+    StageCompleted: 'stage',
+    StageFailed: 'stage',
+    StageRetrying: 'stage',
+    ParallelStarted: 'parallel',
+    ParallelBranchStarted: 'parallel',
+    ParallelBranchCompleted: 'parallel',
+    ParallelCompleted: 'parallel',
+    InterviewStarted: 'interview',
+    InterviewCompleted: 'interview',
+    InterviewTimeout: 'interview',
+    CheckpointSaved: 'checkpoint',
+}
+
+const TIMELINE_CATEGORY_LABELS: Record<TimelineEventCategory, string> = {
+    lifecycle: 'Lifecycle',
+    stage: 'Stage',
+    parallel: 'Parallel',
+    interview: 'Interview',
+    checkpoint: 'Checkpoint',
+}
+
+const TIMELINE_MAX_ITEMS = 200
+
 const asRecord = (value: unknown): Record<string, unknown> | null => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return null
     }
     return value as Record<string, unknown>
+}
+
+const asFiniteNumber = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null
+    }
+    return value
 }
 
 const asErrorDetail = (value: unknown): string | null => {
@@ -165,6 +213,125 @@ const buildContextExportPayload = (
     null,
     2
 )
+
+const timelineNodeIdFromEvent = (payload: Record<string, unknown>): string | null => {
+    const candidates = [payload.node_id, payload.node, payload.name, payload.stage]
+    for (const value of candidates) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+            return value.trim()
+        }
+    }
+    return null
+}
+
+const timelineSummaryFromEvent = (type: string, payload: Record<string, unknown>, nodeId: string | null): string => {
+    if (type === 'PipelineStarted') {
+        return `Pipeline started at ${nodeId || 'start'}`
+    }
+    if (type === 'PipelineCompleted') {
+        return `Pipeline completed at ${nodeId || 'exit'}`
+    }
+    if (type === 'PipelineFailed') {
+        const error = typeof payload.error === 'string' && payload.error.trim().length > 0
+            ? payload.error.trim()
+            : null
+        return error ? `Pipeline failed: ${error}` : 'Pipeline failed'
+    }
+    if (type === 'StageStarted') {
+        return `Stage ${nodeId || 'unknown'} started`
+    }
+    if (type === 'StageCompleted') {
+        const outcome = typeof payload.outcome === 'string' && payload.outcome.trim().length > 0
+            ? payload.outcome.trim()
+            : null
+        return outcome
+            ? `Stage ${nodeId || 'unknown'} completed (${outcome})`
+            : `Stage ${nodeId || 'unknown'} completed`
+    }
+    if (type === 'StageFailed') {
+        const error = typeof payload.error === 'string' && payload.error.trim().length > 0
+            ? payload.error.trim()
+            : null
+        return error
+            ? `Stage ${nodeId || 'unknown'} failed: ${error}`
+            : `Stage ${nodeId || 'unknown'} failed`
+    }
+    if (type === 'StageRetrying') {
+        const attempt = asFiniteNumber(payload.attempt)
+        return attempt !== null
+            ? `Stage ${nodeId || 'unknown'} retrying (attempt ${attempt})`
+            : `Stage ${nodeId || 'unknown'} retrying`
+    }
+    if (type === 'ParallelStarted') {
+        const branchCount = asFiniteNumber(payload.branch_count)
+        return branchCount !== null ? `Parallel fan-out started (${branchCount} branches)` : 'Parallel fan-out started'
+    }
+    if (type === 'ParallelBranchStarted') {
+        const branchName = typeof payload.branch === 'string' && payload.branch.trim().length > 0
+            ? payload.branch.trim()
+            : nodeId || 'unknown'
+        return `Parallel branch ${branchName} started`
+    }
+    if (type === 'ParallelBranchCompleted') {
+        const branchName = typeof payload.branch === 'string' && payload.branch.trim().length > 0
+            ? payload.branch.trim()
+            : nodeId || 'unknown'
+        const success = payload.success === true ? 'success' : payload.success === false ? 'failed' : null
+        return success
+            ? `Parallel branch ${branchName} completed (${success})`
+            : `Parallel branch ${branchName} completed`
+    }
+    if (type === 'ParallelCompleted') {
+        const successCount = asFiniteNumber(payload.success_count)
+        const failureCount = asFiniteNumber(payload.failure_count)
+        if (successCount !== null && failureCount !== null) {
+            return `Parallel fan-out completed (${successCount} success, ${failureCount} failed)`
+        }
+        return 'Parallel fan-out completed'
+    }
+    if (type === 'InterviewStarted') {
+        return `Interview started for ${nodeId || 'human gate'}`
+    }
+    if (type === 'InterviewCompleted') {
+        const answer = typeof payload.answer === 'string' && payload.answer.trim().length > 0
+            ? payload.answer.trim()
+            : null
+        return answer
+            ? `Interview completed for ${nodeId || 'human gate'} (${answer})`
+            : `Interview completed for ${nodeId || 'human gate'}`
+    }
+    if (type === 'InterviewTimeout') {
+        return `Interview timed out for ${nodeId || 'human gate'}`
+    }
+    if (type === 'CheckpointSaved') {
+        return `Checkpoint saved at ${nodeId || 'current node'}`
+    }
+    return type
+}
+
+const toTimelineEvent = (value: unknown, sequence: number): TimelineEventEntry | null => {
+    const payload = asRecord(value)
+    if (!payload) {
+        return null
+    }
+    const type = typeof payload.type === 'string' ? payload.type : ''
+    const category = TIMELINE_EVENT_TYPES[type]
+    if (!category) {
+        return null
+    }
+    const nodeId = timelineNodeIdFromEvent(payload)
+    const stageIndex = asFiniteNumber(payload.index)
+    return {
+        id: `${type}-${sequence}`,
+        type,
+        category,
+        nodeId,
+        stageIndex,
+        summary: timelineSummaryFromEvent(type, payload, nodeId),
+        receivedAt: new Date().toISOString(),
+        payload,
+    }
+}
 
 const STATUS_STYLES: Record<string, string> = {
     running: 'bg-sky-500/15 text-sky-700',
@@ -274,6 +441,10 @@ export function RunsPanel() {
     const [contextError, setContextError] = useState<ContextErrorState | null>(null)
     const [contextSearchQuery, setContextSearchQuery] = useState('')
     const [contextCopyStatus, setContextCopyStatus] = useState('')
+    const [timelineEvents, setTimelineEvents] = useState<TimelineEventEntry[]>([])
+    const [timelineError, setTimelineError] = useState<string | null>(null)
+    const [isTimelineLive, setIsTimelineLive] = useState(false)
+    const timelineSequenceRef = useRef(0)
     const [metadataStaleAfterMs] = useState(() => {
         const override = (globalThis as typeof globalThis & { __RUNS_METADATA_STALE_AFTER_MS__?: unknown })
             .__RUNS_METADATA_STALE_AFTER_MS__
@@ -460,6 +631,51 @@ export function RunsPanel() {
         setContextCopyStatus('')
         void fetchContext()
     }, [viewMode, selectedRunSummary, fetchContext])
+
+    const selectedRunTimelineId = selectedRunSummary?.run_id ?? null
+
+    useEffect(() => {
+        if (viewMode !== 'runs' || !selectedRunTimelineId) {
+            timelineSequenceRef.current = 0
+            setTimelineEvents([])
+            setTimelineError(null)
+            setIsTimelineLive(false)
+            return
+        }
+
+        timelineSequenceRef.current = 0
+        setTimelineEvents([])
+        setTimelineError(null)
+        setIsTimelineLive(false)
+
+        const source = new EventSource(`/pipelines/${encodeURIComponent(selectedRunTimelineId)}/events`)
+        source.onopen = () => {
+            setTimelineError(null)
+            setIsTimelineLive(true)
+        }
+        source.onmessage = (event) => {
+            try {
+                const payload = JSON.parse(event.data) as unknown
+                const timelineEvent = toTimelineEvent(payload, timelineSequenceRef.current)
+                timelineSequenceRef.current += 1
+                if (!timelineEvent) {
+                    return
+                }
+                setTimelineEvents((current) => [timelineEvent, ...current].slice(0, TIMELINE_MAX_ITEMS))
+            } catch {
+                // ignore malformed events
+            }
+        }
+        source.onerror = () => {
+            setIsTimelineLive(false)
+            setTimelineError((current) => current || 'Event timeline stream unavailable. Reopen this run to retry.')
+        }
+
+        return () => {
+            source.close()
+            setIsTimelineLive(false)
+        }
+    }, [viewMode, selectedRunTimelineId])
 
     const checkpointSnapshot = useMemo(() => asRecord(checkpointData?.checkpoint), [checkpointData])
     const checkpointCurrentNode = useMemo(() => {
@@ -793,6 +1009,70 @@ export function RunsPanel() {
                                         )}
                                     </tbody>
                                 </table>
+                            </div>
+                        )}
+                    </div>
+                )}
+                {selectedRunSummary && (
+                    <div data-testid="run-event-timeline-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Event Timeline</h3>
+                            <span
+                                className={`inline-flex rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                    isTimelineLive
+                                        ? 'border-sky-500/40 bg-sky-500/10 text-sky-700'
+                                        : 'border-border bg-muted text-muted-foreground'
+                                }`}
+                            >
+                                {isTimelineLive ? 'Live' : 'Idle'}
+                            </span>
+                        </div>
+                        {timelineError && (
+                            <div data-testid="run-event-timeline-error" className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                {timelineError}
+                            </div>
+                        )}
+                        {!timelineError && timelineEvents.length === 0 && (
+                            <div data-testid="run-event-timeline-empty" className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                                No typed timeline events yet.
+                            </div>
+                        )}
+                        {timelineEvents.length > 0 && (
+                            <div data-testid="run-event-timeline-list" className="max-h-80 space-y-2 overflow-auto pr-1">
+                                {timelineEvents.map((event) => (
+                                    <article
+                                        key={event.id}
+                                        data-testid="run-event-timeline-row"
+                                        className="rounded-md border border-border/70 bg-muted/30 px-3 py-2"
+                                    >
+                                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                            <span
+                                                data-testid="run-event-timeline-row-type"
+                                                className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 font-semibold uppercase tracking-wide text-foreground"
+                                            >
+                                                {event.type}
+                                            </span>
+                                            <span
+                                                data-testid="run-event-timeline-row-category"
+                                                className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 uppercase tracking-wide text-muted-foreground"
+                                            >
+                                                {TIMELINE_CATEGORY_LABELS[event.category]}
+                                            </span>
+                                            <span data-testid="run-event-timeline-row-time" className="text-muted-foreground">
+                                                {formatTimestamp(event.receivedAt)}
+                                            </span>
+                                        </div>
+                                        <p data-testid="run-event-timeline-row-summary" className="mt-1 text-sm text-foreground">
+                                            {event.summary}
+                                        </p>
+                                        {event.nodeId && (
+                                            <p data-testid="run-event-timeline-row-node" className="text-xs text-muted-foreground">
+                                                Node: {event.nodeId}
+                                                {event.stageIndex !== null ? ` (index ${event.stageIndex})` : ''}
+                                            </p>
+                                        )}
+                                    </article>
+                                ))}
                             </div>
                         )}
                     </div>
