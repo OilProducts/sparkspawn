@@ -250,7 +250,7 @@ export function RunsPanel() {
                             <div data-testid="run-summary-duration"><span className="font-medium">Duration:</span> {formatDuration(selectedRunSummary.started_at, selectedRunSummary.ended_at, selectedRunSummary.status, now)}</div>
                             <div data-testid="run-summary-model"><span className="font-medium">Model:</span> {selectedRunSummary.model || 'default model'}</div>
                             <div data-testid="run-summary-working-directory" className="break-all"><span className="font-medium">Working Dir:</span> {selectedRunSummary.working_directory || '—'}</div>
-                            <div data-testid="run-summary-project-path" className="break-all"><span className="font-medium">Project Path:</span> {selectedRunSummary.project_path || selectedRunSummary.working_directory || activeProjectPath || '—'}</div>
+                            <div data-testid="run-summary-project-path" className="break-all"><span className="font-medium">Project Path:</span> {selectedRunSummary.project_path || activeProjectPath || '—'}</div>
                             <div data-testid="run-summary-git-branch"><span className="font-medium">Git Branch:</span> {selectedRunSummary.git_branch || '—'}</div>
                             <div data-testid="run-summary-git-commit"><span className="font-medium">Git Commit:</span> {selectedRunSummary.git_commit || '—'}</div>
                             <div data-testid="run-summary-last-error" className="break-all"><span className="font-medium">Last Error:</span> {selectedRunSummary.last_error || '—'}</div>

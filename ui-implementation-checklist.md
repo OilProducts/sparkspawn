@@ -209,8 +209,8 @@ Status key:
 ## 9. Run Inspector Requirements
 
 ### 9.1 Summary
-- [ ] [9.1-01] Build run summary panel with status/result/time/model/working-dir/project/git-metadata/error/tokens.
-  - Blocker (2026-03-03): Evaluator `fail` because evidence is still incomplete in spirit (test coverage is snippet-only and UI-smoke screenshots only show empty run states without a populated summary panel).
+- [x] [9.1-01] Build run summary panel with status/result/time/model/working-dir/project/git-metadata/error/tokens.
+  - Evidence (2026-03-03): Evaluator `pass`; populated summary runtime assertions added in UI smoke and visual QA captured in `frontend/artifacts/ui-smoke/08b-runs-panel-populated-summary.png`.
 - [ ] [9.1-02] Add run metadata refresh behavior and stale-state indicators.
 
 ### 9.2 Checkpoint View

@@ -86,6 +86,56 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
   await page.screenshot({ path: screenshotPath("08-runs-panel.png"), fullPage: true })
 })
 
+test("run summary panel renders populated metadata for item 9.1-01", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-runs-summary-${Date.now()}`
+  const runId = `run-summary-${Date.now()}`
+
+  await page.route("**/runs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        runs: [
+          {
+            run_id: runId,
+            flow_name: "SmokeFlow",
+            status: "success",
+            result: "success",
+            working_directory: `${projectPath}/workspace`,
+            project_path: projectPath,
+            git_branch: "main",
+            git_commit: "abc1234",
+            model: "gpt-5",
+            started_at: "2026-03-03T12:00:00Z",
+            ended_at: "2026-03-03T12:02:00Z",
+            last_error: "none",
+            token_usage: 42,
+          },
+        ],
+      }),
+    })
+  })
+
+  await page.goto("/")
+  await page.getByTestId("project-path-input").fill(projectPath)
+  await page.getByTestId("project-register-button").click()
+  await page.getByTestId("nav-mode-runs").click()
+
+  await expect(page.getByTestId("run-summary-panel")).toBeVisible()
+  await expect(page.getByTestId("run-summary-panel")).toContainText(runId)
+  await expect(page.getByTestId("run-summary-status")).toContainText("success")
+  await expect(page.getByTestId("run-summary-result")).toContainText("success")
+  await expect(page.getByTestId("run-summary-flow-name")).toContainText("SmokeFlow")
+  await expect(page.getByTestId("run-summary-model")).toContainText("gpt-5")
+  await expect(page.getByTestId("run-summary-working-directory")).toContainText(`${projectPath}/workspace`)
+  await expect(page.getByTestId("run-summary-project-path")).toContainText(projectPath)
+  await expect(page.getByTestId("run-summary-git-branch")).toContainText("main")
+  await expect(page.getByTestId("run-summary-git-commit")).toContainText("abc1234")
+  await expect(page.getByTestId("run-summary-last-error")).toContainText("none")
+  await expect(page.getByTestId("run-summary-token-usage")).toContainText("42")
+  await page.screenshot({ path: screenshotPath("08b-runs-panel-populated-summary.png"), fullPage: true })
+})
+
 test("semantic-equivalence save blocks mismatch and confirms no-op round-trip for item 5.3-03", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-semantic-equivalence-${Date.now()}`
   const semanticSaveBodies: string[] = []
