@@ -14,6 +14,8 @@ def test_raw_dot_required_config_report_exists_with_required_coverage() -> None:
         "subgraph",
         "node[...] defaults",
         "edge[...] defaults",
+        "unknown-valid extension attributes",
+        "advanced key/value editor",
         "Current Required Raw-DOT Surfaces",
     ]
     for snippet in required_snippets:
@@ -32,4 +34,3 @@ def test_raw_dot_required_config_report_exists_with_required_coverage() -> None:
     ]
     for snippet in no_longer_required_snippets:
         assert snippet not in report_text, f"report still marks UI-supported attr as raw-DOT-only: {snippet}"
-
