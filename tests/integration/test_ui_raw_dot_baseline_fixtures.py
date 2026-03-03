@@ -22,6 +22,11 @@ BASELINE_FIXTURES: dict[str, tuple[str, ...]] = {
         "node [",
         "edge [",
     ),
+    "flows/reference-1.1-03-extension-attrs.dot": (
+        "ui_extension.graph_policy",
+        "custom.node_behavior",
+        "custom.edge_hint",
+    ),
 }
 
 
@@ -40,5 +45,4 @@ def test_raw_dot_baseline_fixture_set_exists_and_is_spec_valid() -> None:
         diagnostics = validate_graph(graph)
         error_rules = {d.rule_id for d in diagnostics if d.severity == DiagnosticSeverity.ERROR}
         assert error_rules == set(), f"Fixture {rel_path} has validation errors: {sorted(error_rules)}"
-
 

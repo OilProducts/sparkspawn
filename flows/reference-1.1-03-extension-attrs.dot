@@ -1,0 +1,8 @@
+digraph reference_1_1_03_extension_attrs {
+  graph [label="Raw DOT extension attrs baseline", ui_extension.graph_policy="strict", ui_extension.routing_mode="manual"];
+  exit [shape="Msquare"];
+  review [custom.node_behavior="review", prompt="Review extension behavior", shape="box"];
+  start [custom.node_behavior="ingest", custom.node_priority="p1", shape="Mdiamond"];
+  review -> exit [custom.edge_hint="finalize"];
+  start -> review [custom.edge_hint="handoff", custom.edge_priority=7];
+}
