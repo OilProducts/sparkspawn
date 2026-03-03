@@ -9,6 +9,7 @@ def test_runs_panel_renders_run_summary_fields_item_9_1_01() -> None:
         "data-testid=\"run-summary-panel\"",
         "data-testid=\"run-summary-status\"",
         "data-testid=\"run-summary-result\"",
+        "data-testid=\"run-summary-flow-name\"",
         "data-testid=\"run-summary-started-at\"",
         "data-testid=\"run-summary-ended-at\"",
         "data-testid=\"run-summary-duration\"",
@@ -23,4 +24,3 @@ def test_runs_panel_renders_run_summary_fields_item_9_1_01() -> None:
 
     for snippet in required_snippets:
         assert snippet in runs_panel_text, f"missing run summary panel snippet: {snippet}"
-

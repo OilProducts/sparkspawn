@@ -244,6 +244,7 @@ export function RunsPanel() {
                         <div className="grid gap-x-6 gap-y-2 text-sm md:grid-cols-2">
                             <div data-testid="run-summary-status"><span className="font-medium">Status:</span> {STATUS_LABELS[selectedRunSummary.status] || selectedRunSummary.status}</div>
                             <div data-testid="run-summary-result"><span className="font-medium">Result:</span> {selectedRunSummary.result || '—'}</div>
+                            <div data-testid="run-summary-flow-name"><span className="font-medium">Flow:</span> {selectedRunSummary.flow_name || 'Untitled'}</div>
                             <div data-testid="run-summary-started-at"><span className="font-medium">Started:</span> {formatTimestamp(selectedRunSummary.started_at)}</div>
                             <div data-testid="run-summary-ended-at"><span className="font-medium">Ended:</span> {formatTimestamp(selectedRunSummary.ended_at)}</div>
                             <div data-testid="run-summary-duration"><span className="font-medium">Duration:</span> {formatDuration(selectedRunSummary.started_at, selectedRunSummary.ended_at, selectedRunSummary.status, now)}</div>
