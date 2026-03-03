@@ -5,11 +5,12 @@ interface SaveFlowErrorDetail {
     error?: string
 }
 
-interface SaveFlowOptions {
+export interface SaveFlowOptions {
     expectSemanticEquivalence?: boolean
 }
 
 const FALLBACK_SAVE_FAILURE_MESSAGE = 'Flow save failed before confirmation from backend.'
+export const EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS: SaveFlowOptions = { expectSemanticEquivalence: true }
 let lastSaveRequest: { name: string; content: string; options?: SaveFlowOptions } | null = null
 
 function parseErrorDetail(payload: unknown): SaveFlowErrorDetail {
@@ -44,6 +45,10 @@ function buildErrorMessage(status: string | undefined, error: string | undefined
 export async function retryLastSaveContent(): Promise<boolean> {
     if (!lastSaveRequest) return false
     return saveFlowContent(lastSaveRequest.name, lastSaveRequest.content, lastSaveRequest.options)
+}
+
+export async function saveFlowContentExpectingSemanticEquivalence(name: string, content: string): Promise<boolean> {
+    return saveFlowContent(name, content, EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS)
 }
 
 export async function saveFlowContent(name: string, content: string, options?: SaveFlowOptions): Promise<boolean> {

@@ -20,7 +20,11 @@ import { ValidationEdge } from './ValidationEdge';
 import { ValidationPanel } from './ValidationPanel';
 import { ExecutionControls } from './ExecutionControls';
 import { generateDot } from '@/lib/dotUtils';
-import { saveFlowContent } from '@/lib/flowPersistence';
+import {
+    EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS,
+    saveFlowContent,
+    saveFlowContentExpectingSemanticEquivalence,
+} from '@/lib/flowPersistence';
 
 const nodeTypes = {
     customTask: TaskNode,
@@ -366,7 +370,7 @@ export function Editor() {
                 const normalizedContent = normalizeLegacyDot(data.content);
                 setRawDotDraft(normalizedContent);
                 if (activeProjectPath && normalizedContent !== data.content) {
-                    void saveFlowContent(activeFlow, normalizedContent, { expectSemanticEquivalence: true });
+                    void saveFlowContentExpectingSemanticEquivalence(activeFlow, normalizedContent);
                 }
                 return requestPreview(normalizedContent);
             })
@@ -458,7 +462,7 @@ export function Editor() {
                         (change) => change.type === 'position' || change.type === 'dimensions'
                     );
                 if (shouldExpectSemanticEquivalence) {
-                    scheduleSave(nextNodes, edges, { expectSemanticEquivalence: true });
+                    scheduleSave(nextNodes, edges, EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS);
                 } else {
                     scheduleSave(nextNodes, edges);
                 }
@@ -540,8 +544,8 @@ export function Editor() {
     const returnToStructuredMode = useCallback(async () => {
         if (!activeProjectPath || !activeFlow) return;
         const expectSemanticEquivalence = rawDotEntryDraftRef.current === rawDotDraft;
-        const saveOptions = expectSemanticEquivalence ? { expectSemanticEquivalence: true } : undefined;
-        const saved = await saveFlowContent(activeFlow, rawDotDraft, saveOptions);
+        const save = expectSemanticEquivalence ? saveFlowContentExpectingSemanticEquivalence : saveFlowContent;
+        const saved = await save(activeFlow, rawDotDraft);
         if (!saved) {
             setRawHandoffError(`Safe handoff requires valid DOT. ${saveErrorMessage || 'Fix parse or validation errors before switching modes.'}`);
             return;
