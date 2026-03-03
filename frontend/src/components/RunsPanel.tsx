@@ -106,6 +106,13 @@ interface GroupedTimelineEntry {
     events: TimelineEventEntry[]
 }
 
+interface PendingInterviewGate {
+    eventId: string
+    nodeId: string | null
+    stageIndex: number | null
+    prompt: string
+}
+
 const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
     PipelineStarted: 'lifecycle',
     PipelineCompleted: 'lifecycle',
@@ -1183,6 +1190,34 @@ export function RunsPanel() {
 
         return entries
     }, [filteredTimelineEvents, retryCorrelationEntityKeys])
+    const pendingInterviewGates = useMemo(() => {
+        const latestInterviewEventByEntity = new Map<string, TimelineEventEntry>()
+        for (let index = timelineEvents.length - 1; index >= 0; index -= 1) {
+            const event = timelineEvents[index]
+            if (event.category !== 'interview') {
+                continue
+            }
+            const entityKey = timelineEntityKey(event) || `event:${event.id}`
+            latestInterviewEventByEntity.set(entityKey, event)
+        }
+
+        const pendingGates: PendingInterviewGate[] = []
+        for (const event of latestInterviewEventByEntity.values()) {
+            if (event.type === 'InterviewStarted') {
+                const promptCandidate = event.payload.question
+                const prompt = typeof promptCandidate === 'string' && promptCandidate.trim().length > 0
+                    ? promptCandidate.trim()
+                    : event.summary
+                pendingGates.push({
+                    eventId: event.id,
+                    nodeId: event.nodeId,
+                    stageIndex: event.stageIndex,
+                    prompt,
+                })
+            }
+        }
+        return pendingGates
+    }, [timelineEvents])
 
     const openRun = (run: RunRecord) => {
         setSelectedRunId(run.run_id)
@@ -1638,6 +1673,21 @@ export function RunsPanel() {
                         {timelineError && (
                             <div data-testid="run-event-timeline-error" className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                                 {timelineError}
+                            </div>
+                        )}
+                        {!timelineError && pendingInterviewGates.length > 0 && (
+                            <div data-testid="run-pending-human-gates-panel" className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                                <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                    Pending Human Gates
+                                </div>
+                                <ul className="mt-2 space-y-1">
+                                    {pendingInterviewGates.map((gate) => (
+                                        <li key={gate.eventId} data-testid="run-pending-human-gate-item" className="text-xs text-amber-900">
+                                            {gate.prompt}
+                                            {gate.nodeId ? ` (${gate.nodeId}${gate.stageIndex !== null ? `, index ${gate.stageIndex}` : ''})` : ''}
+                                        </li>
+                                    ))}
+                                </ul>
                             </div>
                         )}
                         {!timelineError && (

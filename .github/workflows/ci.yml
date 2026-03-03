@@ -5,7 +5,7 @@ on:
   push:
 
 jobs:
-  dot-lint:
+  backend-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -20,10 +20,82 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: DOT lint
-        run: uv run pytest -q tests/integration/test_dot_format_lint.py
+        run: just dot-lint
 
       - name: Parser unsupported grammar regression suite
         run: just parser-unsupported-grammar
 
-      - name: Integration smoke pipeline
-        run: uv run pytest -q tests/integration/test_integration_smoke_pipeline.py
+      - name: Run Python Test Suite
+        run: uv run pytest -q
+
+  frontend-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: npm --prefix frontend ci
+
+      - name: Run Frontend Unit Tests
+        run: npm --prefix frontend run test:unit
+
+  ui-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: npm --prefix frontend ci
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run UI Smoke Suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run uvicorn attractor.api.server:app --host 127.0.0.1 --port 8000 --log-level warning > /tmp/attractor-backend.log 2>&1 &
+          BACKEND_PID=$!
+          cleanup() {
+            if kill -0 "$BACKEND_PID" 2>/dev/null; then
+              kill "$BACKEND_PID" || true
+            fi
+            wait "$BACKEND_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8000/status >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/status >/dev/null
+
+          npm --prefix frontend run ui:smoke

@@ -1,27 +1,26 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 
 
 def test_cancel_pipeline_returns_404_for_unknown_pipeline(
+    api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
 
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(server.cancel_pipeline("missing-run"))
-
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "Unknown pipeline"
+    response = api_client.post("/pipelines/missing-run/cancel")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Unknown pipeline"
 
 
 def test_cancel_pipeline_requests_cancel_for_active_run(
+    api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     run_id = "run-active"
@@ -57,7 +56,9 @@ def test_cancel_pipeline_requests_cancel_for_active_run(
         )
 
     try:
-        payload = asyncio.run(server.cancel_pipeline(run_id))
+        response = api_client.post(f"/pipelines/{run_id}/cancel")
+        assert response.status_code == 200
+        payload = response.json()
         active = server._get_active_run(run_id)
         assert active is not None
         assert active.control.poll() == "abort"
@@ -81,6 +82,7 @@ def test_cancel_pipeline_requests_cancel_for_active_run(
 
 
 def test_cancel_pipeline_ignores_non_running_known_pipeline(
+    api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     run_id = "run-finished"
@@ -99,6 +101,8 @@ def test_cancel_pipeline_ignores_non_running_known_pipeline(
         )
     )
 
-    payload = asyncio.run(server.cancel_pipeline(run_id))
+    response = api_client.post(f"/pipelines/{run_id}/cancel")
+    assert response.status_code == 200
+    payload = response.json()
 
     assert payload == {"status": "ignored", "pipeline_id": run_id}

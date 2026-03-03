@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 from attractor.dsl.models import Diagnostic, DiagnosticSeverity, DotAttribute, DotValueType
@@ -65,22 +65,32 @@ def _warning_error_diagnostics() -> list[Diagnostic]:
     ]
 
 
-def test_preview_preserves_warning_and_info_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preview_preserves_warning_and_info_diagnostics(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_info_diagnostics())
 
-    payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=FLOW)))
+    response = api_client.post("/preview", json={"flow_content": FLOW})
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["status"] == "ok"
     assert payload["errors"] == []
     assert [diag["severity"] for diag in payload["diagnostics"]] == ["warning", "info"]
     assert payload["diagnostics"][0]["node_id"] == "start"
 
 
-def test_preview_validation_error_payload_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preview_validation_error_payload_shape(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_error_diagnostics())
 
-    payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=FLOW)))
+    response = api_client.post("/preview", json={"flow_content": FLOW})
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["status"] == "validation_error"
     assert [diag["severity"] for diag in payload["diagnostics"]] == ["warning", "error"]
     warning_diag, error_diag = payload["diagnostics"]
@@ -105,22 +115,25 @@ def test_preview_validation_error_payload_shape(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_start_pipeline_preserves_warning_and_info_diagnostics(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_info_diagnostics())
 
-    payload = asyncio.run(
-        server._start_pipeline(
-            server.PipelineStartRequest(
-                flow_content=FLOW,
-                working_directory=str(tmp_path / "work"),
-                backend="codex",
-            )
-        )
+    response = api_client.post(
+        "/pipelines",
+        json={
+            "flow_content": FLOW,
+            "working_directory": str(tmp_path / "work"),
+            "backend": "codex",
+        },
     )
 
+    assert response.status_code == 200
+    payload = response.json()
     try:
         assert payload["status"] == "started"
         assert payload["errors"] == []
@@ -131,22 +144,25 @@ def test_start_pipeline_preserves_warning_and_info_diagnostics(
 
 
 def test_start_pipeline_validation_error_payload_shape(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_error_diagnostics())
 
-    payload = asyncio.run(
-        server._start_pipeline(
-            server.PipelineStartRequest(
-                flow_content=FLOW,
-                working_directory=str(tmp_path / "work"),
-                backend="codex",
-            )
-        )
+    response = api_client.post(
+        "/pipelines",
+        json={
+            "flow_content": FLOW,
+            "working_directory": str(tmp_path / "work"),
+            "backend": "codex",
+        },
     )
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["status"] == "validation_error"
     assert [diag["severity"] for diag in payload["diagnostics"]] == ["warning", "error"]
     assert len(payload["errors"]) == 1
@@ -165,7 +181,9 @@ def test_start_pipeline_validation_error_payload_shape(
 
 
 def test_start_pipeline_runs_stylesheet_transform_before_validation(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
@@ -188,16 +206,17 @@ def test_start_pipeline_runs_stylesheet_transform_before_validation(
     }
     """
 
-    payload = asyncio.run(
-        server._start_pipeline(
-            server.PipelineStartRequest(
-                flow_content=flow,
-                working_directory=str(tmp_path / "work"),
-                backend="codex",
-            )
-        )
+    response = api_client.post(
+        "/pipelines",
+        json={
+            "flow_content": flow,
+            "working_directory": str(tmp_path / "work"),
+            "backend": "codex",
+        },
     )
 
+    assert response.status_code == 200
+    payload = response.json()
     try:
         assert payload["status"] == "started"
         assert captured["plan_llm_model"] == "fast-model"
@@ -206,7 +225,7 @@ def test_start_pipeline_runs_stylesheet_transform_before_validation(
             server._pop_active_run(str(payload["pipeline_id"]))
 
 
-def test_preview_applies_registered_custom_transform() -> None:
+def test_preview_applies_registered_custom_transform(api_client: TestClient) -> None:
     class _CustomPromptTransform:
         def apply(self, graph):
             prompt_attr = graph.nodes["task"].attrs["prompt"]
@@ -225,14 +244,16 @@ def test_preview_applies_registered_custom_transform() -> None:
     server.clear_registered_transforms()
     try:
         server.register_transform(_CustomPromptTransform())
-        payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        response = api_client.post("/preview", json={"flow_content": flow})
+        assert response.status_code == 200
+        payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
         assert nodes_by_id["task"]["prompt"] == "Build [custom]"
     finally:
         server.clear_registered_transforms()
 
 
-def test_preview_applies_multiple_custom_transforms_in_registration_order() -> None:
+def test_preview_applies_multiple_custom_transforms_in_registration_order(api_client: TestClient) -> None:
     class _AppendFirstTransform:
         def apply(self, graph):
             prompt_attr = graph.nodes["task"].attrs["prompt"]
@@ -259,7 +280,9 @@ def test_preview_applies_multiple_custom_transforms_in_registration_order() -> N
     try:
         server.register_transform(_AppendFirstTransform())
         server.register_transform(_AppendSecondTransform())
-        payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        response = api_client.post("/preview", json={"flow_content": flow})
+        assert response.status_code == 200
+        payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
 
         assert nodes_by_id["task"]["prompt"] == "Build Ship Docs [first] [second]"
@@ -267,7 +290,7 @@ def test_preview_applies_multiple_custom_transforms_in_registration_order() -> N
         server.clear_registered_transforms()
 
 
-def test_preview_runs_custom_transforms_after_builtin_transforms() -> None:
+def test_preview_runs_custom_transforms_after_builtin_transforms(api_client: TestClient) -> None:
     class _BuiltInOrderingProbeTransform:
         def apply(self, graph):
             prompt_attr = graph.nodes["task"].attrs["prompt"]
@@ -290,7 +313,9 @@ def test_preview_runs_custom_transforms_after_builtin_transforms() -> None:
     server.clear_registered_transforms()
     try:
         server.register_transform(_BuiltInOrderingProbeTransform())
-        payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        response = api_client.post("/preview", json={"flow_content": flow})
+        assert response.status_code == 200
+        payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
 
         assert nodes_by_id["task"]["prompt"] == "Build Ship Docs [after-builtins]"
@@ -299,6 +324,7 @@ def test_preview_runs_custom_transforms_after_builtin_transforms() -> None:
 
 
 def test_start_pipeline_custom_transform_conflict_uses_later_registration_precedence(
+    api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     class _SetFirstModelTransform:
@@ -346,16 +372,17 @@ def test_start_pipeline_custom_transform_conflict_uses_later_registration_preced
     try:
         server.register_transform(_SetFirstModelTransform())
         server.register_transform(_SetSecondModelTransform())
-        payload = asyncio.run(
-            server._start_pipeline(
-                server.PipelineStartRequest(
-                    flow_content=flow,
-                    working_directory=str(tmp_path / "work"),
-                    backend="codex",
-                )
-            )
+        response = api_client.post(
+            "/pipelines",
+            json={
+                "flow_content": flow,
+                "working_directory": str(tmp_path / "work"),
+                "backend": "codex",
+            },
         )
 
+        assert response.status_code == 200
+        payload = response.json()
         assert payload["status"] == "started"
         assert captured["task_llm_model"] == "second-model"
     finally:
@@ -364,7 +391,9 @@ def test_start_pipeline_custom_transform_conflict_uses_later_registration_preced
         server.clear_registered_transforms()
 
 
-def test_preview_custom_transform_conflict_precedence_is_deterministic_across_runs() -> None:
+def test_preview_custom_transform_conflict_precedence_is_deterministic_across_runs(
+    api_client: TestClient,
+) -> None:
     class _StatefulFirstTransform:
         def __init__(self):
             self.count = 0
@@ -409,8 +438,12 @@ def test_preview_custom_transform_conflict_precedence_is_deterministic_across_ru
         server.register_transform(first)
         server.register_transform(second)
 
-        first_payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
-        second_payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=flow)))
+        first_response = api_client.post("/preview", json={"flow_content": flow})
+        second_response = api_client.post("/preview", json={"flow_content": flow})
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+        first_payload = first_response.json()
+        second_payload = second_response.json()
         first_nodes = {str(node["id"]): node for node in first_payload["graph"]["nodes"]}
         second_nodes = {str(node["id"]): node for node in second_payload["graph"]["nodes"]}
 

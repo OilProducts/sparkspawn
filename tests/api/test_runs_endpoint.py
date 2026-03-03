@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 
 
 def test_list_runs_includes_project_and_git_metadata_fields(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_id = "run-with-project-metadata"
     runs_root = tmp_path / "runs"
@@ -34,8 +36,10 @@ def test_list_runs_includes_project_and_git_metadata_fields(
         )
     )
 
-    payload = asyncio.run(server.list_runs())
+    response = api_client.get("/runs")
 
+    assert response.status_code == 200
+    payload = response.json()
     assert len(payload["runs"]) == 1
     run_payload = payload["runs"][0]
     assert run_payload["project_path"] == str(tmp_path / "project")
@@ -44,7 +48,9 @@ def test_list_runs_includes_project_and_git_metadata_fields(
 
 
 def test_list_runs_includes_spec_and_plan_artifact_links_when_available_item_9_6_03(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_id = "run-with-artifact-links"
     runs_root = tmp_path / "runs"
@@ -68,8 +74,10 @@ def test_list_runs_includes_spec_and_plan_artifact_links_when_available_item_9_6
         )
     )
 
-    payload = asyncio.run(server.list_runs())
+    response = api_client.get("/runs")
 
+    assert response.status_code == 200
+    payload = response.json()
     assert len(payload["runs"]) == 1
     run_payload = payload["runs"][0]
     assert run_payload["spec_id"] == "spec-project-1700000000"
@@ -77,7 +85,9 @@ def test_list_runs_includes_spec_and_plan_artifact_links_when_available_item_9_6
 
 
 def test_list_runs_filters_durable_history_by_project_item_9_6_01(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
@@ -122,14 +132,21 @@ def test_list_runs_filters_durable_history_by_project_item_9_6_01(
         )
     )
 
-    filtered_payload = asyncio.run(server.list_runs(project_path=str(tmp_path / "project-alpha")))
+    filtered_response = api_client.get(
+        "/runs",
+        params={"project_path": str(tmp_path / "project-alpha")},
+    )
+    assert filtered_response.status_code == 200
+    filtered_payload = filtered_response.json()
     filtered_run_ids = {run["run_id"] for run in filtered_payload["runs"]}
 
     assert filtered_run_ids == {"run-in-project-root", "run-in-project-child"}
 
 
 def test_list_runs_backfills_missing_timestamps_from_run_log_item_9_6_04(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
@@ -163,8 +180,10 @@ def test_list_runs_backfills_missing_timestamps_from_run_log_item_9_6_04(
         encoding="utf-8",
     )
 
-    payload = asyncio.run(server.list_runs())
+    response = api_client.get("/runs")
 
+    assert response.status_code == 200
+    payload = response.json()
     assert len(payload["runs"]) == 1
     run_payload = payload["runs"][0]
     assert run_payload["started_at"] == "2026-01-01T00:10:00Z"
@@ -172,7 +191,9 @@ def test_list_runs_backfills_missing_timestamps_from_run_log_item_9_6_04(
 
 
 def test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
@@ -212,7 +233,9 @@ def test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04(
             encoding="utf-8",
         )
 
-    payload = asyncio.run(server.list_runs())
+    response = api_client.get("/runs")
+    assert response.status_code == 200
+    payload = response.json()
     run_ids = [run["run_id"] for run in payload["runs"]]
 
     assert run_ids == [newer_id, older_id]

@@ -42,7 +42,8 @@ def test_section_95_core_endpoints_are_registered() -> None:
 
 
 def test_section_95_events_endpoint_uses_sse_headers(
-    monkeypatch, tmp_path: Path
+    monkeypatch,
+    tmp_path: Path,
 ) -> None:
     run_id = "run-sse-headers"
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")

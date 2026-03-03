@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 from attractor.engine import Checkpoint, save_checkpoint
@@ -21,7 +21,11 @@ def _write_checkpoint(run_root: Path, current_node: str, completed_nodes: list[s
     )
 
 
-def test_get_pipeline_returns_progress_for_active_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_get_pipeline_returns_progress_for_active_run(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     run_id = "run-active"
     runs_root = tmp_path / "runs"
     run_root = runs_root / run_id
@@ -52,10 +56,12 @@ def test_get_pipeline_returns_progress_for_active_run(monkeypatch: pytest.Monkey
         )
 
     try:
-        payload = asyncio.run(server.get_pipeline(run_id))
+        response = api_client.get(f"/pipelines/{run_id}")
     finally:
         server._pop_active_run(run_id)
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["pipeline_id"] == run_id
     assert payload["status"] == "running"
     assert payload["completed_nodes"] == ["start"]
@@ -66,7 +72,9 @@ def test_get_pipeline_returns_progress_for_active_run(monkeypatch: pytest.Monkey
 
 
 def test_get_pipeline_uses_checkpoint_progress_for_persisted_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_id = "run-finished"
     runs_root = tmp_path / "runs"
@@ -88,8 +96,10 @@ def test_get_pipeline_uses_checkpoint_progress_for_persisted_run(
         )
     )
 
-    payload = asyncio.run(server.get_pipeline(run_id))
+    response = api_client.get(f"/pipelines/{run_id}")
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["pipeline_id"] == run_id
     assert payload["status"] == "success"
     assert payload["completed_nodes"] == ["start", "plan"]

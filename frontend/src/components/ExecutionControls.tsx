@@ -61,6 +61,7 @@ export function ExecutionControls() {
     const runtimeStatus = useStore((state) => state.runtimeStatus)
     const setRuntimeStatus = useStore((state) => state.setRuntimeStatus)
     const selectedRunId = useStore((state) => state.selectedRunId)
+    const humanGate = useStore((state) => state.humanGate)
 
     const runIsActive = ACTIVE_RUNTIME_STATUSES.has(runtimeStatus)
     const shouldShowFooter = viewMode === 'execution' && (runIsActive || Boolean(selectedRunId))
@@ -106,6 +107,14 @@ export function ExecutionControls() {
             data-testid="execution-footer-controls"
             className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-md border border-border bg-background/90 px-3 py-2 shadow-lg"
         >
+            {humanGate && (
+                <div
+                    data-testid="execution-pending-human-gate-banner"
+                    className="inline-flex items-center rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-semibold text-amber-700"
+                >
+                    Pending human gate: {humanGate.prompt || humanGate.nodeId}
+                </div>
+            )}
             <span data-testid="execution-footer-run-status" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 {statusLabel}
             </span>

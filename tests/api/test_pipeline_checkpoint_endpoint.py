@@ -1,29 +1,31 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 from attractor.engine import Checkpoint, save_checkpoint
 
 
 def test_get_pipeline_checkpoint_returns_404_for_unknown_pipeline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
 
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(server.get_pipeline_checkpoint("missing-run"))
+    response = api_client.get("/pipelines/missing-run/checkpoint")
 
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "Unknown pipeline"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Unknown pipeline"
 
 
 def test_get_pipeline_checkpoint_returns_current_state_for_known_pipeline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_id = "run-with-checkpoint"
     runs_root = tmp_path / "runs"
@@ -53,8 +55,10 @@ def test_get_pipeline_checkpoint_returns_current_state_for_known_pipeline(
         )
     )
 
-    payload = asyncio.run(server.get_pipeline_checkpoint(run_id))
+    response = api_client.get(f"/pipelines/{run_id}/checkpoint")
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload == {
         "pipeline_id": run_id,
         "checkpoint": checkpoint.to_dict(),

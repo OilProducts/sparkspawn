@@ -1,28 +1,30 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 
 
 def test_list_pipeline_questions_returns_404_for_unknown_pipeline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
 
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(server.list_pipeline_questions("missing-run"))
+    response = api_client.get("/pipelines/missing-run/questions")
 
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "Unknown pipeline"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Unknown pipeline"
 
 
 def test_list_pipeline_questions_returns_only_pending_questions_for_requested_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_id = "run-with-questions"
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
@@ -61,8 +63,10 @@ def test_list_pipeline_questions_returns_only_pending_questions_for_requested_ru
         }
     monkeypatch.setattr(server, "HUMAN_BROKER", broker)
 
-    payload = asyncio.run(server.list_pipeline_questions(run_id))
+    response = api_client.get(f"/pipelines/{run_id}/questions")
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload == {
         "questions": [
             {
@@ -78,7 +82,9 @@ def test_list_pipeline_questions_returns_only_pending_questions_for_requested_ru
 
 
 def test_list_pipeline_questions_excludes_answered_questions_for_requested_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_id = "run-with-questions"
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
@@ -117,8 +123,10 @@ def test_list_pipeline_questions_excludes_answered_questions_for_requested_run(
         }
     monkeypatch.setattr(server, "HUMAN_BROKER", broker)
 
-    payload = asyncio.run(server.list_pipeline_questions(run_id))
+    response = api_client.get(f"/pipelines/{run_id}/questions")
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload == {
         "questions": [
             {
@@ -134,26 +142,26 @@ def test_list_pipeline_questions_excludes_answered_questions_for_requested_run(
 
 
 def test_submit_pipeline_answer_returns_404_for_unknown_pipeline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr(server, "HUMAN_BROKER", server.HumanGateBroker())
 
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            server.submit_pipeline_answer(
-                "missing-run",
-                "q-1",
-                server.HumanAnswerRequest(selected_value="approve"),
-            )
-        )
+    response = api_client.post(
+        "/pipelines/missing-run/questions/q-1/answer",
+        json={"selected_value": "approve"},
+    )
 
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "Unknown pipeline"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Unknown pipeline"
 
 
 def test_submit_pipeline_answer_accepts_pending_question_for_pipeline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_id = "run-with-questions"
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
@@ -183,21 +191,22 @@ def test_submit_pipeline_answer_accepts_pending_question_for_pipeline(
         }
     monkeypatch.setattr(server, "HUMAN_BROKER", broker)
 
-    payload = asyncio.run(
-        server.submit_pipeline_answer(
-            run_id,
-            "q-1",
-            server.HumanAnswerRequest(selected_value="approve"),
-        )
+    response = api_client.post(
+        f"/pipelines/{run_id}/questions/q-1/answer",
+        json={"selected_value": "approve"},
     )
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload == {"status": "accepted", "pipeline_id": run_id, "question_id": "q-1"}
     assert broker._pending["q-1"]["answer"] == "approve"
     assert broker._pending["q-1"]["event"].is_set() is True
 
 
 def test_submit_pipeline_answer_rejects_question_owned_by_other_pipeline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_a = "run-a"
     run_b = "run-b"
@@ -229,14 +238,10 @@ def test_submit_pipeline_answer_rejects_question_owned_by_other_pipeline(
         }
     monkeypatch.setattr(server, "HUMAN_BROKER", broker)
 
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            server.submit_pipeline_answer(
-                run_b,
-                "q-1",
-                server.HumanAnswerRequest(selected_value="approve"),
-            )
-        )
+    response = api_client.post(
+        f"/pipelines/{run_b}/questions/q-1/answer",
+        json={"selected_value": "approve"},
+    )
 
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "Unknown question for pipeline"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Unknown question for pipeline"

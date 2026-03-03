@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 import subprocess
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 
 
 def test_project_metadata_returns_name_directory_and_branch_for_git_repo(
+    api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     project_dir = tmp_path / "demo-project"
@@ -25,8 +25,13 @@ def test_project_metadata_returns_name_directory_and_branch_for_git_repo(
 
     monkeypatch.setattr(server.subprocess, "run", fake_run)
 
-    payload = asyncio.run(server.get_project_metadata(str(project_dir)))
+    response = api_client.get(
+        "/api/projects/metadata",
+        params={"directory": str(project_dir)},
+    )
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload == {
         "name": "demo-project",
         "directory": str(project_dir),
@@ -35,6 +40,7 @@ def test_project_metadata_returns_name_directory_and_branch_for_git_repo(
 
 
 def test_project_metadata_returns_null_branch_for_non_git_directory(
+    api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     project_dir = tmp_path / "non-git-project"
@@ -45,8 +51,13 @@ def test_project_metadata_returns_null_branch_for_non_git_directory(
 
     monkeypatch.setattr(server.subprocess, "run", fake_run)
 
-    payload = asyncio.run(server.get_project_metadata(str(project_dir)))
+    response = api_client.get(
+        "/api/projects/metadata",
+        params={"directory": str(project_dir)},
+    )
 
+    assert response.status_code == 200
+    payload = response.json()
     assert payload == {
         "name": "non-git-project",
         "directory": str(project_dir),
@@ -54,8 +65,11 @@ def test_project_metadata_returns_null_branch_for_non_git_directory(
     }
 
 
-def test_project_metadata_rejects_non_absolute_directory() -> None:
-    with pytest.raises(HTTPException, match="must be absolute") as exc:
-        asyncio.run(server.get_project_metadata("./relative-project"))
+def test_project_metadata_rejects_non_absolute_directory(api_client: TestClient) -> None:
+    response = api_client.get(
+        "/api/projects/metadata",
+        params={"directory": "./relative-project"},
+    )
 
-    assert exc.value.status_code == 400
+    assert response.status_code == 400
+    assert "must be absolute" in response.json()["detail"]
