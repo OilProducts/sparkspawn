@@ -537,6 +537,46 @@ def _extract_token_usage(run_id: str) -> Optional[int]:
     return total if total > 0 else None
 
 
+RUN_LOG_TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC\]")
+
+
+def _hydrate_run_record_from_log(record: RunRecord, run_log_path: Path) -> None:
+    if not run_log_path.exists():
+        return
+    record.token_usage = _extract_token_usage(record.run_id)
+    try:
+        lines = run_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return
+    if not lines:
+        return
+
+    first_timestamp = RUN_LOG_TIMESTAMP_RE.search(lines[0])
+    if first_timestamp and not record.started_at:
+        record.started_at = f"{first_timestamp.group(1).replace(' ', 'T')}Z"
+
+    log_status = None
+    for line in reversed(lines):
+        status_match = re.search(r"Pipeline\s+(\w+)", line)
+        if status_match:
+            log_status = _normalize_run_status(status_match.group(1))
+            break
+        if "Pipeline Aborted" in line:
+            log_status = "canceled"
+            break
+
+    if log_status and record.status in {"", "unknown", "running"}:
+        record.status = log_status
+    if log_status and record.result is None:
+        record.result = log_status
+    if log_status and not record.ended_at:
+        last_timestamp = RUN_LOG_TIMESTAMP_RE.search(lines[-1])
+        if last_timestamp:
+            record.ended_at = f"{last_timestamp.group(1).replace(' ', 'T')}Z"
+    if not log_status and record.status == "unknown":
+        record.status = "running"
+
+
 def _ensure_known_pipeline(pipeline_id: str) -> None:
     active = _get_active_run(pipeline_id)
     if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
@@ -1210,8 +1250,10 @@ async def list_runs(project_path: Optional[str] = None):
         if not run_dir.is_dir():
             continue
         meta_path = run_dir / "run.json"
+        run_log_path = run_dir / "run.log"
         record = _read_run_meta(meta_path)
         if record:
+            _hydrate_run_record_from_log(record, run_log_path)
             records.append(record)
             continue
 
@@ -1225,38 +1267,7 @@ async def list_runs(project_path: Optional[str] = None):
             model="",
             started_at="",
         )
-        run_log_path = run_dir / "run.log"
-        if run_log_path.exists():
-            record.token_usage = _extract_token_usage(run_id)
-            try:
-                lines = run_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-            except Exception:
-                lines = []
-            if lines:
-                first_line = lines[0]
-                timestamp_match = re.search(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC\]", first_line)
-                if timestamp_match:
-                    record.started_at = f"{timestamp_match.group(1).replace(' ', 'T')}Z"
-
-                status = None
-                for line in reversed(lines):
-                    status_match = re.search(r"Pipeline\s+(\w+)", line)
-                    if status_match:
-                        status = _normalize_run_status(status_match.group(1))
-                        break
-                    if "Pipeline Aborted" in line:
-                        status = "canceled"
-                        break
-
-                if status:
-                    record.status = status
-                    record.result = status
-                    last_line = lines[-1]
-                    last_timestamp = re.search(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC\]", last_line)
-                    if last_timestamp:
-                        record.ended_at = f"{last_timestamp.group(1).replace(' ', 'T')}Z"
-                else:
-                    record.status = "running"
+        _hydrate_run_record_from_log(record, run_log_path)
         records.append(record)
 
     def _sort_key(item: RunRecord) -> str:

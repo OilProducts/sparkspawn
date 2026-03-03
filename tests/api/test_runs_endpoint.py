@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -125,3 +126,93 @@ def test_list_runs_filters_durable_history_by_project_item_9_6_01(
     filtered_run_ids = {run["run_id"] for run in filtered_payload["runs"]}
 
     assert filtered_run_ids == {"run-in-project-root", "run-in-project-child"}
+
+
+def test_list_runs_backfills_missing_timestamps_from_run_log_item_9_6_04(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
+
+    run_id = "run-with-partial-timestamps"
+    run_root = runs_root / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    (run_root / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "flow_name": "Flow",
+                "status": "success",
+                "result": "success",
+                "working_directory": str(tmp_path / "project"),
+                "model": "test-model",
+                "started_at": "",
+                "ended_at": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "run.log").write_text(
+        "\n".join(
+            [
+                "[2026-01-01 00:10:00 UTC] Starting run",
+                "[2026-01-01 00:10:30 UTC] Pipeline success",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = asyncio.run(server.list_runs())
+
+    assert len(payload["runs"]) == 1
+    run_payload = payload["runs"][0]
+    assert run_payload["started_at"] == "2026-01-01T00:10:00Z"
+    assert run_payload["ended_at"] == "2026-01-01T00:10:30Z"
+
+
+def test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
+
+    older_id = "run-older"
+    newer_id = "run-newer"
+
+    for run_id, start_ts, end_ts in [
+        (older_id, "2026-01-01 00:00:00", "2026-01-01 00:00:30"),
+        (newer_id, "2026-01-01 00:01:00", "2026-01-01 00:01:30"),
+    ]:
+        run_root = runs_root / run_id
+        run_root.mkdir(parents=True, exist_ok=True)
+        (run_root / "run.json").write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "flow_name": "Flow",
+                    "status": "success",
+                    "result": "success",
+                    "working_directory": str(tmp_path / "project"),
+                    "model": "test-model",
+                    "started_at": "",
+                    "ended_at": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (run_root / "run.log").write_text(
+            "\n".join(
+                [
+                    f"[{start_ts} UTC] Starting run",
+                    f"[{end_ts} UTC] Pipeline success",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    payload = asyncio.run(server.list_runs())
+    run_ids = [run["run_id"] for run in payload["runs"]]
+
+    assert run_ids == [newer_id, older_id]
