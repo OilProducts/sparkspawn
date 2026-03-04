@@ -192,6 +192,13 @@ const STRING_GRAPH_ATTR_KEYS: (keyof GraphAttrs)[] = [
     'ui_default_reasoning_effort',
 ]
 
+const isKnownGraphAttrKey = (key: string): key is keyof GraphAttrs => {
+    if (key === 'model_stylesheet' || key === 'default_max_retry') {
+        return true
+    }
+    return STRING_GRAPH_ATTR_KEYS.includes(key as keyof GraphAttrs)
+}
+
 const normalizeGraphAttrValue = (key: keyof GraphAttrs, value: string): string => {
     if (key === 'model_stylesheet') {
         return value
@@ -230,16 +237,23 @@ const validateGraphAttrValue = (key: keyof GraphAttrs, value: string): string | 
 }
 
 const normalizeGraphAttrs = (attrs: GraphAttrs): GraphAttrs => {
-    const normalized: GraphAttrs = {}
-    const entries = Object.entries(attrs) as [keyof GraphAttrs, GraphAttrs[keyof GraphAttrs]][]
+    const normalized: Record<string, unknown> = {}
+    const entries = Object.entries(attrs) as [string, unknown][]
     entries.forEach(([key, rawValue]) => {
         if (rawValue === undefined || rawValue === null) {
             return
         }
-        const value = normalizeGraphAttrValue(key, String(rawValue))
-        normalized[key] = value
+        if (isKnownGraphAttrKey(key)) {
+            normalized[key] = normalizeGraphAttrValue(key, String(rawValue))
+            return
+        }
+        if (typeof rawValue === 'string' || typeof rawValue === 'number' || typeof rawValue === 'boolean') {
+            normalized[key] = rawValue
+            return
+        }
+        normalized[key] = String(rawValue)
     })
-    return normalized
+    return normalized as GraphAttrs
 }
 
 const deriveGraphAttrErrors = (attrs: GraphAttrs): GraphAttrErrors => {

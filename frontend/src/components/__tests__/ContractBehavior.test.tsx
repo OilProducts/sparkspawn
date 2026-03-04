@@ -2599,6 +2599,78 @@ digraph contract_behavior {
     expect(savedDot).toContain('x_edge_extension="edge-extra"')
   })
 
+  it('[CID:11.4.03] keeps numeric extension attrs stable across repeated structured edits', async () => {
+    const savePayloads: Array<{ name: string; content: string }> = []
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/api/flows') && init?.method === 'POST') {
+        const payload = JSON.parse(String(init.body)) as { name: string; content: string }
+        savePayloads.push(payload)
+        return jsonResponse({ status: 'saved' })
+      }
+      return jsonResponse({}, { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    act(() => {
+      useStore.getState().setGraphAttrs({
+        goal: 'Release',
+        label: 'Milestone',
+        x_graph_extension_number: 17,
+      } as never)
+    })
+
+    const nodes: Node[] = [
+      {
+        id: 'start',
+        position: { x: 0, y: 0 },
+        data: { label: 'Start', shape: 'Mdiamond' },
+      },
+      {
+        id: 'task',
+        position: { x: 180, y: 0 },
+        data: {
+          label: 'Task',
+          shape: 'box',
+          x_node_extension_number: 23,
+        },
+      },
+    ]
+    const edges: Edge[] = [
+      {
+        id: 'edge-start-task',
+        source: 'start',
+        target: 'task',
+        data: {
+          label: 'next',
+          x_edge_extension_number: 29,
+        },
+      },
+    ]
+
+    renderGraphSettings(nodes, edges)
+    await screen.findByTestId('graph-structured-form')
+
+    await new Promise((resolve) => window.setTimeout(resolve, 275))
+    expect(savePayloads).toHaveLength(0)
+
+    fireEvent.change(screen.getByDisplayValue('Release'), { target: { value: 'Ship now' } })
+    await waitFor(() => {
+      expect(savePayloads).toHaveLength(1)
+    })
+
+    fireEvent.change(screen.getByDisplayValue('Milestone'), { target: { value: 'Milestone 2' } })
+    await waitFor(() => {
+      expect(savePayloads).toHaveLength(2)
+    })
+
+    savePayloads.forEach(({ content }) => {
+      expect(content).toContain('x_graph_extension_number=17')
+      expect(content).toContain('x_node_extension_number=23')
+      expect(content).toContain('x_edge_extension_number=29')
+    })
+  })
+
   it('[CID:10.3.01] exposes human.default_choice authoring and timeout-default visibility in node inspector', async () => {
     act(() => {
       useStore.getState().setSelectedNodeId('gate')
