@@ -82,7 +82,42 @@ checklist_hash() {
 extract_evaluator_verdict() {
   local log_file="$1"
   local verdict
-  verdict="$(rg -N -o 'EVALUATOR_VERDICT:\s*`?(pass|fail|needs-human)`?' "$log_file" | tail -n1 | sed -E 's/^EVALUATOR_VERDICT:[[:space:]]*`?//; s/`?$//' || true)"
+  verdict="$(
+    awk '
+      function ltrim(s) { sub(/^[[:space:]]+/, "", s); return s }
+      function rtrim(s) { sub(/[[:space:]]+$/, "", s); return s }
+      function trim(s) { return rtrim(ltrim(s)) }
+      {
+        line = tolower($0)
+        gsub(/\r/, "", line)
+        gsub(/`/, "", line)
+        gsub(/\*\*/, "", line)
+        gsub(/^[[:space:]]*[-*][[:space:]]*/, "", line)
+        if (line ~ /^evaluator_verdict[[:space:]]*:/) {
+          value = line
+          sub(/^evaluator_verdict[[:space:]]*:[[:space:]]*/, "", value)
+          value = trim(value)
+          if (index(value, "|") > 0) {
+            next
+          }
+          sub(/[[:space:]].*$/, "", value)
+          gsub(/[^a-z-].*$/, "", value)
+          if (value != "") {
+            parsed = value
+          }
+        }
+      }
+      END {
+        if (parsed != "") {
+          print parsed
+        }
+      }
+    ' "$log_file"
+  )"
+  case "$verdict" in
+    pass|fail|needs-human) ;;
+    *) verdict="" ;;
+  esac
   if [[ -z "${verdict:-}" ]]; then
     verdict="unknown"
   fi
@@ -92,11 +127,68 @@ extract_evaluator_verdict() {
 extract_checklist_status_update() {
   local log_file="$1"
   local status
-  status="$(rg -N -o 'CHECKLIST_STATUS_UPDATE:\s*`?(checked|unchecked|deferred)`?' "$log_file" | tail -n1 | sed -E 's/^CHECKLIST_STATUS_UPDATE:[[:space:]]*`?//; s/`?$//' || true)"
+  status="$(
+    awk '
+      function ltrim(s) { sub(/^[[:space:]]+/, "", s); return s }
+      function rtrim(s) { sub(/[[:space:]]+$/, "", s); return s }
+      function trim(s) { return rtrim(ltrim(s)) }
+      {
+        line = tolower($0)
+        gsub(/\r/, "", line)
+        gsub(/`/, "", line)
+        gsub(/\*\*/, "", line)
+        gsub(/^[[:space:]]*[-*][[:space:]]*/, "", line)
+        if (line ~ /^checklist_status_update[[:space:]]*:/) {
+          value = line
+          sub(/^checklist_status_update[[:space:]]*:[[:space:]]*/, "", value)
+          value = trim(value)
+          if (index(value, "|") > 0) {
+            next
+          }
+          sub(/[[:space:]].*$/, "", value)
+          gsub(/[^a-z-].*$/, "", value)
+          if (value != "") {
+            parsed = value
+          }
+        }
+      }
+      END {
+        if (parsed != "") {
+          print parsed
+        }
+      }
+    ' "$log_file"
+  )"
+  case "$status" in
+    checked|unchecked|deferred) ;;
+    *) status="" ;;
+  esac
   if [[ -z "${status:-}" ]]; then
     status="unknown"
   fi
   echo "$status"
+}
+
+report_stop_and_restore_state() {
+  local exit_code="$1"
+  local reason="$2"
+  local checklist_snapshot="$3"
+  local iteration_log="$4"
+  local head_before="$5"
+  local head_after="$6"
+
+  if [[ -n "$head_before" && -n "$head_after" && "$head_before" != "$head_after" ]]; then
+    rm -f "$checklist_snapshot"
+    echo "Stopping: $reason" >&2
+    echo "New commit detected during iteration ($head_before -> $head_after); checklist snapshot NOT restored." >&2
+  else
+    cp "$checklist_snapshot" "$CHECKLIST_FILE"
+    rm -f "$checklist_snapshot"
+    echo "Stopping: $reason" >&2
+    echo "Checklist reverted to pre-iteration snapshot." >&2
+  fi
+  echo "Iteration log retained at: $iteration_log" >&2
+  exit "$exit_code"
 }
 
 read -r -d '' ACTIVE_PROMPT <<'EOF' || true
@@ -194,18 +286,22 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
   echo "Phase: $phase"
   echo "Before run: active_unchecked=$active_before deferred_unchecked=$deferred_before total_unchecked=$total_before"
 
+  head_before="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
   checklist_snapshot="$(mktemp)"
   cp "$CHECKLIST_FILE" "$checklist_snapshot"
   iteration_log="$(mktemp)"
-  if ! codex exec --sandbox "$CODEX_SANDBOX" -C "$ROOT_DIR" "$prompt" | tee "$iteration_log"; then
-    cp "$checklist_snapshot" "$CHECKLIST_FILE"
-    rm -f "$checklist_snapshot" "$iteration_log"
-    echo "Stopping: codex exec failed; restored checklist to pre-iteration state." >&2
-    exit 8
+  if codex exec --sandbox "$CODEX_SANDBOX" -C "$ROOT_DIR" "$prompt" 2>&1 | tee "$iteration_log"; then
+    codex_exit=0
+  else
+    codex_exit=$?
+  fi
+  head_after="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
+
+  if [[ "$codex_exit" -ne 0 ]]; then
+    report_stop_and_restore_state 8 "codex exec failed." "$checklist_snapshot" "$iteration_log" "$head_before" "$head_after"
   fi
   evaluator_verdict="$(extract_evaluator_verdict "$iteration_log")"
   checklist_status_update="$(extract_checklist_status_update "$iteration_log")"
-  rm -f "$iteration_log"
 
   active_after="$(count_unchecked_active)"
   deferred_after="$(count_unchecked_deferred)"
@@ -216,39 +312,23 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
   echo "Checklist status update: $checklist_status_update"
 
   if [[ "$evaluator_verdict" == "unknown" ]]; then
-    cp "$checklist_snapshot" "$CHECKLIST_FILE"
-    rm -f "$checklist_snapshot"
-    echo "Stopping: missing required machine-readable EVALUATOR_VERDICT output." >&2
-    echo "Checklist reverted to pre-iteration snapshot." >&2
-    exit 6
+    report_stop_and_restore_state 6 "missing required machine-readable EVALUATOR_VERDICT output." "$checklist_snapshot" "$iteration_log" "$head_before" "$head_after"
   fi
 
   if [[ "$checklist_status_update" == "unknown" ]]; then
-    cp "$checklist_snapshot" "$CHECKLIST_FILE"
-    rm -f "$checklist_snapshot"
-    echo "Stopping: missing required machine-readable CHECKLIST_STATUS_UPDATE output." >&2
-    echo "Checklist reverted to pre-iteration snapshot." >&2
-    exit 7
+    report_stop_and_restore_state 7 "missing required machine-readable CHECKLIST_STATUS_UPDATE output." "$checklist_snapshot" "$iteration_log" "$head_before" "$head_after"
   fi
 
   if [[ "$total_after" -lt "$total_before" && "$evaluator_verdict" != "pass" ]]; then
-    cp "$checklist_snapshot" "$CHECKLIST_FILE"
-    rm -f "$checklist_snapshot"
-    echo "Stopping: checklist unchecked count decreased without evaluator pass verdict." >&2
-    echo "Expected EVALUATOR_VERDICT: pass when marking an item complete." >&2
-    echo "Checklist reverted to pre-iteration snapshot." >&2
-    exit 4
+    report_stop_and_restore_state 4 "checklist unchecked count decreased without evaluator pass verdict. Expected EVALUATOR_VERDICT: pass when marking an item complete." "$checklist_snapshot" "$iteration_log" "$head_before" "$head_after"
   fi
 
   if [[ "$checklist_status_update" == "checked" && "$evaluator_verdict" != "pass" ]]; then
-    cp "$checklist_snapshot" "$CHECKLIST_FILE"
-    rm -f "$checklist_snapshot"
-    echo "Stopping: implementor reported CHECKLIST_STATUS_UPDATE=checked with non-pass evaluator verdict." >&2
-    echo "Checklist reverted to pre-iteration snapshot." >&2
-    exit 5
+    report_stop_and_restore_state 5 "implementor reported CHECKLIST_STATUS_UPDATE=checked with non-pass evaluator verdict." "$checklist_snapshot" "$iteration_log" "$head_before" "$head_after"
   fi
 
   rm -f "$checklist_snapshot"
+  rm -f "$iteration_log"
 
   if [[ "$total_after" -eq 0 ]]; then
     echo "Checklist complete."
