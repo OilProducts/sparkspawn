@@ -302,9 +302,22 @@ function readStringOrNumberAttr(attrs: CanonicalAttrMap, key: string): string | 
     return ''
 }
 
-function readBooleanAttr(attrs: CanonicalAttrMap, key: string): boolean {
+function readExplicitBooleanAttr(attrs: CanonicalAttrMap, key: string): boolean | null {
     const value = attrs[key]
-    return value === true || value === 'true'
+    if (value === true || value === 'true') {
+        return true
+    }
+    if (value === false || value === 'false') {
+        return false
+    }
+    return null
+}
+
+function formatExplicitBooleanAttr(key: string, value: boolean | null): string {
+    if (value === null) {
+        return ''
+    }
+    return `${key}=${value ? 'true' : 'false'}`
 }
 
 function formatIntAttr(key: string, value: string | number): string {
@@ -500,7 +513,7 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
         const maxParallelValue = readStringOrNumberAttr(attrs, 'max_parallel')
         const typeValue = readStringAttr(attrs, 'type')
         const maxRetriesValue = readStringOrNumberAttr(attrs, 'max_retries')
-        const goalGateValue = readBooleanAttr(attrs, 'goal_gate')
+        const goalGateValue = readExplicitBooleanAttr(attrs, 'goal_gate')
         const retryTargetValue = readStringAttr(attrs, 'retry_target')
         const fallbackRetryTargetValue = readStringAttr(attrs, 'fallback_retry_target')
         const fidelityValue = readStringAttr(attrs, 'fidelity')
@@ -510,8 +523,8 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
         const llmModelValue = readStringAttr(attrs, 'llm_model')
         const llmProviderValue = readStringAttr(attrs, 'llm_provider')
         const reasoningEffortValue = readStringAttr(attrs, 'reasoning_effort')
-        const autoStatusValue = readBooleanAttr(attrs, 'auto_status')
-        const allowPartialValue = readBooleanAttr(attrs, 'allow_partial')
+        const autoStatusValue = readExplicitBooleanAttr(attrs, 'auto_status')
+        const allowPartialValue = readExplicitBooleanAttr(attrs, 'allow_partial')
         const managerPollIntervalValue = readStringAttr(attrs, 'manager.poll_interval')
         const managerMaxCyclesValue = readStringOrNumberAttr(attrs, 'manager.max_cycles')
         const managerStopConditionValue = readStringAttr(attrs, 'manager.stop_condition')
@@ -540,7 +553,7 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
             maxParallel,
             typeValue ? `type=${formatAttrValue(typeValue)}` : '',
             formatIntAttr('max_retries', maxRetriesValue),
-            goalGateValue ? 'goal_gate=true' : '',
+            formatExplicitBooleanAttr('goal_gate', goalGateValue),
             retryTargetValue ? `retry_target=${formatAttrValue(retryTargetValue)}` : '',
             fallbackRetryTargetValue ? `fallback_retry_target=${formatAttrValue(fallbackRetryTargetValue)}` : '',
             fidelityValue ? `fidelity=${formatAttrValue(fidelityValue)}` : '',
@@ -550,8 +563,8 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
             llmModelValue ? `llm_model=${formatAttrValue(llmModelValue)}` : '',
             llmProviderValue ? `llm_provider=${formatAttrValue(llmProviderValue)}` : '',
             reasoningEffortValue ? `reasoning_effort=${formatAttrValue(reasoningEffortValue)}` : '',
-            autoStatusValue ? 'auto_status=true' : '',
-            allowPartialValue ? 'allow_partial=true' : '',
+            formatExplicitBooleanAttr('auto_status', autoStatusValue),
+            formatExplicitBooleanAttr('allow_partial', allowPartialValue),
             managerPollIntervalValue ? formatDurationAttr('manager.poll_interval', managerPollIntervalValue) : '',
             formatIntAttr('manager.max_cycles', managerMaxCyclesValue),
             managerStopConditionValue ? `manager.stop_condition="${escapeDotString(managerStopConditionValue)}"` : '',
@@ -570,7 +583,7 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
         const weightValue = readStringOrNumberAttr(attrs, 'weight')
         const fidelityValue = readStringAttr(attrs, 'fidelity')
         const threadIdValue = readStringAttr(attrs, 'thread_id')
-        const loopRestartValue = readBooleanAttr(attrs, 'loop_restart')
+        const loopRestartValue = readExplicitBooleanAttr(attrs, 'loop_restart')
 
         const edgeAttrs = [
             labelValue ? `label="${escapeDotString(labelValue)}"` : '',
@@ -578,7 +591,7 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
             formatIntAttr('weight', weightValue),
             fidelityValue ? `fidelity=${formatAttrValue(fidelityValue)}` : '',
             threadIdValue ? `thread_id="${escapeDotString(threadIdValue)}"` : '',
-            loopRestartValue ? 'loop_restart=true' : '',
+            formatExplicitBooleanAttr('loop_restart', loopRestartValue),
             ...formatCanonicalAttrEntries(attrs, KNOWN_EDGE_ATTR_KEYS),
         ].filter(Boolean).join(', ')
 

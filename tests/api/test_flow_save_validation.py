@@ -40,6 +40,42 @@ SPEC_VALID_NO_OP_SAVE_FIXTURES: tuple[str, ...] = (
     "flows/reference-1.1-03-extension-attrs.dot",
 )
 
+ADVANCED_ATTR_ROUND_TRIP_FLOW = """
+digraph AdvancedRoundTrip {
+    start [shape=Mdiamond]
+    task [
+        shape=box,
+        prompt="Do work",
+        max_retries=0,
+        goal_gate=false,
+        retry_target="fix",
+        fallback_retry_target="done",
+        fidelity="summary:low",
+        thread_id="thread-a",
+        class="critical",
+        timeout=900s,
+        llm_model="gpt-5",
+        llm_provider=openai,
+        reasoning_effort=high,
+        auto_status=false,
+        allow_partial=false
+    ]
+    gate [
+        shape=hexagon,
+        prompt="Choose path",
+        human.default_choice="fix"
+    ]
+    fix [shape=box, prompt="Fix issue"]
+    done [shape=Msquare]
+
+    start -> task
+    task -> gate
+    gate -> fix [label="Fix", loop_restart=false]
+    gate -> done [label="Ship", weight=0]
+    fix -> done
+}
+"""
+
 
 def _generate_no_op_save_candidate_from_preview(flow_name: str, flow_content: str) -> str:
     preview_payload = preview_pipeline(flow_content)
@@ -59,6 +95,50 @@ console.log(dot)
         probe_script,
         temp_prefix=".tmp-canonical-no-op-save-",
         error_context=f"no-op semantic-equivalence probe for {flow_name}",
+        env_extra={
+            "CANONICAL_ROUND_TRIP_FLOW_NAME": flow_name,
+            "CANONICAL_ROUND_TRIP_PREVIEW_GRAPH": json.dumps(preview_graph),
+            "CANONICAL_ROUND_TRIP_RAW_DOT": flow_content,
+        },
+    )
+
+
+def _generate_edited_advanced_attr_flow_from_preview(flow_name: str, flow_content: str) -> str:
+    preview_payload = preview_pipeline(flow_content)
+    preview_graph = preview_payload["graph"]
+    probe_script = """
+import { pathToFileURL } from 'node:url'
+const mod = await import(pathToFileURL(process.env.CANONICAL_FLOW_MODEL_JS_PATH).href)
+
+const flowName = process.env.CANONICAL_ROUND_TRIP_FLOW_NAME ?? 'fixture.dot'
+const previewGraph = JSON.parse(process.env.CANONICAL_ROUND_TRIP_PREVIEW_GRAPH ?? '{}')
+const rawDot = process.env.CANONICAL_ROUND_TRIP_RAW_DOT ?? null
+const model = mod.buildCanonicalFlowModelFromPreviewGraph(flowName, previewGraph, { rawDot })
+
+const taskNode = model.nodes.find((node) => node.id === 'task')
+if (taskNode) {
+  taskNode.attrs.max_retries = 2
+  taskNode.attrs.timeout = '120s'
+  taskNode.attrs.llm_model = 'gpt-5.3'
+  taskNode.attrs.reasoning_effort = 'medium'
+  taskNode.attrs.goal_gate = false
+  taskNode.attrs.auto_status = false
+  taskNode.attrs.allow_partial = false
+}
+
+const gateToFixEdge = model.edges.find((edge) => edge.source === 'gate' && edge.target === 'fix')
+if (gateToFixEdge) {
+  gateToFixEdge.attrs.loop_restart = false
+}
+
+const dot = mod.generateDotFromCanonicalFlowModel(flowName, model)
+console.log(dot)
+""".strip()
+
+    return run_canonical_flow_model_probe(
+        probe_script,
+        temp_prefix=".tmp-canonical-advanced-save-",
+        error_context=f"advanced-attr round-trip probe for {flow_name}",
         env_extra={
             "CANONICAL_ROUND_TRIP_FLOW_NAME": flow_name,
             "CANONICAL_ROUND_TRIP_PREVIEW_GRAPH": json.dumps(preview_graph),
@@ -233,6 +313,66 @@ def test_save_flow_no_op_semantic_equivalence_for_spec_valid_fixtures_item_11_2_
     no_op_payload = no_op_response.json()
     assert no_op_payload["status"] == "saved"
     assert no_op_payload["semantic_equivalent_to_existing"] is True
+
+
+def test_save_flow_open_edit_save_reopen_preserves_advanced_attrs_item_11_2_02(
+    api_client: TestClient,
+) -> None:
+    flow_name = "fixture-open-edit-save-reopen-advanced.dot"
+    seed_response = api_client.post(
+        "/api/flows",
+        json={
+            "name": flow_name,
+            "content": ADVANCED_ATTR_ROUND_TRIP_FLOW,
+        },
+    )
+    assert seed_response.status_code == 200, seed_response.text
+
+    edited_content = _generate_edited_advanced_attr_flow_from_preview(
+        flow_name,
+        ADVANCED_ATTR_ROUND_TRIP_FLOW,
+    )
+    assert "auto_status=false" in edited_content
+    assert "allow_partial=false" in edited_content
+    assert "goal_gate=false" in edited_content
+    assert "loop_restart=false" in edited_content
+
+    save_response = api_client.post(
+        "/api/flows",
+        json={
+            "name": flow_name,
+            "content": edited_content,
+        },
+    )
+    assert save_response.status_code == 200, save_response.text
+
+    reopen_response = api_client.get(f"/api/flows/{flow_name}")
+    assert reopen_response.status_code == 200, reopen_response.text
+    reopened_content = reopen_response.json()["content"]
+
+    reopened_payload = preview_pipeline(reopened_content)
+    nodes = reopened_payload["graph"]["nodes"]
+    edges = reopened_payload["graph"]["edges"]
+    task_node = next((node for node in nodes if node["id"] == "task"), None)
+    gate_to_fix = next(
+        (
+            edge
+            for edge in edges
+            if edge["from"] == "gate" and edge["to"] == "fix"
+        ),
+        None,
+    )
+    assert task_node is not None
+    assert gate_to_fix is not None
+
+    assert task_node["max_retries"] == 2
+    assert task_node["timeout"] == "120s"
+    assert task_node["llm_model"] == "gpt-5.3"
+    assert task_node["reasoning_effort"] == "medium"
+    assert task_node["goal_gate"] is False
+    assert task_node["auto_status"] is False
+    assert task_node["allow_partial"] is False
+    assert gate_to_fix["loop_restart"] is False
 
 
 def test_flow_endpoints_use_project_root_not_process_cwd(
