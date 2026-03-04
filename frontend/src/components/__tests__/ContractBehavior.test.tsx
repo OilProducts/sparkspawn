@@ -5,7 +5,21 @@ import { RunsPanel } from '@/components/RunsPanel'
 import { Sidebar } from '@/components/Sidebar'
 import { TaskNode } from '@/components/TaskNode'
 import {
+  ApiHttpError,
   ApiSchemaError,
+  fetchFlowListValidated,
+  fetchFlowPayloadValidated,
+  fetchPipelineAnswerValidated,
+  fetchPipelineCancelValidated,
+  fetchPipelineCheckpointValidated,
+  fetchPipelineContextValidated,
+  fetchPipelineGraphValidated,
+  fetchPipelineQuestionsValidated,
+  fetchPipelineStartValidated,
+  fetchPipelineStatusValidated,
+  fetchPreviewValidated,
+  fetchRunsListValidated,
+  fetchRuntimeStatusValidated,
   parseFlowListResponse,
   parseFlowPayloadResponse,
   parsePipelineGraphResponse,
@@ -326,6 +340,202 @@ describe('Frontend contract behavior', () => {
     expect(() => parseRuntimeStatusResponse({})).toThrow(ApiSchemaError)
     expect(parsePipelineGraphResponse('<svg></svg>')).toContain('<svg')
     expect(() => parsePipelineGraphResponse('')).toThrow(ApiSchemaError)
+  })
+
+  it('[CID:12.1.03] exercises endpoint adapters with happy paths and common error cases', async () => {
+    type SuccessCase = {
+      name: string
+      invoke: () => Promise<unknown>
+      expectedUrl: string
+      expectedMethod?: string
+      response: Response
+      assertResult: (result: unknown) => void
+      assertBody?: (init: RequestInit | undefined) => void
+    }
+
+    const successCases: SuccessCase[] = [
+      {
+        name: 'flow list',
+        invoke: () => fetchFlowListValidated(),
+        expectedUrl: '/api/flows',
+        response: jsonResponse(['alpha.dot']),
+        assertResult: (result) => expect(result).toEqual(['alpha.dot']),
+      },
+      {
+        name: 'flow payload',
+        invoke: () => fetchFlowPayloadValidated('alpha flow.dot'),
+        expectedUrl: '/api/flows/alpha%20flow.dot',
+        response: jsonResponse({ name: 'alpha flow.dot', content: 'digraph G {}' }),
+        assertResult: (result) =>
+          expect(result).toEqual({
+            name: 'alpha flow.dot',
+            content: 'digraph G {}',
+          }),
+      },
+      {
+        name: 'preview',
+        invoke: () => fetchPreviewValidated('digraph G {}'),
+        expectedUrl: '/preview',
+        expectedMethod: 'POST',
+        response: jsonResponse({ status: 'ok', graph: { nodes: [], edges: [] } }),
+        assertResult: (result) => expect(result).toMatchObject({ status: 'ok' }),
+        assertBody: (init) => {
+          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
+          expect(JSON.parse(String(init?.body))).toEqual({ flow_content: 'digraph G {}' })
+        },
+      },
+      {
+        name: 'pipeline start',
+        invoke: () =>
+          fetchPipelineStartValidated({
+            flow_name: 'alpha.dot',
+            flow_content: 'digraph G {}',
+          }),
+        expectedUrl: '/pipelines',
+        expectedMethod: 'POST',
+        response: jsonResponse({ status: 'accepted', pipeline_id: 'run-start', run_id: 'run-start' }),
+        assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', pipeline_id: 'run-start' }),
+        assertBody: (init) => {
+          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
+          expect(JSON.parse(String(init?.body))).toMatchObject({ flow_name: 'alpha.dot' })
+        },
+      },
+      {
+        name: 'pipeline status',
+        invoke: () => fetchPipelineStatusValidated('run status'),
+        expectedUrl: '/pipelines/run%20status',
+        response: jsonResponse({ pipeline_id: 'run status', status: 'running' }),
+        assertResult: (result) => expect(result).toMatchObject({ pipeline_id: 'run status', status: 'running' }),
+      },
+      {
+        name: 'pipeline cancel',
+        invoke: () => fetchPipelineCancelValidated('run cancel'),
+        expectedUrl: '/pipelines/run%20cancel/cancel',
+        expectedMethod: 'POST',
+        response: jsonResponse({ status: 'accepted', pipeline_id: 'run cancel' }),
+        assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', pipeline_id: 'run cancel' }),
+      },
+      {
+        name: 'pipeline graph',
+        invoke: () => fetchPipelineGraphValidated('run graph'),
+        expectedUrl: '/pipelines/run%20graph/graph',
+        response: new Response('<svg><g /></svg>', { status: 200 }),
+        assertResult: (result) => expect(result).toContain('<svg>'),
+      },
+      {
+        name: 'pipeline questions',
+        invoke: () => fetchPipelineQuestionsValidated('run questions'),
+        expectedUrl: '/pipelines/run%20questions/questions',
+        response: jsonResponse({ questions: [{ question_id: 'q-1' }] }),
+        assertResult: (result) => expect(result).toEqual({ questions: [{ question_id: 'q-1' }] }),
+      },
+      {
+        name: 'pipeline answer',
+        invoke: () => fetchPipelineAnswerValidated('run answer', 'q 1', 'approve'),
+        expectedUrl: '/pipelines/run%20answer/questions/q%201/answer',
+        expectedMethod: 'POST',
+        response: jsonResponse({ status: 'accepted', pipeline_id: 'run answer', question_id: 'q 1' }),
+        assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', question_id: 'q 1' }),
+        assertBody: (init) => {
+          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
+          expect(JSON.parse(String(init?.body))).toEqual({
+            question_id: 'q 1',
+            selected_value: 'approve',
+          })
+        },
+      },
+      {
+        name: 'pipeline checkpoint',
+        invoke: () => fetchPipelineCheckpointValidated('run checkpoint'),
+        expectedUrl: '/pipelines/run%20checkpoint/checkpoint',
+        response: jsonResponse({ pipeline_id: 'run checkpoint', checkpoint: { node: 'n-1' } }),
+        assertResult: (result) =>
+          expect(result).toEqual({ pipeline_id: 'run checkpoint', checkpoint: { node: 'n-1' } }),
+      },
+      {
+        name: 'pipeline context',
+        invoke: () => fetchPipelineContextValidated('run context'),
+        expectedUrl: '/pipelines/run%20context/context',
+        response: jsonResponse({ pipeline_id: 'run context', context: { branch: 'main' } }),
+        assertResult: (result) =>
+          expect(result).toEqual({ pipeline_id: 'run context', context: { branch: 'main' } }),
+      },
+      {
+        name: 'runs list',
+        invoke: () => fetchRunsListValidated(),
+        expectedUrl: '/runs',
+        response: jsonResponse({ runs: [{ run_id: 'run-1', status: 'running' }] }),
+        assertResult: (result) => expect(result).toEqual({ runs: [{ run_id: 'run-1', status: 'running', flow_name: '', working_directory: '', model: '', started_at: '', result: undefined, project_path: undefined, git_branch: undefined, git_commit: undefined, spec_id: undefined, plan_id: undefined, ended_at: undefined, last_error: undefined, token_usage: undefined }] }),
+      },
+      {
+        name: 'runtime status',
+        invoke: () => fetchRuntimeStatusValidated(),
+        expectedUrl: '/status',
+        response: jsonResponse({ status: 'idle' }),
+        assertResult: (result) =>
+          expect(result).toEqual({
+            status: 'idle',
+            last_error: undefined,
+            last_working_directory: undefined,
+            last_model: undefined,
+            last_completed_nodes: null,
+            last_flow_name: undefined,
+            last_run_id: undefined,
+          }),
+      },
+    ]
+
+    for (const testCase of successCases) {
+      const fetchMock = vi.fn(async () => testCase.response)
+      vi.stubGlobal('fetch', fetchMock)
+      const result = await testCase.invoke()
+
+      expect(fetchMock, `fetch call count for ${testCase.name}`).toHaveBeenCalledTimes(1)
+      const [input, init] = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit | undefined]
+      expect(requestUrl(input), `request URL for ${testCase.name}`).toBe(testCase.expectedUrl)
+      expect(init?.method ?? 'GET', `request method for ${testCase.name}`).toBe(testCase.expectedMethod ?? 'GET')
+      testCase.assertBody?.(init)
+      testCase.assertResult(result)
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(
+          {
+            detail: { error: 'Preview validation failed.' },
+          },
+          { status: 422 },
+        ),
+      ),
+    )
+    await expect(fetchPreviewValidated('digraph G {}')).rejects.toMatchObject<ApiHttpError>({
+      endpoint: '/preview',
+      status: 422,
+      detail: 'Preview validation failed.',
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('Gateway timeout', { status: 504 })),
+    )
+    await expect(fetchPipelineStatusValidated('run-504')).rejects.toMatchObject<ApiHttpError>({
+      endpoint: '/pipelines/{id}',
+      status: 504,
+      detail: 'Gateway timeout',
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ flows: [] })),
+    )
+    await expect(fetchFlowListValidated()).rejects.toBeInstanceOf(ApiSchemaError)
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('   ', { status: 200 })),
+    )
+    await expect(fetchPipelineGraphValidated('run-empty-graph')).rejects.toBeInstanceOf(ApiSchemaError)
   })
 
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {

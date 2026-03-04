@@ -7,3 +7,7 @@ def test_required_ui_api_endpoints_have_runtime_coverage_item_12_1_01() -> None:
 
 def test_typed_client_adapters_and_runtime_schema_validation_item_12_1_02() -> None:
     assert_frontend_behavior_contract_passed("12.1.02")
+
+
+def test_endpoint_integration_happy_path_and_common_error_cases_item_12_1_03() -> None:
+    assert_frontend_behavior_contract_passed("12.1.03")

@@ -250,8 +250,15 @@ async function parseJsonPayload(response: Response, endpoint: string): Promise<u
 async function extractHttpError(response: Response, endpoint: string): Promise<ApiHttpError> {
     let detail: string | null = null
     try {
-        const payload = await response.json()
-        detail = parseHttpErrorDetail(payload)
+        const bodyText = await response.text()
+        if (bodyText.trim().length > 0) {
+            try {
+                const payload = JSON.parse(bodyText) as unknown
+                detail = parseHttpErrorDetail(payload)
+            } catch {
+                detail = bodyText.trim()
+            }
+        }
     } catch {
         detail = null
     }
