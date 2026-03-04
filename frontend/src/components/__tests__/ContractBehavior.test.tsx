@@ -2885,4 +2885,57 @@ digraph contract_behavior {
     expect(switchedScope.conversationHistory).toHaveLength(1)
     expect(switchedScope.conversationHistory[0]?.content).toBe('Other scope history')
   })
+
+  it('[CID:11.5.03] clears stale flow/run route context when persisted active project path is invalid on reopen', async () => {
+    vi.resetModules()
+    const storage = new Map<string, string>()
+    const localStorageMock = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value)
+      },
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      clear: () => {
+        storage.clear()
+      },
+    }
+    vi.stubGlobal('localStorage', localStorageMock)
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: localStorageMock,
+    })
+
+    localStorageMock.setItem(
+      'sparkspawn.project_registry_state',
+      JSON.stringify({
+        '/tmp/persisted-project': {
+          directoryPath: '/tmp/persisted-project',
+          isFavorite: true,
+          lastAccessedAt: '2026-03-04T00:00:00.000Z',
+        },
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.ui_route_state',
+      JSON.stringify({
+        viewMode: 'editor',
+        activeProjectPath: 'relative/project',
+        activeFlow: 'leaked-flow.dot',
+        selectedRunId: 'leaked-run-id',
+      }),
+    )
+
+    const { useStore: restoredStore } = await import('@/store')
+    const restoredState = restoredStore.getState()
+
+    expect(restoredState.activeProjectPath).toBeNull()
+    expect(restoredState.viewMode).toBe('projects')
+    expect(restoredState.activeFlow).toBeNull()
+    expect(restoredState.selectedRunId).toBeNull()
+    expect(restoredState.workingDir).toBe(DEFAULT_WORKING_DIRECTORY)
+    expect(restoredState.projectScopedWorkspaces).toEqual({})
+    expect(restoredState.projectRegistry['/tmp/persisted-project']).toBeDefined()
+  })
 })

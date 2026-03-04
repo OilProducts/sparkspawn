@@ -7,3 +7,7 @@ def test_project_registry_persists_across_sessions_with_unique_directory_enforce
 
 def test_project_scoped_conversation_spec_plan_linkage_persists_by_project_item_11_5_02() -> None:
     assert_frontend_behavior_contract_passed("11.5.02")
+
+
+def test_restore_on_reopen_clears_stale_flow_run_context_when_active_project_invalid_item_11_5_03() -> None:
+    assert_frontend_behavior_contract_passed("11.5.03")

@@ -511,14 +511,17 @@ const loadRouteState = (): RouteState => {
         const parsedActiveProjectPath = typeof parsed.activeProjectPath === "string"
             ? normalizeProjectPath(parsed.activeProjectPath)
             : null
+        const restoredActiveProjectPath =
+            parsedActiveProjectPath && isAbsoluteProjectPath(parsedActiveProjectPath)
+                ? parsedActiveProjectPath
+                : null
         const parsedRouteState: RouteState = {
             viewMode: requestedViewMode,
-            activeProjectPath:
-                parsedActiveProjectPath && isAbsoluteProjectPath(parsedActiveProjectPath)
-                    ? parsedActiveProjectPath
-                    : null,
-            activeFlow: typeof parsed.activeFlow === "string" ? parsed.activeFlow : null,
-            selectedRunId: typeof parsed.selectedRunId === "string" ? parsed.selectedRunId : null,
+            activeProjectPath: restoredActiveProjectPath,
+            activeFlow: restoredActiveProjectPath && typeof parsed.activeFlow === "string" ? parsed.activeFlow : null,
+            selectedRunId: restoredActiveProjectPath && typeof parsed.selectedRunId === "string"
+                ? parsed.selectedRunId
+                : null,
         }
         return {
             ...parsedRouteState,
