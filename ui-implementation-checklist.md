@@ -373,7 +373,7 @@ Status key:
   - Evidence (2026-03-04): Evaluator `pass`; added project-identity keyed retrieval accessor `getProjectScopedArtifactState` with path normalization/absolute-path guards in `frontend/src/store.ts`, covered by frontend contract `CID:12.3.03` in `frontend/src/components/__tests__/ContractBehavior.test.tsx` and Python bridge `tests/contracts/frontend/test_api_integration_contracts.py`, validated by `just test` (`600 passed`) plus screenshot-based visual QA review of `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/08q-runs-panel-run-history-spec-plan-links.png` (`just ui-smoke` had unrelated backend `ECONNREFUSED`/HTTP 500 failures in other scenarios).
 
 ### 12.4 Workflow Orchestration Contract
-- [ ] [12.4-01] Integrate project-scoped conversation turn/history contract in UI client adapters.
+Deferred to `Deferred Tasks` until a backend project-scoped conversation turn/history API contract exists for validated client adapters.
 - [ ] [12.4-02] Integrate spec-edit proposal/apply/reject contract with schema validation.
 - [ ] [12.4-03] Integrate plan-generation invocation/status contract with degraded-state handling.
 - [ ] [12.4-04] Integrate plan approval/rejection/revision transition contract.
@@ -627,3 +627,5 @@ Status key:
   Deferred because the current UI/API contract only exposes `/pipelines/{id}/cancel` with no pause/resume endpoint or capability metadata to drive those controls safely.
 - [ ] [8.5-02] Persist generated implementation plans to project files with visible status/provenance.
   Deferred because the current API/UI contract has no project-scoped plan artifact write/read endpoint (only flow save and pipeline launch), so file persistence with visible status/provenance cannot be implemented correctly yet.
+- [ ] [12.4-01] Integrate project-scoped conversation turn/history contract in UI client adapters.
+  Deferred because `ui-spec.md` section 12.4 requires backend workflow-orchestration contracts, but the current API surface has no project-scoped conversation turn/history endpoint to integrate or validate against.
