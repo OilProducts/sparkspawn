@@ -37,3 +37,7 @@ def test_run_timeline_displays_human_gate_timeout_default_and_skip_provenance_it
 
 def test_run_timeline_supports_timeout_fallback_and_explicit_answer_branches_item_10_3_03() -> None:
     assert_frontend_behavior_contract_passed("10.3.03")
+
+
+def test_pending_human_gates_group_multi_question_prompts_by_stage_item_10_4_01() -> None:
+    assert_frontend_behavior_contract_passed("10.4.01")

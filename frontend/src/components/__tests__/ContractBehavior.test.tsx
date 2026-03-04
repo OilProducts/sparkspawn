@@ -1379,6 +1379,167 @@ describe('Frontend contract behavior', () => {
     expect(freeformSubmit).toBeDisabled()
   })
 
+  it('[CID:10.4.01] groups multi-question pending prompts by originating stage', async () => {
+    const runId = 'run-contract-human-gate-grouped-prompts'
+    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runRecord = {
+      run_id: runId,
+      flow_name: 'contract-behavior.dot',
+      status: 'running',
+      result: 'running',
+      working_directory: '/tmp/project-contract-behavior/workspace',
+      project_path: '/tmp/project-contract-behavior',
+      git_branch: 'main',
+      git_commit: 'abc1234',
+      model: 'gpt-5',
+      started_at: '2026-03-04T01:00:00Z',
+      ended_at: null,
+      last_error: '',
+      token_usage: 0,
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input)
+        if (url.endsWith('/runs')) {
+          return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(`${runApiPath}/checkpoint`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            checkpoint: {
+              current_node: 'review_gate',
+              completed_nodes: ['start'],
+              retry_counts: {},
+            },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/context`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            context: { 'graph.goal': 'Human gate grouped-prompt contract' },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/artifacts`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            artifacts: [],
+          })
+        }
+        if (url.endsWith(`${runApiPath}/graph`)) {
+          return new Response('<svg xmlns="http://www.w3.org/2000/svg"></svg>', {
+            status: 200,
+            headers: { 'Content-Type': 'image/svg+xml' },
+          })
+        }
+        return jsonResponse({}, { status: 404 })
+      }),
+    )
+
+    class MockEventSource {
+      url: string
+      withCredentials = false
+      readyState = 1
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        if (!url.includes(`${runApiPath}/events`)) {
+          return
+        }
+        setTimeout(() => {
+          this.onopen?.(new Event('open'))
+          this.onmessage?.(new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'human_gate',
+              question_id: 'gate-review-1',
+              node_id: 'review_gate',
+              index: 2,
+              question_type: 'MULTIPLE_CHOICE',
+              prompt: 'Choose deployment strategy',
+              options: [
+                { label: 'Promote', value: 'promote' },
+                { label: 'Rollback', value: 'rollback' },
+              ],
+            }),
+          }))
+          this.onmessage?.(new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'human_gate',
+              question_id: 'gate-review-2',
+              node_id: 'review_gate',
+              index: 2,
+              question_type: 'FREEFORM',
+              prompt: 'Why this strategy?',
+            }),
+          }))
+          this.onmessage?.(new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'human_gate',
+              question_id: 'gate-approval-1',
+              node_id: 'approval_gate',
+              index: 3,
+              question_type: 'CONFIRMATION',
+              prompt: 'Finalize production promotion?',
+            }),
+          }))
+        }, 0)
+      }
+
+      close() {
+        this.readyState = 2
+      }
+
+      addEventListener() {}
+
+      removeEventListener() {}
+
+      dispatchEvent() {
+        return false
+      }
+    }
+
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'runs',
+        selectedRunId: runId,
+        runtimeStatus: 'running',
+      }))
+    })
+
+    render(<RunsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('run-pending-human-gate-group')).toHaveLength(2)
+    })
+
+    const groups = screen.getAllByTestId('run-pending-human-gate-group')
+    const reviewGroup = groups.find((group) =>
+      within(group).getByTestId('run-pending-human-gate-group-heading').textContent?.includes('review_gate'),
+    )
+    const approvalGroup = groups.find((group) =>
+      within(group).getByTestId('run-pending-human-gate-group-heading').textContent?.includes('approval_gate'),
+    )
+
+    expect(reviewGroup).toBeTruthy()
+    expect(approvalGroup).toBeTruthy()
+
+    const reviewScope = within(reviewGroup as HTMLElement)
+    expect(reviewScope.getAllByTestId('run-pending-human-gate-item')).toHaveLength(2)
+    expect(reviewScope.getByText(/Choose deployment strategy/)).toBeVisible()
+    expect(reviewScope.getByText(/Why this strategy\?/)).toBeVisible()
+
+    const approvalScope = within(approvalGroup as HTMLElement)
+    expect(approvalScope.getAllByTestId('run-pending-human-gate-item')).toHaveLength(1)
+    expect(approvalScope.getByText(/Finalize production promotion\?/)).toBeVisible()
+  })
+
   it('[CID:10.3.02] renders timeout/default-applied/skipped provenance in run timeline summaries', async () => {
     const runId = 'run-contract-human-gate-provenance'
     const runApiPath = `/pipelines/${encodeURIComponent(runId)}`

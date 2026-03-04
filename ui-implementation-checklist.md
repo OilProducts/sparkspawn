@@ -287,7 +287,8 @@ Status key:
   - Evidence (2026-03-04): Evaluator `pass`; added frontend contract `CID:10.3.03` to assert timeout/default and explicit-answer summary fallbacks when `outcome_provenance` is omitted, with fallback inference implemented in `RunsPanel` and contract bridge coverage in `tests/contracts/frontend/test_human_gate_discoverability_contracts.py`.
 
 ### 10.4 Multi-Question and Inform Messages
-- [ ] [10.4-01] Support grouped multi-question prompts when emitted by backend.
+- [x] [10.4-01] Support grouped multi-question prompts when emitted by backend.
+  - Evidence (2026-03-04): Evaluator `pass`; `RunsPanel` now retains multiple pending prompts per stage entity and renders grouped stage cards in the pending-human-gates panel, covered by frontend contract `CID:10.4.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_human_gate_discoverability_contracts.py`) plus screenshot-based visual QA using `frontend/artifacts/ui-smoke/10b-human-gate-discoverability-runs.png`, `frontend/artifacts/ui-smoke/10c-human-gate-yes-no-confirmation-semantics.png`, and `frontend/artifacts/ui-smoke/10d-human-gate-freeform-interaction.png`.
 - [ ] [10.4-02] Display interviewer inform messages in context of originating stage.
 - [ ] [10.4-03] Preserve order and auditability of grouped interactions.
 

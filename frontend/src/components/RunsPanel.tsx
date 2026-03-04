@@ -121,6 +121,12 @@ interface PendingInterviewGate {
     }>
 }
 
+interface PendingInterviewGateGroup {
+    key: string
+    heading: string
+    gates: PendingInterviewGate[]
+}
+
 const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
     PipelineStarted: 'lifecycle',
     PipelineCompleted: 'lifecycle',
@@ -1375,52 +1381,55 @@ export function RunsPanel() {
         return entries
     }, [filteredTimelineEvents, retryCorrelationEntityKeys])
     const pendingInterviewGates = useMemo(() => {
-        const latestInterviewEventByEntity = new Map<string, TimelineEventEntry>()
+        const closedEntityKeys = new Set<string>()
+        const pendingGates: PendingInterviewGate[] = []
+        const pendingGateKeys = new Set<string>()
         for (const event of timelineEvents) {
             if (event.category !== 'interview') {
                 continue
             }
             const entityKey = timelineEntityKey(event) || `event:${event.id}`
-            if (!latestInterviewEventByEntity.has(entityKey)) {
-                latestInterviewEventByEntity.set(entityKey, event)
+            if (closedEntityKeys.has(entityKey)) {
+                continue
             }
-        }
+            if (event.type === 'InterviewCompleted' || event.type === 'InterviewTimeout') {
+                closedEntityKeys.add(entityKey)
+                continue
+            }
+            if (event.type !== 'InterviewStarted' && event.type !== 'human_gate') {
+                continue
+            }
 
-        const pendingGates: PendingInterviewGate[] = []
-        const pendingGateKeys = new Set<string>()
-        for (const event of latestInterviewEventByEntity.values()) {
-            if (event.type === 'InterviewStarted' || event.type === 'human_gate') {
-                const questionIdValue = event.payload.question_id
-                const questionId = typeof questionIdValue === 'string' && questionIdValue.trim().length > 0
-                    ? questionIdValue.trim()
-                    : null
-                const questionType = pendingGateQuestionTypeFromPayload(event.payload)
-                const payloadOptions = pendingGateOptionsFromPayload(event.payload)
-                const options = payloadOptions.length > 0
-                    ? payloadOptions
-                    : pendingGateSemanticFallbackOptions(questionType)
-                const questionPrompt = event.payload.question
-                const gatePrompt = event.payload.prompt
-                const prompt = typeof questionPrompt === 'string' && questionPrompt.trim().length > 0
-                    ? questionPrompt.trim()
-                    : typeof gatePrompt === 'string' && gatePrompt.trim().length > 0
-                        ? gatePrompt.trim()
+            const questionIdValue = event.payload.question_id
+            const questionId = typeof questionIdValue === 'string' && questionIdValue.trim().length > 0
+                ? questionIdValue.trim()
+                : null
+            const questionType = pendingGateQuestionTypeFromPayload(event.payload)
+            const payloadOptions = pendingGateOptionsFromPayload(event.payload)
+            const options = payloadOptions.length > 0
+                ? payloadOptions
+                : pendingGateSemanticFallbackOptions(questionType)
+            const questionPrompt = event.payload.question
+            const gatePrompt = event.payload.prompt
+            const prompt = typeof questionPrompt === 'string' && questionPrompt.trim().length > 0
+                ? questionPrompt.trim()
+                : typeof gatePrompt === 'string' && gatePrompt.trim().length > 0
+                    ? gatePrompt.trim()
                     : event.summary
-                const dedupeKey = `${event.nodeId ?? ''}::${prompt.toLowerCase()}`
-                if (pendingGateKeys.has(dedupeKey)) {
-                    continue
-                }
-                pendingGateKeys.add(dedupeKey)
-                pendingGates.push({
-                    eventId: event.id,
-                    nodeId: event.nodeId,
-                    stageIndex: event.stageIndex,
-                    prompt,
-                    questionId,
-                    questionType,
-                    options,
-                })
+            const dedupeKey = `${event.nodeId ?? ''}::${prompt.toLowerCase()}`
+            if (pendingGateKeys.has(dedupeKey)) {
+                continue
             }
+            pendingGateKeys.add(dedupeKey)
+            pendingGates.push({
+                eventId: event.id,
+                nodeId: event.nodeId,
+                stageIndex: event.stageIndex,
+                prompt,
+                questionId,
+                questionType,
+                options,
+            })
         }
         return pendingGates
     }, [timelineEvents])
@@ -1428,6 +1437,23 @@ export function RunsPanel() {
         () => pendingInterviewGates.filter((gate) => !gate.questionId || !answeredGateIds[gate.questionId]),
         [pendingInterviewGates, answeredGateIds]
     )
+    const groupedPendingInterviewGates = useMemo(() => {
+        const grouped = new Map<string, PendingInterviewGateGroup>()
+        for (const gate of visiblePendingInterviewGates) {
+            const key = `${gate.nodeId ?? 'human-gate'}::${gate.stageIndex !== null ? String(gate.stageIndex) : 'na'}`
+            if (!grouped.has(key)) {
+                const headingNode = gate.nodeId ?? 'human gate'
+                const headingStage = gate.stageIndex !== null ? ` (index ${gate.stageIndex})` : ''
+                grouped.set(key, {
+                    key,
+                    heading: `${headingNode}${headingStage}`,
+                    gates: [],
+                })
+            }
+            grouped.get(key)?.gates.push(gate)
+        }
+        return Array.from(grouped.values())
+    }, [visiblePendingInterviewGates])
 
     const submitPendingGateAnswer = useCallback(async (gate: PendingInterviewGate, selectedValue: string) => {
         if (!selectedRunTimelineId || !gate.questionId || !selectedValue.trim()) {
@@ -1952,88 +1978,101 @@ export function RunsPanel() {
                                         {pendingGateActionError}
                                     </div>
                                 )}
-                                <ul className="mt-2 space-y-1">
-                                    {visiblePendingInterviewGates.map((gate) => {
-                                        const freeformAnswer = gate.questionId
-                                            ? freeformAnswersByGateId[gate.questionId] ?? ''
-                                            : ''
-                                        return (
-                                            <li key={gate.eventId} data-testid="run-pending-human-gate-item" className="text-xs text-amber-900">
-                                                <div>
-                                                    {gate.prompt}
-                                                    {gate.nodeId ? ` (${gate.nodeId}${gate.stageIndex !== null ? `, index ${gate.stageIndex}` : ''})` : ''}
-                                                </div>
-                                                {gate.questionId && gate.questionType === 'FREEFORM' && (
-                                                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                                                        <input
-                                                            type="text"
-                                                            data-testid={`run-pending-human-gate-freeform-input-${gate.questionId}`}
-                                                            value={freeformAnswer}
-                                                            onChange={(event) => {
-                                                                const nextValue = event.target.value
-                                                                setFreeformAnswersByGateId((previous) => ({
-                                                                    ...previous,
-                                                                    [gate.questionId!]: nextValue,
-                                                                }))
-                                                            }}
-                                                            disabled={submittingGateIds[gate.questionId] === true}
-                                                            placeholder="Type answer..."
-                                                            className="h-7 min-w-[18rem] rounded border border-amber-500/40 bg-white px-2 text-[11px] text-amber-900 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:cursor-not-allowed disabled:opacity-70"
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            data-testid={`run-pending-human-gate-freeform-submit-${gate.questionId}`}
-                                                            onClick={() => {
-                                                                void submitPendingGateAnswer(gate, freeformAnswer)
-                                                            }}
-                                                            disabled={submittingGateIds[gate.questionId] === true || freeformAnswer.trim().length === 0}
-                                                            className="inline-flex h-7 items-center rounded border border-amber-500/50 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                        >
-                                                            Submit
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {gate.questionId && gate.questionType !== 'FREEFORM' && gate.options.length > 0 && (
-                                                    <div className="mt-1 flex flex-wrap gap-1.5">
-                                                        {gate.options.map((option) => (
-                                                            <div key={option.value} className="space-y-1">
-                                                                <button
-                                                                    type="button"
-                                                                    data-testid={`run-pending-human-gate-answer-${option.value}`}
-                                                                    onClick={() => {
-                                                                        void submitPendingGateAnswer(gate, option.value)
-                                                                    }}
-                                                                    disabled={submittingGateIds[gate.questionId!] === true}
-                                                                    className="inline-flex h-6 items-center rounded border border-amber-500/50 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                >
-                                                                    {option.label}
-                                                                </button>
-                                                                {(() => {
-                                                                    const semanticHint = pendingGateSemanticHint(gate.questionType, option.value)
-                                                                    const showMultipleChoiceMetadata = gate.questionType === 'MULTIPLE_CHOICE'
-                                                                        && (option.key || option.description)
-                                                                    if (!showMultipleChoiceMetadata && !semanticHint) {
-                                                                        return null
-                                                                    }
-                                                                    return (
-                                                                        <div
-                                                                            data-testid={`run-pending-human-gate-option-metadata-${option.value}`}
-                                                                            className="flex items-center gap-1 text-[10px] text-amber-900/90"
-                                                                        >
-                                                                            {showMultipleChoiceMetadata && option.key && <span className="font-mono">[{option.key}]</span>}
-                                                                            {showMultipleChoiceMetadata && option.description && <span>{option.description}</span>}
-                                                                            {semanticHint && <span>{semanticHint}</span>}
+                                <div className="mt-2 space-y-2">
+                                    {groupedPendingInterviewGates.map((group) => (
+                                        <div
+                                            key={group.key}
+                                            data-testid="run-pending-human-gate-group"
+                                            className="rounded border border-amber-500/30 bg-amber-100/40 px-2 py-1.5"
+                                        >
+                                            <div
+                                                data-testid="run-pending-human-gate-group-heading"
+                                                className="text-[11px] font-semibold uppercase tracking-wide text-amber-700"
+                                            >
+                                                {group.heading}
+                                            </div>
+                                            <ul className="mt-1 space-y-1">
+                                                {group.gates.map((gate) => {
+                                                    const freeformAnswer = gate.questionId
+                                                        ? freeformAnswersByGateId[gate.questionId] ?? ''
+                                                        : ''
+                                                    return (
+                                                        <li key={gate.eventId} data-testid="run-pending-human-gate-item" className="text-xs text-amber-900">
+                                                            <div>{gate.prompt}</div>
+                                                            {gate.questionId && gate.questionType === 'FREEFORM' && (
+                                                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                                                    <input
+                                                                        type="text"
+                                                                        data-testid={`run-pending-human-gate-freeform-input-${gate.questionId}`}
+                                                                        value={freeformAnswer}
+                                                                        onChange={(event) => {
+                                                                            const nextValue = event.target.value
+                                                                            setFreeformAnswersByGateId((previous) => ({
+                                                                                ...previous,
+                                                                                [gate.questionId!]: nextValue,
+                                                                            }))
+                                                                        }}
+                                                                        disabled={submittingGateIds[gate.questionId] === true}
+                                                                        placeholder="Type answer..."
+                                                                        className="h-7 min-w-[18rem] rounded border border-amber-500/40 bg-white px-2 text-[11px] text-amber-900 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:cursor-not-allowed disabled:opacity-70"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        data-testid={`run-pending-human-gate-freeform-submit-${gate.questionId}`}
+                                                                        onClick={() => {
+                                                                            void submitPendingGateAnswer(gate, freeformAnswer)
+                                                                        }}
+                                                                        disabled={submittingGateIds[gate.questionId] === true || freeformAnswer.trim().length === 0}
+                                                                        className="inline-flex h-7 items-center rounded border border-amber-500/50 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    >
+                                                                        Submit
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                            {gate.questionId && gate.questionType !== 'FREEFORM' && gate.options.length > 0 && (
+                                                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                                                    {gate.options.map((option) => (
+                                                                        <div key={option.value} className="space-y-1">
+                                                                            <button
+                                                                                type="button"
+                                                                                data-testid={`run-pending-human-gate-answer-${option.value}`}
+                                                                                onClick={() => {
+                                                                                    void submitPendingGateAnswer(gate, option.value)
+                                                                                }}
+                                                                                disabled={submittingGateIds[gate.questionId!] === true}
+                                                                                className="inline-flex h-6 items-center rounded border border-amber-500/50 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                            >
+                                                                                {option.label}
+                                                                            </button>
+                                                                            {(() => {
+                                                                                const semanticHint = pendingGateSemanticHint(gate.questionType, option.value)
+                                                                                const showMultipleChoiceMetadata = gate.questionType === 'MULTIPLE_CHOICE'
+                                                                                    && (option.key || option.description)
+                                                                                if (!showMultipleChoiceMetadata && !semanticHint) {
+                                                                                    return null
+                                                                                }
+                                                                                return (
+                                                                                    <div
+                                                                                        data-testid={`run-pending-human-gate-option-metadata-${option.value}`}
+                                                                                        className="flex items-center gap-1 text-[10px] text-amber-900/90"
+                                                                                    >
+                                                                                        {showMultipleChoiceMetadata && option.key && <span className="font-mono">[{option.key}]</span>}
+                                                                                        {showMultipleChoiceMetadata && option.description && <span>{option.description}</span>}
+                                                                                        {semanticHint && <span>{semanticHint}</span>}
+                                                                                    </div>
+                                                                                )
+                                                                            })()}
                                                                         </div>
-                                                                    )
-                                                                })()}
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </li>
-                                        )
-                                    })}
-                                </ul>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </li>
+                                                    )
+                                                })}
+                                            </ul>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                         {!timelineError && (
