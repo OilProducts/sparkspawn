@@ -15,3 +15,7 @@ def test_endpoint_integration_happy_path_and_common_error_cases_item_12_1_03() -
 
 def test_degraded_state_ux_when_endpoint_unavailable_or_incompatible_item_12_2_01() -> None:
     assert_frontend_behavior_contract_passed("12.2.01")
+
+
+def test_non_dependent_ui_surfaces_remain_functional_under_partial_api_failure_item_12_2_02() -> None:
+    assert_frontend_behavior_contract_passed("12.2.02")

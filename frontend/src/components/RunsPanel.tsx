@@ -957,6 +957,25 @@ export function RunsPanel() {
         if (scopedRuns.length === 0) return null
         return scopedRuns.find((run) => run.run_id === selectedRunId) || scopedRuns[0]
     }, [scopedRuns, selectedRunId])
+    const degradedDetailPanels = useMemo(() => {
+        const panels: string[] = []
+        if (checkpointError) {
+            panels.push('checkpoint')
+        }
+        if (contextError) {
+            panels.push('context')
+        }
+        if (artifactError) {
+            panels.push('artifacts')
+        }
+        if (graphvizError) {
+            panels.push('graph visualization')
+        }
+        if (timelineError) {
+            panels.push('event timeline')
+        }
+        return panels
+    }, [checkpointError, contextError, artifactError, graphvizError, timelineError])
 
     const metadataFreshness = computeRunMetadataFreshness({
         isLoading,
@@ -1727,6 +1746,17 @@ export function RunsPanel() {
                             <div data-testid="run-summary-last-error" className="break-all"><span className="font-medium">Last Error:</span> {selectedRunSummary.last_error || '—'}</div>
                             <div data-testid="run-summary-token-usage"><span className="font-medium">Tokens:</span> {typeof selectedRunSummary.token_usage === 'number' ? selectedRunSummary.token_usage.toLocaleString() : '—'}</div>
                         </div>
+                    </div>
+                )}
+                {selectedRunSummary && degradedDetailPanels.length > 0 && (
+                    <div
+                        data-testid="run-partial-api-failure-banner"
+                        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700"
+                    >
+                        Some run detail endpoints are unavailable. Non-dependent panels remain functional.
+                        <span className="ml-1 text-xs">
+                            Affected surfaces: {degradedDetailPanels.join(', ')}.
+                        </span>
                     </div>
                 )}
                 {selectedRunSummary && (

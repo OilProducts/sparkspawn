@@ -359,7 +359,8 @@ Status key:
 ### 12.2 Contract Drift Handling
 - [x] [12.2-01] Add degraded-state UX when endpoints are unavailable or incompatible.
   - Evidence (2026-03-04): Evaluator `pass`; `RunStream` now surfaces explicit degraded-state banners when `/status` or selected-run status preflight responses are unavailable/incompatible (`frontend/src/components/RunStream.tsx`), covered by frontend contract `CID:12.2.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`) with screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png` and `frontend/artifacts/ui-smoke/08b-runs-panel-populated-summary.png`.
-- [ ] [12.2-02] Ensure non-dependent UI surfaces remain functional under partial API failure.
+- [x] [12.2-02] Ensure non-dependent UI surfaces remain functional under partial API failure.
+  - Evidence (2026-03-04): Evaluator `pass`; `RunsPanel` now surfaces a partial-failure banner with affected surfaces while keeping non-dependent panels interactive (`frontend/src/components/RunsPanel.tsx`), covered by frontend contract `CID:12.2.02` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`) and screenshot-based visual QA on `frontend/artifacts/ui-smoke/08b-runs-panel-populated-summary.png`, `frontend/artifacts/ui-smoke/08d-runs-panel-checkpoint-viewer.png`, `frontend/artifacts/ui-smoke/08m-runs-panel-artifact-browser.png`, and `frontend/artifacts/ui-smoke/08n-runs-panel-graphviz-viewer.png`.
 - [ ] [12.2-03] Ensure save paths remain non-destructive during API contract drift.
 
 ### 12.3 Project Scope Contract

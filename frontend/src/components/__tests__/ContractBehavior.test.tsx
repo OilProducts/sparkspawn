@@ -563,6 +563,117 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByTestId('global-save-state-indicator')).toHaveTextContent('Idle')
   })
 
+  it('[CID:12.2.02] keeps non-dependent run-inspector surfaces functional under partial API failure', async () => {
+    const runId = 'run-contract-partial-failure'
+    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runRecord = {
+      run_id: runId,
+      flow_name: 'contract-behavior.dot',
+      status: 'running',
+      result: 'running',
+      working_directory: '/tmp/project-contract-behavior/workspace',
+      project_path: '/tmp/project-contract-behavior',
+      git_branch: 'main',
+      git_commit: 'abc1234',
+      model: 'gpt-5',
+      started_at: '2026-03-04T01:00:00Z',
+      ended_at: null,
+      last_error: '',
+      token_usage: 0,
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input)
+        if (url.endsWith('/runs')) {
+          return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(`${runApiPath}/checkpoint`)) {
+          return jsonResponse({ detail: 'backend unavailable' }, { status: 503 })
+        }
+        if (url.endsWith(`${runApiPath}/context`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            context: {
+              'graph.goal': 'Contract drift handling',
+              'run.outcome': 'success',
+            },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/artifacts`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            artifacts: [],
+          })
+        }
+        if (url.endsWith(`${runApiPath}/graph`)) {
+          return new Response('<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10" /></svg>', {
+            status: 200,
+            headers: { 'Content-Type': 'image/svg+xml' },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/questions`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            questions: [],
+          })
+        }
+        return jsonResponse({}, { status: 404 })
+      }),
+    )
+
+    class MockEventSource {
+      url: string
+      withCredentials = false
+      readyState = 1
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        setTimeout(() => {
+          this.onopen?.(new Event('open'))
+        }, 0)
+      }
+
+      close() {}
+      addEventListener() {}
+      removeEventListener() {}
+      dispatchEvent(): boolean {
+        return false
+      }
+    }
+
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+
+    act(() => {
+      useStore.getState().setViewMode('runs')
+    })
+
+    render(<RunsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-checkpoint-error')).toBeVisible()
+    })
+
+    expect(screen.getByTestId('run-checkpoint-error')).toHaveTextContent('Unable to load checkpoint (HTTP 503).')
+    expect(screen.getByTestId('run-context-panel')).toBeVisible()
+    expect(screen.getByTestId('run-context-table')).toBeVisible()
+    expect(screen.getByText('graph.goal')).toBeVisible()
+    expect(screen.getByText('run.outcome')).toBeVisible()
+    expect(screen.getByTestId('run-artifact-panel')).toBeVisible()
+    await waitFor(() => {
+      expect(screen.getByTestId('run-graphviz-viewer-image')).toBeVisible()
+    })
+    expect(screen.getByTestId('run-partial-api-failure-banner')).toHaveTextContent(
+      'Some run detail endpoints are unavailable.',
+    )
+    expect(screen.getByTestId('run-context-refresh-button')).toBeEnabled()
+    expect(screen.getByTestId('run-artifact-refresh-button')).toBeEnabled()
+  })
+
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {
     renderSelectedEdgeSidebar()
     const edgeForm = await screen.findByTestId('edge-structured-form')
