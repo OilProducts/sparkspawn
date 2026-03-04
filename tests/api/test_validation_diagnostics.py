@@ -3,28 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 from attractor.dsl.models import Diagnostic, DiagnosticSeverity, DotAttribute, DotValueType
-
-
-FLOW = """
-digraph G {
-    start [shape=Mdiamond]
-    done [shape=Msquare]
-    start -> done
-}
-"""
-
-
-def _close_task_immediately(coro):
-    coro.close()
-
-    class _DummyTask:
-        pass
-
-    return _DummyTask()
+from tests.api._support import (
+    SIMPLE_FLOW as FLOW,
+    close_task_immediately as _close_task_immediately,
+)
 
 
 def _warning_info_diagnostics() -> list[Diagnostic]:

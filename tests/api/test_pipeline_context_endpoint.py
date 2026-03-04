@@ -3,42 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 from attractor.engine import Checkpoint, save_checkpoint
-
-FLOW = """
-digraph G {
-    start [shape=Mdiamond]
-    done [shape=Msquare]
-    start -> done
-}
-"""
-
-
-def _close_task_immediately(coro):
-    coro.close()
-
-    class _DummyTask:
-        pass
-
-    return _DummyTask()
-
-
-def _start_pipeline(api_client: TestClient, working_directory: Path) -> dict:
-    response = api_client.post(
-        "/pipelines",
-        json={
-            "flow_content": FLOW,
-            "working_directory": str(working_directory),
-            "backend": "codex",
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "started"
-    return payload
+from tests.api._support import (
+    close_task_immediately as _close_task_immediately,
+    start_pipeline as _start_pipeline,
+)
 
 
 def test_get_pipeline_context_returns_404_for_unknown_pipeline(

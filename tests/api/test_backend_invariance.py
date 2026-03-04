@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import time
 from typing import List
 
 import pytest
@@ -10,41 +9,17 @@ from fastapi.testclient import TestClient
 import attractor.api.server as server
 from attractor.engine import Context, load_checkpoint
 from attractor.engine.outcome import Outcome, OutcomeStatus
-
-
-FLOW = """
-digraph G {
-    start [shape=Mdiamond]
-    done [shape=Msquare]
-    start -> done
-}
-"""
-
-
-def _close_task_immediately(coro):
-    coro.close()
-
-    class _DummyTask:
-        pass
-
-    return _DummyTask()
+from tests.api._support import (
+    SIMPLE_FLOW as FLOW,
+    close_task_immediately as _close_task_immediately,
+    wait_for_pipeline_completion as _wait_for_pipeline_completion,
+)
 
 
 def _start_pipeline_via_http(api_client: TestClient, payload: dict) -> dict:
     response = api_client.post("/pipelines", json=payload)
     assert response.status_code == 200
     return response.json()
-
-
-def _wait_for_pipeline_completion(api_client: TestClient, pipeline_id: str) -> dict:
-    for _ in range(400):
-        response = api_client.get(f"/pipelines/{pipeline_id}")
-        assert response.status_code == 200
-        payload = response.json()
-        if payload["status"] != "running":
-            return payload
-        time.sleep(0.01)
-    raise AssertionError("timed out waiting for pipeline completion")
 
 
 def test_pipeline_start_request_accepts_dot_source_alias(

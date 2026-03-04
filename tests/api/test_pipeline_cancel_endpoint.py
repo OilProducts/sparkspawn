@@ -1,55 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-import time
 
 import pytest
-from fastapi.testclient import TestClient
 
 import attractor.api.server as server
-
-FLOW = """
-digraph G {
-    start [shape=Mdiamond]
-    done [shape=Msquare]
-    start -> done
-}
-"""
-
-
-def _close_task_immediately(coro):
-    coro.close()
-
-    class _DummyTask:
-        pass
-
-    return _DummyTask()
-
-
-def _start_pipeline(api_client: TestClient, working_directory: Path) -> dict:
-    response = api_client.post(
-        "/pipelines",
-        json={
-            "flow_content": FLOW,
-            "working_directory": str(working_directory),
-            "backend": "codex",
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "started"
-    return payload
-
-
-def _wait_for_pipeline_terminal_status(api_client: TestClient, pipeline_id: str) -> str:
-    for _ in range(400):
-        response = api_client.get(f"/pipelines/{pipeline_id}")
-        assert response.status_code == 200
-        status = str(response.json()["status"])
-        if status != "running":
-            return status
-        time.sleep(0.01)
-    raise AssertionError("timed out waiting for pipeline completion")
+from tests.api._support import (
+    close_task_immediately as _close_task_immediately,
+    start_pipeline as _start_pipeline,
+    wait_for_pipeline_terminal_status as _wait_for_pipeline_terminal_status,
+)
 
 
 def test_cancel_pipeline_returns_404_for_unknown_pipeline(

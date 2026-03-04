@@ -6,23 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
-
-FLOW = """
-digraph G {
-    start [shape=Mdiamond]
-    done [shape=Msquare]
-    start -> done
-}
-"""
-
-
-def _close_task_immediately(coro):
-    coro.close()
-
-    class _DummyTask:
-        pass
-
-    return _DummyTask()
+from tests.api._support import (
+    close_task_immediately as _close_task_immediately,
+    start_pipeline as _start_pipeline,
+)
 
 
 def _seed_run(
@@ -33,18 +20,7 @@ def _seed_run(
     runs_root = tmp_path / "runs"
     monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    response = api_client.post(
-        "/pipelines",
-        json={
-            "flow_content": FLOW,
-            "working_directory": str(tmp_path / "work"),
-            "backend": "codex",
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "started"
-    run_id = str(payload["pipeline_id"])
+    run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
     return run_id, runs_root / run_id
 
 

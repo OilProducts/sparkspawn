@@ -3,41 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 import attractor.api.server as server
-
-FLOW = """
-digraph G {
-    start [shape=Mdiamond]
-    done [shape=Msquare]
-    start -> done
-}
-"""
-
-
-def _close_task_immediately(coro):
-    coro.close()
-
-    class _DummyTask:
-        pass
-
-    return _DummyTask()
-
-
-def _start_pipeline(api_client: TestClient, working_directory: Path) -> str:
-    response = api_client.post(
-        "/pipelines",
-        json={
-            "flow_content": FLOW,
-            "working_directory": str(working_directory),
-            "backend": "codex",
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "started"
-    return str(payload["pipeline_id"])
+from tests.api._support import (
+    close_task_immediately as _close_task_immediately,
+    start_pipeline as _start_pipeline,
+)
 
 
 def test_list_pipeline_questions_returns_404_for_unknown_pipeline(
@@ -60,7 +31,7 @@ def test_list_pipeline_questions_returns_only_pending_questions_for_requested_ru
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    run_id = _start_pipeline(api_client, tmp_path / "work")
+    run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
 
     broker = server.HumanGateBroker()
     with broker._lock:
@@ -109,7 +80,7 @@ def test_list_pipeline_questions_excludes_answered_questions_for_requested_run(
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    run_id = _start_pipeline(api_client, tmp_path / "work")
+    run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
 
     broker = server.HumanGateBroker()
     with broker._lock:
@@ -175,7 +146,7 @@ def test_submit_pipeline_answer_accepts_pending_question_for_pipeline(
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    run_id = _start_pipeline(api_client, tmp_path / "work")
+    run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
 
     broker = server.HumanGateBroker()
     with broker._lock:
@@ -209,8 +180,8 @@ def test_submit_pipeline_answer_rejects_question_owned_by_other_pipeline(
 ) -> None:
     monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    run_a = _start_pipeline(api_client, tmp_path / "work-a")
-    run_b = _start_pipeline(api_client, tmp_path / "work-b")
+    run_a = str(_start_pipeline(api_client, tmp_path / "work-a")["pipeline_id"])
+    run_b = str(_start_pipeline(api_client, tmp_path / "work-b")["pipeline_id"])
 
     broker = server.HumanGateBroker()
     with broker._lock:
