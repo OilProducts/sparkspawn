@@ -1176,4 +1176,206 @@ describe('Frontend contract behavior', () => {
       expect(screen.queryByTestId('run-pending-human-gate-item')).not.toBeInTheDocument()
     })
   })
+
+  it('[CID:10.2.04] covers each supported human-gate question type with type-specific UI affordances', async () => {
+    const runId = 'run-contract-human-gate-type-matrix'
+    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runRecord = {
+      run_id: runId,
+      flow_name: 'contract-behavior.dot',
+      status: 'running',
+      result: 'running',
+      working_directory: '/tmp/project-contract-behavior/workspace',
+      project_path: '/tmp/project-contract-behavior',
+      git_branch: 'main',
+      git_commit: 'abc1234',
+      model: 'gpt-5',
+      started_at: '2026-03-04T01:00:00Z',
+      ended_at: null,
+      last_error: '',
+      token_usage: 0,
+    }
+    const multipleChoiceGateId = 'gate-matrix-multiple-choice'
+    const yesNoGateId = 'gate-matrix-yes-no'
+    const confirmationGateId = 'gate-matrix-confirmation'
+    const freeformGateId = 'gate-matrix-freeform'
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input)
+        if (url.endsWith('/runs')) {
+          return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(`${runApiPath}/checkpoint`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            checkpoint: {
+              current_node: 'review_gate',
+              completed_nodes: ['start'],
+              retry_counts: {},
+            },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/context`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            context: { 'graph.goal': 'Human gate question type matrix contract' },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/artifacts`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            artifacts: [],
+          })
+        }
+        if (url.endsWith(`${runApiPath}/graph`)) {
+          return new Response('<svg xmlns="http://www.w3.org/2000/svg"></svg>', {
+            status: 200,
+            headers: { 'Content-Type': 'image/svg+xml' },
+          })
+        }
+        return jsonResponse({}, { status: 404 })
+      }),
+    )
+
+    class MockEventSource {
+      url: string
+      withCredentials = false
+      readyState = 1
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        if (!url.includes(`${runApiPath}/events`)) {
+          return
+        }
+        setTimeout(() => {
+          this.onopen?.(new Event('open'))
+          this.onmessage?.(new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'human_gate',
+              question_id: multipleChoiceGateId,
+              question_type: 'MULTIPLE_CHOICE',
+              node_id: 'review_gate_multiple',
+              prompt: 'Choose deployment strategy',
+              options: [
+                {
+                  key: 'P',
+                  label: 'Promote',
+                  value: 'promote',
+                  description: 'Advance this build to production.',
+                },
+                {
+                  key: 'H',
+                  label: 'Hold',
+                  value: 'hold',
+                  description: 'Pause rollout and gather more evidence.',
+                },
+              ],
+            }),
+          }))
+          this.onmessage?.(new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'human_gate',
+              question_id: yesNoGateId,
+              question_type: 'YES_NO',
+              node_id: 'review_gate_yes_no',
+              prompt: 'Continue migration?',
+            }),
+          }))
+          this.onmessage?.(new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'human_gate',
+              question_id: confirmationGateId,
+              question_type: 'CONFIRMATION',
+              node_id: 'release_gate_confirmation',
+              prompt: 'Finalize promotion?',
+            }),
+          }))
+          this.onmessage?.(new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'human_gate',
+              question_id: freeformGateId,
+              question_type: 'FREEFORM',
+              node_id: 'release_gate_freeform',
+              prompt: 'Add release notes before promotion.',
+            }),
+          }))
+        }, 0)
+      }
+
+      close() {
+        this.readyState = 2
+      }
+
+      addEventListener() {}
+
+      removeEventListener() {}
+
+      dispatchEvent() {
+        return false
+      }
+    }
+
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'runs',
+        selectedRunId: runId,
+        runtimeStatus: 'running',
+      }))
+    })
+
+    render(<RunsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-pending-human-gates-panel')).toBeVisible()
+    })
+
+    await waitFor(() => {
+      const pendingItems = screen.getAllByTestId('run-pending-human-gate-item')
+      expect(pendingItems.some((item) => item.textContent?.includes('Choose deployment strategy'))).toBe(true)
+      expect(pendingItems.some((item) => item.textContent?.includes('Continue migration?'))).toBe(true)
+      expect(pendingItems.some((item) => item.textContent?.includes('Finalize promotion?'))).toBe(true)
+      expect(pendingItems.some((item) => item.textContent?.includes('Add release notes before promotion.'))).toBe(true)
+    })
+
+    const pendingItems = screen.getAllByTestId('run-pending-human-gate-item')
+    const multipleChoiceItem = pendingItems.find((item) => item.textContent?.includes('Choose deployment strategy'))
+    const yesNoItem = pendingItems.find((item) => item.textContent?.includes('Continue migration?'))
+    const confirmationItem = pendingItems.find((item) => item.textContent?.includes('Finalize promotion?'))
+
+    expect(multipleChoiceItem).toBeTruthy()
+    expect(yesNoItem).toBeTruthy()
+    expect(confirmationItem).toBeTruthy()
+
+    const multipleChoiceScope = within(multipleChoiceItem as HTMLElement)
+    expect(multipleChoiceScope.getByRole('button', { name: 'Promote' })).toBeVisible()
+    expect(screen.getByTestId('run-pending-human-gate-option-metadata-promote')).toHaveTextContent('[P]')
+    expect(screen.getByTestId('run-pending-human-gate-option-metadata-promote')).toHaveTextContent(
+      'Advance this build to production.',
+    )
+
+    const yesNoScope = within(yesNoItem as HTMLElement)
+    expect(yesNoScope.getByRole('button', { name: 'Yes' })).toBeVisible()
+    expect(yesNoScope.getByRole('button', { name: 'No' })).toBeVisible()
+    expect(yesNoScope.getByText('Sends YES')).toBeVisible()
+    expect(yesNoScope.getByText('Sends NO')).toBeVisible()
+
+    const confirmationScope = within(confirmationItem as HTMLElement)
+    expect(confirmationScope.getByRole('button', { name: 'Confirm' })).toBeVisible()
+    expect(confirmationScope.getByRole('button', { name: 'Cancel' })).toBeVisible()
+    expect(confirmationScope.getByText('Sends YES')).toBeVisible()
+    expect(confirmationScope.getByText('Sends NO')).toBeVisible()
+
+    const freeformInput = screen.getByTestId(`run-pending-human-gate-freeform-input-${freeformGateId}`)
+    const freeformSubmit = screen.getByTestId(`run-pending-human-gate-freeform-submit-${freeformGateId}`)
+    expect(freeformInput).toBeVisible()
+    expect(freeformSubmit).toBeDisabled()
+  })
 })
