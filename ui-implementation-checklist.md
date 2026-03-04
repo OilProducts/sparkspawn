@@ -263,7 +263,8 @@ Status key:
 ## 10. Human-in-the-Loop UX
 
 ### 10.1 Prompt Handling
-- [ ] [10.1-01] Ensure pending human gates are discoverable in execution and run views.
+- [x] [10.1-01] Ensure pending human gates are discoverable in execution and run views.
+  - Evidence (2026-03-04): Evaluator `pass`; `RunsPanel` now surfaces pending gates from both `InterviewStarted` and `human_gate` events with duplicate suppression, covered by frontend contract `CID:10.1.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_human_gate_discoverability_contracts.py`) and UI smoke visual QA screenshots `frontend/artifacts/ui-smoke/10a-human-gate-discoverability.png` and `frontend/artifacts/ui-smoke/10b-human-gate-discoverability-runs.png`.
 - [ ] [10.1-02] Ensure operator can answer prompts without leaving UI.
 
 ### 10.2 Question Types

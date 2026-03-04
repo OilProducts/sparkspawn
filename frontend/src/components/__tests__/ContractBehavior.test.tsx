@@ -1,4 +1,6 @@
+import { ExecutionControls } from '@/components/ExecutionControls'
 import { GraphSettings } from '@/components/GraphSettings'
+import { RunsPanel } from '@/components/RunsPanel'
 import { Sidebar } from '@/components/Sidebar'
 import { TaskNode } from '@/components/TaskNode'
 import { useStore } from '@/store'
@@ -9,6 +11,23 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const DEFAULT_WORKING_DIRECTORY = './test-app'
+
+const jsonResponse = (payload: unknown, init?: ResponseInit) =>
+  new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  })
+
+const requestUrl = (input: RequestInfo | URL): string => {
+  if (typeof input === 'string') {
+    return input
+  }
+  if (input instanceof URL) {
+    return input.toString()
+  }
+  return input.url
+}
 
 const resetContractState = () => {
   useStore.setState((state) => ({
@@ -442,5 +461,146 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByText('Manager Max Cycles')).toBeVisible()
     expect(screen.getByText('Manager Stop Condition')).toBeVisible()
     expect(screen.getByText('Manager Actions')).toBeVisible()
+  })
+
+  it('[CID:10.1.01] keeps pending human gates discoverable in runs and execution views', async () => {
+    const runId = 'run-contract-human-gate'
+    const pendingPrompt = 'Approve production deploy?'
+    const gateId = 'gate-1'
+    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runRecord = {
+      run_id: runId,
+      flow_name: 'contract-behavior.dot',
+      status: 'running',
+      result: 'running',
+      working_directory: '/tmp/project-contract-behavior/workspace',
+      project_path: '/tmp/project-contract-behavior',
+      git_branch: 'main',
+      git_commit: 'abc1234',
+      model: 'gpt-5',
+      started_at: '2026-03-04T01:00:00Z',
+      ended_at: null,
+      last_error: '',
+      token_usage: 0,
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input)
+        if (url.endsWith('/runs')) {
+          return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(`${runApiPath}/checkpoint`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            checkpoint: {
+              current_node: 'review_gate',
+              completed_nodes: ['start'],
+              retry_counts: {},
+            },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/context`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            context: { 'graph.goal': 'Human gate discoverability contract' },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/artifacts`)) {
+          return jsonResponse({
+            pipeline_id: runId,
+            artifacts: [],
+          })
+        }
+        if (url.endsWith(`${runApiPath}/graph`)) {
+          return new Response('<svg xmlns="http://www.w3.org/2000/svg"></svg>', {
+            status: 200,
+            headers: { 'Content-Type': 'image/svg+xml' },
+          })
+        }
+        return jsonResponse({}, { status: 404 })
+      }),
+    )
+
+    class MockEventSource {
+      url: string
+      withCredentials = false
+      readyState = 1
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        if (!url.includes(`${runApiPath}/events`)) {
+          return
+        }
+        setTimeout(() => {
+          this.onopen?.(new Event('open'))
+          this.onmessage?.(new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'human_gate',
+              question_id: gateId,
+              node_id: 'review_gate',
+              prompt: pendingPrompt,
+              options: [{ label: 'Approve', value: 'approve' }],
+            }),
+          }))
+        }, 0)
+      }
+
+      close() {
+        this.readyState = 2
+      }
+
+      addEventListener() {}
+
+      removeEventListener() {}
+
+      dispatchEvent() {
+        return false
+      }
+    }
+
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'runs',
+        selectedRunId: runId,
+        runtimeStatus: 'running',
+      }))
+    })
+
+    render(<RunsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-pending-human-gates-panel')).toBeVisible()
+    })
+    expect(screen.getByTestId('run-pending-human-gate-item')).toHaveTextContent(pendingPrompt)
+
+    cleanup()
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'execution',
+        selectedRunId: runId,
+        runtimeStatus: 'running',
+        humanGate: {
+          id: gateId,
+          runId,
+          nodeId: 'review_gate',
+          prompt: pendingPrompt,
+          options: [{ label: 'Approve', value: 'approve' }],
+          flowName: 'contract-behavior.dot',
+        },
+      }))
+    })
+    render(<ExecutionControls />)
+
+    expect(screen.getByTestId('execution-pending-human-gate-banner')).toHaveTextContent('Pending human gate')
+    expect(screen.getByTestId('execution-pending-human-gate-banner')).toHaveTextContent(pendingPrompt)
   })
 })

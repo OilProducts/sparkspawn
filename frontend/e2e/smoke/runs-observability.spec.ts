@@ -719,9 +719,11 @@ test("pending human gates are discoverable in execution and runs views for item 
   await page.getByTestId("project-register-button").click()
   await page.getByTestId("nav-mode-runs").click()
 
-  await expect(page.getByTestId("run-pending-human-gates-panel")).toBeVisible()
+  const pendingGatesPanel = page.getByTestId("run-pending-human-gates-panel")
+  await expect(pendingGatesPanel).toBeVisible()
   await expect(page.getByTestId("run-pending-human-gate-item")).toContainText(pendingPrompt)
-  await page.screenshot({ path: screenshotPath("10b-human-gate-discoverability-runs.png"), fullPage: true })
+  await pendingGatesPanel.scrollIntoViewIfNeeded()
+  await pendingGatesPanel.screenshot({ path: screenshotPath("10b-human-gate-discoverability-runs.png") })
 
   await page.getByRole("button", { name: "Open" }).first().click()
   await expect(page.getByTestId("execution-pending-human-gate-banner")).toBeVisible()
@@ -1596,4 +1598,3 @@ test("run artifact browser handles missing files and partial run states for item
   await artifactPanel.scrollIntoViewIfNeeded()
   await artifactPanel.screenshot({ path: screenshotPath("08o-runs-panel-artifact-missing-partial.png") })
 })
-

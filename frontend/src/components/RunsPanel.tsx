@@ -128,6 +128,7 @@ const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
     InterviewStarted: 'interview',
     InterviewCompleted: 'interview',
     InterviewTimeout: 'interview',
+    human_gate: 'interview',
     CheckpointSaved: 'checkpoint',
 }
 
@@ -435,6 +436,14 @@ const timelineSummaryFromEvent = (type: string, payload: Record<string, unknown>
     }
     if (type === 'InterviewTimeout') {
         return `Interview timed out for ${nodeId || 'human gate'}`
+    }
+    if (type === 'human_gate') {
+        const prompt = typeof payload.prompt === 'string' && payload.prompt.trim().length > 0
+            ? payload.prompt.trim()
+            : null
+        return prompt
+            ? `Human gate pending: ${prompt}`
+            : `Human gate pending for ${nodeId || 'unknown'}`
     }
     if (type === 'CheckpointSaved') {
         return `Checkpoint saved at ${nodeId || 'current node'}`
@@ -1202,12 +1211,21 @@ export function RunsPanel() {
         }
 
         const pendingGates: PendingInterviewGate[] = []
+        const pendingGateKeys = new Set<string>()
         for (const event of latestInterviewEventByEntity.values()) {
-            if (event.type === 'InterviewStarted') {
-                const promptCandidate = event.payload.question
-                const prompt = typeof promptCandidate === 'string' && promptCandidate.trim().length > 0
-                    ? promptCandidate.trim()
+            if (event.type === 'InterviewStarted' || event.type === 'human_gate') {
+                const questionPrompt = event.payload.question
+                const gatePrompt = event.payload.prompt
+                const prompt = typeof questionPrompt === 'string' && questionPrompt.trim().length > 0
+                    ? questionPrompt.trim()
+                    : typeof gatePrompt === 'string' && gatePrompt.trim().length > 0
+                        ? gatePrompt.trim()
                     : event.summary
+                const dedupeKey = `${event.nodeId ?? ''}::${prompt.toLowerCase()}`
+                if (pendingGateKeys.has(dedupeKey)) {
+                    continue
+                }
+                pendingGateKeys.add(dedupeKey)
                 pendingGates.push({
                     eventId: event.id,
                     nodeId: event.nodeId,
