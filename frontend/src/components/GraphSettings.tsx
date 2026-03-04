@@ -74,6 +74,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const flowNodes = useNodes()
     const saveTimer = useRef<number | null>(null)
     const hasPendingSave = useRef(false)
+    const autosaveScopeRef = useRef<string | null>(null)
     const flowProviderFallback = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || ''
     const canApplyDefaults = !!activeProjectPath && !!activeFlow && viewMode === 'editor'
     const toolHookPreWarning = getToolHookCommandWarning(graphAttrs['tool_hooks.pre'] || '')
@@ -146,7 +147,15 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     }
 
     useEffect(() => {
-        if (!activeProjectPath || !activeFlow) return
+        if (!activeProjectPath || !activeFlow) {
+            autosaveScopeRef.current = null
+            return
+        }
+        const autosaveScope = `${activeProjectPath}::${activeFlow}`
+        if (autosaveScopeRef.current !== autosaveScope) {
+            autosaveScopeRef.current = autosaveScope
+            return
+        }
         hasPendingSave.current = true
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current)

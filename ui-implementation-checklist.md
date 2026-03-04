@@ -323,7 +323,8 @@ Status key:
 ### 11.4 Extension Attributes
 - [x] [11.4-01] Implement generic advanced key/value editor for non-core attributes.
   - Evidence (2026-03-04): Evaluator `pass`; added reusable non-core key/value editor component (`frontend/src/components/AdvancedKeyValueEditor.tsx`) wired into graph/node/edge inspectors (`frontend/src/components/GraphSettings.tsx`, `frontend/src/components/Sidebar.tsx`) with extension-attr filtering helper (`frontend/src/lib/extensionAttrs.ts`), covered by frontend contract `CID:11.4.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_extension_attribute_editor_contracts.py`) and validated by `just test`.
-- [ ] [11.4-02] Preserve unknown-valid attributes during all save operations.
+- [x] [11.4-02] Preserve unknown-valid attributes during all save operations.
+  - Evidence (2026-03-04): Evaluator `pass`; graph settings autosave now skips destructive first-run save per project+flow scope (`frontend/src/components/GraphSettings.tsx`), and frontend contract `CID:11.4.02` proves graph/node/edge unknown attrs are preserved in save payloads after graph edits (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_extension_attribute_editor_contracts.py`), validated by `just test` plus screenshot-based visual QA on `frontend/artifacts/ui-smoke/02-graph-inspector.png`, `frontend/artifacts/ui-smoke/03-graph-inspector.png`, and `frontend/artifacts/ui-smoke/19-semantic-equivalence-noop-save.png`.
 - [ ] [11.4-03] Add tests proving extension attribute stability across edits.
 
 ### 11.5 Project Workspace Persistence
