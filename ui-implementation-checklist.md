@@ -374,7 +374,6 @@ Status key:
 
 ### 12.4 Workflow Orchestration Contract
 Deferred to `Deferred Tasks` until a backend project-scoped conversation turn/history API contract exists for validated client adapters.
-- [ ] [12.4-02] Integrate spec-edit proposal/apply/reject contract with schema validation.
 - [ ] [12.4-03] Integrate plan-generation invocation/status contract with degraded-state handling.
 - [ ] [12.4-04] Integrate plan approval/rejection/revision transition contract.
 - [ ] [12.4-05] Integrate build invocation-from-approved-plan contract and error paths.
@@ -629,3 +628,5 @@ Deferred to `Deferred Tasks` until a backend project-scoped conversation turn/hi
   Deferred because the current API/UI contract has no project-scoped plan artifact write/read endpoint (only flow save and pipeline launch), so file persistence with visible status/provenance cannot be implemented correctly yet.
 - [ ] [12.4-01] Integrate project-scoped conversation turn/history contract in UI client adapters.
   Deferred because `ui-spec.md` section 12.4 requires backend workflow-orchestration contracts, but the current API surface has no project-scoped conversation turn/history endpoint to integrate or validate against.
+- [ ] [12.4-02] Integrate spec-edit proposal/apply/reject contract with schema validation.
+  Deferred because the current backend API surface does not expose a project-scoped spec-edit proposal/apply/reject contract endpoint for validated client adapters.
