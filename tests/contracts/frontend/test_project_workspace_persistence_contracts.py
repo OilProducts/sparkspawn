@@ -15,3 +15,7 @@ def test_restore_on_reopen_clears_stale_flow_run_context_when_active_project_inv
 
 def test_project_workspace_persists_and_restores_spec_plan_provenance_references_item_11_6_01() -> None:
     assert_frontend_behavior_contract_passed("11.6.01")
+
+
+def test_project_workspace_provenance_captures_run_linkage_timestamps_and_git_context_item_11_6_02() -> None:
+    assert_frontend_behavior_contract_passed("11.6.02")

@@ -78,6 +78,9 @@ export interface ArtifactProvenanceReference {
     source: string
     referenceId: string
     capturedAt: string
+    runId?: string | null
+    gitBranch?: string | null
+    gitCommit?: string | null
 }
 
 export interface DiagnosticEntry {
@@ -369,10 +372,22 @@ const coerceArtifactProvenanceReference = (value: unknown): ArtifactProvenanceRe
         && typeof candidate.capturedAt === "string"
         && candidate.capturedAt.trim().length > 0
     ) {
+        const runId = typeof candidate.runId === "string" && candidate.runId.trim().length > 0
+            ? candidate.runId.trim()
+            : null
+        const gitBranch = typeof candidate.gitBranch === "string" && candidate.gitBranch.trim().length > 0
+            ? candidate.gitBranch.trim()
+            : null
+        const gitCommit = typeof candidate.gitCommit === "string" && candidate.gitCommit.trim().length > 0
+            ? candidate.gitCommit.trim()
+            : null
         return {
             source: candidate.source,
             referenceId: candidate.referenceId,
             capturedAt: candidate.capturedAt,
+            runId,
+            gitBranch,
+            gitCommit,
         }
     }
     return null

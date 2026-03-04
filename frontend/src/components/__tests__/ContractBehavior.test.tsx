@@ -3009,11 +3009,17 @@ digraph contract_behavior {
       source: 'spec-edit-proposal',
       referenceId: 'proposal-123',
       capturedAt: '2026-03-04T00:05:00.000Z',
+      runId: null,
+      gitBranch: null,
+      gitCommit: null,
     })
     expect(restoredScope.planProvenance).toEqual({
       source: 'plan-generation-workflow',
       referenceId: 'run-plan-123',
       capturedAt: '2026-03-04T00:10:00.000Z',
+      runId: null,
+      gitBranch: null,
+      gitCommit: null,
     })
 
     restoredStore.getState().setSpecProvenance({
@@ -3032,19 +3038,180 @@ digraph contract_behavior {
     const persistedConversationState = JSON.parse(String(persistedConversationStateRaw)) as Record<
       string,
       {
-        specProvenance?: { source?: string; referenceId?: string; capturedAt?: string }
-        planProvenance?: { source?: string; referenceId?: string; capturedAt?: string }
+        specProvenance?: {
+          source?: string
+          referenceId?: string
+          capturedAt?: string
+          runId?: string | null
+          gitBranch?: string | null
+          gitCommit?: string | null
+        }
+        planProvenance?: {
+          source?: string
+          referenceId?: string
+          capturedAt?: string
+          runId?: string | null
+          gitBranch?: string | null
+          gitCommit?: string | null
+        }
+      }
+    >
+    expect(persistedConversationState['/tmp/persisted-project']?.specProvenance).toMatchObject({
+      source: 'spec-edit-proposal',
+      referenceId: 'proposal-456',
+      capturedAt: '2026-03-04T00:15:00.000Z',
+    })
+    expect(persistedConversationState['/tmp/persisted-project']?.planProvenance).toMatchObject({
+      source: 'plan-generation-workflow',
+      referenceId: 'run-plan-456',
+      capturedAt: '2026-03-04T00:20:00.000Z',
+    })
+  })
+
+  it('[CID:11.6.02] persists and restores provenance run-linkage and available git branch/commit context', async () => {
+    vi.resetModules()
+    const storage = new Map<string, string>()
+    const localStorageMock = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value)
+      },
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      clear: () => {
+        storage.clear()
+      },
+    }
+    vi.stubGlobal('localStorage', localStorageMock)
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: localStorageMock,
+    })
+
+    localStorageMock.setItem(
+      'sparkspawn.project_registry_state',
+      JSON.stringify({
+        '/tmp/persisted-project': {
+          directoryPath: '/tmp/persisted-project',
+          isFavorite: false,
+          lastAccessedAt: '2026-03-04T00:00:00.000Z',
+        },
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.ui_route_state',
+      JSON.stringify({
+        viewMode: 'projects',
+        activeProjectPath: '/tmp/persisted-project',
+        activeFlow: null,
+        selectedRunId: null,
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.project_conversation_state',
+      JSON.stringify({
+        '/tmp/persisted-project': {
+          conversationId: null,
+          conversationHistory: [],
+          specId: 'spec-persisted-project',
+          specStatus: 'approved',
+          specProvenance: {
+            source: 'spec-edit-proposal',
+            referenceId: 'proposal-123',
+            capturedAt: '2026-03-04T00:05:00.000Z',
+            runId: 'run-spec-123',
+            gitBranch: 'feature/spec-provenance',
+            gitCommit: 'abcde12345',
+          },
+          planId: 'plan-persisted-project',
+          planStatus: 'approved',
+          planProvenance: {
+            source: 'plan-generation-workflow',
+            referenceId: 'run-plan-123',
+            capturedAt: '2026-03-04T00:10:00.000Z',
+            runId: 'run-plan-123',
+            gitBranch: 'feature/plan-provenance',
+            gitCommit: '98765fedcb',
+          },
+        },
+      }),
+    )
+
+    const { useStore: restoredStore } = await import('@/store')
+    const restoredScope = restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']
+    expect(restoredScope.specProvenance).toEqual({
+      source: 'spec-edit-proposal',
+      referenceId: 'proposal-123',
+      capturedAt: '2026-03-04T00:05:00.000Z',
+      runId: 'run-spec-123',
+      gitBranch: 'feature/spec-provenance',
+      gitCommit: 'abcde12345',
+    })
+    expect(restoredScope.planProvenance).toEqual({
+      source: 'plan-generation-workflow',
+      referenceId: 'run-plan-123',
+      capturedAt: '2026-03-04T00:10:00.000Z',
+      runId: 'run-plan-123',
+      gitBranch: 'feature/plan-provenance',
+      gitCommit: '98765fedcb',
+    })
+
+    restoredStore.getState().setSpecProvenance({
+      source: 'spec-edit-proposal',
+      referenceId: 'proposal-456',
+      capturedAt: '2026-03-04T00:15:00.000Z',
+      runId: 'run-spec-456',
+      gitBranch: 'main',
+      gitCommit: '22222aaaaa',
+    })
+    restoredStore.getState().setPlanProvenance({
+      source: 'plan-generation-workflow',
+      referenceId: 'run-plan-456',
+      capturedAt: '2026-03-04T00:20:00.000Z',
+      runId: 'run-plan-456',
+      gitBranch: 'main',
+      gitCommit: '33333bbbbb',
+    })
+
+    const persistedConversationStateRaw = localStorageMock.getItem('sparkspawn.project_conversation_state')
+    expect(persistedConversationStateRaw).toBeTruthy()
+    const persistedConversationState = JSON.parse(String(persistedConversationStateRaw)) as Record<
+      string,
+      {
+        specProvenance?: {
+          source?: string
+          referenceId?: string
+          capturedAt?: string
+          runId?: string | null
+          gitBranch?: string | null
+          gitCommit?: string | null
+        }
+        planProvenance?: {
+          source?: string
+          referenceId?: string
+          capturedAt?: string
+          runId?: string | null
+          gitBranch?: string | null
+          gitCommit?: string | null
+        }
       }
     >
     expect(persistedConversationState['/tmp/persisted-project']?.specProvenance).toEqual({
       source: 'spec-edit-proposal',
       referenceId: 'proposal-456',
       capturedAt: '2026-03-04T00:15:00.000Z',
+      runId: 'run-spec-456',
+      gitBranch: 'main',
+      gitCommit: '22222aaaaa',
     })
     expect(persistedConversationState['/tmp/persisted-project']?.planProvenance).toEqual({
       source: 'plan-generation-workflow',
       referenceId: 'run-plan-456',
       capturedAt: '2026-03-04T00:20:00.000Z',
+      runId: 'run-plan-456',
+      gitBranch: 'main',
+      gitCommit: '33333bbbbb',
     })
   })
 })

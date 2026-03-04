@@ -339,7 +339,8 @@ Status key:
 ### 11.6 Spec and Plan Artifact Provenance
 - [x] [11.6-01] Store spec/plan provenance metadata or references for workflow-generated artifacts.
   - Evidence (2026-03-04): Evaluator `pass`; project-scoped workspace persistence now stores/restores `specProvenance` and `planProvenance` references in `frontend/src/store.ts`, with workflow-origin provenance stamping on spec proposal apply and plan-generation launch in `frontend/src/components/ProjectsPanel.tsx`, covered by frontend contract `CID:11.6.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`).
-- [ ] [11.6-02] Ensure provenance captures run linkage and timestamps, plus branch/commit when available.
+- [x] [11.6-02] Ensure provenance captures run linkage and timestamps, plus branch/commit when available.
+  - Evidence (2026-03-04): Evaluator `pass`; project-scoped provenance now persists/restores `runId` + `capturedAt` with optional `gitBranch`/`gitCommit` context (`frontend/src/store.ts`), workflow stamping now records these fields for spec proposal apply and plan-generation launch (`frontend/src/components/ProjectsPanel.tsx`), and `/api/projects/metadata` now supplies commit metadata when available (`attractor/api/server.py`), covered by frontend contract `CID:11.6.02`, workflow unit tests, and API metadata tests with screenshot-based visual QA references `frontend/artifacts/ui-smoke/02-projects-panel.png`, `frontend/artifacts/ui-smoke/08b-runs-panel-populated-summary.png`, `frontend/artifacts/ui-smoke/08p-runs-panel-run-history-traceability.png`, and `frontend/artifacts/ui-smoke/08q-runs-panel-run-history-spec-plan-links.png`.
 - [ ] [11.6-03] Persist and restore plan status lifecycle (`draft`, `approved`, `rejected`, `revision-requested`).
 
 ---

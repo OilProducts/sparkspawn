@@ -1982,6 +1982,7 @@ async def get_project_metadata(directory: str):
         "name": normalized_path.name or str(normalized_path),
         "directory": str(normalized_path),
         "branch": _resolve_project_git_branch(normalized_path),
+        "commit": _resolve_project_git_commit(normalized_path),
     }
 
 

@@ -34,6 +34,24 @@ type WorkflowFailureDiagnostics = {
     flowSource: string | null
 }
 
+type ProjectGitMetadata = {
+    branch: string | null
+    commit: string | null
+}
+
+const EMPTY_PROJECT_GIT_METADATA: ProjectGitMetadata = {
+    branch: null,
+    commit: null,
+}
+
+const asProjectGitMetadataField = (value: unknown): string | null => {
+    if (typeof value !== "string") {
+        return null
+    }
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
+}
+
 export function ProjectsPanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
     const projects = Object.values(projectRegistry)
@@ -62,11 +80,14 @@ export function ProjectsPanel() {
     const [directoryPathInput, setDirectoryPathInput] = useState("")
     const [editingProjectPath, setEditingProjectPath] = useState<string | null>(null)
     const [editingDirectoryPathInput, setEditingDirectoryPathInput] = useState("")
-    const [projectBranches, setProjectBranches] = useState<Record<string, string | null>>({})
+    const [projectGitMetadata, setProjectGitMetadata] = useState<Record<string, ProjectGitMetadata>>({})
     const [projectSpecEditProposals, setProjectSpecEditProposals] = useState<ProjectSpecEditProposalMap>({})
     const [planGenerationError, setPlanGenerationError] = useState<string | null>(null)
     const [lastPlanGenerationFailure, setLastPlanGenerationFailure] = useState<WorkflowFailureDiagnostics | null>(null)
     const activeProjectScope = activeProjectPath ? projectScopedWorkspaces[activeProjectPath] : null
+    const activeProjectGitMetadata = activeProjectPath
+        ? projectGitMetadata[activeProjectPath] || EMPTY_PROJECT_GIT_METADATA
+        : EMPTY_PROJECT_GIT_METADATA
     const activeProjectProposalPreview = getProjectSpecEditProposal(projectSpecEditProposals, activeProjectPath)
     const specIsApprovedForPlanning = activeProjectScope?.specStatus === 'approved'
     const favoriteProjects = projects.filter((project) => project.isFavorite)
@@ -80,7 +101,7 @@ export function ProjectsPanel() {
     useEffect(() => {
         const projectPathsToFetch = projects
             .map((project) => project.directoryPath)
-            .filter((projectPath) => !(projectPath in projectBranches))
+            .filter((projectPath) => !(projectPath in projectGitMetadata))
         if (projectPathsToFetch.length === 0) {
             return
         }
@@ -92,12 +113,18 @@ export function ProjectsPanel() {
                     try {
                         const response = await fetch(`/api/projects/metadata?directory=${encodeURIComponent(projectPath)}`)
                         if (!response.ok) {
-                            return [projectPath, null] as const
+                            return [projectPath, { ...EMPTY_PROJECT_GIT_METADATA }] as const
                         }
-                        const payload = (await response.json()) as { branch?: string | null }
-                        return [projectPath, typeof payload.branch === "string" ? payload.branch : null] as const
+                        const payload = (await response.json()) as { branch?: string | null; commit?: string | null }
+                        return [
+                            projectPath,
+                            {
+                                branch: asProjectGitMetadataField(payload.branch),
+                                commit: asProjectGitMetadataField(payload.commit),
+                            },
+                        ] as const
                     } catch {
-                        return [projectPath, null] as const
+                        return [projectPath, { ...EMPTY_PROJECT_GIT_METADATA }] as const
                     }
                 })
             )
@@ -106,10 +133,10 @@ export function ProjectsPanel() {
                 return
             }
 
-            setProjectBranches((current) => {
+            setProjectGitMetadata((current) => {
                 const next = { ...current }
-                entries.forEach(([projectPath, branch]) => {
-                    next[projectPath] = branch
+                entries.forEach(([projectPath, metadata]) => {
+                    next[projectPath] = metadata
                 })
                 return next
             })
@@ -119,7 +146,7 @@ export function ProjectsPanel() {
         return () => {
             isCancelled = true
         }
-    }, [projects, projectBranches])
+    }, [projects, projectGitMetadata])
 
     const formatLastActivity = (value: string | null) => {
         if (!value) {
@@ -261,6 +288,9 @@ export function ProjectsPanel() {
             source: "spec-edit-proposal",
             referenceId: activeProjectProposalPreview.id,
             capturedAt: new Date().toISOString(),
+            runId: activeProjectScope?.artifactRunId || null,
+            gitBranch: activeProjectGitMetadata.branch,
+            gitCommit: activeProjectGitMetadata.commit,
         })
         appendConversationHistoryEntry({
             role: "system",
@@ -330,6 +360,9 @@ export function ProjectsPanel() {
                 source: "plan-generation-workflow",
                 referenceId: runData.pipeline_id,
                 capturedAt: new Date().toISOString(),
+                runId: runData.pipeline_id,
+                gitBranch: activeProjectGitMetadata.branch,
+                gitCommit: activeProjectGitMetadata.commit,
             })
             appendConversationHistoryEntry({
                 role: "system",
@@ -858,7 +891,8 @@ export function ProjectsPanel() {
                                                 <div className="min-w-0 flex-1 space-y-1">
                                                     {(() => {
                                                         const projectName = project.directoryPath.split('/').filter(Boolean).pop() || project.directoryPath
-                                                        const branchLabel = projectBranches[project.directoryPath] || "Unknown branch"
+                                                        const branchLabel =
+                                                            projectGitMetadata[project.directoryPath]?.branch || "Unknown branch"
                                                         const lastActivityLabel = formatLastActivity(project.lastAccessedAt)
                                                         return (
                                                             <>

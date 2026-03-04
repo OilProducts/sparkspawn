@@ -16,12 +16,17 @@ def test_project_metadata_returns_name_directory_and_branch_for_git_repo(
     project_dir = tmp_path / "demo-project"
     project_dir.mkdir()
 
+    branch_cmd = ["git", "-C", str(project_dir), "rev-parse", "--abbrev-ref", "HEAD"]
+    commit_cmd = ["git", "-C", str(project_dir), "rev-parse", "HEAD"]
+
     def fake_run(cmd: list[str], capture_output: bool, text: bool, check: bool) -> subprocess.CompletedProcess[str]:
-        assert cmd == ["git", "-C", str(project_dir), "rev-parse", "--abbrev-ref", "HEAD"]
+        assert cmd == branch_cmd or cmd == commit_cmd
         assert capture_output is True
         assert text is True
         assert check is True
-        return subprocess.CompletedProcess(cmd, 0, stdout="feature/ui-metadata\n", stderr="")
+        if cmd == branch_cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="feature/ui-metadata\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="abc123def456\n", stderr="")
 
     monkeypatch.setattr(server.subprocess, "run", fake_run)
 
@@ -36,6 +41,7 @@ def test_project_metadata_returns_name_directory_and_branch_for_git_repo(
         "name": "demo-project",
         "directory": str(project_dir),
         "branch": "feature/ui-metadata",
+        "commit": "abc123def456",
     }
 
 
@@ -62,6 +68,7 @@ def test_project_metadata_returns_null_branch_for_non_git_directory(
         "name": "non-git-project",
         "directory": str(project_dir),
         "branch": None,
+        "commit": None,
     }
 
 

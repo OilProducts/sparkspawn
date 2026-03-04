@@ -42,7 +42,7 @@ describe('Project-scoped workflow behavior', () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
         if (url.includes('/api/projects/metadata')) {
-          return new Response(JSON.stringify({ branch: 'main' }), {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -105,6 +105,16 @@ describe('Project-scoped workflow behavior', () => {
     const projectScope = useStore.getState().projectScopedWorkspaces['/tmp/workflow-project']
     expect(projectScope.specId).toMatch(/^spec-/)
     expect(projectScope.specStatus).toBe('draft')
+    expect(projectScope.specProvenance).toEqual(
+      expect.objectContaining({
+        source: 'spec-edit-proposal',
+        referenceId: expect.stringMatching(/^proposal-/),
+        runId: null,
+        gitBranch: 'main',
+        gitCommit: 'abc123def456',
+      }),
+    )
+    expect(projectScope.specProvenance?.capturedAt).toEqual(expect.any(String))
   })
 
   it('enforces spec approval before launching plan workflow and records run context on launch', async () => {
@@ -135,6 +145,16 @@ describe('Project-scoped workflow behavior', () => {
     const scope = state.projectScopedWorkspaces['/tmp/plan-project']
     expect(scope.planId).toMatch(/^plan-/)
     expect(scope.planStatus).toBe('draft')
+    expect(scope.planProvenance).toEqual(
+      expect.objectContaining({
+        source: 'plan-generation-workflow',
+        referenceId: 'run-plan-101',
+        capturedAt: expect.any(String),
+        runId: 'run-plan-101',
+        gitBranch: 'main',
+        gitCommit: 'abc123def456',
+      }),
+    )
     expect(state.viewMode).toBe('execution')
   })
 })
