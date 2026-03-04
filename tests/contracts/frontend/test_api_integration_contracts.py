@@ -31,3 +31,7 @@ def test_project_selection_and_active_project_identity_persist_in_ui_client_stat
 
 def test_execution_payload_project_identity_resolves_to_working_directory_context_item_12_3_02() -> None:
     assert_frontend_behavior_contract_passed("12.3.02")
+
+
+def test_conversation_spec_plan_retrieval_is_keyed_by_project_identity_item_12_3_03() -> None:
+    assert_frontend_behavior_contract_passed("12.3.03")

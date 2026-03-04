@@ -302,6 +302,14 @@ interface ProjectScopedWorkspace {
     artifactRunId: string | null
 }
 
+interface ProjectScopedArtifactState {
+    conversationId: string | null
+    specId: string | null
+    specStatus: 'draft' | 'approved'
+    planId: string | null
+    planStatus: PlanStatus
+}
+
 type PersistedProjectWorkspaceState = Record<
     string,
     {
@@ -548,6 +556,32 @@ const resolveProjectScopedWorkspace = (
     }
 }
 
+const selectProjectScopedArtifactState = (
+    projectScopedWorkspaces: Record<string, ProjectScopedWorkspace>,
+    projectPath: string | null
+): ProjectScopedArtifactState | null => {
+    if (!projectPath) {
+        return null
+    }
+    const normalizedProjectPath = normalizeProjectPath(projectPath)
+    if (!normalizedProjectPath || !isAbsoluteProjectPath(normalizedProjectPath)) {
+        return null
+    }
+    const loadedWorkspace = projectScopedWorkspaces[normalizedProjectPath]
+    const restoredWorkspace = restoredProjectConversationState[normalizedProjectPath]
+    if (!loadedWorkspace && !restoredWorkspace) {
+        return null
+    }
+    const workspace = resolveProjectScopedWorkspace(loadedWorkspace, normalizedProjectPath)
+    return {
+        conversationId: workspace.conversationId,
+        specId: workspace.specId,
+        specStatus: workspace.specStatus,
+        planId: workspace.planId,
+        planStatus: workspace.planStatus,
+    }
+}
+
 const DEFAULT_ROUTE_STATE: RouteState = {
     viewMode: 'projects',
     activeProjectPath: null,
@@ -653,6 +687,7 @@ interface AppState {
     setPlanId: (id: string | null) => void
     setPlanStatus: (status: PlanStatus) => void
     setPlanProvenance: (provenance: ArtifactProvenanceReference | null) => void
+    getProjectScopedArtifactState: (projectPath: string | null) => ProjectScopedArtifactState | null
 
     logs: LogEntry[]
     addLog: (entry: LogEntry) => void
@@ -729,7 +764,7 @@ const restoredProjectScope = restoredRouteState.activeProjectPath
     )
     : null
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
     viewMode: restoredRouteState.viewMode,
     setViewMode: (mode) =>
         set((state) => {
@@ -1196,6 +1231,8 @@ export const useStore = create<AppState>((set) => ({
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
         }),
+    getProjectScopedArtifactState: (projectPath) =>
+        selectProjectScopedArtifactState(get().projectScopedWorkspaces, projectPath),
 
     logs: [],
     addLog: (entry) => set((state) => ({ logs: [...state.logs, entry] })),

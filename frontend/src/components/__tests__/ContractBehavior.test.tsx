@@ -831,6 +831,95 @@ describe('Frontend contract behavior', () => {
     expect(blankWorkingDirectoryPayload.working_directory).toBe('/tmp/project-contract-behavior')
   })
 
+  it('[CID:12.3.03] retrieves conversation/spec/plan state by project identity', async () => {
+    vi.resetModules()
+    const storage = new Map<string, string>()
+    const localStorageMock = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value)
+      },
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      clear: () => {
+        storage.clear()
+      },
+    }
+    vi.stubGlobal('localStorage', localStorageMock)
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: localStorageMock,
+    })
+
+    localStorageMock.setItem(
+      'sparkspawn.project_registry_state',
+      JSON.stringify({
+        '/tmp/project-a': {
+          directoryPath: '/tmp/project-a',
+          isFavorite: false,
+          lastAccessedAt: null,
+        },
+        '/tmp/project-b': {
+          directoryPath: '/tmp/project-b',
+          isFavorite: false,
+          lastAccessedAt: null,
+        },
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.ui_route_state',
+      JSON.stringify({
+        viewMode: 'projects',
+        activeProjectPath: '/tmp/project-a',
+        activeFlow: null,
+        selectedRunId: null,
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.project_conversation_state',
+      JSON.stringify({
+        '/tmp/project-a': {
+          conversationId: 'conversation-a',
+          conversationHistory: [],
+          specId: 'spec-a',
+          specStatus: 'approved',
+          planId: 'plan-a',
+          planStatus: 'rejected',
+        },
+        '/tmp/project-b/./': {
+          conversationId: 'conversation-b',
+          conversationHistory: [],
+          specId: 'spec-b',
+          specStatus: 'draft',
+          planId: 'plan-b',
+          planStatus: 'revision-requested',
+        },
+      }),
+    )
+
+    const { useStore: restoredStore } = await import('@/store')
+    const projectAState = restoredStore.getState().getProjectScopedArtifactState('/tmp/project-a')
+    expect(projectAState).toEqual({
+      conversationId: 'conversation-a',
+      specId: 'spec-a',
+      specStatus: 'approved',
+      planId: 'plan-a',
+      planStatus: 'rejected',
+    })
+
+    const projectBState = restoredStore.getState().getProjectScopedArtifactState('/tmp/project-b/./')
+    expect(projectBState).toEqual({
+      conversationId: 'conversation-b',
+      specId: 'spec-b',
+      specStatus: 'draft',
+      planId: 'plan-b',
+      planStatus: 'revision-requested',
+    })
+
+    expect(restoredStore.getState().getProjectScopedArtifactState('/tmp/project-missing')).toBeNull()
+  })
+
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {
     renderSelectedEdgeSidebar()
     const edgeForm = await screen.findByTestId('edge-structured-form')
