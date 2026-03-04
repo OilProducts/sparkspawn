@@ -1,23 +1,7 @@
-from __future__ import annotations
-
-import json
-import shlex
-import subprocess
-import tempfile
-import threading
-from pathlib import Path
-from typing import get_args, get_type_hints
-
-import pytest
-
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
-from attractor.engine.executor import PipelineExecutor
-from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.engine.outcome import OutcomeStatus
 from attractor.handlers import HandlerRunner, build_default_registry
-from attractor.handlers.base import CodergenBackend
-from attractor.handlers.registry import SHAPE_TO_TYPE
-from attractor.interviewer import Answer, CallbackInterviewer, Interviewer, Question, QueueInterviewer
 
 from tests.handlers._support.fakes import (
     _StubBackend,
