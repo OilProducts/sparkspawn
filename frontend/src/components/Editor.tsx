@@ -177,10 +177,12 @@ export function Editor() {
     const saveTimer = useRef<number | null>(null);
     const pendingSaveRef = useRef<{ nodes: Node[]; edges: Edge[]; options?: SaveFlowOptions } | null>(null);
     const rawDotEntryDraftRef = useRef<string>('');
+    const rawHandoffInFlightRef = useRef(false);
     const [isDragging, setIsDragging] = useState(false);
     const [editorMode, setEditorMode] = useState<EditorMode>('structured');
     const [rawDotDraft, setRawDotDraft] = useState('');
     const [rawHandoffError, setRawHandoffError] = useState<string | null>(null);
+    const [isRawHandoffInFlight, setIsRawHandoffInFlight] = useState(false);
 
     const enforceSingleSelectedNode = useCallback((nextNodes: Node[], selectedNodeId: string) => {
         setEdges((currentEdges) =>
@@ -375,12 +377,16 @@ export function Editor() {
             clearDiagnostics();
             setRawDotDraft('');
             setRawHandoffError(null);
+            rawHandoffInFlightRef.current = false;
+            setIsRawHandoffInFlight(false);
             setEditorMode('structured');
             rawDotEntryDraftRef.current = '';
             return;
         }
         clearDiagnostics();
         setRawHandoffError(null);
+        rawHandoffInFlightRef.current = false;
+        setIsRawHandoffInFlight(false);
         setEditorMode('structured');
         rawDotEntryDraftRef.current = '';
 
@@ -566,26 +572,36 @@ export function Editor() {
 
     const returnToStructuredMode = useCallback(async () => {
         if (!activeProjectPath || !activeFlow) return;
-        const expectSemanticEquivalence = rawDotEntryDraftRef.current === rawDotDraft;
-        const save = expectSemanticEquivalence ? saveFlowContentExpectingSemanticEquivalence : saveFlowContent;
-        const saved = await save(activeFlow, rawDotDraft);
-        if (!saved) {
-            setRawHandoffError(`Safe handoff requires valid DOT. ${saveErrorMessage || 'Fix parse or validation errors before switching modes.'}`);
+        if (rawHandoffInFlightRef.current) {
             return;
         }
-
+        rawHandoffInFlightRef.current = true;
+        setIsRawHandoffInFlight(true);
         try {
-            const preview = await requestPreview(rawDotDraft);
-            const hydrated = await hydrateFromPreview(preview, rawDotDraft);
-            if (!hydrated) {
-                setRawHandoffError('Safe handoff requires valid DOT. Preview response did not include a graph.');
+            const expectSemanticEquivalence = rawDotEntryDraftRef.current === rawDotDraft;
+            const save = expectSemanticEquivalence ? saveFlowContentExpectingSemanticEquivalence : saveFlowContent;
+            const saved = await save(activeFlow, rawDotDraft);
+            if (!saved) {
+                setRawHandoffError(`Safe handoff requires valid DOT. ${saveErrorMessage || 'Fix parse or validation errors before switching modes.'}`);
                 return;
             }
-            setRawHandoffError(null);
-            rawDotEntryDraftRef.current = '';
-            setEditorMode('structured');
-        } catch {
-            setRawHandoffError('Safe handoff requires valid DOT. Failed to parse DOT preview for structured mode.');
+
+            try {
+                const preview = await requestPreview(rawDotDraft);
+                const hydrated = await hydrateFromPreview(preview, rawDotDraft);
+                if (!hydrated) {
+                    setRawHandoffError('Safe handoff requires valid DOT. Preview response did not include a graph.');
+                    return;
+                }
+                setRawHandoffError(null);
+                rawDotEntryDraftRef.current = '';
+                setEditorMode('structured');
+            } catch {
+                setRawHandoffError('Safe handoff requires valid DOT. Failed to parse DOT preview for structured mode.');
+            }
+        } finally {
+            rawHandoffInFlightRef.current = false;
+            setIsRawHandoffInFlight(false);
         }
     }, [activeProjectPath, activeFlow, hydrateFromPreview, rawDotDraft, requestPreview, saveErrorMessage]);
 
@@ -687,6 +703,7 @@ export function Editor() {
                                 }
                                 setEditorMode('structured');
                             }}
+                            disabled={editorMode === 'raw' && isRawHandoffInFlight}
                             className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                                 editorMode === 'structured'
                                     ? 'bg-primary text-primary-foreground'

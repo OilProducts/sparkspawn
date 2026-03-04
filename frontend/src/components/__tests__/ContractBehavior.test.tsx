@@ -1,4 +1,5 @@
 import { ExecutionControls } from '@/components/ExecutionControls'
+import { Editor } from '@/components/Editor'
 import { GraphSettings } from '@/components/GraphSettings'
 import { RunsPanel } from '@/components/RunsPanel'
 import { Sidebar } from '@/components/Sidebar'
@@ -2153,6 +2154,72 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByTestId('run-event-timeline-list')).toHaveTextContent(
       'Interview completed for review_gate (accepted answer: Approve)',
     )
+  })
+
+  it('[CID:11.3.01] keeps raw-to-structured handoff single-flight during repeated transition clicks', async () => {
+    const initialDot = 'digraph contract_behavior { start [label="Start"]; }'
+    const previewPayload = {
+      graph: {
+        graph_attrs: {},
+        defaults: {
+          node: {},
+          edge: {},
+        },
+        subgraphs: [],
+        nodes: [
+          {
+            id: 'start',
+            label: 'Start',
+            shape: 'box',
+          },
+        ],
+        edges: [],
+      },
+      diagnostics: [],
+    }
+    const saveResolvers: Array<() => void> = []
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/api/flows/contract-behavior.dot')) {
+        return Promise.resolve(jsonResponse({ content: initialDot }))
+      }
+      if (url.endsWith('/preview')) {
+        return Promise.resolve(jsonResponse(previewPayload))
+      }
+      if (url.endsWith('/api/flows') && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => {
+          saveResolvers.push(() => resolve(jsonResponse({ status: 'saved' })))
+        })
+      }
+      return Promise.resolve(jsonResponse({}, { status: 404 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const user = userEvent.setup()
+    renderWithFlowProvider(<Editor />)
+
+    await screen.findByTestId('editor-mode-toggle')
+    await user.click(screen.getByRole('button', { name: 'Raw DOT' }))
+    expect(await screen.findByTestId('raw-dot-editor')).toBeVisible()
+
+    const structuredButton = screen.getByRole('button', { name: 'Structured' })
+    fireEvent.click(structuredButton)
+    fireEvent.click(structuredButton)
+
+    await waitFor(() => {
+      const saveCalls = fetchMock.mock.calls.filter(([input, requestInit]) => {
+        const callUrl = requestUrl(input as RequestInfo | URL)
+        return callUrl.endsWith('/api/flows') && (requestInit as RequestInit | undefined)?.method === 'POST'
+      })
+      expect(saveCalls).toHaveLength(1)
+    })
+
+    expect(saveResolvers).toHaveLength(1)
+    saveResolvers[0]()
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('raw-dot-editor')).not.toBeInTheDocument()
+    })
   })
 
   it('[CID:10.3.01] exposes human.default_choice authoring and timeout-default visibility in node inspector', async () => {

@@ -313,7 +313,8 @@ Status key:
   - Evidence (2026-03-04): Evaluator `pass`; added API regression coverage in `tests/api/test_flow_save_validation.py::test_save_flow_open_edit_save_reopen_preserves_label_regressions_item_11_2_03` for a previously lossy semicolon-less explicit-label edit path, plus a minimal canonical-label detection fix in `frontend/src/lib/canonicalFlowModel.ts`, validated by `just test` and UI-smoke visual QA screenshots `frontend/artifacts/ui-smoke/19-semantic-equivalence-noop-save.png`, `frontend/artifacts/ui-smoke/19a-semantic-equivalence-mismatch-blocked.png`, and `frontend/artifacts/ui-smoke/19b-semantic-equivalence-round-trip-saved.png`.
 
 ### 11.3 Mixed-Mode Editing
-- [ ] [11.3-01] Implement robust transitions between raw DOT and structured UI modes.
+- [x] [11.3-01] Implement robust transitions between raw DOT and structured UI modes.
+  - Evidence (2026-03-04): Evaluator `pass`; `Editor` now enforces single-flight raw→structured handoff (re-entry guard + disabled Structured toggle while handoff is in-flight) in `frontend/src/components/Editor.tsx`, with contract coverage `CID:11.3.01` in `frontend/src/components/__tests__/ContractBehavior.test.tsx` bridged by `tests/contracts/frontend/test_mixed_mode_editing_contracts.py`, and screenshot-based visual QA references `frontend/artifacts/ui-smoke/19a-semantic-equivalence-mismatch-blocked.png` and `frontend/artifacts/ui-smoke/19b-semantic-equivalence-round-trip-saved.png`.
 - [ ] [11.3-02] Preserve unsurfaced data through both editing paths.
 - [ ] [11.3-03] Add conflict handling when raw edit invalidates structured assumptions.
 
