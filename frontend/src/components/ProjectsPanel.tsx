@@ -1,7 +1,7 @@
 import { type ConversationHistoryEntry, type PlanStatus, useStore } from "@/store"
 import { type FormEvent, useEffect, useState } from "react"
 import { buildPipelineStartPayload } from "@/lib/pipelineStartPayload"
-import { ApiHttpError, fetchFlowPayloadValidated, fetchPipelineStartValidated } from '@/lib/apiClient'
+import { ApiHttpError, fetchFlowPayloadValidated, fetchPipelineStartValidated, fetchPipelineStatusValidated } from '@/lib/apiClient'
 import {
     clearProjectSpecEditProposal,
     getProjectSpecEditProposal,
@@ -84,6 +84,7 @@ export function ProjectsPanel() {
     const [projectGitMetadata, setProjectGitMetadata] = useState<Record<string, ProjectGitMetadata>>({})
     const [projectSpecEditProposals, setProjectSpecEditProposals] = useState<ProjectSpecEditProposalMap>({})
     const [planGenerationError, setPlanGenerationError] = useState<string | null>(null)
+    const [planGenerationStatusDegraded, setPlanGenerationStatusDegraded] = useState<string | null>(null)
     const [lastPlanGenerationFailure, setLastPlanGenerationFailure] = useState<WorkflowFailureDiagnostics | null>(null)
     const activeProjectScope = activeProjectPath ? projectScopedWorkspaces[activeProjectPath] : null
     const activeProjectGitMetadata = activeProjectPath
@@ -307,6 +308,7 @@ export function ProjectsPanel() {
         }
         setSpecStatus('approved')
         setPlanGenerationError(null)
+        setPlanGenerationStatusDegraded(null)
         appendConversationHistoryEntry({
             role: "system",
             content: `Approved spec ${activeProjectScope.specId} for plan generation.`,
@@ -324,6 +326,7 @@ export function ProjectsPanel() {
         }
 
         setPlanGenerationError(null)
+        setPlanGenerationStatusDegraded(null)
         try {
             const flow = await fetchFlowPayloadValidated(activeFlow)
 
@@ -340,6 +343,17 @@ export function ProjectsPanel() {
             const runData = await fetchPipelineStartValidated(startPayload as Record<string, unknown>)
             if (typeof runData?.pipeline_id !== 'string') {
                 throw new Error('Plan-generation launch did not return a pipeline id.')
+            }
+
+            try {
+                await fetchPipelineStatusValidated(runData.pipeline_id)
+            } catch (statusError) {
+                const detail = statusError instanceof ApiHttpError && statusError.detail
+                    ? statusError.detail
+                    : statusError instanceof Error
+                        ? statusError.message
+                        : 'Plan status retrieval unavailable.'
+                setPlanGenerationStatusDegraded(`Plan generation launched, but status retrieval is degraded: ${detail}`)
             }
 
             setSelectedRunId(runData.pipeline_id)
@@ -367,6 +381,7 @@ export function ProjectsPanel() {
                     ? error.message
                     : 'Failed to launch plan-generation workflow.'
             setPlanGenerationError(message)
+            setPlanGenerationStatusDegraded(null)
             setLastPlanGenerationFailure({
                 message,
                 failedAt: new Date().toISOString(),
@@ -387,6 +402,7 @@ export function ProjectsPanel() {
             return
         }
         setPlanGenerationError(null)
+        setPlanGenerationStatusDegraded(null)
         setPlanStatus(nextStatus)
         appendConversationHistoryEntry({
             role: "system",
@@ -761,6 +777,11 @@ export function ProjectsPanel() {
                             {planGenerationError ? (
                                 <p data-testid="project-plan-generation-error" className="text-[11px] text-destructive">
                                     {planGenerationError}
+                                </p>
+                            ) : null}
+                            {planGenerationStatusDegraded ? (
+                                <p data-testid="project-plan-generation-status-degraded" className="text-[11px] text-amber-700">
+                                    {planGenerationStatusDegraded}
                                 </p>
                             ) : null}
                             {lastPlanGenerationFailure ? (

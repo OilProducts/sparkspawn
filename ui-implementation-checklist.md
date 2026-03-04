@@ -373,8 +373,8 @@ Status key:
   - Evidence (2026-03-04): Evaluator `pass`; added project-identity keyed retrieval accessor `getProjectScopedArtifactState` with path normalization/absolute-path guards in `frontend/src/store.ts`, covered by frontend contract `CID:12.3.03` in `frontend/src/components/__tests__/ContractBehavior.test.tsx` and Python bridge `tests/contracts/frontend/test_api_integration_contracts.py`, validated by `just test` (`600 passed`) plus screenshot-based visual QA review of `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/08q-runs-panel-run-history-spec-plan-links.png` (`just ui-smoke` had unrelated backend `ECONNREFUSED`/HTTP 500 failures in other scenarios).
 
 ### 12.4 Workflow Orchestration Contract
-Deferred to `Deferred Tasks` until a backend project-scoped conversation turn/history API contract exists for validated client adapters.
-- [ ] [12.4-03] Integrate plan-generation invocation/status contract with degraded-state handling.
+- [x] [12.4-03] Integrate plan-generation invocation/status contract with degraded-state handling.
+  - Evidence (2026-03-04): Evaluator `pass`; plan-generation launch now performs validated `/pipelines/{id}` status retrieval and surfaces explicit degraded-state messaging without aborting successful launches (`frontend/src/components/ProjectsPanel.tsx`), covered by frontend contract `CID:12.4.03` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`) plus workflow integration coverage (`frontend/src/components/__tests__/ProjectSpecWorkflow.test.tsx`) and screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, `frontend/artifacts/ui-smoke/20a-plan-failure-rerun-enabled.png`, and `frontend/artifacts/ui-smoke/20b-plan-failure-rerun-disabled.png`.
 - [ ] [12.4-04] Integrate plan approval/rejection/revision transition contract.
 - [ ] [12.4-05] Integrate build invocation-from-approved-plan contract and error paths.
 

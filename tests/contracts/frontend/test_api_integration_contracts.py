@@ -35,3 +35,7 @@ def test_execution_payload_project_identity_resolves_to_working_directory_contex
 
 def test_conversation_spec_plan_retrieval_is_keyed_by_project_identity_item_12_3_03() -> None:
     assert_frontend_behavior_contract_passed("12.3.03")
+
+
+def test_plan_generation_invocation_status_contract_with_degraded_state_item_12_4_03() -> None:
+    assert_frontend_behavior_contract_passed("12.4.03")

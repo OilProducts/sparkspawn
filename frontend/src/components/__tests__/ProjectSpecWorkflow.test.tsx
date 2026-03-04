@@ -34,7 +34,10 @@ const resolveRequestUrl = (input: RequestInfo | URL): string => {
 }
 
 describe('Project-scoped workflow behavior', () => {
+  let planStatusContractUnavailable = false
+
   beforeEach(() => {
+    planStatusContractUnavailable = false
     resetProjectWorkflowState()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     vi.stubGlobal(
@@ -58,6 +61,27 @@ describe('Project-scoped workflow behavior', () => {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
+        }
+        if (url.endsWith('/pipelines/run-plan-101')) {
+          if (planStatusContractUnavailable) {
+            return new Response(JSON.stringify({ detail: 'plan status endpoint unavailable' }), {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
+          return new Response(
+            JSON.stringify({
+              pipeline_id: 'run-plan-101',
+              status: 'running',
+              flow_name: 'plan-generation.dot',
+              working_directory: '/tmp/plan-project',
+              model: 'gpt-5.3',
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          )
         }
         return new Response(JSON.stringify({}), {
           status: 200,
@@ -156,5 +180,31 @@ describe('Project-scoped workflow behavior', () => {
       }),
     )
     expect(state.viewMode).toBe('execution')
+  })
+
+  it('[CID:12.4.03] keeps plan-generation launch active when status retrieval is degraded', async () => {
+    planStatusContractUnavailable = true
+    const user = userEvent.setup()
+    act(() => {
+      useStore.getState().registerProject('/tmp/plan-status-degraded-project')
+      useStore.getState().setActiveProjectPath('/tmp/plan-status-degraded-project')
+      useStore.getState().setActiveFlow('plan-generation.dot')
+    })
+
+    render(<ProjectsPanel />)
+
+    await user.click(screen.getByRole('button', { name: 'Create spec' }))
+    await user.click(screen.getByTestId('project-spec-approve-for-plan-button'))
+    await user.click(screen.getByTestId('project-plan-generation-launch-button'))
+
+    await waitFor(() => {
+      expect(useStore.getState().selectedRunId).toBe('run-plan-101')
+    })
+
+    expect(screen.getByTestId('project-plan-generation-status-degraded')).toHaveTextContent(
+      'plan status endpoint unavailable',
+    )
+    expect(useStore.getState().projectScopedWorkspaces['/tmp/plan-status-degraded-project']?.planStatus).toBe('draft')
+    expect(useStore.getState().viewMode).toBe('execution')
   })
 })

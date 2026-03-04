@@ -1,6 +1,7 @@
 import { ExecutionControls } from '@/components/ExecutionControls'
 import { Editor } from '@/components/Editor'
 import { GraphSettings } from '@/components/GraphSettings'
+import { ProjectsPanel } from '@/components/ProjectsPanel'
 import { RunStream } from '@/components/RunStream'
 import { RunsPanel } from '@/components/RunsPanel'
 import { Sidebar } from '@/components/Sidebar'
@@ -918,6 +919,61 @@ describe('Frontend contract behavior', () => {
     })
 
     expect(restoredStore.getState().getProjectScopedArtifactState('/tmp/project-missing')).toBeNull()
+  })
+
+  it('[CID:12.4.03] integrates plan-generation invocation/status contract with degraded-state handling', async () => {
+    const launchedRunId = 'run-plan-contract-12-4-03'
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.includes('/api/projects/metadata')) {
+        return jsonResponse({ branch: 'main', commit: 'abc123def456' })
+      }
+      if (url.endsWith('/api/flows/contract-behavior.dot')) {
+        return jsonResponse({ content: 'digraph Plan { start -> end }' })
+      }
+      if (url.endsWith('/pipelines') && init?.method === 'POST') {
+        return jsonResponse({ status: 'started', pipeline_id: launchedRunId })
+      }
+      if (url.endsWith(`/pipelines/${launchedRunId}`)) {
+        return jsonResponse({ detail: 'plan status endpoint unavailable' }, { status: 503 })
+      }
+      return jsonResponse({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'projects',
+        activeProjectPath: '/tmp/project-contract-behavior',
+        activeFlow: 'contract-behavior.dot',
+        projectScopedWorkspaces: {
+          ...state.projectScopedWorkspaces,
+          '/tmp/project-contract-behavior': {
+            ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
+            specId: 'spec-contract-behavior',
+            specStatus: 'approved',
+          },
+        },
+      }))
+    })
+
+    const user = userEvent.setup()
+    render(<ProjectsPanel />)
+
+    await user.click(screen.getByTestId('project-plan-generation-launch-button'))
+
+    await waitFor(() => {
+      expect(useStore.getState().selectedRunId).toBe(launchedRunId)
+    })
+
+    const requestedUrls = fetchMock.mock.calls.map(([input]) => requestUrl(input as RequestInfo | URL))
+    expect(requestedUrls).toContain(`/pipelines/${launchedRunId}`)
+    expect(screen.getByTestId('project-plan-generation-status-degraded')).toHaveTextContent(
+      'plan status endpoint unavailable',
+    )
+    expect(useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.planStatus).toBe('draft')
+    expect(useStore.getState().viewMode).toBe('execution')
   })
 
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {
