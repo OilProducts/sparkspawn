@@ -27,7 +27,7 @@ def test_pipeline_start_request_accepts_dot_source_alias(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     payload = _start_pipeline_via_http(
@@ -48,7 +48,7 @@ def test_pipeline_definition_is_backend_invariant_for_backend_selection(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     payload = _start_pipeline_via_http(
@@ -68,7 +68,7 @@ def test_pipeline_emits_lifecycle_phases_in_spec_order(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
     payload = _start_pipeline_via_http(
         api_client,
@@ -96,7 +96,7 @@ def test_pipeline_stream_includes_executor_typed_runtime_events(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
     payload = _start_pipeline_via_http(
         api_client,
@@ -124,7 +124,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     flow = """

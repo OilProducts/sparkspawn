@@ -46,7 +46,7 @@ def test_section_95_events_endpoint_uses_sse_headers(
     tmp_path: Path,
 ) -> None:
     run_id = "run-sse-headers"
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     asyncio.run(
         server.EVENT_HUB.publish(run_id, {"type": "runtime", "status": "running", "run_id": run_id})
     )

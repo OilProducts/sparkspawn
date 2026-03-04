@@ -84,7 +84,7 @@ def test_pipeline_events_replays_history_without_replaying_same_event_from_live_
     tmp_path: Path,
 ) -> None:
     run_id = "run-sse"
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
     hub = _InterleavingEventHub(run_id)
     monkeypatch.setattr(server, "EVENT_HUB", hub)

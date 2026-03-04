@@ -18,7 +18,7 @@ def _seed_run(
     tmp_path: Path,
 ) -> tuple[str, Path]:
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
+    server.configure_runtime_paths(runs_dir=runs_root)
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
     return run_id, runs_root / run_id

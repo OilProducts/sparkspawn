@@ -16,7 +16,7 @@ def test_cancel_pipeline_returns_404_for_unknown_pipeline(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
     response = api_client.post("/pipelines/missing-run/cancel")
     assert response.status_code == 404
@@ -27,7 +27,7 @@ def test_cancel_pipeline_requests_cancel_for_active_run(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     start_payload = _start_pipeline(api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])
@@ -66,7 +66,7 @@ def test_cancel_pipeline_ignores_non_running_known_pipeline(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     start_payload = _start_pipeline(api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])
     final_status = _wait_for_pipeline_terminal_status(api_client, run_id)

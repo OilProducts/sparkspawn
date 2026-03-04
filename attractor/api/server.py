@@ -40,6 +40,7 @@ from attractor.engine import (
     save_checkpoint,
 )
 from attractor.graphviz_export import export_graphviz_artifact
+from attractor.config import Settings, resolve_settings, validate_settings
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
 from attractor.interviewer.base import Interviewer
@@ -52,12 +53,61 @@ from attractor.transforms import (
 
 
 app = FastAPI()
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
-FRONTEND_DIST_INDEX = FRONTEND_DIST / "index.html"
-LEGACY_INDEX = PROJECT_ROOT / "index.html"
+SETTINGS_LOCK = threading.Lock()
+SETTINGS = resolve_settings()
 REGISTERED_TRANSFORMS: List[object] = []
 _REGISTERED_TRANSFORMS_LOCK = threading.Lock()
+
+
+def get_settings() -> Settings:
+    with SETTINGS_LOCK:
+        return SETTINGS
+
+
+def configure_runtime_paths(
+    *,
+    data_dir: Path | str | None = None,
+    runs_dir: Path | str | None = None,
+    flows_dir: Path | str | None = None,
+    ui_dir: Path | str | None = None,
+) -> Settings:
+    global SETTINGS
+    current = get_settings()
+    updated = resolve_settings(
+        data_dir=data_dir if data_dir is not None else current.data_dir,
+        runs_dir=runs_dir if runs_dir is not None else current.runs_dir,
+        flows_dir=flows_dir if flows_dir is not None else current.flows_dir,
+        ui_dir=ui_dir if ui_dir is not None else current.ui_dir,
+    )
+    validate_settings(updated)
+    with SETTINGS_LOCK:
+        SETTINGS = updated
+    return updated
+
+
+def validate_runtime_paths() -> None:
+    validate_settings(get_settings())
+
+
+def _resolve_ui_index_path() -> Path | None:
+    settings = get_settings()
+    if settings.ui_dir:
+        index_path = settings.ui_dir / "index.html"
+        if index_path.exists():
+            return index_path
+    if settings.legacy_ui_index and settings.legacy_ui_index.exists():
+        return settings.legacy_ui_index
+    return None
+
+
+def _resolve_ui_asset_path(relative_path: str) -> Path | None:
+    settings = get_settings()
+    if not settings.ui_dir:
+        return None
+    candidate = settings.ui_dir / relative_path
+    if candidate.exists():
+        return candidate
+    return None
 
 
 def register_transform(transform: object) -> None:
@@ -373,12 +423,15 @@ class RunRecord:
 
 
 RUN_HISTORY_LOCK = threading.Lock()
-RUNS_ROOT = PROJECT_ROOT / ".attractor" / "runs"
 PIPELINE_LIFECYCLE_PHASES = ("PARSE", "VALIDATE", "INITIALIZE", "EXECUTE", "FINALIZE")
 
 
+def _runs_root() -> Path:
+    return get_settings().runs_dir
+
+
 def _run_root(run_id: str) -> Path:
-    return RUNS_ROOT / run_id
+    return _runs_root() / run_id
 
 
 def _resolve_start_node_id(graph) -> str:
@@ -1196,23 +1249,24 @@ class BroadcastingRunner:
 
 @app.get("/")
 async def get_ui():
-    if FRONTEND_DIST_INDEX.exists():
-        return FileResponse(FRONTEND_DIST_INDEX)
-    return FileResponse(LEGACY_INDEX)
+    index_path = _resolve_ui_index_path()
+    if not index_path:
+        raise HTTPException(status_code=404, detail="UI index not found")
+    return FileResponse(index_path)
 
 
 @app.get("/assets/{asset_path:path}")
 async def get_frontend_asset(asset_path: str):
-    file_path = FRONTEND_DIST / "assets" / asset_path
-    if not file_path.exists():
+    file_path = _resolve_ui_asset_path(f"assets/{asset_path}")
+    if not file_path:
         raise HTTPException(status_code=404, detail="Asset not found")
     return FileResponse(file_path)
 
 
 @app.get("/vite.svg")
 async def get_frontend_vite_icon():
-    file_path = FRONTEND_DIST / "vite.svg"
-    if not file_path.exists():
+    file_path = _resolve_ui_asset_path("vite.svg")
+    if not file_path:
         raise HTTPException(status_code=404, detail="Asset not found")
     return FileResponse(file_path)
 
@@ -1242,11 +1296,12 @@ async def get_status():
 
 @app.get("/runs")
 async def list_runs(project_path: Optional[str] = None):
-    if not RUNS_ROOT.exists():
+    runs_root = _runs_root()
+    if not runs_root.exists():
         return {"runs": []}
 
     records: List[RunRecord] = []
-    for run_dir in RUNS_ROOT.iterdir():
+    for run_dir in runs_root.iterdir():
         if not run_dir.is_dir():
             continue
         meta_path = run_dir / "run.json"
@@ -1828,8 +1883,9 @@ async def answer_pipeline(req: LegacyHumanAnswerRequest):
 
 @app.post("/reset")
 async def reset_checkpoint(req: ResetRequest):
-    if RUNS_ROOT.exists():
-        shutil.rmtree(RUNS_ROOT, ignore_errors=True)
+    runs_root = _runs_root()
+    if runs_root.exists():
+        shutil.rmtree(runs_root, ignore_errors=True)
     return {"status": "reset"}
 
 
@@ -1909,8 +1965,8 @@ async def list_flows():
 
 
 def _flows_dir() -> Path:
-    flows_dir = PROJECT_ROOT / "flows"
-    flows_dir.mkdir(exist_ok=True)
+    flows_dir = get_settings().flows_dir
+    flows_dir.mkdir(parents=True, exist_ok=True)
     return flows_dir
 
 

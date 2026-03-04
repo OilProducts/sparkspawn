@@ -16,7 +16,7 @@ def test_list_pipeline_questions_returns_404_for_unknown_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
     response = api_client.get("/pipelines/missing-run/questions")
 
@@ -29,7 +29,7 @@ def test_list_pipeline_questions_returns_only_pending_questions_for_requested_ru
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
 
@@ -78,7 +78,7 @@ def test_list_pipeline_questions_excludes_answered_questions_for_requested_run(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
 
@@ -127,7 +127,7 @@ def test_submit_pipeline_answer_returns_404_for_unknown_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server, "HUMAN_BROKER", server.HumanGateBroker())
 
     response = api_client.post(
@@ -144,7 +144,7 @@ def test_submit_pipeline_answer_accepts_pending_question_for_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
 
@@ -178,7 +178,7 @@ def test_submit_pipeline_answer_rejects_question_owned_by_other_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     run_a = str(_start_pipeline(api_client, tmp_path / "work-a")["pipeline_id"])
     run_b = str(_start_pipeline(api_client, tmp_path / "work-b")["pipeline_id"])

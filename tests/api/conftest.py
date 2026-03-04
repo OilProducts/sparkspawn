@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,7 +9,12 @@ import attractor.api.server as server
 
 
 @pytest.fixture(autouse=True)
-def _reset_api_server_state() -> None:
+def _reset_api_server_state(tmp_path: Path) -> None:
+    server.configure_runtime_paths(
+        data_dir=tmp_path / ".attractor",
+        runs_dir=tmp_path / "runs",
+        flows_dir=tmp_path / "flows",
+    )
     with server.ACTIVE_RUNS_LOCK:
         server.ACTIVE_RUNS.clear()
     server.HUMAN_BROKER = server.HumanGateBroker()

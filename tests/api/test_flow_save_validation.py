@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import attractor.api.server as server
 from attractor.dsl import canonicalize_dot
 
 
@@ -30,12 +29,6 @@ digraph G {
     start -> missing
 }
 """
-
-
-@pytest.fixture(autouse=True)
-def _isolated_project_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    monkeypatch.setattr(server, "PROJECT_ROOT", tmp_path)
-    return tmp_path
 
 
 def test_save_flow_rejects_parse_invalid_dot(

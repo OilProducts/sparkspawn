@@ -6,3 +6,4 @@ codex-app-server.schema/
 .DS_Store
 artifacts/
 frontend/.tmp-*/
+attractor/ui_dist/

@@ -31,7 +31,7 @@ def test_get_pipeline_returns_progress_for_active_run(
     tmp_path: Path,
 ) -> None:
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
+    server.configure_runtime_paths(runs_dir=runs_root)
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     start_payload = _start_pipeline(api_client, tmp_path / "work")
@@ -58,7 +58,7 @@ def test_get_pipeline_uses_checkpoint_progress_for_persisted_run(
     tmp_path: Path,
 ) -> None:
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
+    server.configure_runtime_paths(runs_dir=runs_root)
 
     start_payload = _start_pipeline(api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])

@@ -104,7 +104,7 @@ def test_start_pipeline_preserves_warning_and_info_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_info_diagnostics())
 
@@ -133,7 +133,7 @@ def test_start_pipeline_validation_error_payload_shape(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_error_diagnostics())
 
@@ -170,7 +170,7 @@ def test_start_pipeline_runs_stylesheet_transform_before_validation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     captured: dict[str, str | None] = {}
 
@@ -332,7 +332,7 @@ def test_start_pipeline_custom_transform_conflict_uses_later_registration_preced
             )
             return graph
 
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
     captured: dict[str, str | None] = {}
 

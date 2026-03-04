@@ -27,3 +27,17 @@ frontend-unit:
 
 ui-smoke:
   npm --prefix frontend run ui:smoke
+
+frontend-build:
+  npm --prefix frontend run build
+
+sync-ui-dist:
+  ./scripts/sync_ui_dist.sh
+
+wheel:
+  uv build
+
+build:
+  npm --prefix frontend run build
+  ./scripts/sync_ui_dist.sh
+  uv build

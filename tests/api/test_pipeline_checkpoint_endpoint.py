@@ -17,7 +17,7 @@ def test_get_pipeline_checkpoint_returns_404_for_unknown_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(server, "RUNS_ROOT", tmp_path / "runs")
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
     response = api_client.get("/pipelines/missing-run/checkpoint")
 
@@ -31,7 +31,7 @@ def test_get_pipeline_checkpoint_returns_current_state_for_known_pipeline(
     tmp_path: Path,
 ) -> None:
     runs_root = tmp_path / "runs"
-    monkeypatch.setattr(server, "RUNS_ROOT", runs_root)
+    server.configure_runtime_paths(runs_dir=runs_root)
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     start_payload = _start_pipeline(api_client, tmp_path / "work")
