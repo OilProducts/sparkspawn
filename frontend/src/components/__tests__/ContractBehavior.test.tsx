@@ -3214,4 +3214,83 @@ digraph contract_behavior {
       gitCommit: '33333bbbbb',
     })
   })
+
+  it('[CID:11.6.03] persists and restores plan status lifecycle transitions', async () => {
+    vi.resetModules()
+    const storage = new Map<string, string>()
+    const localStorageMock = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value)
+      },
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      clear: () => {
+        storage.clear()
+      },
+    }
+    vi.stubGlobal('localStorage', localStorageMock)
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: localStorageMock,
+    })
+
+    localStorageMock.setItem(
+      'sparkspawn.project_registry_state',
+      JSON.stringify({
+        '/tmp/lifecycle-project': {
+          directoryPath: '/tmp/lifecycle-project',
+          isFavorite: false,
+          lastAccessedAt: '2026-03-04T00:00:00.000Z',
+        },
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.ui_route_state',
+      JSON.stringify({
+        viewMode: 'projects',
+        activeProjectPath: '/tmp/lifecycle-project',
+        activeFlow: null,
+        selectedRunId: null,
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.project_conversation_state',
+      JSON.stringify({
+        '/tmp/lifecycle-project': {
+          conversationId: null,
+          conversationHistory: [],
+          specId: 'spec-lifecycle-project',
+          specStatus: 'approved',
+          planId: 'plan-lifecycle-project',
+          planStatus: 'draft',
+        },
+      }),
+    )
+
+    const { useStore: restoredStore } = await import('@/store')
+    expect(restoredStore.getState().projectScopedWorkspaces['/tmp/lifecycle-project']?.planStatus).toBe('draft')
+
+    const lifecycleStatuses = ['approved', 'rejected', 'revision-requested', 'draft'] as const
+    lifecycleStatuses.forEach((status) => {
+      restoredStore.getState().setPlanStatus(status)
+      const persistedConversationStateRaw = localStorageMock.getItem('sparkspawn.project_conversation_state')
+      expect(persistedConversationStateRaw).toBeTruthy()
+      const persistedConversationState = JSON.parse(String(persistedConversationStateRaw)) as Record<
+        string,
+        { planStatus?: string }
+      >
+      expect(persistedConversationState['/tmp/lifecycle-project']?.planStatus).toBe(status)
+    })
+
+    vi.resetModules()
+    vi.stubGlobal('localStorage', localStorageMock)
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: localStorageMock,
+    })
+    const { useStore: reopenedStore } = await import('@/store')
+    expect(reopenedStore.getState().projectScopedWorkspaces['/tmp/lifecycle-project']?.planStatus).toBe('draft')
+  })
 })

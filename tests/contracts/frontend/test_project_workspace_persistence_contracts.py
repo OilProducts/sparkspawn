@@ -19,3 +19,7 @@ def test_project_workspace_persists_and_restores_spec_plan_provenance_references
 
 def test_project_workspace_provenance_captures_run_linkage_timestamps_and_git_context_item_11_6_02() -> None:
     assert_frontend_behavior_contract_passed("11.6.02")
+
+
+def test_project_workspace_persists_and_restores_plan_status_lifecycle_item_11_6_03() -> None:
+    assert_frontend_behavior_contract_passed("11.6.03")
