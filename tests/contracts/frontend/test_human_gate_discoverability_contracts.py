@@ -41,3 +41,7 @@ def test_run_timeline_supports_timeout_fallback_and_explicit_answer_branches_ite
 
 def test_pending_human_gates_group_multi_question_prompts_by_stage_item_10_4_01() -> None:
     assert_frontend_behavior_contract_passed("10.4.01")
+
+
+def test_interviewer_inform_messages_render_in_originating_stage_context_item_10_4_02() -> None:
+    assert_frontend_behavior_contract_passed("10.4.02")

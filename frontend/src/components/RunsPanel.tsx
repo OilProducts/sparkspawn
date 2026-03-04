@@ -140,6 +140,7 @@ const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
     ParallelBranchCompleted: 'parallel',
     ParallelCompleted: 'parallel',
     InterviewStarted: 'interview',
+    InterviewInform: 'interview',
     InterviewCompleted: 'interview',
     InterviewTimeout: 'interview',
     human_gate: 'interview',
@@ -486,6 +487,14 @@ const timelineSummaryFromEvent = (type: string, payload: Record<string, unknown>
     }
     if (type === 'InterviewStarted') {
         return `Interview started for ${nodeId || 'human gate'}`
+    }
+    if (type === 'InterviewInform') {
+        const message = asTrimmedString(payload.message)
+            ?? asTrimmedString(payload.prompt)
+            ?? asTrimmedString(payload.question)
+        return message
+            ? `Interview info for ${nodeId || 'human gate'}: ${message}`
+            : `Interview info for ${nodeId || 'human gate'}`
     }
     if (type === 'InterviewCompleted') {
         const answer = asTrimmedString(payload.answer)
@@ -1396,7 +1405,7 @@ export function RunsPanel() {
                 closedEntityKeys.add(entityKey)
                 continue
             }
-            if (event.type !== 'InterviewStarted' && event.type !== 'human_gate') {
+            if (event.type !== 'InterviewStarted' && event.type !== 'human_gate' && event.type !== 'InterviewInform') {
                 continue
             }
 
@@ -1411,10 +1420,13 @@ export function RunsPanel() {
                 : pendingGateSemanticFallbackOptions(questionType)
             const questionPrompt = event.payload.question
             const gatePrompt = event.payload.prompt
+            const informMessage = event.payload.message
             const prompt = typeof questionPrompt === 'string' && questionPrompt.trim().length > 0
                 ? questionPrompt.trim()
                 : typeof gatePrompt === 'string' && gatePrompt.trim().length > 0
                     ? gatePrompt.trim()
+                    : typeof informMessage === 'string' && informMessage.trim().length > 0
+                        ? informMessage.trim()
                     : event.summary
             const dedupeKey = `${event.nodeId ?? ''}::${prompt.toLowerCase()}`
             if (pendingGateKeys.has(dedupeKey)) {

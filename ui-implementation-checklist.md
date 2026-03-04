@@ -289,7 +289,8 @@ Status key:
 ### 10.4 Multi-Question and Inform Messages
 - [x] [10.4-01] Support grouped multi-question prompts when emitted by backend.
   - Evidence (2026-03-04): Evaluator `pass`; `RunsPanel` now retains multiple pending prompts per stage entity and renders grouped stage cards in the pending-human-gates panel, covered by frontend contract `CID:10.4.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_human_gate_discoverability_contracts.py`) plus screenshot-based visual QA using `frontend/artifacts/ui-smoke/10b-human-gate-discoverability-runs.png`, `frontend/artifacts/ui-smoke/10c-human-gate-yes-no-confirmation-semantics.png`, and `frontend/artifacts/ui-smoke/10d-human-gate-freeform-interaction.png`.
-- [ ] [10.4-02] Display interviewer inform messages in context of originating stage.
+- [x] [10.4-02] Display interviewer inform messages in context of originating stage.
+  - Evidence (2026-03-04): Evaluator `pass`; `RunsPanel` now classifies `InterviewInform` events, renders inform-message summaries, and places inform prompts inside stage-scoped pending-gate groups using `message` fallback handling, covered by frontend contract `CID:10.4.02` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_human_gate_discoverability_contracts.py`) with screenshot-based visual QA references `frontend/artifacts/ui-smoke/10b-human-gate-discoverability-runs.png`, `frontend/artifacts/ui-smoke/10c-human-gate-yes-no-confirmation-semantics.png`, `frontend/artifacts/ui-smoke/10d-human-gate-freeform-interaction.png`, `frontend/artifacts/ui-smoke/08i-runs-panel-event-timeline.png`, and `frontend/artifacts/ui-smoke/08k-runs-panel-event-timeline-grouping-correlation.png`.
 - [ ] [10.4-03] Preserve order and auditability of grouped interactions.
 
 ---
