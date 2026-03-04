@@ -356,6 +356,10 @@ const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
         const parsed = JSON.parse(raw) as Record<string, unknown>
         const restored: PersistedProjectWorkspaceState = {}
         Object.entries(parsed).forEach(([projectPath, value]) => {
+            const normalizedProjectPath = normalizeProjectPath(projectPath)
+            if (!normalizedProjectPath || !isAbsoluteProjectPath(normalizedProjectPath)) {
+                return
+            }
             if (!value || typeof value !== "object") {
                 return
             }
@@ -372,7 +376,7 @@ const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
                     .map(coerceConversationHistoryEntry)
                     .filter((entry): entry is ConversationHistoryEntry => entry !== null)
                 : []
-            restored[projectPath] = {
+            restored[normalizedProjectPath] = {
                 conversationId: typeof scope.conversationId === "string" ? scope.conversationId : null,
                 conversationHistory: history,
                 specId: typeof scope.specId === "string" ? scope.specId : null,

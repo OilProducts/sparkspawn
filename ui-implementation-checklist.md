@@ -331,7 +331,8 @@ Status key:
 ### 11.5 Project Workspace Persistence
 - [x] [11.5-01] Persist project registry across sessions with unique-directory enforcement.
   - Evidence (2026-03-04): Evaluator `pass`; added persisted project-registry load/save hydration (`sparkspawn.project_registry_state`) with normalized absolute-path dedupe and duplicate-directory enforcement retained in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) and screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
-- [ ] [11.5-02] Persist and restore project-scoped conversation/spec/plan linkage.
+- [x] [11.5-02] Persist and restore project-scoped conversation/spec/plan linkage.
+  - Evidence (2026-03-04): Evaluator `pass`; normalized project-key hydration now restores persisted `conversationId`/`conversationHistory`/`specId`/`planId` linkage for project-scoped workspaces in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.02` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) with screenshot-based visual QA review using `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
 - [ ] [11.5-03] Rehydrate last active project context safely on reopen.
 
 ### 11.6 Spec and Plan Artifact Provenance

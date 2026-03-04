@@ -2785,4 +2785,104 @@ digraph contract_behavior {
     expect(persistedRegistry['/tmp/persisted-project']?.directoryPath).toBe('/tmp/persisted-project')
     expect(persistedRegistry['/tmp/new-project']?.directoryPath).toBe('/tmp/new-project')
   })
+
+  it('[CID:11.5.02] restores project-scoped conversation/spec/plan linkage for normalized project paths', async () => {
+    vi.resetModules()
+    const storage = new Map<string, string>()
+    const localStorageMock = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value)
+      },
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      clear: () => {
+        storage.clear()
+      },
+    }
+    vi.stubGlobal('localStorage', localStorageMock)
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: localStorageMock,
+    })
+
+    localStorageMock.setItem(
+      'sparkspawn.project_registry_state',
+      JSON.stringify({
+        '/tmp/persisted-project': {
+          directoryPath: '/tmp/persisted-project',
+          isFavorite: false,
+          lastAccessedAt: '2026-03-04T00:00:00.000Z',
+        },
+        '/tmp/other-project': {
+          directoryPath: '/tmp/other-project',
+          isFavorite: false,
+          lastAccessedAt: '2026-03-04T00:00:00.000Z',
+        },
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.ui_route_state',
+      JSON.stringify({
+        viewMode: 'projects',
+        activeProjectPath: '/tmp/persisted-project',
+        activeFlow: null,
+        selectedRunId: null,
+      }),
+    )
+    localStorageMock.setItem(
+      'sparkspawn.project_conversation_state',
+      JSON.stringify({
+        '/tmp/persisted-project/./': {
+          conversationId: 'conversation-persisted-project',
+          conversationHistory: [
+            {
+              role: 'user',
+              content: 'Persisted scope history',
+              timestamp: '2026-03-04T00:05:00.000Z',
+            },
+          ],
+          specId: 'spec-persisted-project',
+          specStatus: 'approved',
+          planId: 'plan-persisted-project',
+          planStatus: 'rejected',
+        },
+        '/tmp/other-project': {
+          conversationId: 'conversation-other-project',
+          conversationHistory: [
+            {
+              role: 'assistant',
+              content: 'Other scope history',
+              timestamp: '2026-03-04T00:06:00.000Z',
+            },
+          ],
+          specId: 'spec-other-project',
+          specStatus: 'draft',
+          planId: 'plan-other-project',
+          planStatus: 'revision-requested',
+        },
+      }),
+    )
+
+    const { useStore: restoredStore } = await import('@/store')
+
+    const persistedScope = restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']
+    expect(persistedScope.conversationId).toBe('conversation-persisted-project')
+    expect(persistedScope.specId).toBe('spec-persisted-project')
+    expect(persistedScope.specStatus).toBe('approved')
+    expect(persistedScope.planId).toBe('plan-persisted-project')
+    expect(persistedScope.planStatus).toBe('rejected')
+    expect(persistedScope.conversationHistory).toHaveLength(1)
+    expect(persistedScope.conversationHistory[0]?.content).toBe('Persisted scope history')
+
+    restoredStore.getState().setActiveProjectPath('/tmp/other-project')
+    const switchedScope = restoredStore.getState().projectScopedWorkspaces['/tmp/other-project']
+    expect(switchedScope.conversationId).toBe('conversation-other-project')
+    expect(switchedScope.specId).toBe('spec-other-project')
+    expect(switchedScope.planId).toBe('plan-other-project')
+    expect(switchedScope.planStatus).toBe('revision-requested')
+    expect(switchedScope.conversationHistory).toHaveLength(1)
+    expect(switchedScope.conversationHistory[0]?.content).toBe('Other scope history')
+  })
 })
