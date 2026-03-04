@@ -1,6 +1,7 @@
 import { ExecutionControls } from '@/components/ExecutionControls'
 import { Editor } from '@/components/Editor'
 import { GraphSettings } from '@/components/GraphSettings'
+import { RunStream } from '@/components/RunStream'
 import { RunsPanel } from '@/components/RunsPanel'
 import { Sidebar } from '@/components/Sidebar'
 import { TaskNode } from '@/components/TaskNode'
@@ -536,6 +537,30 @@ describe('Frontend contract behavior', () => {
       vi.fn(async () => new Response('   ', { status: 200 })),
     )
     await expect(fetchPipelineGraphValidated('run-empty-graph')).rejects.toBeInstanceOf(ApiSchemaError)
+  })
+
+  it('[CID:12.2.01] shows degraded-state UX when runtime status endpoint responses are unavailable or incompatible', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input)
+        if (url.endsWith('/status')) {
+          return jsonResponse({ runtime: 'idle' })
+        }
+        return jsonResponse({})
+      }),
+    )
+
+    render(<RunStream />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-api-degraded-banner')).toBeVisible()
+    })
+
+    expect(screen.getByTestId('runtime-api-degraded-banner')).toHaveTextContent(
+      'Runtime status endpoint is unavailable or incompatible.',
+    )
+    expect(screen.getByTestId('global-save-state-indicator')).toHaveTextContent('Idle')
   })
 
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {

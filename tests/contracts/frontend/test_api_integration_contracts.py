@@ -11,3 +11,7 @@ def test_typed_client_adapters_and_runtime_schema_validation_item_12_1_02() -> N
 
 def test_endpoint_integration_happy_path_and_common_error_cases_item_12_1_03() -> None:
     assert_frontend_behavior_contract_passed("12.1.03")
+
+
+def test_degraded_state_ux_when_endpoint_unavailable_or_incompatible_item_12_2_01() -> None:
+    assert_frontend_behavior_contract_passed("12.2.01")

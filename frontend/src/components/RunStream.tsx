@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@/store'
 import { fetchPipelineStatusValidated, fetchRuntimeStatusValidated } from '@/lib/apiClient'
 import { resolveSaveRemediation } from '@/lib/saveRemediation'
@@ -19,6 +19,10 @@ const RUNTIME_STAGE_STATUS_MAP: Record<string, 'running' | 'success' | 'failed'>
     StageCompleted: 'success',
     StageFailed: 'failed',
 }
+const RUNTIME_STATUS_DEGRADED_MESSAGE =
+    'Runtime status endpoint is unavailable or incompatible. Live runtime hydration is in degraded mode.'
+const SELECTED_RUN_STATUS_DEGRADED_MESSAGE =
+    'Selected run status endpoint is unavailable or incompatible. Live event streaming preflight is in degraded mode.'
 
 interface RuntimeStageCursor {
     stageIndex: number
@@ -76,6 +80,7 @@ export function RunStream() {
     const saveState = useStore((state) => state.saveState)
     const saveErrorMessage = useStore((state) => state.saveErrorMessage)
     const saveErrorKind = useStore((state) => state.saveErrorKind)
+    const [runtimeApiDegradedMessage, setRuntimeApiDegradedMessage] = useState<string | null>(null)
     const stageCursorsRef = useRef<Record<string, RuntimeStageCursor>>({})
     const saveStateLabel =
         saveState === 'saving'
@@ -98,8 +103,13 @@ export function RunStream() {
     }, [selectedRunId, resetNodeStatuses, clearHumanGate, clearLogs, setRuntimeStatus])
 
     useEffect(() => {
+        let isCancelled = false
         fetchRuntimeStatusValidated()
             .then((data) => {
+                if (isCancelled) return
+                setRuntimeApiDegradedMessage((current) =>
+                    current === RUNTIME_STATUS_DEGRADED_MESSAGE ? null : current
+                )
                 const runId = typeof data?.last_run_id === 'string' ? data.last_run_id : null
                 const lastWorkingDirectory = typeof data?.last_working_directory === 'string' ? data.last_working_directory : ''
                 const statusRunInScope = runBelongsToProjectScope(lastWorkingDirectory, activeProjectPath)
@@ -125,11 +135,22 @@ export function RunStream() {
                     }
                 }
             })
-            .catch(() => null)
+            .catch(() => {
+                if (isCancelled) return
+                setRuntimeApiDegradedMessage(RUNTIME_STATUS_DEGRADED_MESSAGE)
+            })
+        return () => {
+            isCancelled = true
+        }
     }, [selectedRunId, activeProjectPath, setRuntimeStatus, setSelectedRunId])
 
     useEffect(() => {
-        if (!selectedRunId) return
+        if (!selectedRunId) {
+            setRuntimeApiDegradedMessage((current) =>
+                current === SELECTED_RUN_STATUS_DEGRADED_MESSAGE ? null : current
+            )
+            return
+        }
 
         let eventSource: EventSource | null = null
         const metadataAbort = new AbortController()
@@ -253,9 +274,20 @@ export function RunStream() {
         }
 
         const startScopedStream = async () => {
-            const data = metadataAbort.signal.aborted
-                ? null
-                : await fetchPipelineStatusValidated(selectedRunId).catch(() => null)
+            let data: Awaited<ReturnType<typeof fetchPipelineStatusValidated>> | null = null
+            if (!metadataAbort.signal.aborted) {
+                try {
+                    data = await fetchPipelineStatusValidated(selectedRunId)
+                    setRuntimeApiDegradedMessage((current) =>
+                        current === SELECTED_RUN_STATUS_DEGRADED_MESSAGE ? null : current
+                    )
+                } catch {
+                    if (!metadataAbort.signal.aborted) {
+                        setRuntimeApiDegradedMessage(SELECTED_RUN_STATUS_DEGRADED_MESSAGE)
+                    }
+                    return
+                }
+            }
             if (metadataAbort.signal.aborted) return
 
             const selectedRunWorkingDirectory = typeof data?.working_directory === 'string' ? data.working_directory : ''
@@ -308,6 +340,11 @@ export function RunStream() {
             >
                 <span>{saveStateLabel}</span>
                 {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
+                {runtimeApiDegradedMessage ? (
+                    <p data-testid="runtime-api-degraded-banner" className="mt-1 text-[10px] font-normal leading-4 text-amber-700">
+                        {runtimeApiDegradedMessage}
+                    </p>
+                ) : null}
                 {remediation ? (
                     <p data-testid="global-save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
                         {remediation.message}
