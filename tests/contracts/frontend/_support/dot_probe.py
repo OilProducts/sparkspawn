@@ -144,3 +144,76 @@ def run_graph_attr_validation_probe(
             env=env,
         )
         return result.stdout
+
+
+def run_canonical_flow_model_probe(
+    probe_script: str,
+    *,
+    temp_prefix: str,
+    error_context: str,
+    env_extra: dict[str, str] | None = None,
+) -> str:
+    repo_root, frontend_dir = _repo_paths()
+
+    with tempfile.TemporaryDirectory(prefix=temp_prefix, dir=frontend_dir) as temp_dir:
+        temp_path = Path(temp_dir)
+        out_dir = temp_path / "out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        probe_tsconfig = temp_path / "tsconfig.json"
+        probe_tsconfig.write_text(
+            """{
+  \"extends\": \"../tsconfig.app.json\",
+  \"compilerOptions\": {
+    \"noEmit\": false,
+    \"noEmitOnError\": false,
+    \"allowImportingTsExtensions\": false,
+    \"outDir\": \"./out\"
+  },
+  \"include\": [\"../src/lib/canonicalFlowModel.ts\"]
+}
+""",
+            encoding="utf-8",
+        )
+
+        compile_result = subprocess.run(
+            [
+                "npm",
+                "--prefix",
+                str(frontend_dir),
+                "exec",
+                "--",
+                "tsc",
+                "--pretty",
+                "false",
+                "--project",
+                str(probe_tsconfig),
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        canonical_flow_model_js = out_dir / "lib" / "canonicalFlowModel.js"
+        if not canonical_flow_model_js.exists():
+            raise AssertionError(
+                f"Failed to compile canonicalFlowModel.ts for {error_context}.\n"
+                f"stdout:\n{compile_result.stdout}\n"
+                f"stderr:\n{compile_result.stderr}"
+            )
+
+        env = os.environ.copy()
+        env["CANONICAL_FLOW_MODEL_JS_PATH"] = str(canonical_flow_model_js)
+        if env_extra:
+            env.update(env_extra)
+
+        probe_result = subprocess.run(
+            ["node", "--input-type=module", "-e", probe_script],
+            cwd=frontend_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+        return probe_result.stdout

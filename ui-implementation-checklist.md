@@ -299,7 +299,8 @@ Status key:
 ## 11. Persistence and DOT Serialization
 
 ### 11.1 Canonical Model
-- [ ] [11.1-01] Define and implement canonical frontend flow model covering all spec constructs.
+- [x] [11.1-01] Define and implement canonical frontend flow model covering all spec constructs.
+  - Evidence (2026-03-04): Evaluator `pass`; added canonical flow model ingestion/serialization (`frontend/src/lib/canonicalFlowModel.ts`) and routed editor hydration + DOT generation through the canonical mapping (`frontend/src/components/Editor.tsx`, `frontend/src/lib/dotUtils.ts`), covered by contract tests `tests/contracts/frontend/test_canonical_flow_model_contracts.py` and UI-smoke visual QA screenshots `frontend/artifacts/ui-smoke/01-editor-shell.png`, `frontend/artifacts/ui-smoke/19a-semantic-equivalence-mismatch-blocked.png`, and `frontend/artifacts/ui-smoke/19b-semantic-equivalence-round-trip-saved.png`.
 - [ ] [11.1-02] Ensure canonical model can represent subgraph/default scopes and extension attrs.
 
 ### 11.2 Round-Trip Requirements

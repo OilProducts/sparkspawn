@@ -14,12 +14,13 @@ import type { Connection, Edge, EdgeChange, Node, NodeChange, OnSelectionChangeP
 import '@xyflow/react/dist/style.css';
 import ELK from 'elkjs/lib/elk.bundled.js';
 
-import { useStore, type DiagnosticEntry } from '@/store';
+import { useStore, type DiagnosticEntry, type GraphAttrs } from '@/store';
 import { TaskNode } from './TaskNode';
 import { ValidationEdge } from './ValidationEdge';
 import { ValidationPanel } from './ValidationPanel';
 import { ExecutionControls } from './ExecutionControls';
 import { generateDot } from '@/lib/dotUtils';
+import { buildCanonicalFlowModelFromPreviewGraph } from '@/lib/canonicalFlowModel';
 import {
     EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS,
     saveFlowContent,
@@ -240,9 +241,10 @@ export function Editor() {
 
     const hydrateFromPreview = useCallback(async (preview: PreviewResponse) => {
         if (!preview.graph) return false;
+        const canonicalModel = buildCanonicalFlowModelFromPreviewGraph(activeFlow ?? 'flow', preview.graph)
 
         if (preview.graph.graph_attrs) {
-            const nextGraphAttrs = { ...preview.graph.graph_attrs }
+            const nextGraphAttrs: GraphAttrs = { ...canonicalModel.graphAttrs }
             const shouldSeed = (value?: string | null) =>
                 value === undefined || value === null || value === ''
             if (shouldSeed(nextGraphAttrs.ui_default_llm_model) && uiDefaults.llm_model) {
@@ -257,58 +259,71 @@ export function Editor() {
             setGraphAttrs(nextGraphAttrs)
         }
 
-        const rfNodes: Node[] = preview.graph.nodes.map((n, i: number) => ({
+        const rfNodes: Node[] = canonicalModel.nodes.map((n, i: number) => ({
             id: n.id,
             type: 'customTask',
             position: { x: 250, y: i * 150 },
             data: {
-                label: n.label,
-                shape: n.shape ?? 'box',
-                prompt: n.prompt ?? '',
-                tool_command: n.tool_command ?? '',
-                'tool_hooks.pre': n['tool_hooks.pre'] ?? '',
-                'tool_hooks.post': n['tool_hooks.post'] ?? '',
-                join_policy: n.join_policy ?? 'wait_all',
-                error_policy: n.error_policy ?? 'continue',
-                max_parallel: n.max_parallel ?? 4,
-                type: n.type ?? '',
-                max_retries: n.max_retries ?? '',
-                goal_gate: n.goal_gate ?? false,
-                retry_target: n.retry_target ?? '',
-                fallback_retry_target: n.fallback_retry_target ?? '',
-                fidelity: n.fidelity ?? '',
-                thread_id: n.thread_id ?? '',
-                class: n.class ?? '',
-                timeout: n.timeout ?? '',
-                llm_model: n.llm_model ?? '',
-                llm_provider: n.llm_provider ?? '',
-                reasoning_effort: n.reasoning_effort ?? '',
-                auto_status: n.auto_status ?? false,
-                allow_partial: n.allow_partial ?? false,
-                'manager.poll_interval': n['manager.poll_interval'] ?? '',
-                'manager.max_cycles': n['manager.max_cycles'] ?? '',
-                'manager.stop_condition': n['manager.stop_condition'] ?? '',
-                'manager.actions': n['manager.actions'] ?? '',
-                'human.default_choice': n['human.default_choice'] ?? '',
+                label: typeof n.attrs.label === 'string' ? n.attrs.label : n.id,
+                shape: typeof n.attrs.shape === 'string' ? n.attrs.shape : 'box',
+                prompt: typeof n.attrs.prompt === 'string' ? n.attrs.prompt : '',
+                tool_command: typeof n.attrs.tool_command === 'string' ? n.attrs.tool_command : '',
+                'tool_hooks.pre': typeof n.attrs['tool_hooks.pre'] === 'string' ? n.attrs['tool_hooks.pre'] : '',
+                'tool_hooks.post': typeof n.attrs['tool_hooks.post'] === 'string' ? n.attrs['tool_hooks.post'] : '',
+                join_policy: typeof n.attrs.join_policy === 'string' ? n.attrs.join_policy : 'wait_all',
+                error_policy: typeof n.attrs.error_policy === 'string' ? n.attrs.error_policy : 'continue',
+                max_parallel: typeof n.attrs.max_parallel === 'number' || typeof n.attrs.max_parallel === 'string'
+                    ? n.attrs.max_parallel
+                    : 4,
+                type: typeof n.attrs.type === 'string' ? n.attrs.type : '',
+                max_retries: typeof n.attrs.max_retries === 'number' || typeof n.attrs.max_retries === 'string'
+                    ? n.attrs.max_retries
+                    : '',
+                goal_gate: n.attrs.goal_gate === true || n.attrs.goal_gate === 'true',
+                retry_target: typeof n.attrs.retry_target === 'string' ? n.attrs.retry_target : '',
+                fallback_retry_target: typeof n.attrs.fallback_retry_target === 'string' ? n.attrs.fallback_retry_target : '',
+                fidelity: typeof n.attrs.fidelity === 'string' ? n.attrs.fidelity : '',
+                thread_id: typeof n.attrs.thread_id === 'string' ? n.attrs.thread_id : '',
+                class: typeof n.attrs.class === 'string' ? n.attrs.class : '',
+                timeout: typeof n.attrs.timeout === 'string' ? n.attrs.timeout : '',
+                llm_model: typeof n.attrs.llm_model === 'string' ? n.attrs.llm_model : '',
+                llm_provider: typeof n.attrs.llm_provider === 'string' ? n.attrs.llm_provider : '',
+                reasoning_effort: typeof n.attrs.reasoning_effort === 'string' ? n.attrs.reasoning_effort : '',
+                auto_status: n.attrs.auto_status === true || n.attrs.auto_status === 'true',
+                allow_partial: n.attrs.allow_partial === true || n.attrs.allow_partial === 'true',
+                'manager.poll_interval': typeof n.attrs['manager.poll_interval'] === 'string'
+                    ? n.attrs['manager.poll_interval']
+                    : '',
+                'manager.max_cycles': typeof n.attrs['manager.max_cycles'] === 'number'
+                    || typeof n.attrs['manager.max_cycles'] === 'string'
+                    ? n.attrs['manager.max_cycles']
+                    : '',
+                'manager.stop_condition': typeof n.attrs['manager.stop_condition'] === 'string'
+                    ? n.attrs['manager.stop_condition']
+                    : '',
+                'manager.actions': typeof n.attrs['manager.actions'] === 'string' ? n.attrs['manager.actions'] : '',
+                'human.default_choice': typeof n.attrs['human.default_choice'] === 'string'
+                    ? n.attrs['human.default_choice']
+                    : '',
                 status: 'idle'
             },
         }));
 
-        const rfEdges: Edge[] = preview.graph.edges.map((e, i: number) => ({
-            id: `e-${e.from}-${e.to}-${i}`,
-            source: e.from,
-            target: e.to,
+        const rfEdges: Edge[] = canonicalModel.edges.map((e, i: number) => ({
+            id: `e-${e.source}-${e.target}-${i}`,
+            source: e.source,
+            target: e.target,
             type: EDGE_TYPE,
             className: EDGE_CLASS,
             interactionWidth: EDGE_INTERACTION_WIDTH,
-            label: e.label,
+            label: typeof e.attrs.label === 'string' ? e.attrs.label : undefined,
             data: {
-                label: e.label ?? '',
-                condition: e.condition ?? '',
-                weight: e.weight ?? '',
-                fidelity: e.fidelity ?? '',
-                thread_id: e.thread_id ?? '',
-                loop_restart: e.loop_restart ?? false,
+                label: typeof e.attrs.label === 'string' ? e.attrs.label : '',
+                condition: typeof e.attrs.condition === 'string' ? e.attrs.condition : '',
+                weight: typeof e.attrs.weight === 'number' || typeof e.attrs.weight === 'string' ? e.attrs.weight : '',
+                fidelity: typeof e.attrs.fidelity === 'string' ? e.attrs.fidelity : '',
+                thread_id: typeof e.attrs.thread_id === 'string' ? e.attrs.thread_id : '',
+                loop_restart: e.attrs.loop_restart === true || e.attrs.loop_restart === 'true',
             },
         }));
 
@@ -323,6 +338,7 @@ export function Editor() {
         hydratedRef.current = true;
         return true;
     }, [
+        activeFlow,
         setEdges,
         setGraphAttrs,
         setNodes,
