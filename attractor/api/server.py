@@ -1503,6 +1503,9 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
     run_root = _run_root(run_id)
     checkpoint_file = str(run_root / "state.json")
     logs_root = str(run_root / "logs")
+    # NOTE: This artifact render intentionally uses the submitted DOT source.
+    # It does not reflect transform/normalization changes applied to `graph`.
+    # If post-transform fidelity is required, render from a serialized `graph` instead.
     graphviz_export = export_graphviz_artifact(req.flow_content, run_root)
 
     context = Context(values=_graph_attr_context_seed(graph))
