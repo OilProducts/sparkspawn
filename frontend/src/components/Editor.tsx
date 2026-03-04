@@ -239,9 +239,13 @@ export function Editor() {
         saveFlow(pending.nodes, pending.edges, pending.options);
     }, [activeProjectPath, activeFlow, saveFlow]);
 
-    const hydrateFromPreview = useCallback(async (preview: PreviewResponse) => {
+    const hydrateFromPreview = useCallback(async (preview: PreviewResponse, sourceDot?: string) => {
         if (!preview.graph) return false;
-        const canonicalModel = buildCanonicalFlowModelFromPreviewGraph(activeFlow ?? 'flow', preview.graph)
+        const canonicalModel = buildCanonicalFlowModelFromPreviewGraph(
+            activeFlow ?? 'flow',
+            preview.graph,
+            sourceDot !== undefined ? { rawDot: sourceDot } : undefined,
+        )
 
         if (preview.graph.graph_attrs) {
             const nextGraphAttrs: GraphAttrs = { ...canonicalModel.graphAttrs }
@@ -388,9 +392,12 @@ export function Editor() {
                 if (activeProjectPath && normalizedContent !== data.content) {
                     void saveFlowContentExpectingSemanticEquivalence(activeFlow, normalizedContent);
                 }
-                return requestPreview(normalizedContent);
+                return requestPreview(normalizedContent).then((preview) => ({
+                    normalizedContent,
+                    preview,
+                }));
             })
-            .then((preview) => hydrateFromPreview(preview))
+            .then(({ normalizedContent, preview }) => hydrateFromPreview(preview, normalizedContent))
             .catch(console.error);
     }, [
         activeFlow,
@@ -569,7 +576,7 @@ export function Editor() {
 
         try {
             const preview = await requestPreview(rawDotDraft);
-            const hydrated = await hydrateFromPreview(preview);
+            const hydrated = await hydrateFromPreview(preview, rawDotDraft);
             if (!hydrated) {
                 setRawHandoffError('Safe handoff requires valid DOT. Preview response did not include a graph.');
                 return;

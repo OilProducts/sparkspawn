@@ -305,7 +305,8 @@ Status key:
   - Evidence (2026-03-04): Evaluator `pass`; canonical DOT generation now serializes top-level defaults, nested subgraph scopes, and unknown-valid extension attrs (`frontend/src/lib/canonicalFlowModel.ts`), covered by contract test `tests/contracts/frontend/test_canonical_flow_model_contracts.py::test_canonical_flow_model_serializes_scopes_and_extension_attrs_item_11_1_02` plus UI-smoke visual QA screenshots `frontend/artifacts/ui-smoke/01-editor-shell.png`, `frontend/artifacts/ui-smoke/19a-semantic-equivalence-mismatch-blocked.png`, and `frontend/artifacts/ui-smoke/19b-semantic-equivalence-round-trip-saved.png`.
 
 ### 11.2 Round-Trip Requirements
-- [ ] [11.2-01] Add no-op save semantic-equivalence tests for spec-valid fixtures.
+- [x] [11.2-01] Add no-op save semantic-equivalence tests for spec-valid fixtures.
+  - Evidence (2026-03-04): Evaluator `pass`; added fixture-based no-op semantic-equivalence coverage in `tests/api/test_flow_save_validation.py::test_save_flow_no_op_semantic_equivalence_for_spec_valid_fixtures_item_11_2_01`, and updated canonical preview round-trip handling (`frontend/src/lib/canonicalFlowModel.ts`, `frontend/src/components/Editor.tsx`) to preserve explicit-vs-implicit label semantics across no-op saves, with visual QA screenshots `frontend/artifacts/ui-smoke/19-semantic-equivalence-noop-save.png`, `frontend/artifacts/ui-smoke/19a-semantic-equivalence-mismatch-blocked.png`, and `frontend/artifacts/ui-smoke/19b-semantic-equivalence-round-trip-saved.png`.
 - [ ] [11.2-02] Add open/edit/save/re-open tests for advanced attribute coverage.
 - [ ] [11.2-03] Add regression tests for previously lossy edit paths.
 

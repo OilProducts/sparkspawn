@@ -156,19 +156,60 @@ function cloneSubgraph(subgraph: CanonicalSubgraph): CanonicalSubgraph {
     }
 }
 
+function normalizeDotId(rawId: string): string {
+    const trimmed = rawId.trim()
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        const inner = trimmed.slice(1, -1)
+        return inner
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\')
+    }
+    return trimmed
+}
+
+function extractNodeIdsWithExplicitLabels(rawDot?: string | null): Set<string> {
+    if (!rawDot) {
+        return new Set<string>()
+    }
+
+    const nodeIdsWithExplicitLabels = new Set<string>()
+    const nodeStatementPattern = /(^|[\r\n])\s*("(?:[^"\\]|\\.)+"|[A-Za-z_][A-Za-z0-9_]*)\s*\[([\s\S]*?)\]\s*;/g
+    let match = nodeStatementPattern.exec(rawDot)
+    while (match !== null) {
+        const nodeId = normalizeDotId(match[2])
+        const attrsBody = match[3]
+        if (
+            nodeId !== 'graph'
+            && nodeId !== 'node'
+            && nodeId !== 'edge'
+            && /\blabel\s*=/.test(attrsBody)
+        ) {
+            nodeIdsWithExplicitLabels.add(nodeId)
+        }
+        match = nodeStatementPattern.exec(rawDot)
+    }
+
+    return nodeIdsWithExplicitLabels
+}
+
 export function buildCanonicalFlowModelFromPreviewGraph(
     graphId: string,
     graph: CanonicalPreviewGraphPayload,
     options?: CanonicalModelBuildOptions,
 ): CanonicalFlowModel {
+    const nodeIdsWithExplicitLabels = extractNodeIdsWithExplicitLabels(options?.rawDot)
     const nodes: CanonicalFlowNode[] = graph.nodes.flatMap((nodePayload) => {
         const nodeId = typeof nodePayload.id === 'string' ? nodePayload.id : null
         if (!nodeId) {
             return []
         }
+        const attrs = cloneCanonicalAttrMap(nodePayload, PREVIEW_NODE_META_KEYS)
+        if (attrs.label === nodeId && !nodeIdsWithExplicitLabels.has(nodeId)) {
+            delete attrs.label
+        }
         return [{
             id: nodeId,
-            attrs: cloneCanonicalAttrMap(nodePayload, PREVIEW_NODE_META_KEYS),
+            attrs,
         }]
     })
 
@@ -447,7 +488,8 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
 
     model.nodes.forEach((node) => {
         const attrs = node.attrs
-        const labelValue = readStringAttr(attrs, 'label') || node.id
+        const hasLabelAttr = Object.prototype.hasOwnProperty.call(attrs, 'label')
+        const labelValue = readStringAttr(attrs, 'label')
         const shapeValue = readStringAttr(attrs, 'shape')
         const promptValue = readStringAttr(attrs, 'prompt')
         const toolCommandValue = readStringAttr(attrs, 'tool_command')
@@ -476,7 +518,7 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
         const managerActionsValue = readStringAttr(attrs, 'manager.actions')
         const humanDefaultChoiceValue = readStringAttr(attrs, 'human.default_choice')
 
-        const label = `"${escapeDotString(labelValue)}"`
+        const label = hasLabelAttr ? `label="${escapeDotString(labelValue)}"` : ''
         const shape = shapeValue ? `shape=${formatAttrValue(shapeValue)}` : ''
         const prompt = promptValue ? `prompt="${escapeDotString(promptValue)}"` : ''
         const toolCommand = toolCommandValue ? `tool_command="${escapeDotString(toolCommandValue)}"` : ''
@@ -487,7 +529,7 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
         const maxParallel = formatIntAttr('max_parallel', maxParallelValue)
 
         const nodeAttrs = [
-            `label=${label}`,
+            label,
             shape,
             prompt,
             toolCommand,
