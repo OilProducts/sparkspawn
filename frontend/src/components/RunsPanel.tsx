@@ -398,6 +398,13 @@ const interviewOutcomeProvenanceFromPayload = (
         }
         return answer.toLowerCase() === 'skipped' ? 'skipped' : 'accepted'
     }
+
+    if (type === 'InterviewTimeout') {
+        const defaultChoice = asTrimmedString(payload.default_choice_label)
+            ?? asTrimmedString(payload.default_choice_target)
+        return defaultChoice ? 'timeout_default_applied' : 'timeout_no_default'
+    }
+
     return null
 }
 
