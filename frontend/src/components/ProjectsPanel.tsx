@@ -1,8 +1,9 @@
-import { type ConversationHistoryEntry, type PlanStatus, useStore } from "@/store"
+import { type ConversationHistoryEntry, type PlanStatus, type ProjectRegistrationResult, useStore } from "@/store"
 import { type FormEvent, useEffect, useState } from "react"
 import { buildPipelineStartPayload } from "@/lib/pipelineStartPayload"
 import { ApiHttpError, fetchFlowPayloadValidated, fetchPipelineStartValidated, fetchPipelineStatusValidated } from '@/lib/apiClient'
 import { useNarrowViewport } from "@/lib/useNarrowViewport"
+import { isAbsoluteProjectPath, normalizeProjectPath } from "@/lib/projectPaths"
 import {
     clearProjectSpecEditProposal,
     getProjectSpecEditProposal,
@@ -71,6 +72,7 @@ export function ProjectsPanel() {
     const registerProject = useStore((state) => state.registerProject)
     const updateProjectPath = useStore((state) => state.updateProjectPath)
     const toggleProjectFavorite = useStore((state) => state.toggleProjectFavorite)
+    const setProjectRegistrationError = useStore((state) => state.setProjectRegistrationError)
     const clearProjectRegistrationError = useStore((state) => state.clearProjectRegistrationError)
     const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
     const setConversationId = useStore((state) => state.setConversationId)
@@ -159,6 +161,76 @@ export function ProjectsPanel() {
         }
     }, [projects, projectGitMetadata])
 
+    const resolveProjectPathValidation = (rawPath: string, currentPath?: string | null): ProjectRegistrationResult => {
+        const normalizedPath = normalizeProjectPath(rawPath)
+        if (!normalizedPath) {
+            return { ok: false, error: 'Project directory path is required.' }
+        }
+        if (!isAbsoluteProjectPath(normalizedPath)) {
+            return {
+                ok: false,
+                normalizedPath,
+                error: 'Project directory path must be absolute.',
+            }
+        }
+        const normalizedCurrent = currentPath ? normalizeProjectPath(currentPath) : null
+        const duplicate = Boolean(projectRegistry[normalizedPath]) && normalizedPath !== normalizedCurrent
+        if (duplicate) {
+            return {
+                ok: false,
+                normalizedPath,
+                error: `Project already registered: ${normalizedPath}`,
+            }
+        }
+        return {
+            ok: true,
+            normalizedPath,
+        }
+    }
+
+    const fetchProjectGitMetadata = async (
+        projectPath: string,
+    ): Promise<{ metadata: ProjectGitMetadata; error?: string }> => {
+        try {
+            const response = await fetch(`/api/projects/metadata?directory=${encodeURIComponent(projectPath)}`)
+            if (!response.ok) {
+                let message = 'Unable to verify project Git state.'
+                try {
+                    const payload = (await response.json()) as { detail?: string }
+                    if (payload?.detail) {
+                        message = payload.detail
+                    }
+                } catch {
+                    // ignore
+                }
+                return { metadata: { ...EMPTY_PROJECT_GIT_METADATA }, error: message }
+            }
+            const payload = (await response.json()) as { branch?: string | null; commit?: string | null }
+            return {
+                metadata: {
+                    branch: asProjectGitMetadataField(payload.branch),
+                    commit: asProjectGitMetadataField(payload.commit),
+                },
+            }
+        } catch {
+            return { metadata: { ...EMPTY_PROJECT_GIT_METADATA }, error: 'Unable to verify project Git state.' }
+        }
+    }
+
+    const ensureProjectGitRepository = async (projectPath: string): Promise<ProjectGitMetadata | null> => {
+        const { metadata, error } = await fetchProjectGitMetadata(projectPath)
+        setProjectGitMetadata((current) => ({ ...current, [projectPath]: metadata }))
+        if (error) {
+            setProjectRegistrationError(error)
+            return null
+        }
+        if (!metadata.branch && !metadata.commit) {
+            setProjectRegistrationError('Project directory must be a Git repository.')
+            return null
+        }
+        return metadata
+    }
+
     const formatLastActivity = (value: string | null) => {
         if (!value) {
             return "No activity yet"
@@ -170,16 +242,56 @@ export function ProjectsPanel() {
         return parsed.toLocaleString()
     }
 
-    const onRegisterProject = () => {
-        const result = registerProject(directoryPathInput)
+    const onRegisterProject = async () => {
+        const validation = resolveProjectPathValidation(directoryPathInput)
+        if (!validation.ok || !validation.normalizedPath) {
+            setProjectRegistrationError(validation.error ?? 'Project directory path is required.')
+            return
+        }
+        const gitMetadata = await ensureProjectGitRepository(validation.normalizedPath)
+        if (!gitMetadata) {
+            return
+        }
+        const result = registerProject(validation.normalizedPath)
         if (result.ok) {
             setDirectoryPathInput("")
+            setProjectRegistrationError(null)
         }
     }
 
     const onSubmitProjectRegistration = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
-        onRegisterProject()
+        void onRegisterProject()
+    }
+
+    const onSaveProjectPathEdit = async (projectPath: string) => {
+        const validation = resolveProjectPathValidation(editingDirectoryPathInput, projectPath)
+        if (!validation.ok || !validation.normalizedPath) {
+            setProjectRegistrationError(validation.error ?? 'Project directory path is required.')
+            return
+        }
+        const normalizedCurrentPath = normalizeProjectPath(projectPath)
+        let nextGitMetadata: ProjectGitMetadata | null = null
+        if (validation.normalizedPath !== normalizedCurrentPath) {
+            nextGitMetadata = await ensureProjectGitRepository(validation.normalizedPath)
+            if (!nextGitMetadata) {
+                return
+            }
+        }
+        const result = updateProjectPath(projectPath, validation.normalizedPath)
+        if (result.ok) {
+            setEditingProjectPath(null)
+            setEditingDirectoryPathInput("")
+            setProjectRegistrationError(null)
+            if (validation.normalizedPath !== normalizedCurrentPath && nextGitMetadata) {
+                setProjectGitMetadata((current) => {
+                    const next = { ...current }
+                    delete next[normalizedCurrentPath]
+                    next[validation.normalizedPath as string] = nextGitMetadata
+                    return next
+                })
+            }
+        }
     }
 
     const onStartProjectPathEdit = (projectPath: string) => {
@@ -932,11 +1044,7 @@ export function ProjectsPanel() {
                                                         data-testid="project-edit-save-button"
                                                         type="button"
                                                         onClick={() => {
-                                                            const result = updateProjectPath(project.directoryPath, editingDirectoryPathInput)
-                                                            if (result.ok) {
-                                                                setEditingProjectPath(null)
-                                                                setEditingDirectoryPathInput("")
-                                                            }
+                                                            void onSaveProjectPathEdit(project.directoryPath)
                                                         }}
                                                         className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                                     >

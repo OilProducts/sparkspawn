@@ -2011,6 +2011,85 @@ describe('Frontend contract behavior', () => {
     expect(registryInactiveButton).not.toHaveAttribute('aria-current')
   })
 
+  it('[CID:14.0.02] enforces unique project directories and Git-repo registration invariants', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input)
+      if (url.includes('/api/projects/metadata')) {
+        const directory = new URL(url, 'http://localhost').searchParams.get('directory') ?? ''
+        if (directory.includes('non-git')) {
+          return jsonResponse({ branch: null, commit: null })
+        }
+        if (directory.includes('detached')) {
+          return jsonResponse({ branch: null, commit: 'abc123def456' })
+        }
+        return jsonResponse({ branch: 'main', commit: 'abc123def456' })
+      }
+      return jsonResponse({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'projects',
+      }))
+    })
+
+    render(<ProjectsPanel />)
+
+    await user.clear(screen.getByTestId('project-path-input'))
+    await user.type(screen.getByTestId('project-path-input'), '/tmp/project-contract-behavior')
+    await user.click(screen.getByTestId('project-register-button'))
+
+    expect(screen.getByTestId('project-registration-error')).toHaveTextContent(
+      'Project already registered: /tmp/project-contract-behavior',
+    )
+
+    await user.clear(screen.getByTestId('project-path-input'))
+    await user.type(screen.getByTestId('project-path-input'), '/tmp/non-git-project')
+    await user.click(screen.getByTestId('project-register-button'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-registration-error')).toHaveTextContent(
+        'Project directory must be a Git repository.',
+      )
+    })
+    expect(useStore.getState().projectRegistry['/tmp/non-git-project']).toBeUndefined()
+
+    await user.clear(screen.getByTestId('project-path-input'))
+    await user.type(screen.getByTestId('project-path-input'), '/tmp/detached-git-project')
+    await user.click(screen.getByTestId('project-register-button'))
+
+    await waitFor(() => {
+      expect(useStore.getState().projectRegistry['/tmp/detached-git-project']).toBeDefined()
+    })
+    expect(screen.queryByTestId('project-registration-error')).not.toBeInTheDocument()
+
+    await user.clear(screen.getByTestId('project-path-input'))
+    await user.type(screen.getByTestId('project-path-input'), '/tmp/git-project')
+    await user.click(screen.getByTestId('project-register-button'))
+
+    await waitFor(() => {
+      expect(useStore.getState().projectRegistry['/tmp/git-project']).toBeDefined()
+    })
+
+    const registryList = screen.getByTestId('project-registry-list')
+    const editButtons = within(registryList).getAllByTestId('project-edit-button')
+    await user.click(editButtons[0])
+    await user.clear(screen.getByTestId('project-edit-input'))
+    await user.type(screen.getByTestId('project-edit-input'), '/tmp/non-git-update')
+    await user.click(screen.getByTestId('project-edit-save-button'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-registration-error')).toHaveTextContent(
+        'Project directory must be a Git repository.',
+      )
+    })
+    expect(useStore.getState().projectRegistry['/tmp/project-contract-behavior']).toBeDefined()
+    expect(useStore.getState().projectRegistry['/tmp/non-git-update']).toBeUndefined()
+  })
+
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {
     renderSelectedEdgeSidebar()
     const edgeForm = await screen.findByTestId('edge-structured-form')
