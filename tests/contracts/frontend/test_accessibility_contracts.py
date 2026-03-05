@@ -23,3 +23,7 @@ def test_mobile_narrow_viewport_usability_for_project_and_operational_tasks_item
 
 def test_viewport_regression_contracts_and_smoke_evidence_item_13_2_03() -> None:
     assert_frontend_behavior_contract_passed("13.2.03")
+
+
+def test_performance_budgets_defined_for_canvas_and_timeline_item_13_3_01() -> None:
+    assert_frontend_behavior_contract_passed("13.3.01")

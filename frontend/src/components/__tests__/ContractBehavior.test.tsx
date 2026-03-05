@@ -1648,6 +1648,130 @@ describe('Frontend contract behavior', () => {
     }
   })
 
+  it('[CID:13.3.01] defines explicit performance budgets for canvas interaction and timeline updates', async () => {
+    const runId = 'run-performance-budget-contract'
+    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runRecord = {
+      run_id: runId,
+      flow_name: 'contract-behavior.dot',
+      status: 'running',
+      result: 'running',
+      working_directory: '/tmp/project-contract-behavior/workspace',
+      project_path: '/tmp/project-contract-behavior',
+      git_branch: 'main',
+      git_commit: 'abc1234',
+      model: 'gpt-5',
+      started_at: '2026-03-05T00:00:00Z',
+      ended_at: null,
+      last_error: '',
+      token_usage: 0,
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input)
+        if (url.endsWith('/api/flows/contract-behavior.dot')) {
+          return jsonResponse({
+            name: 'contract-behavior.dot',
+            content: 'digraph G { start [label="Start"]; end [label="End"]; start -> end; }',
+          })
+        }
+        if (url.endsWith('/preview')) {
+          return jsonResponse({
+            status: 'ok',
+            graph: {
+              nodes: [
+                { id: 'start', attrs: { label: 'Start' } },
+                { id: 'end', attrs: { label: 'End' } },
+              ],
+              edges: [{ source: 'start', target: 'end', attrs: {} }],
+              graph_attrs: {},
+            },
+            diagnostics: [],
+          })
+        }
+        if (url.endsWith('/runs')) {
+          return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(`${runApiPath}/checkpoint`)) {
+          return jsonResponse({ pipeline_id: runId, checkpoint: { node_statuses: {} } })
+        }
+        if (url.endsWith(`${runApiPath}/context`)) {
+          return jsonResponse({ pipeline_id: runId, context: {} })
+        }
+        if (url.endsWith(`${runApiPath}/artifacts`)) {
+          return jsonResponse({ pipeline_id: runId, artifacts: [] })
+        }
+        if (url.endsWith(`${runApiPath}/graph`)) {
+          return new Response('<svg xmlns="http://www.w3.org/2000/svg"></svg>', {
+            status: 200,
+            headers: { 'Content-Type': 'image/svg+xml' },
+          })
+        }
+        if (url.endsWith(`${runApiPath}/questions`)) {
+          return jsonResponse({ pipeline_id: runId, questions: [] })
+        }
+        return jsonResponse({}, { status: 404 })
+      }),
+    )
+
+    class MockEventSource {
+      url: string
+      withCredentials = false
+      readyState = 1
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+      }
+
+      close() {}
+      addEventListener() {}
+      removeEventListener() {}
+      dispatchEvent(): boolean {
+        return false
+      }
+    }
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+
+    act(() => {
+      resetContractState()
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'editor',
+        activeFlow: 'contract-behavior.dot',
+      }))
+    })
+
+    renderWithFlowProvider(<Editor />)
+
+    const canvasBudget = await screen.findByTestId('canvas-interaction-performance-budget')
+    expect(canvasBudget).toHaveAttribute('data-budget-ms', '16')
+    expect(canvasBudget).toHaveTextContent('16ms')
+
+    cleanup()
+
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'runs',
+        selectedRunId: runId,
+      }))
+    })
+
+    render(<RunsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-event-timeline-panel')).toBeVisible()
+    })
+    const timelineBudget = screen.getByTestId('timeline-update-performance-budget')
+    expect(timelineBudget).toHaveAttribute('data-budget-ms', '50')
+    expect(timelineBudget).toHaveTextContent('50ms')
+  })
+
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {
     renderSelectedEdgeSidebar()
     const edgeForm = await screen.findByTestId('edge-structured-form')

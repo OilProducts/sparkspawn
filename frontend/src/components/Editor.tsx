@@ -31,6 +31,7 @@ import {
     saveFlowContent,
     saveFlowContentExpectingSemanticEquivalence,
 } from '@/lib/flowPersistence';
+import { CANVAS_INTERACTION_BUDGET_MS } from '@/lib/performanceBudgets';
 
 const nodeTypes = {
     customTask: TaskNode,
@@ -680,6 +681,13 @@ export function Editor() {
                             Add Node
                         </button>
                     )}
+                    <div
+                        data-testid="canvas-interaction-performance-budget"
+                        data-budget-ms={CANVAS_INTERACTION_BUDGET_MS}
+                        className="inline-flex items-center rounded-md border border-border/70 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm"
+                    >
+                        Canvas interaction budget: {CANVAS_INTERACTION_BUDGET_MS}ms max per interaction frame.
+                    </div>
                 </div>
             )}
 

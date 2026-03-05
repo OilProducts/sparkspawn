@@ -17,6 +17,7 @@ import {
     fetchPipelineQuestionsValidated,
     fetchRunsListValidated,
 } from '@/lib/apiClient'
+import { TIMELINE_UPDATE_BUDGET_MS } from '@/lib/performanceBudgets'
 
 interface RunRecord {
     run_id: string
@@ -2089,6 +2090,13 @@ export function RunsPanel() {
                             >
                                 {isTimelineLive ? 'Live' : 'Idle'}
                             </span>
+                        </div>
+                        <div
+                            data-testid="timeline-update-performance-budget"
+                            data-budget-ms={TIMELINE_UPDATE_BUDGET_MS}
+                            className="mb-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                        >
+                            Timeline update budget: {TIMELINE_UPDATE_BUDGET_MS}ms max per stream update batch.
                         </div>
                         {timelineError && (
                             <div data-testid="run-event-timeline-error" className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
