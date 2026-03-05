@@ -2074,7 +2074,34 @@ describe('Frontend contract behavior', () => {
       expect(useStore.getState().projectRegistry['/tmp/git-project']).toBeDefined()
     })
 
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        projectRegistry: {
+          ...state.projectRegistry,
+          '/tmp/non-git-existing': {
+            directoryPath: '/tmp/non-git-existing',
+            isFavorite: false,
+            lastAccessedAt: null,
+          },
+        },
+      }))
+    })
+
     const registryList = screen.getByTestId('project-registry-list')
+    const nonGitRow = within(registryList)
+      .getByText('Directory: /tmp/non-git-existing')
+      .closest('li')
+    expect(nonGitRow).not.toBeNull()
+    await user.click(within(nonGitRow as HTMLElement).getByRole('button', { name: /set active/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-registration-error')).toHaveTextContent(
+        'Project directory must be a Git repository.',
+      )
+    })
+    expect(useStore.getState().activeProjectPath).toBe('/tmp/project-contract-behavior')
+
     const editButtons = within(registryList).getAllByTestId('project-edit-button')
     await user.click(editButtons[0])
     await user.clear(screen.getByTestId('project-edit-input'))

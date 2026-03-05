@@ -1,8 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { ensureScreenshotDir, screenshotPath } from '../fixtures/smoke-helpers'
+import { ensureScreenshotDir, screenshotPath, stubProjectMetadata } from '../fixtures/smoke-helpers'
 
 test.beforeAll(() => {
   ensureScreenshotDir()
+})
+
+test.beforeEach(async ({ page }) => {
+  await stubProjectMetadata(page)
 })
 
 test("run summary panel renders populated metadata for item 9.1-01", async ({ page }) => {

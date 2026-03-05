@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isAbsoluteProjectPath, normalizeProjectPath } from '@/lib/projectPaths'
 
 export type ViewMode = 'projects' | 'editor' | 'execution' | 'settings' | 'runs'
 export type NodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'waiting'
@@ -139,37 +140,6 @@ const modeRequiresActiveProject = (mode: ViewMode) => mode === 'editor' || mode 
 const resolveViewModeForProjectScope = (mode: ViewMode, activeProjectPath: string | null): ViewMode => {
     return modeRequiresActiveProject(mode) && !activeProjectPath ? 'projects' : mode
 }
-const normalizeProjectPath = (path: string) => {
-    const trimmed = path.trim()
-    if (!trimmed) return ""
-    const slashNormalized = trimmed.replace(/\\/g, "/").replace(/\/{2,}/g, "/")
-    const windowsPrefixMatch = slashNormalized.match(/^[A-Za-z]:\//)
-    const prefix = slashNormalized.startsWith("/") ? "/" : windowsPrefixMatch ? windowsPrefixMatch[0] : ""
-    const rawBody = prefix ? slashNormalized.slice(prefix.length) : slashNormalized
-    const parts = rawBody.split("/").filter((part) => part.length > 0)
-    const segments: string[] = []
-    for (const part of parts) {
-        if (part === ".") {
-            continue
-        }
-        if (part === "..") {
-            if (segments.length > 0) {
-                segments.pop()
-            }
-            continue
-        }
-        segments.push(part)
-    }
-    const normalizedBody = segments.join("/")
-    if (!normalizedBody) {
-        if (prefix === "/") {
-            return "/"
-        }
-        return prefix || normalizedBody
-    }
-    return `${prefix}${normalizedBody}`
-}
-const isAbsoluteProjectPath = (path: string) => path.startsWith("/") || /^[A-Za-z]:\//.test(path)
 const pushRecentProjectPath = (recentProjectPaths: string[], projectPath: string | null) => {
     if (!projectPath) {
         return recentProjectPaths
@@ -670,6 +640,7 @@ interface AppState {
     registerProject: (directoryPath: string) => ProjectRegistrationResult
     updateProjectPath: (currentDirectoryPath: string, nextDirectoryPath: string) => ProjectRegistrationResult
     toggleProjectFavorite: (projectPath: string) => void
+    setProjectRegistrationError: (error: string | null) => void
     clearProjectRegistrationError: () => void
     activeFlow: string | null
     setActiveFlow: (flow: string | null) => void
@@ -1046,6 +1017,7 @@ export const useStore = create<AppState>((set, get) => ({
                 projectRegistry: nextProjectRegistry,
             }
         }),
+    setProjectRegistrationError: (error) => set({ projectRegistrationError: error }),
     clearProjectRegistrationError: () => set({ projectRegistrationError: null }),
     activeFlow: restoredProjectScope ? restoredProjectScope.activeFlow : restoredRouteState.activeFlow,
     setActiveFlow: (flow) =>

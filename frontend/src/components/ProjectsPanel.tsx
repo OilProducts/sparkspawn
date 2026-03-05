@@ -300,6 +300,22 @@ export function ProjectsPanel() {
         clearProjectRegistrationError()
     }
 
+    const onActivateProject = async (projectPath: string) => {
+        if (!projectPath) {
+            return
+        }
+        if (projectPath === activeProjectPath) {
+            setActiveProjectPath(projectPath)
+            return
+        }
+        const gitMetadata = await ensureProjectGitRepository(projectPath)
+        if (!gitMetadata) {
+            return
+        }
+        setProjectRegistrationError(null)
+        setActiveProjectPath(projectPath)
+    }
+
     const onCancelProjectPathEdit = () => {
         setEditingProjectPath(null)
         setEditingDirectoryPathInput("")
@@ -584,7 +600,9 @@ export function ProjectsPanel() {
                                             <li key={`favorite-${projectPath}`}>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setActiveProjectPath(projectPath)}
+                                                    onClick={() => {
+                                                        void onActivateProject(projectPath)
+                                                    }}
                                                     aria-current={isActive ? "true" : undefined}
                                                     className={`w-full rounded border px-3 py-2 text-left text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActive
                                                         ? "border-primary/60 bg-primary/10 text-foreground"
@@ -621,7 +639,9 @@ export function ProjectsPanel() {
                                             <li key={`recent-${projectPath}`}>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setActiveProjectPath(projectPath)}
+                                                    onClick={() => {
+                                                        void onActivateProject(projectPath)
+                                                    }}
                                                     aria-current={isActive ? "true" : undefined}
                                                     className={`w-full rounded border px-3 py-2 text-left text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActive
                                                         ? "border-primary/60 bg-primary/10 text-foreground"
@@ -1103,7 +1123,9 @@ export function ProjectsPanel() {
                                                     </button>
                                                     <button
                                                         type="button"
-                                                        onClick={() => setActiveProjectPath(project.directoryPath)}
+                                                        onClick={() => {
+                                                            void onActivateProject(project.directoryPath)
+                                                        }}
                                                         aria-current={isActive ? "true" : undefined}
                                                         className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                                     >

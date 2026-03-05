@@ -1,8 +1,18 @@
 import { expect, test } from '@playwright/test'
-import { cloneFlowForSmokeTest, deleteFlowAfterSmoke, ensureScreenshotDir, screenshotPath } from '../fixtures/smoke-helpers'
+import {
+  cloneFlowForSmokeTest,
+  deleteFlowAfterSmoke,
+  ensureScreenshotDir,
+  screenshotPath,
+  stubProjectMetadata,
+} from '../fixtures/smoke-helpers'
 
 test.beforeAll(() => {
   ensureScreenshotDir()
+})
+
+test.beforeEach(async ({ page }) => {
+  await stubProjectMetadata(page)
 })
 
 test("semantic-equivalence save blocks mismatch and confirms no-op round-trip for item 5.3-03", async ({ page }) => {
@@ -136,4 +146,3 @@ test("semantic-equivalence save blocks mismatch and confirms no-op round-trip fo
   await expect.poll(() => semanticEquivalentSavedBodies.length).toBeGreaterThan(equivalentSavesBeforeRoundTrip)
   await page.screenshot({ path: screenshotPath("19b-semantic-equivalence-round-trip-saved.png"), fullPage: true })
 })
-
