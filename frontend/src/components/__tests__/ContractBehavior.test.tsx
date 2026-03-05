@@ -1044,6 +1044,7 @@ describe('Frontend contract behavior', () => {
       return jsonResponse({})
     })
     vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     act(() => {
       useStore.setState((state) => ({
@@ -1055,8 +1056,9 @@ describe('Frontend contract behavior', () => {
           ...state.projectScopedWorkspaces,
           '/tmp/project-contract-behavior': {
             ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
-            specId: 'spec-contract-behavior',
-            specStatus: 'approved',
+            specId: null,
+            specStatus: 'draft',
+            conversationHistory: [],
           },
         },
       }))
@@ -1065,7 +1067,15 @@ describe('Frontend contract behavior', () => {
     const user = userEvent.setup()
     render(<ProjectsPanel />)
 
-    await user.click(screen.getByTestId('project-plan-generation-launch-button'))
+    await user.type(
+      screen.getByTestId('project-ai-conversation-input'),
+      'Draft a plan to implement project-home chat workflow approvals.',
+    )
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+    await waitFor(() => {
+      expect(screen.getByTestId('project-spec-edit-proposal-preview')).toBeVisible()
+    })
+    await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
 
     await waitFor(() => {
       expect(useStore.getState().selectedRunId).toBe(launchedRunId)
@@ -1076,8 +1086,9 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByTestId('project-plan-generation-status-degraded')).toHaveTextContent(
       'plan status endpoint unavailable',
     )
+    expect(screen.getByTestId('project-plan-generation-surface')).toBeVisible()
     expect(useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.planStatus).toBe('draft')
-    expect(useStore.getState().viewMode).toBe('execution')
+    expect(useStore.getState().viewMode).toBe('projects')
   })
 
   it('[CID:12.4.04] integrates plan approval/rejection/revision transition contract', async () => {

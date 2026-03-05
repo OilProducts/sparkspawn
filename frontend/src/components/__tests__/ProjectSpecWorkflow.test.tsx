@@ -9,7 +9,7 @@ const DEFAULT_WORKING_DIRECTORY = './test-app'
 const resetProjectWorkflowState = () => {
   useStore.setState((state) => ({
     ...state,
-    viewMode: 'projects',
+    viewMode: 'home',
     activeProjectPath: null,
     activeFlow: null,
     selectedRunId: null,
@@ -135,7 +135,7 @@ describe('Project-scoped workflow behavior', () => {
 
     const projectScope = useStore.getState().projectScopedWorkspaces['/tmp/workflow-project']
     expect(projectScope.specId).toMatch(/^spec-/)
-    expect(projectScope.specStatus).toBe('draft')
+    expect(projectScope.specStatus).toBe('approved')
     expect(projectScope.projectEventLog).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -156,32 +156,32 @@ describe('Project-scoped workflow behavior', () => {
     expect(screen.getByTestId('project-ai-conversation-history-list')).not.toHaveTextContent('Applied spec edit proposal')
   })
 
-  it('enforces spec approval before launching plan workflow and records run context on launch', async () => {
+  it('auto-launches plan workflow after spec proposal approval and records run context', async () => {
     const user = userEvent.setup()
     act(() => {
       useStore.getState().registerProject('/tmp/plan-project')
       useStore.getState().setActiveProjectPath('/tmp/plan-project')
       useStore.getState().setActiveFlow('plan-generation.dot')
-      useStore.getState().setSpecId('spec-plan-project')
     })
 
     render(<ProjectsPanel />)
-    expect(screen.getByTestId('project-plan-generation-surface')).toBeVisible()
-    expect(screen.getByTestId('project-plan-gate-surface')).toBeVisible()
-
-    const launchButton = screen.getByTestId('project-plan-generation-launch-button')
-    expect(launchButton).toBeDisabled()
-
-    await user.click(screen.getByTestId('project-spec-approve-for-plan-button'))
-    expect(launchButton).toBeEnabled()
-
-    await user.click(launchButton)
+    expect(screen.queryByTestId('project-plan-generation-surface')).not.toBeInTheDocument()
+    await user.type(
+      screen.getByTestId('project-ai-conversation-input'),
+      'Generate a plan for implementing project-home chat proposal approvals.',
+    )
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+    await waitFor(() => {
+      expect(screen.getByTestId('project-spec-edit-proposal-preview')).toBeVisible()
+    })
+    await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
     await waitFor(() => {
       expect(useStore.getState().selectedRunId).toBe('run-plan-101')
     })
 
     const state = useStore.getState()
     const scope = state.projectScopedWorkspaces['/tmp/plan-project']
+    expect(screen.getByTestId('project-plan-generation-surface')).toBeVisible()
     expect(scope.planId).toMatch(/^plan-/)
     expect(scope.planStatus).toBe('draft')
     expect(scope.planProvenance).toEqual(
@@ -194,7 +194,8 @@ describe('Project-scoped workflow behavior', () => {
         gitCommit: 'abc123def456',
       }),
     )
-    expect(state.viewMode).toBe('execution')
+    expect(state.viewMode).toBe('home')
+    expect(screen.getByTestId('project-plan-gate-surface')).toBeVisible()
   })
 
   it('[CID:12.4.03] keeps plan-generation launch active when status retrieval is degraded', async () => {
@@ -204,13 +205,18 @@ describe('Project-scoped workflow behavior', () => {
       useStore.getState().registerProject('/tmp/plan-status-degraded-project')
       useStore.getState().setActiveProjectPath('/tmp/plan-status-degraded-project')
       useStore.getState().setActiveFlow('plan-generation.dot')
-      useStore.getState().setSpecId('spec-plan-status-degraded-project')
     })
 
     render(<ProjectsPanel />)
-
-    await user.click(screen.getByTestId('project-spec-approve-for-plan-button'))
-    await user.click(screen.getByTestId('project-plan-generation-launch-button'))
+    await user.type(
+      screen.getByTestId('project-ai-conversation-input'),
+      'Draft plan steps and work items for home-first project workflow.',
+    )
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+    await waitFor(() => {
+      expect(screen.getByTestId('project-spec-edit-proposal-preview')).toBeVisible()
+    })
+    await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
 
     await waitFor(() => {
       expect(useStore.getState().selectedRunId).toBe('run-plan-101')
@@ -220,6 +226,6 @@ describe('Project-scoped workflow behavior', () => {
       'plan status endpoint unavailable',
     )
     expect(useStore.getState().projectScopedWorkspaces['/tmp/plan-status-degraded-project']?.planStatus).toBe('draft')
-    expect(useStore.getState().viewMode).toBe('execution')
+    expect(useStore.getState().viewMode).toBe('home')
   })
 })

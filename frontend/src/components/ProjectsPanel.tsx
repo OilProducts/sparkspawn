@@ -91,7 +91,6 @@ export function HomePanel() {
     const setPlanProvenance = useStore((state) => state.setPlanProvenance)
     const activeFlow = useStore((state) => state.activeFlow)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
-    const setViewMode = useStore((state) => state.setViewMode)
     const workingDir = useStore((state) => state.workingDir)
     const model = useStore((state) => state.model)
     const [directoryPathInput, setDirectoryPathInput] = useState("")
@@ -102,6 +101,7 @@ export function HomePanel() {
     const [planGenerationError, setPlanGenerationError] = useState<string | null>(null)
     const [planGenerationStatusDegraded, setPlanGenerationStatusDegraded] = useState<string | null>(null)
     const [lastPlanGenerationFailure, setLastPlanGenerationFailure] = useState<WorkflowFailureDiagnostics | null>(null)
+    const [isPlanGenerationLaunching, setIsPlanGenerationLaunching] = useState(false)
     const [chatDraft, setChatDraft] = useState("")
     const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
     const isNarrowViewport = useNarrowViewport()
@@ -476,7 +476,7 @@ export function HomePanel() {
 
         const specId = activeProjectScope?.specId || buildProjectScopedArtifactId("spec", activeProjectPath)
         setSpecId(specId)
-        setSpecStatus('draft')
+        setSpecStatus('approved')
         setSpecProvenance({
             source: "spec-edit-proposal",
             referenceId: activeProjectProposalPreview.id,
@@ -487,29 +487,29 @@ export function HomePanel() {
         })
         appendProjectEvent(`Applied spec edit proposal ${activeProjectProposalPreview.id} to ${specId}.`)
         setProjectSpecEditProposals((current) => clearProjectSpecEditProposal(current, activeProjectPath))
+        void onLaunchPlanGenerationWorkflow({
+            specIdOverride: specId,
+            trigger: "spec-proposal-apply",
+        })
     }
 
-    const onApproveSpecForPlanning = () => {
-        if (!activeProjectPath || !activeProjectScope?.specId) {
-            return
-        }
-        setSpecStatus('approved')
-        setPlanGenerationError(null)
-        setPlanGenerationStatusDegraded(null)
-        appendProjectEvent(`Approved spec ${activeProjectScope.specId} for plan generation.`)
-    }
-
-    const onLaunchPlanGenerationWorkflow = async () => {
-        if (!activeProjectPath || !activeProjectScope?.specId || !specIsApprovedForPlanning) {
+    const onLaunchPlanGenerationWorkflow = async (options?: {
+        specIdOverride?: string | null
+        trigger?: "spec-proposal-apply" | "retry"
+    }) => {
+        const effectiveSpecId = options?.specIdOverride || activeProjectScope?.specId
+        if (!activeProjectPath || !effectiveSpecId) {
             return
         }
         if (!activeFlow) {
             setPlanGenerationError('Select a plan-generation flow before launching.')
+            appendProjectEvent('Plan-generation launch blocked: no active flow selected.')
             return
         }
 
         setPlanGenerationError(null)
         setPlanGenerationStatusDegraded(null)
+        setIsPlanGenerationLaunching(true)
         try {
             const flow = await fetchFlowPayloadValidated(activeFlow)
 
@@ -519,7 +519,7 @@ export function HomePanel() {
                 workingDirectory: workingDir.trim() || activeProjectPath,
                 backend: 'codex',
                 model: model.trim() || null,
-                specArtifactId: activeProjectScope?.specId || null,
+                specArtifactId: effectiveSpecId,
                 planArtifactId: activeProjectScope?.planId || null,
             }
             const startPayload = buildPipelineStartPayload(runInitiationForm, flow.content)
@@ -551,9 +551,9 @@ export function HomePanel() {
                 gitBranch: activeProjectGitMetadata.branch,
                 gitCommit: activeProjectGitMetadata.commit,
             })
-            appendProjectEvent(`Launched plan-generation workflow from approved spec ${activeProjectScope.specId}.`)
+            const triggerSource = options?.trigger === "retry" ? "retry" : "approved spec edit"
+            appendProjectEvent(`Launched plan-generation workflow from ${triggerSource} ${effectiveSpecId}.`)
             setLastPlanGenerationFailure(null)
-            setViewMode('execution')
         } catch (error) {
             const message = error instanceof ApiHttpError && error.detail
                 ? error.detail
@@ -568,6 +568,8 @@ export function HomePanel() {
                 flowSource: activeFlow || null,
             })
             appendProjectEvent(`Plan-generation workflow launch failed: ${message}`)
+        } finally {
+            setIsPlanGenerationLaunching(false)
         }
     }
 
@@ -883,6 +885,120 @@ export function HomePanel() {
                                     </div>
                                 </div>
                             ) : null}
+                            {(activeProjectScope?.specId
+                                || activeProjectScope?.planId
+                                || planGenerationError
+                                || planGenerationStatusDegraded
+                                || lastPlanGenerationFailure
+                                || isPlanGenerationLaunching) ? (
+                                <div data-testid="project-plan-generation-surface" className="rounded-md border border-border px-3 py-2">
+                                    <div className="mb-2 space-y-1">
+                                        <p className="text-xs font-medium text-foreground">Spec to Plan Workflow</p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Launch is triggered automatically when a spec edit proposal is applied.
+                                        </p>
+                                    </div>
+                                    <p className="truncate text-xs text-muted-foreground">
+                                        Plan artifact: <span className="font-mono text-foreground">{activeProjectScope?.planId || "Not created yet"}</span>
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Spec status: <span className="font-medium text-foreground">{specIsApprovedForPlanning ? "approved" : "draft"}</span>
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Active flow source: <span className="font-mono text-foreground">{activeFlow || "none selected"}</span>
+                                    </p>
+                                    {isPlanGenerationLaunching ? (
+                                        <p data-testid="project-plan-generation-launching" className="text-[11px] text-muted-foreground">
+                                            Launching plan-generation workflow...
+                                        </p>
+                                    ) : null}
+                                    {!activeProjectScope?.planId && !isPlanGenerationLaunching ? (
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Plan artifact will appear here once auto-launch finishes.
+                                        </p>
+                                    ) : null}
+                                    <div data-testid="project-plan-gate-surface" className="mt-2 rounded-md border border-border px-3 py-2">
+                                        <p className="text-xs font-medium text-foreground">Plan gate controls</p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Plan status: <span className="font-medium text-foreground">{activePlanStatus}</span>
+                                        </p>
+                                        {!activeProjectScope?.planId ? (
+                                            <p className="text-[11px] text-muted-foreground">
+                                                Waiting for plan-generation output before gate actions are available.
+                                            </p>
+                                        ) : null}
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            <button
+                                                data-testid="project-plan-approve-button"
+                                                type="button"
+                                                onClick={() => onPlanGateTransition('approved')}
+                                                disabled={!activeProjectScope?.planId || !canTransitionPlanStatus(activePlanStatus, 'approved')}
+                                                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                Approve plan
+                                            </button>
+                                            <button
+                                                data-testid="project-plan-reject-button"
+                                                type="button"
+                                                onClick={() => onPlanGateTransition('rejected')}
+                                                disabled={!activeProjectScope?.planId || !canTransitionPlanStatus(activePlanStatus, 'rejected')}
+                                                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                Reject plan
+                                            </button>
+                                            <button
+                                                data-testid="project-plan-request-revision-button"
+                                                type="button"
+                                                onClick={() => onPlanGateTransition('revision-requested')}
+                                                disabled={!activeProjectScope?.planId || !canTransitionPlanStatus(activePlanStatus, 'revision-requested')}
+                                                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                Request revision
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {planGenerationError ? (
+                                        <p data-testid="project-plan-generation-error" className="mt-2 text-[11px] text-destructive">
+                                            {planGenerationError}
+                                        </p>
+                                    ) : null}
+                                    {planGenerationStatusDegraded ? (
+                                        <p data-testid="project-plan-generation-status-degraded" className="mt-2 text-[11px] text-amber-800">
+                                            {planGenerationStatusDegraded}
+                                        </p>
+                                    ) : null}
+                                    {lastPlanGenerationFailure ? (
+                                        <div data-testid="project-plan-failure-diagnostics" className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+                                            <p className="font-medium">Last planning launch failure</p>
+                                            <p data-testid="project-plan-failure-message">{lastPlanGenerationFailure.message}</p>
+                                            <p>
+                                                Flow source: <span className="font-mono">{lastPlanGenerationFailure.flowSource || "none selected"}</span>
+                                            </p>
+                                            <p>
+                                                Failed at: {formatConversationTimestamp(lastPlanGenerationFailure.failedAt)}
+                                            </p>
+                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                <button
+                                                    data-testid="project-plan-generation-rerun-button"
+                                                    type="button"
+                                                    onClick={() => {
+                                                        void onLaunchPlanGenerationWorkflow({ trigger: "retry" })
+                                                    }}
+                                                    disabled={!canRerunPlanGeneration}
+                                                    className="rounded border border-destructive/40 bg-background px-2 py-1 text-[11px] font-medium text-destructive hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    Retry plan-generation workflow
+                                                </button>
+                                                {!canRerunPlanGeneration ? (
+                                                    <p data-testid="project-plan-generation-rerun-disabled-reason" className="text-[11px] text-destructive/90">
+                                                        Fix launch prerequisites to enable rerun.
+                                                    </p>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
                             <form
                                 data-testid="project-ai-conversation-composer"
                                 onSubmit={onChatComposerSubmit}
@@ -918,146 +1034,6 @@ export function HomePanel() {
                             <p className="text-[11px] text-muted-foreground">
                                 Assistant messages and proposal cards are currently local UI placeholders until backend agent/tool APIs are connected.
                             </p>
-                        </div>
-                    )}
-                </div>
-                <div data-testid="project-plan-generation-surface" className="rounded-md border border-border bg-card p-4 shadow-sm">
-                    <div className="mb-3 space-y-1">
-                        <h3 className="text-sm font-semibold text-foreground">Spec to Plan Workflow Launch</h3>
-                        <p className="text-xs text-muted-foreground">
-                            Launch plan-generation workflows only after the active project spec is explicitly approved.
-                        </p>
-                    </div>
-                    {!activeProjectPath ? (
-                        <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
-                            Select an active project to approve a spec and launch plan generation.
-                        </p>
-                    ) : (
-                        <div className="space-y-3">
-                            <p className="truncate text-xs text-muted-foreground">
-                                Plan artifact: <span className="font-mono text-foreground">{activeProjectScope?.planId || "Not created yet"}</span>
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                                Spec status: <span className="font-medium text-foreground">{specIsApprovedForPlanning ? "approved" : "draft"}</span>
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                                Active flow source for plan-generation launch: <span className="font-mono text-foreground">{activeFlow || "none selected"}</span>
-                            </p>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    data-testid="project-spec-approve-for-plan-button"
-                                    type="button"
-                                    onClick={onApproveSpecForPlanning}
-                                    disabled={!activeProjectScope?.specId}
-                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    Approve spec for planning
-                                </button>
-                                <button
-                                    data-testid="project-plan-generation-launch-button"
-                                    type="button"
-                                    onClick={() => {
-                                        void onLaunchPlanGenerationWorkflow()
-                                    }}
-                                    disabled={!activeProjectScope?.specId || !specIsApprovedForPlanning || !activeFlow}
-                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    Launch plan-generation workflow
-                                </button>
-                            </div>
-                            {!activeProjectScope?.specId ? (
-                                <p className="text-[11px] text-muted-foreground">
-                                    Create or open a project spec before approving and launching plan generation.
-                                </p>
-                            ) : null}
-                            {activeProjectScope?.specId && !specIsApprovedForPlanning ? (
-                                <p className="text-[11px] text-muted-foreground">
-                                    Approve the active spec before launching the plan-generation workflow.
-                                </p>
-                            ) : null}
-                            <div data-testid="project-plan-gate-surface" className="rounded-md border border-border px-3 py-2">
-                                <p className="text-xs font-medium text-foreground">Plan gate controls</p>
-                                <p className="text-[11px] text-muted-foreground">
-                                    Plan status: <span className="font-medium text-foreground">{activePlanStatus}</span>
-                                </p>
-                                {!activeProjectScope?.planId ? (
-                                    <p className="text-[11px] text-muted-foreground">
-                                        Generate or open a plan artifact before applying plan gate actions.
-                                    </p>
-                                ) : null}
-                                <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <button
-                                        data-testid="project-plan-approve-button"
-                                        type="button"
-                                        onClick={() => onPlanGateTransition('approved')}
-                                        disabled={!activeProjectScope?.planId || !canTransitionPlanStatus(activePlanStatus, 'approved')}
-                                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        Approve plan
-                                    </button>
-                                    <button
-                                        data-testid="project-plan-reject-button"
-                                        type="button"
-                                        onClick={() => onPlanGateTransition('rejected')}
-                                        disabled={!activeProjectScope?.planId || !canTransitionPlanStatus(activePlanStatus, 'rejected')}
-                                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        Reject plan
-                                    </button>
-                                    <button
-                                        data-testid="project-plan-request-revision-button"
-                                        type="button"
-                                        onClick={() => onPlanGateTransition('revision-requested')}
-                                        disabled={!activeProjectScope?.planId || !canTransitionPlanStatus(activePlanStatus, 'revision-requested')}
-                                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        Request revision
-                                    </button>
-                                </div>
-                            </div>
-                            {planGenerationError ? (
-                                <p data-testid="project-plan-generation-error" className="text-[11px] text-destructive">
-                                    {planGenerationError}
-                                </p>
-                            ) : null}
-                            {planGenerationStatusDegraded ? (
-                                <p data-testid="project-plan-generation-status-degraded" className="text-[11px] text-amber-800">
-                                    {planGenerationStatusDegraded}
-                                </p>
-                            ) : null}
-                            {lastPlanGenerationFailure ? (
-                                <div data-testid="project-plan-failure-diagnostics" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
-                                    <p className="font-medium">Last planning launch failure</p>
-                                    <p data-testid="project-plan-failure-message">{lastPlanGenerationFailure.message}</p>
-                                    <p>
-                                        Flow source: <span className="font-mono">{lastPlanGenerationFailure.flowSource || "none selected"}</span>
-                                    </p>
-                                    <p>
-                                        Failed at: {formatConversationTimestamp(lastPlanGenerationFailure.failedAt)}
-                                    </p>
-                                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                                        <button
-                                            data-testid="project-plan-generation-rerun-button"
-                                            type="button"
-                                            onClick={() => {
-                                                void onLaunchPlanGenerationWorkflow()
-                                            }}
-                                            disabled={!canRerunPlanGeneration}
-                                            className="rounded border border-destructive/40 bg-background px-2 py-1 text-[11px] font-medium text-destructive hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            Retry plan-generation workflow
-                                        </button>
-                                        {!canRerunPlanGeneration ? (
-                                            <p data-testid="project-plan-generation-rerun-disabled-reason" className="text-[11px] text-destructive/90">
-                                                Fix launch prerequisites to enable rerun.
-                                            </p>
-                                        ) : null}
-                                        <p className="text-[11px] text-destructive/90">
-                                            Review the launch error, then rerun with the same project-scoped workflow inputs.
-                                        </p>
-                                    </div>
-                                </div>
-                            ) : null}
                         </div>
                     )}
                 </div>
