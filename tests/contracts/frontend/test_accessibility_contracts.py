@@ -31,3 +31,7 @@ def test_performance_budgets_defined_for_canvas_and_timeline_item_13_3_01() -> N
 
 def test_performance_profile_and_optimizations_for_medium_graphs_item_13_3_02() -> None:
     assert_frontend_behavior_contract_passed("13.3.02")
+
+
+def test_sustained_sse_throughput_stress_item_13_3_03() -> None:
+    assert_frontend_behavior_contract_passed("13.3.03")

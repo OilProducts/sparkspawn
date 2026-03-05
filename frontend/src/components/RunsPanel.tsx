@@ -1261,11 +1261,12 @@ export function RunsPanel() {
         source.onmessage = (event) => {
             try {
                 const payload = JSON.parse(event.data) as unknown
-                const timelineEvent = toTimelineEvent(payload, timelineSequenceRef.current)
-                timelineSequenceRef.current += 1
+                const sequence = timelineSequenceRef.current
+                const timelineEvent = toTimelineEvent(payload, sequence)
                 if (!timelineEvent) {
                     return
                 }
+                timelineSequenceRef.current = sequence + 1
                 setTimelineEvents((current) => [timelineEvent, ...current].slice(0, TIMELINE_MAX_ITEMS))
             } catch {
                 // ignore malformed events
@@ -1475,6 +1476,7 @@ export function RunsPanel() {
 
         return entries
     }, [filteredTimelineEvents, retryCorrelationEntityKeys])
+    const timelineDroppedCount = Math.max(0, timelineSequenceRef.current - timelineEvents.length)
     const pendingInterviewGates = useMemo(() => {
         const closedEntityKeys = new Set<string>()
         const pendingGates: PendingInterviewGate[] = []
@@ -2098,6 +2100,19 @@ export function RunsPanel() {
                         >
                             Timeline update budget: {TIMELINE_UPDATE_BUDGET_MS}ms max per stream update batch.
                         </div>
+                        {(timelineEvents.length > 0 || timelineDroppedCount > 0) && (
+                            <div
+                                data-testid="run-event-timeline-throughput"
+                                data-max-items={TIMELINE_MAX_ITEMS}
+                                data-dropped-count={timelineDroppedCount}
+                                className="mb-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                            >
+                                Showing latest {Math.min(timelineEvents.length, TIMELINE_MAX_ITEMS)} events.
+                                {timelineDroppedCount > 0
+                                    ? ` Dropped ${timelineDroppedCount} older events to stay responsive.`
+                                    : ''}
+                            </div>
+                        )}
                         {timelineError && (
                             <div data-testid="run-event-timeline-error" className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                                 {timelineError}
