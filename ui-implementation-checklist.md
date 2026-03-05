@@ -406,6 +406,7 @@ Status key:
 - [x] [13.3-02] Add profiling and optimization pass for medium-sized graphs.
   - Evidence (2026-03-05): Medium-graph optimizations now surface in the editor performance profile (`frontend/src/components/Editor.tsx`), covered by frontend contract `CID:13.3.02` and UI-smoke visual capture `frontend/artifacts/ui-smoke/13e-medium-graph-performance-profile.png`.
 - [ ] [13.3-03] Add stress tests for sustained SSE event throughput.
+  - Blocker: Needs UI-level sustained SSE timeline rendering/performance verification; current coverage is backend-only.
 
 ---
 

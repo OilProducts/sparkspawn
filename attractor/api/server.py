@@ -303,7 +303,14 @@ class PipelineEventHub:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                continue
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    continue
+                try:
+                    queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    continue
 
     def history(self, run_id: str) -> List[dict]:
         with self._lock:

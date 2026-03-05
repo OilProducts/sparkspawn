@@ -18,6 +18,11 @@ class _RequestDisconnectAfterOneLoop:
         return self._checks > 1
 
 
+class _RequestNeverDisconnect:
+    async def is_disconnected(self) -> bool:
+        return False
+
+
 class _InterleavingEventHub:
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
@@ -79,6 +84,35 @@ async def _collect_stream_events(run_id: str) -> list[dict]:
     return [_decode_event(chunk) for chunk in chunks]
 
 
+async def _collect_stream_events_for_throughput(
+    run_id: str,
+    hub: server.PipelineEventHub,
+    overflow: int = 40,
+) -> tuple[list[dict], int, int]:
+    response = await server.pipeline_events(run_id, _RequestNeverDisconnect())
+    iterator = response.body_iterator
+    queue = hub._subscribers[run_id][0]
+    queue_maxsize = queue.maxsize
+    assert queue_maxsize > 0
+    publish_count = queue_maxsize + overflow
+    for index in range(publish_count):
+        await hub.publish(
+            run_id,
+            {"type": "runtime", "status": "running", "seq": index, "run_id": run_id},
+        )
+    events: list[dict] = []
+    try:
+        while len(events) < queue_maxsize:
+            chunk = await anext(iterator)
+            text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+            if text.startswith(": keepalive"):
+                continue
+            events.append(_decode_event(text))
+    finally:
+        await iterator.aclose()
+    return events, queue_maxsize, publish_count
+
+
 def test_pipeline_events_replays_history_without_replaying_same_event_from_live_queue(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -104,3 +138,34 @@ def test_pipeline_events_replays_history_without_replaying_same_event_from_live_
         server._pop_active_run(run_id)
 
     assert [event["seq"] for event in events] == ["history", "late", "live"]
+
+
+def test_pipeline_events_drop_oldest_events_under_sustained_throughput(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_id = "run-sse-throughput"
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+
+    hub = server.PipelineEventHub()
+    monkeypatch.setattr(server, "EVENT_HUB", hub)
+
+    with server.ACTIVE_RUNS_LOCK:
+        server.ACTIVE_RUNS[run_id] = server.ActiveRun(
+            run_id=run_id,
+            flow_name="Flow",
+            working_directory=str(tmp_path / "work"),
+            model="test-model",
+            status="running",
+        )
+
+    try:
+        events, queue_maxsize, publish_count = asyncio.run(
+            _collect_stream_events_for_throughput(run_id, hub)
+        )
+    finally:
+        server._pop_active_run(run_id)
+
+    assert len(events) == queue_maxsize
+    assert events[0]["seq"] == publish_count - queue_maxsize
+    assert events[-1]["seq"] == publish_count - 1
