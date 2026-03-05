@@ -26,6 +26,13 @@ const PLAN_STATUS_TRANSITIONS: Record<PlanStatus, PlanStatus[]> = {
     'revision-requested': ['approved', 'rejected'],
 }
 
+const PLAN_TRANSITION_ACTION_LABELS: Record<PlanStatus, string> = {
+    draft: 'Reset',
+    approved: 'Approved',
+    rejected: 'Rejected',
+    'revision-requested': 'Requested revision for',
+}
+
 const canTransitionPlanStatus = (from: PlanStatus, to: PlanStatus) =>
     from !== to && PLAN_STATUS_TRANSITIONS[from].includes(to)
 
@@ -403,10 +410,12 @@ export function ProjectsPanel() {
         }
         setPlanGenerationError(null)
         setPlanGenerationStatusDegraded(null)
+        const previousStatus = activeProjectScope.planStatus
+        const transitionAction = PLAN_TRANSITION_ACTION_LABELS[nextStatus]
         setPlanStatus(nextStatus)
         appendConversationHistoryEntry({
             role: "system",
-            content: `Updated plan ${activeProjectScope.planId} status from ${activeProjectScope.planStatus} to ${nextStatus}.`,
+            content: `${transitionAction} plan ${activeProjectScope.planId} (${previousStatus} -> ${nextStatus}).`,
             timestamp: new Date().toISOString(),
         })
     }

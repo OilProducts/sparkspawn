@@ -39,3 +39,7 @@ def test_conversation_spec_plan_retrieval_is_keyed_by_project_identity_item_12_3
 
 def test_plan_generation_invocation_status_contract_with_degraded_state_item_12_4_03() -> None:
     assert_frontend_behavior_contract_passed("12.4.03")
+
+
+def test_plan_approval_rejection_revision_transition_contract_item_12_4_04() -> None:
+    assert_frontend_behavior_contract_passed("12.4.04")

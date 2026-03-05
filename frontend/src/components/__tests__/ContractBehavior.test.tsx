@@ -976,6 +976,72 @@ describe('Frontend contract behavior', () => {
     expect(useStore.getState().viewMode).toBe('execution')
   })
 
+  it('[CID:12.4.04] integrates plan approval/rejection/revision transition contract', async () => {
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'projects',
+        activeProjectPath: '/tmp/project-contract-behavior',
+        projectScopedWorkspaces: {
+          ...state.projectScopedWorkspaces,
+          '/tmp/project-contract-behavior': {
+            ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
+            planId: 'plan-contract-behavior',
+            planStatus: 'draft',
+            conversationHistory: [],
+          },
+        },
+      }))
+    })
+
+    const user = userEvent.setup()
+    render(<ProjectsPanel />)
+
+    const gateSurface = screen.getByTestId('project-plan-gate-surface')
+    const approveButton = screen.getByTestId('project-plan-approve-button')
+    const rejectButton = screen.getByTestId('project-plan-reject-button')
+    const requestRevisionButton = screen.getByTestId('project-plan-request-revision-button')
+
+    expect(gateSurface).toHaveTextContent('Plan status: draft')
+    expect(approveButton).toBeEnabled()
+    expect(rejectButton).toBeEnabled()
+    expect(requestRevisionButton).toBeEnabled()
+
+    await user.click(approveButton)
+    await waitFor(() => {
+      expect(useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.planStatus).toBe('approved')
+    })
+    expect(screen.getByTestId('project-plan-gate-surface')).toHaveTextContent('Plan status: approved')
+    expect(screen.getByTestId('project-plan-approve-button')).toBeDisabled()
+    expect(screen.getByTestId('project-plan-reject-button')).toBeEnabled()
+    expect(screen.getByTestId('project-plan-request-revision-button')).toBeEnabled()
+
+    await user.click(screen.getByTestId('project-plan-reject-button'))
+    await waitFor(() => {
+      expect(useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.planStatus).toBe('rejected')
+    })
+    expect(screen.getByTestId('project-plan-gate-surface')).toHaveTextContent('Plan status: rejected')
+
+    await user.click(screen.getByTestId('project-plan-request-revision-button'))
+    await waitFor(() => {
+      expect(useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.planStatus).toBe(
+        'revision-requested',
+      )
+    })
+    expect(screen.getByTestId('project-plan-gate-surface')).toHaveTextContent('Plan status: revision-requested')
+
+    const transitionMessages = (
+      useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.conversationHistory || []
+    ).map((entry) => entry.content)
+    expect(transitionMessages).toEqual(
+      expect.arrayContaining([
+        'Approved plan plan-contract-behavior (draft -> approved).',
+        'Rejected plan plan-contract-behavior (approved -> rejected).',
+        'Requested revision for plan plan-contract-behavior (rejected -> revision-requested).',
+      ]),
+    )
+  })
+
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {
     renderSelectedEdgeSidebar()
     const edgeForm = await screen.findByTestId('edge-structured-form')
