@@ -1772,6 +1772,66 @@ describe('Frontend contract behavior', () => {
     expect(timelineBudget).toHaveTextContent('50ms')
   })
 
+  it('[CID:13.3.02] profiles medium graphs and enables canvas optimizations', async () => {
+    const nodeCount = 30
+    const nodes = Array.from({ length: nodeCount }, (_, index) => ({
+      id: `node_${index}`,
+      attrs: { label: `Node ${index}` },
+    }))
+    const edges = nodes.slice(0, -1).map((node, index) => ({
+      source: node.id,
+      target: nodes[index + 1].id,
+      attrs: {},
+    }))
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input)
+        if (url.endsWith('/api/flows/contract-behavior.dot')) {
+          return jsonResponse({
+            name: 'contract-behavior.dot',
+            content: 'digraph G { start -> end; }',
+          })
+        }
+        if (url.endsWith('/preview')) {
+          return jsonResponse({
+            status: 'ok',
+            graph: {
+              nodes,
+              edges,
+              graph_attrs: {},
+            },
+            diagnostics: [],
+          })
+        }
+        return jsonResponse({}, { status: 404 })
+      }),
+    )
+
+    act(() => {
+      resetContractState()
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'editor',
+        activeFlow: 'contract-behavior.dot',
+      }))
+    })
+
+    renderWithFlowProvider(<Editor />)
+
+    const profile = await screen.findByTestId('canvas-performance-profile')
+    await waitFor(() => {
+      expect(profile).toHaveAttribute('data-profile', 'medium')
+    })
+    expect(profile).toHaveAttribute('data-node-count', String(nodeCount))
+    expect(profile).toHaveAttribute('data-only-render-visible-elements', 'true')
+    const previewDebounceMs = Number(profile.getAttribute('data-preview-debounce-ms'))
+    expect(previewDebounceMs).toBeGreaterThan(300)
+    const layoutMs = Number(profile.getAttribute('data-layout-ms'))
+    expect(layoutMs).not.toBeNaN()
+  })
+
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {
     renderSelectedEdgeSidebar()
     const edgeForm = await screen.findByTestId('edge-structured-form')

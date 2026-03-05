@@ -42,7 +42,9 @@ const edgeTypes = {
 const EDGE_TYPE: Edge['type'] = 'validation';
 const EDGE_CLASS = 'flow-edge';
 const EDGE_INTERACTION_WIDTH = 16;
-const LIVE_PREVIEW_DEBOUNCE_MS = 300;
+const DEFAULT_PREVIEW_DEBOUNCE_MS = 300;
+const MEDIUM_GRAPH_PREVIEW_DEBOUNCE_MS = 600;
+const MEDIUM_GRAPH_NODE_THRESHOLD = 25;
 const elk = new ELK();
 
 const DEFAULT_NODE_WIDTH = 220;
@@ -98,6 +100,13 @@ async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<Node[]> {
     });
 }
 
+function nowMs(): number {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+        return performance.now();
+    }
+    return Date.now();
+}
+
 export function Editor() {
     const { activeFlow, viewMode, selectedNodeId, selectedEdgeId, setSelectedNodeId, setSelectedEdgeId } = useStore();
     const activeProjectPath = useStore((state) => state.activeProjectPath);
@@ -121,6 +130,13 @@ export function Editor() {
     const [rawDotDraft, setRawDotDraft] = useState('');
     const [rawHandoffError, setRawHandoffError] = useState<string | null>(null);
     const [isRawHandoffInFlight, setIsRawHandoffInFlight] = useState(false);
+    const [lastLayoutMs, setLastLayoutMs] = useState(0);
+
+    const nodeCount = nodes.length;
+    const isMediumGraph = nodeCount >= MEDIUM_GRAPH_NODE_THRESHOLD;
+    const previewDebounceMs = isMediumGraph ? MEDIUM_GRAPH_PREVIEW_DEBOUNCE_MS : DEFAULT_PREVIEW_DEBOUNCE_MS;
+    const onlyRenderVisibleElements = isMediumGraph;
+    const performanceProfile = isMediumGraph ? 'medium' : 'default';
 
     const enforceSingleSelectedNode = useCallback((nextNodes: Node[], selectedNodeId: string) => {
         setEdges((currentEdges) =>
@@ -277,12 +293,16 @@ export function Editor() {
             },
         }));
 
+        const layoutStart = nowMs();
         try {
             const layoutNodes = await layoutWithElk(rfNodes, rfEdges);
             setNodes(layoutNodes);
         } catch (error) {
             console.error('ELK layout failed, using fallback positions.', error);
             setNodes(rfNodes);
+        } finally {
+            const elapsed = Math.max(0, nowMs() - layoutStart);
+            setLastLayoutMs(elapsed);
         }
         setEdges(rfEdges);
         hydratedRef.current = true;
@@ -321,6 +341,7 @@ export function Editor() {
             setIsRawHandoffInFlight(false);
             setEditorMode('structured');
             rawDotEntryDraftRef.current = '';
+            setLastLayoutMs(0);
             return;
         }
         clearDotSerializationContext();
@@ -370,14 +391,25 @@ export function Editor() {
         }
         previewTimer.current = window.setTimeout(() => {
             void requestPreview(dot).catch(console.error);
-        }, LIVE_PREVIEW_DEBOUNCE_MS);
+        }, previewDebounceMs);
 
         return () => {
             if (previewTimer.current) {
                 window.clearTimeout(previewTimer.current);
             }
         };
-    }, [activeFlow, nodes, edges, graphAttrs, viewMode, requestPreview, suppressPreview, isDragging, editorMode]);
+    }, [
+        activeFlow,
+        nodes,
+        edges,
+        graphAttrs,
+        viewMode,
+        requestPreview,
+        suppressPreview,
+        isDragging,
+        editorMode,
+        previewDebounceMs,
+    ]);
 
     useEffect(() => {
         const handleBeforeUnload = () => {
@@ -628,6 +660,7 @@ export function Editor() {
                     elevateEdgesOnSelect
                     fitView
                     colorMode="light"
+                    onlyRenderVisibleElements={onlyRenderVisibleElements}
                     minZoom={0.1}
                     maxZoom={1.5}
                 >
@@ -687,6 +720,17 @@ export function Editor() {
                         className="inline-flex items-center rounded-md border border-border/70 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm"
                     >
                         Canvas interaction budget: {CANVAS_INTERACTION_BUDGET_MS}ms max per interaction frame.
+                    </div>
+                    <div
+                        data-testid="canvas-performance-profile"
+                        data-profile={performanceProfile}
+                        data-node-count={nodeCount}
+                        data-only-render-visible-elements={String(onlyRenderVisibleElements)}
+                        data-preview-debounce-ms={previewDebounceMs}
+                        data-layout-ms={Math.round(lastLayoutMs)}
+                        className="inline-flex items-center rounded-md border border-border/70 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm"
+                    >
+                        Canvas profile: {performanceProfile} ({nodeCount} nodes). Preview debounce: {previewDebounceMs}ms.
                     </div>
                 </div>
             )}
