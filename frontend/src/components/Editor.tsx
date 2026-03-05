@@ -131,6 +131,7 @@ export function Editor() {
     const [rawHandoffError, setRawHandoffError] = useState<string | null>(null);
     const [isRawHandoffInFlight, setIsRawHandoffInFlight] = useState(false);
     const [lastLayoutMs, setLastLayoutMs] = useState(0);
+    const [lastPreviewMs, setLastPreviewMs] = useState(0);
 
     const nodeCount = nodes.length;
     const isMediumGraph = nodeCount >= MEDIUM_GRAPH_NODE_THRESHOLD;
@@ -318,7 +319,10 @@ export function Editor() {
     ]);
 
     const requestPreview = useCallback(async (dot: string): Promise<PreviewResponse> => {
+        const previewStart = nowMs();
         const preview = await fetchPreviewValidated(dot)
+        const elapsed = Math.max(0, nowMs() - previewStart);
+        setLastPreviewMs(elapsed);
         if (preview.diagnostics) {
             setDiagnostics(preview.diagnostics);
         } else {
@@ -342,6 +346,7 @@ export function Editor() {
             setEditorMode('structured');
             rawDotEntryDraftRef.current = '';
             setLastLayoutMs(0);
+            setLastPreviewMs(0);
             return;
         }
         clearDotSerializationContext();
@@ -727,6 +732,7 @@ export function Editor() {
                         data-node-count={nodeCount}
                         data-only-render-visible-elements={String(onlyRenderVisibleElements)}
                         data-preview-debounce-ms={previewDebounceMs}
+                        data-preview-ms={Math.round(lastPreviewMs)}
                         data-layout-ms={Math.round(lastLayoutMs)}
                         className="inline-flex items-center rounded-md border border-border/70 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm"
                     >

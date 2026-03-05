@@ -1822,10 +1822,13 @@ describe('Frontend contract behavior', () => {
 
     const profile = await screen.findByTestId('canvas-performance-profile')
     await waitFor(() => {
-      expect(profile).toHaveAttribute('data-profile', 'medium')
+    expect(profile).toHaveAttribute('data-profile', 'medium')
     })
     expect(profile).toHaveAttribute('data-node-count', String(nodeCount))
     expect(profile).toHaveAttribute('data-only-render-visible-elements', 'true')
+    expect(profile).toHaveAttribute('data-preview-ms')
+    const previewMs = Number(profile.getAttribute('data-preview-ms'))
+    expect(previewMs).not.toBeNaN()
     const previewDebounceMs = Number(profile.getAttribute('data-preview-debounce-ms'))
     expect(previewDebounceMs).toBeGreaterThan(300)
     const layoutMs = Number(profile.getAttribute('data-layout-ms'))
