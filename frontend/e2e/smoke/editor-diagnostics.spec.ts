@@ -144,6 +144,57 @@ test("prompt edits trigger live preview diagnostics before blur for item 5.1-03"
   }
 })
 
+test("medium graph performance profile renders optimizations for item 13.3-02", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-medium-${Date.now()}`
+  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-medium-graph")
+  const nodeCount = 30
+  const nodes = Array.from({ length: nodeCount }, (_, index) => ({
+    id: `node_${index}`,
+    attrs: { label: `Node ${index}` },
+  }))
+  const edges = nodes.slice(0, -1).map((node, index) => ({
+    source: node.id,
+    target: nodes[index + 1].id,
+    attrs: {},
+  }))
+
+  try {
+    await page.route("**/preview", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "ok",
+          graph: {
+            nodes,
+            edges,
+            graph_attrs: {},
+          },
+          diagnostics: [],
+        }),
+      })
+    })
+
+    await page.goto("/")
+    await page.getByTestId("project-path-input").fill(projectPath)
+    await page.getByTestId("project-register-button").click()
+    await page.getByTestId("nav-mode-editor").click()
+
+    const flowButton = page.getByRole("button", { name: flowName })
+    await expect(flowButton).toBeVisible()
+    await flowButton.click()
+
+    const profile = page.getByTestId("canvas-performance-profile")
+    await expect(profile).toContainText("medium")
+    await expect(profile).toContainText("Optimizations")
+    await expect(profile).toContainText("visible-only")
+    await expect(profile).toContainText("debounced-preview")
+    await page.screenshot({ path: screenshotPath("13e-medium-graph-performance-profile.png"), fullPage: true })
+  } finally {
+    await deleteFlowAfterSmoke(page, flowName)
+  }
+})
+
 test("validation panel supports filter and sort controls for item 7.1-01", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-validation-panel-${Date.now()}`
   const promptToken = `validation-panel-${Date.now()}`
@@ -607,4 +658,3 @@ test("stylesheet selector/effective previews render in graph settings for item 6
     await deleteFlowAfterSmoke(page, flowName)
   }
 })
-

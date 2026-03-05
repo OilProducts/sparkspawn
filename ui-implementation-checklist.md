@@ -403,8 +403,8 @@ Status key:
 ### 13.3 Performance
 - [x] [13.3-01] Define performance budgets for canvas interaction and timeline updates.
   - Evidence (2026-03-05): Evaluator `pass`; defined shared UI performance budget constants (`frontend/src/lib/performanceBudgets.ts`) and surfaced explicit canvas (`16ms`) and timeline (`50ms`) budget indicators in `frontend/src/components/Editor.tsx` and `frontend/src/components/RunsPanel.tsx`, covered by frontend contract `CID:13.3.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_accessibility_contracts.py`) with screenshot-based visual QA references `frontend/artifacts/ui-smoke/08i-runs-panel-event-timeline.png`, `frontend/artifacts/ui-smoke/08j-runs-panel-event-timeline-filters.png`, `frontend/artifacts/ui-smoke/19a-semantic-equivalence-mismatch-blocked.png`, and `frontend/artifacts/ui-smoke/19b-semantic-equivalence-round-trip-saved.png` (`just ui-smoke` reported unrelated backend `ECONNREFUSED`/HTTP 500 failures in other scenarios).
-- [ ] [13.3-02] Add profiling and optimization pass for medium-sized graphs.
-  - Blocker (2026-03-05): Needs medium-graph performance validation beyond data attributes and a visual capture showing the medium profile.
+- [x] [13.3-02] Add profiling and optimization pass for medium-sized graphs.
+  - Evidence (2026-03-05): Medium-graph optimizations now surface in the editor performance profile (`frontend/src/components/Editor.tsx`), covered by frontend contract `CID:13.3.02` and UI-smoke visual capture `frontend/artifacts/ui-smoke/13e-medium-graph-performance-profile.png`.
 - [ ] [13.3-03] Add stress tests for sustained SSE event throughput.
 
 ---

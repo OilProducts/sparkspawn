@@ -1833,6 +1833,10 @@ describe('Frontend contract behavior', () => {
     expect(previewDebounceMs).toBeGreaterThan(300)
     const layoutMs = Number(profile.getAttribute('data-layout-ms'))
     expect(layoutMs).not.toBeNaN()
+    expect(profile).toHaveAttribute('data-optimizations', 'visible-only, debounced-preview')
+    expect(profile).toHaveTextContent('Optimizations:')
+    expect(profile).toHaveTextContent('visible-only')
+    expect(profile).toHaveTextContent('debounced-preview')
   })
 
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {

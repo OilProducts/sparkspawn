@@ -138,6 +138,11 @@ export function Editor() {
     const previewDebounceMs = isMediumGraph ? MEDIUM_GRAPH_PREVIEW_DEBOUNCE_MS : DEFAULT_PREVIEW_DEBOUNCE_MS;
     const onlyRenderVisibleElements = isMediumGraph;
     const performanceProfile = isMediumGraph ? 'medium' : 'default';
+    const activeOptimizations = [
+        ...(onlyRenderVisibleElements ? ['visible-only'] : []),
+        ...(previewDebounceMs > DEFAULT_PREVIEW_DEBOUNCE_MS ? ['debounced-preview'] : []),
+    ];
+    const optimizationLabel = activeOptimizations.length ? activeOptimizations.join(', ') : 'none';
 
     const enforceSingleSelectedNode = useCallback((nextNodes: Node[], selectedNodeId: string) => {
         setEdges((currentEdges) =>
@@ -732,11 +737,13 @@ export function Editor() {
                         data-node-count={nodeCount}
                         data-only-render-visible-elements={String(onlyRenderVisibleElements)}
                         data-preview-debounce-ms={previewDebounceMs}
+                        data-optimizations={optimizationLabel}
                         data-preview-ms={Math.round(lastPreviewMs)}
                         data-layout-ms={Math.round(lastLayoutMs)}
                         className="inline-flex items-center rounded-md border border-border/70 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm"
                     >
                         Canvas profile: {performanceProfile} ({nodeCount} nodes). Preview debounce: {previewDebounceMs}ms.
+                        {' '}Optimizations: {optimizationLabel}.
                     </div>
                 </div>
             )}
