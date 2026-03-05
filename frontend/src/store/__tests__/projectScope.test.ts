@@ -23,11 +23,11 @@ describe('project scope store behavior', () => {
     resetStore()
   })
 
-  it('forces projects mode when selecting editor without an active project', () => {
+  it('forces home mode when selecting editor without an active project', () => {
     const store = useStore.getState()
     store.setViewMode('editor')
 
-    expect(useStore.getState().viewMode).toBe('projects')
+    expect(useStore.getState().viewMode).toBe('home')
   })
 
   it('rejects non-absolute project paths', () => {

@@ -11,7 +11,7 @@ type WorkflowFailureDiagnostics = {
     flowSource: string | null
 }
 
-const NAV_MODE_ORDER: ViewMode[] = ['projects', 'editor', 'execution', 'settings', 'runs']
+const NAV_MODE_ORDER: ViewMode[] = ['home', 'editor', 'execution', 'settings', 'runs']
 const NAV_MODES_REQUIRING_ACTIVE_PROJECT = new Set<ViewMode>(['editor', 'execution'])
 
 export function Navbar() {
@@ -49,7 +49,7 @@ export function Navbar() {
         const selectableModes = NAV_MODE_ORDER.filter(
             (candidate) => activeProjectPath || !NAV_MODES_REQUIRING_ACTIVE_PROJECT.has(candidate)
         )
-        const modeCycle = selectableModes.length > 0 ? selectableModes : ['projects']
+        const modeCycle = selectableModes.length > 0 ? selectableModes : ['home']
         const currentIndex = modeCycle.indexOf(mode)
         const startIndex = currentIndex >= 0 ? currentIndex : 0
         const nextIndex = (startIndex + direction + modeCycle.length) % modeCycle.length
@@ -179,12 +179,12 @@ export function Navbar() {
                 >
                     <button
                         data-testid="nav-mode-projects"
-                        onClick={() => setViewMode('projects')}
-                        onKeyDown={(event) => onViewModeKeyDown(event, 'projects')}
-                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1 ${viewMode === 'projects' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                        onClick={() => setViewMode('home')}
+                        onKeyDown={(event) => onViewModeKeyDown(event, 'home')}
+                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1 ${(viewMode === 'home' || viewMode === 'projects') ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
                             }`}
                     >
-                        Projects
+                        <span data-testid="nav-mode-home">Home</span>
                     </button>
                     <button
                         data-testid="nav-mode-editor"

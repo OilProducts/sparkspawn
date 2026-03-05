@@ -44,6 +44,7 @@ describe('ProjectsPanel', () => {
     render(<ProjectsPanel />)
 
     expect(screen.getByTestId('project-register-form')).toBeVisible()
+    expect(screen.getByTestId('project-event-log-surface')).toBeVisible()
     expect(screen.getByLabelText('Project directory path')).toBeVisible()
     expect(screen.getByTestId('project-path-input')).toBeVisible()
     expect(screen.getByTestId('project-register-button')).toHaveAttribute('type', 'submit')

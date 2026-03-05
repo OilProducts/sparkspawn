@@ -1651,7 +1651,7 @@ export function RunsPanel() {
         } else {
             setPlanId(artifactId)
         }
-        setViewMode('projects')
+        setViewMode('home')
     }
 
     const requestCancel = async (runId: string, currentStatus: string) => {

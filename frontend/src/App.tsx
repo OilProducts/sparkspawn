@@ -5,13 +5,14 @@ import { Editor } from "./components/Editor"
 import { RunStream } from "./components/RunStream"
 import { SettingsPanel } from "./components/SettingsPanel"
 import { RunsPanel } from "./components/RunsPanel"
-import { ProjectsPanel } from "./components/ProjectsPanel"
+import { HomePanel } from "./components/ProjectsPanel"
 import { ReactFlowProvider } from "@xyflow/react"
 import { useStore } from "@/store"
 import { useNarrowViewport } from "@/lib/useNarrowViewport"
 
 function App() {
   const viewMode = useStore((state) => state.viewMode)
+  const isHomeMode = viewMode === 'home' || viewMode === 'projects'
   const isCanvasMode = viewMode === 'editor' || viewMode === 'execution'
   const showSidebar = isCanvasMode
   const isNarrowViewport = useNarrowViewport()
@@ -33,8 +34,8 @@ function App() {
               </div>
             ) : viewMode === 'settings' ? (
               <SettingsPanel />
-            ) : viewMode === 'projects' ? (
-              <ProjectsPanel />
+            ) : isHomeMode ? (
+              <HomePanel />
             ) : viewMode === 'runs' ? (
               <RunsPanel />
             ) : null}

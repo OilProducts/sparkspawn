@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { isAbsoluteProjectPath, normalizeProjectPath } from '@/lib/projectPaths'
 
-export type ViewMode = 'projects' | 'editor' | 'execution' | 'settings' | 'runs'
+export type ViewMode = 'home' | 'projects' | 'editor' | 'execution' | 'settings' | 'runs'
 export type NodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'waiting'
 export type DiagnosticSeverity = 'error' | 'warning' | 'info'
 export type RuntimeStatus =
@@ -75,6 +75,11 @@ export interface ConversationHistoryEntry {
     timestamp: string
 }
 
+export interface ProjectEventLogEntry {
+    message: string
+    timestamp: string
+}
+
 export interface ArtifactProvenanceReference {
     source: string
     referenceId: string
@@ -135,10 +140,13 @@ const PROJECT_REGISTRY_STATE_STORAGE_KEY = "sparkspawn.project_registry_state"
 const PROJECT_CONVERSATION_STATE_STORAGE_KEY = "sparkspawn.project_conversation_state"
 const DEFAULT_WORKING_DIRECTORY = "./test-app"
 const RECENT_PROJECT_LIMIT = 5
-const VIEW_MODES: ViewMode[] = ['projects', 'editor', 'execution', 'settings', 'runs']
+const PROJECT_EVENT_LOG_LIMIT = 200
+const VIEW_MODES: ViewMode[] = ['home', 'projects', 'editor', 'execution', 'settings', 'runs']
 const modeRequiresActiveProject = (mode: ViewMode) => mode === 'editor' || mode === 'execution'
+const normalizeViewMode = (mode: ViewMode): ViewMode => (mode === 'projects' ? 'home' : mode)
 const resolveViewModeForProjectScope = (mode: ViewMode, activeProjectPath: string | null): ViewMode => {
-    return modeRequiresActiveProject(mode) && !activeProjectPath ? 'projects' : mode
+    const normalizedMode = normalizeViewMode(mode)
+    return modeRequiresActiveProject(normalizedMode) && !activeProjectPath ? 'home' : normalizedMode
 }
 const pushRecentProjectPath = (recentProjectPaths: string[], projectPath: string | null) => {
     if (!projectPath) {
@@ -263,6 +271,7 @@ interface ProjectScopedWorkspace {
     workingDir: string
     conversationId: string | null
     conversationHistory: ConversationHistoryEntry[]
+    projectEventLog: ProjectEventLogEntry[]
     specId: string | null
     specStatus: 'draft' | 'approved'
     specProvenance?: ArtifactProvenanceReference | null
@@ -285,6 +294,7 @@ type PersistedProjectWorkspaceState = Record<
     {
         conversationId: string | null
         conversationHistory: ConversationHistoryEntry[]
+        projectEventLog?: ProjectEventLogEntry[]
         specId: string | null
         specStatus: 'draft' | 'approved'
         specProvenance?: ArtifactProvenanceReference | null
@@ -309,6 +319,7 @@ const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
     workingDir: DEFAULT_WORKING_DIRECTORY,
     conversationId: null,
     conversationHistory: [],
+    projectEventLog: [],
     specId: null,
     specStatus: 'draft',
     specProvenance: null,
@@ -331,6 +342,20 @@ const coerceConversationHistoryEntry = (value: unknown): ConversationHistoryEntr
         return {
             role: candidate.role,
             content: candidate.content,
+            timestamp: candidate.timestamp,
+        }
+    }
+    return null
+}
+
+const coerceProjectEventLogEntry = (value: unknown): ProjectEventLogEntry | null => {
+    if (!value || typeof value !== "object") {
+        return null
+    }
+    const candidate = value as Partial<ProjectEventLogEntry>
+    if (typeof candidate.message === "string" && typeof candidate.timestamp === "string") {
+        return {
+            message: candidate.message,
             timestamp: candidate.timestamp,
         }
     }
@@ -393,6 +418,7 @@ const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
             const scope = value as {
                 conversationId?: unknown
                 conversationHistory?: unknown
+                projectEventLog?: unknown
                 specId?: unknown
                 specStatus?: unknown
                 specProvenance?: unknown
@@ -400,16 +426,31 @@ const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
                 planStatus?: unknown
                 planProvenance?: unknown
             }
-            const history = Array.isArray(scope.conversationHistory)
+            const historyEntries = Array.isArray(scope.conversationHistory)
                 ? scope.conversationHistory
                     .map(coerceConversationHistoryEntry)
                     .filter((entry): entry is ConversationHistoryEntry => entry !== null)
+                : []
+            const conversationHistory = historyEntries.filter(
+                (entry): entry is ConversationHistoryEntry => entry.role === "user" || entry.role === "assistant"
+            )
+            const legacySystemEventEntries = historyEntries
+                .filter((entry) => entry.role === "system")
+                .map((entry) => ({
+                    message: entry.content,
+                    timestamp: entry.timestamp,
+                }))
+            const persistedProjectEventLog = Array.isArray(scope.projectEventLog)
+                ? scope.projectEventLog
+                    .map(coerceProjectEventLogEntry)
+                    .filter((entry): entry is ProjectEventLogEntry => entry !== null)
                 : []
             const specProvenance = coerceArtifactProvenanceReference(scope.specProvenance)
             const planProvenance = coerceArtifactProvenanceReference(scope.planProvenance)
             restored[normalizedProjectPath] = {
                 conversationId: typeof scope.conversationId === "string" ? scope.conversationId : null,
-                conversationHistory: history,
+                conversationHistory,
+                projectEventLog: [...legacySystemEventEntries, ...persistedProjectEventLog].slice(-PROJECT_EVENT_LOG_LIMIT),
                 specId: typeof scope.specId === "string" ? scope.specId : null,
                 specStatus: scope.specStatus === "approved" ? "approved" : "draft",
                 specProvenance,
@@ -438,6 +479,7 @@ const saveProjectConversationState = (projectScopedWorkspaces: Record<string, Pr
             persisted[projectPath] = {
                 conversationId: workspace.conversationId,
                 conversationHistory: workspace.conversationHistory,
+                projectEventLog: workspace.projectEventLog,
                 specId: workspace.specId,
                 specStatus: workspace.specStatus,
                 specProvenance: workspace.specProvenance || null,
@@ -553,7 +595,7 @@ const selectProjectScopedArtifactState = (
 }
 
 const DEFAULT_ROUTE_STATE: RouteState = {
-    viewMode: 'projects',
+    viewMode: 'home',
     activeProjectPath: null,
     activeFlow: null,
     selectedRunId: null,
@@ -568,7 +610,7 @@ const loadRouteState = (): RouteState => {
         if (!raw) return { ...DEFAULT_ROUTE_STATE }
         const parsed = JSON.parse(raw) as Partial<RouteState>
         const isValidViewMode = parsed.viewMode ? VIEW_MODES.includes(parsed.viewMode) : false
-        const requestedViewMode = isValidViewMode ? parsed.viewMode! : DEFAULT_ROUTE_STATE.viewMode
+        const requestedViewMode = isValidViewMode ? normalizeViewMode(parsed.viewMode!) : DEFAULT_ROUTE_STATE.viewMode
         const parsedActiveProjectPath = typeof parsed.activeProjectPath === "string"
             ? normalizeProjectPath(parsed.activeProjectPath)
             : null
@@ -652,6 +694,7 @@ interface AppState {
     setSelectedRunId: (id: string | null) => void
     setConversationId: (id: string | null) => void
     appendConversationHistoryEntry: (entry: ConversationHistoryEntry) => void
+    appendProjectEventEntry: (entry: ProjectEventLogEntry) => void
     setSpecId: (id: string | null) => void
     setSpecStatus: (status: 'draft' | 'approved') => void
     setSpecProvenance: (provenance: ArtifactProvenanceReference | null) => void
@@ -1101,6 +1144,22 @@ export const useStore = create<AppState>((set, get) => ({
             nextProjectScopedWorkspaces[state.activeProjectPath] = {
                 ...scoped,
                 conversationHistory: [...scoped.conversationHistory, entry],
+            }
+            saveProjectConversationState(nextProjectScopedWorkspaces)
+            return {
+                projectScopedWorkspaces: nextProjectScopedWorkspaces,
+            }
+        }),
+    appendProjectEventEntry: (entry) =>
+        set((state) => {
+            if (!state.activeProjectPath) {
+                return {}
+            }
+            const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
+            const scoped = resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[state.activeProjectPath], state.activeProjectPath)
+            nextProjectScopedWorkspaces[state.activeProjectPath] = {
+                ...scoped,
+                projectEventLog: [...scoped.projectEventLog, entry].slice(-PROJECT_EVENT_LOG_LIMIT),
             }
             saveProjectConversationState(nextProjectScopedWorkspaces)
             return {

@@ -1,15 +1,24 @@
-# Attractor UI User Stories: Project-Centric Workflow
+# Attractor UI User Stories: Home-First Project Workflow
 
-This document captures user stories implied by the current Attractor direction and the new `project` concept.
+This document captures user stories implied by the current Attractor direction and the `project` concept.
 
 A **project** is a user-selected work target with these invariants:
 - It is identified by a unique directory path.
 - It must be backed by a Git repository.
-- It scopes conversation context, specs, plans, runs, and artifacts.
+- It scopes conversation context, specs, plans, work items, runs, and artifacts.
 
 ---
 
-## 1. Project Identity and Selection
+## 1. Home Workspace and Project Selection
+
+- **US-HOME-01**
+  As a user, I want a top-level `Home` tab that combines project selection and AI collaboration so that I can start work from one place.
+
+- **US-HOME-02**
+  As a user, I want a left sidebar in Home with my projects so that switching projects is a single click.
+
+- **US-HOME-03**
+  As a user, I want Home to clearly show the active project identity (name, directory, branch) so that I always know which repo I am operating on.
 
 - **US-PROJ-01**
   As a user, I want to create or register a project from a local directory so that all work is anchored to a concrete filesystem location.
@@ -24,17 +33,17 @@ A **project** is a user-selected work target with these invariants:
   As a user, I want to pick one active project and see that selection clearly in global navigation so that I always know which repo I am operating on.
 
 - **US-PROJ-05**
-  As a user, I want recent/favorite project switching so that I can move between efforts without re-entering paths.
+  As a user, I want recent/favorite project switching in the Home sidebar so that I can move between efforts without re-entering paths.
 
 - **US-PROJ-06**
   As a user, I want project metadata (name, directory, current branch, last activity) visible at a glance so that I can choose the right project confidently.
 
 ---
 
-## 2. Project-Scoped AI Conversation
+## 2. Project-Scoped AI Conversation and Spec Editing
 
 - **US-CONV-01**
-  As a project author, I want to open a project-scoped conversation with an AI agent so that I can define requirements in context of that project.
+  As a project author, I want to open a project-scoped conversation with an AI agent in Home so that I can define requirements in context of that project.
 
 - **US-CONV-02**
   As a project author, I want conversation context to include project directory and repository state so that AI suggestions align with actual project files and structure.
@@ -53,24 +62,27 @@ A **project** is a user-selected work target with these invariants:
 
 ---
 
-## 3. Spec -> Plan -> Build Workflow Chain
+## 3. Spec -> Plan -> Work Tracker -> Build Chain
 
 - **US-WORK-01**
-  As a project author, I want to run a workflow that converts the approved project spec into an implementation plan so that planning is standardized and repeatable.
+  As a project author, I want accepted spec edits to trigger a DOT orchestration that generates an implementation plan so that planning is automatic and repeatable.
 
 - **US-WORK-02**
-  As a project author, I want the generated implementation plan written to a project file with clear status and provenance so that it can be reviewed and versioned.
+  As a project author, I want that orchestration to produce plan artifacts and candidate work items so that planning outputs are actionable.
 
 - **US-WORK-03**
-  As a reviewer/operator, I want to approve, reject, or request revision of a generated plan so that build execution is gated by human intent.
+  As a reviewer/operator, I want a human approval gate before work items are published to the tracker so that implementation does not start without explicit approval.
 
 - **US-WORK-04**
-  As an operator, I want to launch build workflows from the approved plan so that implementation execution is directly tied to agreed scope.
+  As an operator, I want approved work items to transition to `ready` in the tracker so that implementation agents can pick them up.
 
 - **US-WORK-05**
-  As an operator, I want live run status, logs, and artifacts for planning/build workflows so that I can monitor progress and troubleshoot failures.
+  As an operator, I want to launch build/implementation workflows from approved ready work so that execution is tied to governed scope.
 
 - **US-WORK-06**
+  As an operator, I want live run status, logs, and artifacts for planning and build orchestrations so that I can monitor progress and troubleshoot failures.
+
+- **US-WORK-07**
   As a project author, I want failed workflow runs to produce actionable diagnostics and rerun options so that I can recover quickly.
 
 ---
@@ -84,10 +96,10 @@ A **project** is a user-selected work target with these invariants:
   As a user, I want workflow start to be blocked (or explicitly warned) when project Git state violates policy so that risky execution is visible.
 
 - **US-GOV-03**
-  As an auditor, I want each spec/plan/build run linked to project, commit/branch context, and timestamps so that outcomes are traceable.
+  As an auditor, I want each spec/plan/tracker/build run linked to project, commit/branch context, and timestamps so that outcomes are traceable.
 
 - **US-GOV-04**
-  As a user, I want durable run history per project so that I can inspect past specs, plans, artifacts, and decisions.
+  As a user, I want durable run history per project so that I can inspect past specs, plans, work-item approvals, artifacts, and decisions.
 
 - **US-GOV-05**
   As a user, I want non-destructive failure handling (no silent file loss) when workflows or saves fail so that project state remains trustworthy.
@@ -97,11 +109,10 @@ A **project** is a user-selected work target with these invariants:
 ## 5. UX and Information Architecture Implications
 
 - **US-IA-01**
-  As a user, I want Projects to be a first-class top-level area in the UI so that selecting and managing project scope is explicit.
+  As a user, I want Home to be the default top-level workspace for project selection and conversation so that the core loop starts in one obvious place.
 
 - **US-IA-02**
   As a user, I want deep-linkable state for `project + conversation + run` so that I can share/reopen exact working context.
 
 - **US-IA-03**
-  As a user, I want consistent navigation between project context, spec editing, workflow execution, and run inspection so that the end-to-end loop feels unified.
-
+  As a user, I want consistent navigation between Home conversation, spec editing, workflow execution, and run inspection so that the end-to-end loop feels unified.

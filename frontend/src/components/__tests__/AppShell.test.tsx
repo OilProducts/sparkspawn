@@ -95,7 +95,7 @@ describe('App shell behavior', () => {
     expect(screen.getByTestId('runs-panel')).toBeVisible()
 
     await user.click(screen.getByTestId('nav-mode-projects'))
-    expect(useStore.getState().viewMode).toBe('projects')
+    expect(useStore.getState().viewMode).toBe('home')
     expect(screen.getByTestId('projects-panel')).toBeVisible()
   })
 
@@ -104,7 +104,7 @@ describe('App shell behavior', () => {
     render(<App />)
 
     await user.click(screen.getByTestId('nav-mode-editor'))
-    expect(useStore.getState().viewMode).toBe('projects')
+    expect(useStore.getState().viewMode).toBe('home')
     expect(screen.getByTestId('projects-panel')).toBeVisible()
 
     act(() => {

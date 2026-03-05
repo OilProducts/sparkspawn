@@ -104,15 +104,22 @@ describe('Project-scoped workflow behavior', () => {
     })
 
     render(<ProjectsPanel />)
-    expect(screen.getByTestId('project-scope-entrypoints')).toBeVisible()
     expect(screen.getByTestId('project-ai-conversation-surface')).toBeVisible()
-    expect(screen.getByTestId('project-spec-edit-proposal-surface')).toBeVisible()
 
-    await user.click(screen.getByTestId('project-ai-conversation-start-button'))
-    expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Started conversation')
-
-    await user.click(screen.getByTestId('project-spec-edit-proposal-preview-button'))
-    expect(screen.getByTestId('project-spec-edit-proposal-preview')).toBeVisible()
+    await user.type(
+      screen.getByTestId('project-ai-conversation-input'),
+      'Please add a project-first home chat flow with approval before planning.',
+    )
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+    expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent(
+      'Please add a project-first home chat flow with approval before planning.',
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('project-spec-edit-proposal-preview')).toBeVisible()
+    })
+    expect(useStore.getState().projectScopedWorkspaces['/tmp/workflow-project']?.conversationId).toMatch(
+      /^conversation-/,
+    )
 
     const confirmSpy = vi.spyOn(window, 'confirm')
     confirmSpy.mockReturnValueOnce(false)
@@ -129,6 +136,13 @@ describe('Project-scoped workflow behavior', () => {
     const projectScope = useStore.getState().projectScopedWorkspaces['/tmp/workflow-project']
     expect(projectScope.specId).toMatch(/^spec-/)
     expect(projectScope.specStatus).toBe('draft')
+    expect(projectScope.projectEventLog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining('Applied spec edit proposal'),
+        }),
+      ]),
+    )
     expect(projectScope.specProvenance).toEqual(
       expect.objectContaining({
         source: 'spec-edit-proposal',
@@ -139,6 +153,7 @@ describe('Project-scoped workflow behavior', () => {
       }),
     )
     expect(projectScope.specProvenance?.capturedAt).toEqual(expect.any(String))
+    expect(screen.getByTestId('project-ai-conversation-history-list')).not.toHaveTextContent('Applied spec edit proposal')
   })
 
   it('enforces spec approval before launching plan workflow and records run context on launch', async () => {
@@ -147,13 +162,13 @@ describe('Project-scoped workflow behavior', () => {
       useStore.getState().registerProject('/tmp/plan-project')
       useStore.getState().setActiveProjectPath('/tmp/plan-project')
       useStore.getState().setActiveFlow('plan-generation.dot')
+      useStore.getState().setSpecId('spec-plan-project')
     })
 
     render(<ProjectsPanel />)
     expect(screen.getByTestId('project-plan-generation-surface')).toBeVisible()
     expect(screen.getByTestId('project-plan-gate-surface')).toBeVisible()
 
-    await user.click(screen.getByRole('button', { name: 'Create spec' }))
     const launchButton = screen.getByTestId('project-plan-generation-launch-button')
     expect(launchButton).toBeDisabled()
 
@@ -189,11 +204,11 @@ describe('Project-scoped workflow behavior', () => {
       useStore.getState().registerProject('/tmp/plan-status-degraded-project')
       useStore.getState().setActiveProjectPath('/tmp/plan-status-degraded-project')
       useStore.getState().setActiveFlow('plan-generation.dot')
+      useStore.getState().setSpecId('spec-plan-status-degraded-project')
     })
 
     render(<ProjectsPanel />)
 
-    await user.click(screen.getByRole('button', { name: 'Create spec' }))
     await user.click(screen.getByTestId('project-spec-approve-for-plan-button'))
     await user.click(screen.getByTestId('project-plan-generation-launch-button'))
 

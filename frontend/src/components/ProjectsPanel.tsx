@@ -1,9 +1,12 @@
 import { type ConversationHistoryEntry, type PlanStatus, type ProjectRegistrationResult, useStore } from "@/store"
-import { type FormEvent, useEffect, useState } from "react"
+import { type FormEvent, type KeyboardEvent, useEffect, useState } from "react"
+import { ChevronDown, ChevronUp } from "lucide-react"
 import { buildPipelineStartPayload } from "@/lib/pipelineStartPayload"
 import { ApiHttpError, fetchFlowPayloadValidated, fetchPipelineStartValidated, fetchPipelineStatusValidated } from '@/lib/apiClient'
 import { useNarrowViewport } from "@/lib/useNarrowViewport"
 import { isAbsoluteProjectPath, normalizeProjectPath } from "@/lib/projectPaths"
+import { HomeProjectSidebar } from "@/components/HomeProjectSidebar"
+import { HomeWorkspace } from "@/components/HomeWorkspace"
 import {
     clearProjectSpecEditProposal,
     getProjectSpecEditProposal,
@@ -20,6 +23,8 @@ const buildProjectScopedArtifactId = (artifactType: "conversation" | "spec" | "p
     const suffix = normalizedProjectKey || "project"
     return `${artifactType}-${suffix}-${Date.now()}`
 }
+
+const PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT = 12
 
 const PLAN_STATUS_TRANSITIONS: Record<PlanStatus, PlanStatus[]> = {
     draft: ['approved', 'rejected', 'revision-requested'],
@@ -62,7 +67,7 @@ const asProjectGitMetadataField = (value: unknown): string | null => {
     return trimmed.length > 0 ? trimmed : null
 }
 
-export function ProjectsPanel() {
+export function HomePanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
     const projects = Object.values(projectRegistry)
     const recentProjectPaths = useStore((state) => state.recentProjectPaths)
@@ -77,6 +82,7 @@ export function ProjectsPanel() {
     const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
     const setConversationId = useStore((state) => state.setConversationId)
     const appendConversationHistoryEntry = useStore((state) => state.appendConversationHistoryEntry)
+    const appendProjectEventEntry = useStore((state) => state.appendProjectEventEntry)
     const setSpecId = useStore((state) => state.setSpecId)
     const setSpecStatus = useStore((state) => state.setSpecStatus)
     const setSpecProvenance = useStore((state) => state.setSpecProvenance)
@@ -96,6 +102,8 @@ export function ProjectsPanel() {
     const [planGenerationError, setPlanGenerationError] = useState<string | null>(null)
     const [planGenerationStatusDegraded, setPlanGenerationStatusDegraded] = useState<string | null>(null)
     const [lastPlanGenerationFailure, setLastPlanGenerationFailure] = useState<WorkflowFailureDiagnostics | null>(null)
+    const [chatDraft, setChatDraft] = useState("")
+    const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
     const isNarrowViewport = useNarrowViewport()
     const activeProjectScope = activeProjectPath ? projectScopedWorkspaces[activeProjectPath] : null
     const activeProjectGitMetadata = activeProjectPath
@@ -108,6 +116,10 @@ export function ProjectsPanel() {
         .map((projectPath) => projectRegistry[projectPath])
         .filter((project): project is (typeof projects)[number] => Boolean(project))
     const activeConversationHistory = activeProjectScope?.conversationHistory || []
+    const activeChatHistory = activeConversationHistory.filter(
+        (entry) => entry.role === "user" || entry.role === "assistant"
+    )
+    const activeProjectEventLog = activeProjectScope?.projectEventLog || []
     const activePlanStatus: PlanStatus = activeProjectScope?.planStatus || 'draft'
     const canRerunPlanGeneration = Boolean(activeProjectScope?.specId) && specIsApprovedForPlanning && Boolean(activeFlow)
 
@@ -160,6 +172,14 @@ export function ProjectsPanel() {
             isCancelled = true
         }
     }, [projects, projectGitMetadata])
+
+    useEffect(() => {
+        setChatDraft("")
+    }, [activeProjectPath])
+
+    useEffect(() => {
+        setExpandedProposalChanges({})
+    }, [activeProjectPath, activeProjectProposalPreview?.id])
 
     const resolveProjectPathValidation = (rawPath: string, currentPath?: string | null): ProjectRegistrationResult => {
         const normalizedPath = normalizeProjectPath(rawPath)
@@ -322,53 +342,59 @@ export function ProjectsPanel() {
         clearProjectRegistrationError()
     }
 
-    const onOpenConversation = () => {
+    const ensureConversationId = () => {
         if (!activeProjectPath) {
-            return
+            return null
         }
-        setConversationId(activeProjectScope?.conversationId || buildProjectScopedArtifactId("conversation", activeProjectPath))
-    }
-
-    const onStartConversation = () => {
-        if (!activeProjectPath) {
-            return
+        if (activeProjectScope?.conversationId) {
+            return activeProjectScope.conversationId
         }
         const conversationId = buildProjectScopedArtifactId("conversation", activeProjectPath)
         setConversationId(conversationId)
-        const entry: ConversationHistoryEntry = {
-            role: "system",
-            content: `Started conversation ${conversationId}.`,
-            timestamp: new Date().toISOString(),
-        }
-        appendConversationHistoryEntry(entry)
+        return conversationId
     }
 
-    const onContinueConversation = () => {
-        if (!activeProjectScope?.conversationId) {
-            return
-        }
-        setConversationId(activeProjectScope.conversationId)
-        const entry: ConversationHistoryEntry = {
-            role: "system",
-            content: `Continued conversation ${activeProjectScope.conversationId}.`,
-            timestamp: new Date().toISOString(),
-        }
-        appendConversationHistoryEntry(entry)
-    }
-
-    const onOpenSpec = () => {
+    const onSendChatMessage = () => {
         if (!activeProjectPath) {
             return
         }
-        setSpecId(activeProjectScope?.specId || buildProjectScopedArtifactId("spec", activeProjectPath))
-        setSpecStatus(activeProjectScope?.specId ? activeProjectScope.specStatus : 'draft')
-    }
-
-    const onOpenPlan = () => {
-        if (!activeProjectPath) {
+        const trimmed = chatDraft.trim()
+        if (!trimmed) {
             return
         }
-        setPlanId(activeProjectScope?.planId || buildProjectScopedArtifactId("plan", activeProjectPath))
+        const conversationId = ensureConversationId()
+        if (!conversationId) {
+            return
+        }
+
+        const userEntry: ConversationHistoryEntry = {
+            role: "user",
+            content: trimmed,
+            timestamp: new Date().toISOString(),
+        }
+        appendConversationHistoryEntry(userEntry)
+
+        const summarizedIntent = trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed
+        const assistantEntry: ConversationHistoryEntry = {
+            role: "assistant",
+            content: `Acknowledged: "${summarizedIntent}". I drafted a spec edit proposal below for your review.`,
+            timestamp: new Date().toISOString(),
+        }
+        appendConversationHistoryEntry(assistantEntry)
+        upsertAgentSpecEditProposal(trimmed)
+        setChatDraft("")
+    }
+
+    const onChatComposerSubmit = (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        onSendChatMessage()
+    }
+
+    const onChatComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault()
+            onSendChatMessage()
+        }
     }
 
     const formatConversationTimestamp = (value: string) => {
@@ -379,6 +405,30 @@ export function ProjectsPanel() {
         return parsed.toLocaleString()
     }
 
+    const appendProjectEvent = (message: string) => {
+        appendProjectEventEntry({
+            message,
+            timestamp: new Date().toISOString(),
+        })
+    }
+
+    const buildProposalDiffLines = (change: SpecEditProposalPreview["changes"][number]) => {
+        const beforeLines = change.before.split('\n').map((line) => ({ type: "removed" as const, text: line }))
+        const afterLines = change.after.split('\n').map((line) => ({ type: "added" as const, text: line }))
+        return [...beforeLines, ...afterLines]
+    }
+
+    const buildProposalChangeKey = (proposalId: string, changePath: string, index: number) => (
+        `${proposalId}:${changePath}:${index}`
+    )
+
+    const toggleProposalChangeExpanded = (changeKey: string) => {
+        setExpandedProposalChanges((current) => ({
+            ...current,
+            [changeKey]: !current[changeKey],
+        }))
+    }
+
     const truncateProposalSource = (value: string, maxLength = 72) => {
         if (value.length <= maxLength) {
             return value
@@ -386,16 +436,11 @@ export function ProjectsPanel() {
         return `${value.slice(0, maxLength - 1)}...`
     }
 
-    const onPreviewSpecEditProposal = () => {
-        if (!activeProjectPath) {
-            return
-        }
-        const sourceEntry = [...activeConversationHistory].reverse().find((entry) => entry.role !== "system")
-        const sourceText = sourceEntry?.content || "Capture baseline project scope and constraints."
+    const buildAgentSpecEditProposal = (sourceText: string): SpecEditProposalPreview => {
         const proposal: SpecEditProposalPreview = {
             id: `proposal-${Date.now()}`,
             createdAt: new Date().toISOString(),
-            summary: "Suggested spec refinements generated from the latest project-scoped conversation turn.",
+            summary: "Agent-proposed spec refinements generated from the latest project-scoped conversation turn.",
             changes: [
                 {
                     path: "spec/goals.md#scope",
@@ -409,7 +454,16 @@ export function ProjectsPanel() {
                 },
             ],
         }
+        return proposal
+    }
+
+    const upsertAgentSpecEditProposal = (sourceText: string) => {
+        if (!activeProjectPath) {
+            return
+        }
+        const proposal = buildAgentSpecEditProposal(sourceText)
         setProjectSpecEditProposals((current) => upsertProjectSpecEditProposal(current, activeProjectPath, proposal))
+        appendProjectEvent(`Agent proposed spec edits ${proposal.id}.`)
     }
 
     const onApplySpecEditProposal = () => {
@@ -431,11 +485,7 @@ export function ProjectsPanel() {
             gitBranch: activeProjectGitMetadata.branch,
             gitCommit: activeProjectGitMetadata.commit,
         })
-        appendConversationHistoryEntry({
-            role: "system",
-            content: `Applied spec edit proposal ${activeProjectProposalPreview.id} to ${specId}.`,
-            timestamp: new Date().toISOString(),
-        })
+        appendProjectEvent(`Applied spec edit proposal ${activeProjectProposalPreview.id} to ${specId}.`)
         setProjectSpecEditProposals((current) => clearProjectSpecEditProposal(current, activeProjectPath))
     }
 
@@ -446,11 +496,7 @@ export function ProjectsPanel() {
         setSpecStatus('approved')
         setPlanGenerationError(null)
         setPlanGenerationStatusDegraded(null)
-        appendConversationHistoryEntry({
-            role: "system",
-            content: `Approved spec ${activeProjectScope.specId} for plan generation.`,
-            timestamp: new Date().toISOString(),
-        })
+        appendProjectEvent(`Approved spec ${activeProjectScope.specId} for plan generation.`)
     }
 
     const onLaunchPlanGenerationWorkflow = async () => {
@@ -491,6 +537,7 @@ export function ProjectsPanel() {
                         ? statusError.message
                         : 'Plan status retrieval unavailable.'
                 setPlanGenerationStatusDegraded(`Plan generation launched, but status retrieval is degraded: ${detail}`)
+                appendProjectEvent(`Plan generation launched with degraded status retrieval: ${detail}`)
             }
 
             setSelectedRunId(runData.pipeline_id)
@@ -504,11 +551,7 @@ export function ProjectsPanel() {
                 gitBranch: activeProjectGitMetadata.branch,
                 gitCommit: activeProjectGitMetadata.commit,
             })
-            appendConversationHistoryEntry({
-                role: "system",
-                content: `Launched plan-generation workflow from approved spec ${activeProjectScope.specId}.`,
-                timestamp: new Date().toISOString(),
-            })
+            appendProjectEvent(`Launched plan-generation workflow from approved spec ${activeProjectScope.specId}.`)
             setLastPlanGenerationFailure(null)
             setViewMode('execution')
         } catch (error) {
@@ -524,6 +567,7 @@ export function ProjectsPanel() {
                 failedAt: new Date().toISOString(),
                 flowSource: activeFlow || null,
             })
+            appendProjectEvent(`Plan-generation workflow launch failed: ${message}`)
         }
     }
 
@@ -543,11 +587,7 @@ export function ProjectsPanel() {
         const previousStatus = activeProjectScope.planStatus
         const transitionAction = PLAN_TRANSITION_ACTION_LABELS[nextStatus]
         setPlanStatus(nextStatus)
-        appendConversationHistoryEntry({
-            role: "system",
-            content: `${transitionAction} plan ${activeProjectScope.planId} (${previousStatus} -> ${nextStatus}).`,
-            timestamp: new Date().toISOString(),
-        })
+        appendProjectEvent(`${transitionAction} plan ${activeProjectScope.planId} (${previousStatus} -> ${nextStatus}).`)
     }
 
     const onRejectSpecEditProposal = () => {
@@ -555,36 +595,38 @@ export function ProjectsPanel() {
             return
         }
 
-        appendConversationHistoryEntry({
-            role: "system",
-            content: `Rejected spec edit proposal ${activeProjectProposalPreview.id}.`,
-            timestamp: new Date().toISOString(),
-        })
+        appendProjectEvent(`Rejected spec edit proposal ${activeProjectProposalPreview.id}.`)
         setProjectSpecEditProposals((current) => clearProjectSpecEditProposal(current, activeProjectPath))
     }
 
     return (
         <section
             data-testid="projects-panel"
+            data-home-panel="true"
             data-responsive-layout={isNarrowViewport ? "stacked" : "split"}
             className={`flex-1 overflow-auto ${isNarrowViewport ? "p-3" : "p-6"}`}
         >
-            <div className="mx-auto w-full max-w-3xl space-y-6">
+            <div className="w-full space-y-6">
                 <div className="space-y-1">
-                    <h2 className="text-lg font-semibold">Projects</h2>
+                    <h2 className="text-lg font-semibold">Home</h2>
                     <p className="text-sm text-muted-foreground">
-                        Project registration, selection, and workflow scoping live in this workspace.
+                        Project selection and AI collaboration start in this workspace.
                     </p>
                 </div>
                 <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm">
-                    Projects workspace is now a first-class navigation area. Project registry and Git gating controls are tracked in the next checklist slices.
+                    Home is now the first-class workspace for project-scoped conversation, spec proposals, and orchestration launch.
                 </div>
-                <div className="rounded-md border border-border bg-card p-4 shadow-sm">
+                <div
+                    data-testid="home-main-layout"
+                    className={`grid gap-4 ${isNarrowViewport ? "grid-cols-1" : "lg:grid-cols-[320px_minmax(0,1fr)]"}`}
+                >
+                    <HomeProjectSidebar>
+                        <div className="rounded-md border border-border bg-card p-4 shadow-sm">
                     <div className="mb-3 space-y-1">
                         <h3 className="text-sm font-semibold text-foreground">Quick Switch</h3>
                         <p className="text-xs text-muted-foreground">Use favorites and recents to switch project context quickly.</p>
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-4">
                         <div className="space-y-2">
                             <p className="text-xs font-medium text-foreground">Favorites</p>
                             <ul data-testid="favorite-projects-list" className="space-y-2">
@@ -665,168 +707,160 @@ export function ProjectsPanel() {
                         </div>
                     </div>
                 </div>
-                <div data-testid="project-scope-entrypoints" className="rounded-md border border-border bg-card p-4 shadow-sm">
+                <div data-testid="project-event-log-surface" className="flex min-h-[280px] flex-col rounded-md border border-border bg-card p-4 shadow-sm">
                     <div className="mb-3 space-y-1">
-                        <h3 className="text-sm font-semibold text-foreground">Project-Scoped Entry Points</h3>
+                        <h3 className="text-sm font-semibold text-foreground">Workflow Event Log</h3>
                         <p className="text-xs text-muted-foreground">
-                            Conversation, spec, and plan artifacts are scoped to the active project.
+                            Project-scoped operational events and workflow progression.
                         </p>
                     </div>
                     {!activeProjectPath ? (
-                        <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
-                            Select an active project to access conversation, spec, and plan entry points.
+                        <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                            Select a project to view workflow events.
+                        </p>
+                    ) : activeProjectEventLog.length === 0 ? (
+                        <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                            No workflow events recorded for this project yet.
                         </p>
                     ) : (
-                        <div className="space-y-3">
-                            <div data-testid="project-conversation-entrypoint" className="rounded-md border border-border px-3 py-2">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <p className="text-sm font-medium text-foreground">Conversation</p>
-                                    <button
-                                        type="button"
-                                        onClick={onOpenConversation}
-                                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    >
-                                        {activeProjectScope?.conversationId ? "Open conversation" : "Start conversation"}
-                                    </button>
-                                </div>
-                                <p className="truncate text-xs text-muted-foreground">
-                                    {activeProjectScope?.conversationId || "No conversation artifact selected yet."}
-                                </p>
-                            </div>
-                            <div data-testid="project-spec-entrypoint" className="rounded-md border border-border px-3 py-2">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <p className="text-sm font-medium text-foreground">Spec</p>
-                                    <button
-                                        type="button"
-                                        onClick={onOpenSpec}
-                                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    >
-                                        {activeProjectScope?.specId ? "Open spec" : "Create spec"}
-                                    </button>
-                                </div>
-                                <p className="truncate text-xs text-muted-foreground">
-                                    {activeProjectScope?.specId || "No spec artifact selected yet."}
-                                </p>
-                            </div>
-                            <div data-testid="project-plan-entrypoint" className="rounded-md border border-border px-3 py-2">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <p className="text-sm font-medium text-foreground">Plan</p>
-                                    <button
-                                        type="button"
-                                        onClick={onOpenPlan}
-                                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    >
-                                        {activeProjectScope?.planId ? "Open plan" : "Create plan"}
-                                    </button>
-                                </div>
-                                <p className="truncate text-xs text-muted-foreground">
-                                    {activeProjectScope?.planId || "No plan artifact selected yet."}
-                                </p>
-                            </div>
-                        </div>
+                        <ol data-testid="project-event-log-list" className="flex-1 space-y-2 overflow-y-auto pr-1">
+                            {[...activeProjectEventLog].reverse().map((entry, index) => (
+                                <li key={`${entry.timestamp}-${index}`} className="rounded border border-border px-2 py-1.5">
+                                    <p className="text-[10px] text-muted-foreground">{formatConversationTimestamp(entry.timestamp)}</p>
+                                    <p className="text-xs text-foreground">{entry.message}</p>
+                                </li>
+                            ))}
+                        </ol>
                     )}
                 </div>
+                    </HomeProjectSidebar>
+                    <HomeWorkspace>
                 <div data-testid="project-ai-conversation-surface" className="rounded-md border border-border bg-card p-4 shadow-sm">
                     <div className="mb-3 space-y-1">
                         <h3 className="text-sm font-semibold text-foreground">Project-Scoped AI Conversation</h3>
                         <p className="text-xs text-muted-foreground">
-                            Start a new project conversation or continue an existing one in the active project scope.
+                            Chat with the project AI directly in this thread. Messages stay scoped to the active project.
                         </p>
                     </div>
                     {!activeProjectPath ? (
                         <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
-                            Select an active project to start or continue a project-scoped AI conversation.
+                            Select an active project to begin chatting.
                         </p>
                     ) : (
                         <div className="space-y-3">
                             <p className="truncate rounded-md border border-border px-3 py-2 text-xs text-muted-foreground">
-                                Active conversation artifact: {activeProjectScope?.conversationId || "No project conversation selected yet."}
+                                Active conversation artifact: {activeProjectScope?.conversationId || "Not created yet. Sending your first message creates one."}
                             </p>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    data-testid="project-ai-conversation-start-button"
-                                    type="button"
-                                    onClick={onStartConversation}
-                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                >
-                                    Start conversation
-                                </button>
-                                <button
-                                    data-testid="project-ai-conversation-continue-button"
-                                    type="button"
-                                    onClick={onContinueConversation}
-                                    disabled={!activeProjectScope?.conversationId}
-                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    Continue conversation
-                                </button>
+                            <p className="text-[11px] text-muted-foreground">
+                                Conversation turns: <span className="font-medium text-foreground">{activeChatHistory.length}</span>
+                            </p>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <p className="truncate text-xs text-muted-foreground">
+                                    Spec artifact: <span className="font-mono text-foreground">{activeProjectScope?.specId || "Not created yet"}</span>
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Spec status: <span className="font-medium text-foreground">{activeProjectScope?.specStatus || "draft"}</span>
+                                </p>
                             </div>
+                            <p className="text-[11px] text-muted-foreground">
+                                Spec edit proposals are emitted by the assistant and appear inline below the chat thread.
+                            </p>
                             <div data-testid="project-ai-conversation-history" className="rounded-md border border-border px-3 py-2">
                                 <p className="text-xs font-medium text-foreground">Conversation history</p>
                                 <p className="mb-2 text-xs text-muted-foreground">
                                     Conversation history is scoped to the active project and remains discoverable when you return.
                                 </p>
-                                {activeConversationHistory.length === 0 ? (
+                                {activeChatHistory.length === 0 ? (
                                     <p className="text-xs text-muted-foreground">No conversation history for this project yet.</p>
                                 ) : (
-                                    <ol data-testid="project-ai-conversation-history-list" className="space-y-2">
-                                        {activeConversationHistory.map((entry, index) => (
-                                            <li key={`${entry.timestamp}-${index}`} className="rounded border border-border px-2 py-1">
-                                                <p className="text-[11px] text-muted-foreground">{formatConversationTimestamp(entry.timestamp)}</p>
-                                                <p className="text-xs text-foreground">
-                                                    <span className="font-medium">{entry.role}:</span> {entry.content}
-                                                </p>
+                                    <ol
+                                        data-testid="project-ai-conversation-history-list"
+                                        className="max-h-72 space-y-2 overflow-y-auto pr-1"
+                                    >
+                                        {activeChatHistory.map((entry, index) => (
+                                            <li
+                                                key={`${entry.timestamp}-${index}`}
+                                                className={`flex ${entry.role === "user" ? "justify-end" : "justify-start"}`}
+                                            >
+                                                <div
+                                                    className={`max-w-[85%] rounded border px-3 py-2 ${entry.role === "user"
+                                                        ? "border-primary/40 bg-primary/10 text-foreground"
+                                                        : entry.role === "assistant"
+                                                            ? "border-border bg-muted/40 text-foreground"
+                                                            : "border-border bg-background text-muted-foreground"
+                                                        }`}
+                                                >
+                                                    <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                                                        {entry.role === "assistant" ? "AI" : entry.role}
+                                                    </p>
+                                                    <p className="whitespace-pre-wrap text-xs leading-5">{entry.content}</p>
+                                                    <p className="mt-1 text-[10px] opacity-70">{formatConversationTimestamp(entry.timestamp)}</p>
+                                                </div>
                                             </li>
                                         ))}
                                     </ol>
                                 )}
                             </div>
-                        </div>
-                    )}
-                </div>
-                <div data-testid="project-spec-edit-proposal-surface" className="rounded-md border border-border bg-card p-4 shadow-sm">
-                    <div className="mb-3 space-y-1">
-                        <h3 className="text-sm font-semibold text-foreground">Spec Edit Proposals</h3>
-                        <p className="text-xs text-muted-foreground">
-                            AI-generated spec edits appear here as explicit, reviewable proposals before any apply action.
-                        </p>
-                    </div>
-                    {!activeProjectPath ? (
-                        <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
-                            Select an active project to review AI-generated spec edit proposals.
-                        </p>
-                    ) : (
-                        <div className="space-y-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    data-testid="project-spec-edit-proposal-preview-button"
-                                    type="button"
-                                    onClick={onPreviewSpecEditProposal}
-                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                >
-                                    Preview proposed spec edits
-                                </button>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                                Proposal artifacts are scoped to the active project context.
-                            </p>
                             {activeProjectProposalPreview ? (
                                 <div data-testid="project-spec-edit-proposal-preview" className="rounded-md border border-border px-3 py-2">
-                                    <p className="text-xs font-medium text-foreground">Proposal preview</p>
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-xs font-medium text-foreground">Spec edit proposal</p>
+                                        <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                                            Pending review
+                                        </span>
+                                    </div>
                                     <p className="text-[11px] text-muted-foreground">
                                         Generated {formatConversationTimestamp(activeProjectProposalPreview.createdAt)} ({activeProjectProposalPreview.id})
                                     </p>
                                     <p className="mt-1 text-xs text-foreground">{activeProjectProposalPreview.summary}</p>
                                     <ul className="mt-2 space-y-2">
-                                        {activeProjectProposalPreview.changes.map((change) => (
-                                            <li key={`${activeProjectProposalPreview.id}-${change.path}`} className="rounded border border-border px-2 py-1">
-                                                <p className="text-[11px] font-medium text-foreground">{change.path}</p>
-                                                <p className="text-[11px] text-muted-foreground">Before: {change.before}</p>
-                                                <p className="text-[11px] text-foreground">After: {change.after}</p>
-                                            </li>
-                                        ))}
+                                        {activeProjectProposalPreview.changes.map((change, index) => {
+                                            const diffLines = buildProposalDiffLines(change)
+                                            const shouldCollapse = diffLines.length > PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT
+                                            const changeKey = buildProposalChangeKey(activeProjectProposalPreview.id, change.path, index)
+                                            const isExpanded = expandedProposalChanges[changeKey] === true
+                                            const visibleLines = shouldCollapse && !isExpanded
+                                                ? diffLines.slice(0, PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT)
+                                                : diffLines
+                                            return (
+                                                <li key={`${activeProjectProposalPreview.id}-${change.path}-${index}`} className="rounded border border-border">
+                                                    <div className="flex items-center justify-between gap-2 border-b border-border px-2 py-1">
+                                                        <p className="truncate text-[11px] font-medium text-foreground">{change.path}</p>
+                                                        {shouldCollapse ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => toggleProposalChangeExpanded(changeKey)}
+                                                                className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                            >
+                                                                {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                                                {isExpanded ? "Collapse" : `Show all (${diffLines.length})`}
+                                                            </button>
+                                                        ) : null}
+                                                    </div>
+                                                    <div className="space-y-1 px-2 py-2">
+                                                        {visibleLines.map((line, lineIndex) => (
+                                                            <p
+                                                                key={`${change.path}-${lineIndex}`}
+                                                                className={`whitespace-pre-wrap rounded px-1.5 py-0.5 font-mono text-[11px] ${line.type === "removed"
+                                                                    ? "bg-red-500/10 text-red-800"
+                                                                    : "bg-emerald-500/10 text-emerald-800"
+                                                                    }`}
+                                                            >
+                                                                {line.type === "removed" ? "- " : "+ "}
+                                                                {line.text}
+                                                            </p>
+                                                        ))}
+                                                        {shouldCollapse && !isExpanded ? (
+                                                            <p className="text-[10px] text-muted-foreground">
+                                                                Showing first {PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT} of {diffLines.length} lines.
+                                                            </p>
+                                                        ) : null}
+                                                    </div>
+                                                </li>
+                                            )
+                                        })}
                                     </ul>
-                                    <div className="mt-3 flex items-center gap-2">
+                                    <div className="mt-3 flex flex-wrap items-center gap-2">
                                         <button
                                             data-testid="project-spec-edit-proposal-apply-button"
                                             type="button"
@@ -844,13 +878,46 @@ export function ProjectsPanel() {
                                             Reject proposal
                                         </button>
                                         <p className="text-[11px] text-muted-foreground">
-                                            Applying proposed edits requires explicit confirmation. Rejecting a proposal dismisses it without mutating spec files.
+                                            Applying requires explicit confirmation.
                                         </p>
                                     </div>
                                 </div>
-                            ) : (
-                                <p className="text-xs text-muted-foreground">No proposed spec edits for this project yet.</p>
-                            )}
+                            ) : null}
+                            <form
+                                data-testid="project-ai-conversation-composer"
+                                onSubmit={onChatComposerSubmit}
+                                className="space-y-2 rounded-md border border-border px-3 py-3"
+                            >
+                                <label htmlFor="project-ai-conversation-input" className="text-xs font-medium text-foreground">
+                                    Message
+                                </label>
+                                <textarea
+                                    id="project-ai-conversation-input"
+                                    data-testid="project-ai-conversation-input"
+                                    value={chatDraft}
+                                    onChange={(event) => setChatDraft(event.target.value)}
+                                    onKeyDown={onChatComposerKeyDown}
+                                    placeholder="Describe the spec change or requirement you want to work on..."
+                                    rows={4}
+                                    className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[11px] text-muted-foreground">
+                                        Press Enter to send. Use Shift+Enter for a new line.
+                                    </p>
+                                    <button
+                                        data-testid="project-ai-conversation-send-button"
+                                        type="submit"
+                                        disabled={chatDraft.trim().length === 0}
+                                        className="rounded border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        Send
+                                    </button>
+                                </div>
+                            </form>
+                            <p className="text-[11px] text-muted-foreground">
+                                Assistant messages and proposal cards are currently local UI placeholders until backend agent/tool APIs are connected.
+                            </p>
                         </div>
                     )}
                 </div>
@@ -867,6 +934,9 @@ export function ProjectsPanel() {
                         </p>
                     ) : (
                         <div className="space-y-3">
+                            <p className="truncate text-xs text-muted-foreground">
+                                Plan artifact: <span className="font-mono text-foreground">{activeProjectScope?.planId || "Not created yet"}</span>
+                            </p>
                             <p className="text-xs text-muted-foreground">
                                 Spec status: <span className="font-medium text-foreground">{specIsApprovedForPlanning ? "approved" : "draft"}</span>
                             </p>
@@ -990,6 +1060,8 @@ export function ProjectsPanel() {
                             ) : null}
                         </div>
                     )}
+                </div>
+                    </HomeWorkspace>
                 </div>
                 <div className="rounded-md border border-border bg-card p-4 shadow-sm">
                     <form data-testid="project-register-form" onSubmit={onSubmitProjectRegistration}>
@@ -1152,3 +1224,5 @@ export function ProjectsPanel() {
         </section>
     )
 }
+
+export const ProjectsPanel = HomePanel

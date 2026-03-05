@@ -1135,8 +1135,8 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByTestId('project-plan-gate-surface')).toHaveTextContent('Plan status: revision-requested')
 
     const transitionMessages = (
-      useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.conversationHistory || []
-    ).map((entry) => entry.content)
+      useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.projectEventLog || []
+    ).map((entry) => entry.message)
     expect(transitionMessages).toEqual(
       expect.arrayContaining([
         'Approved plan plan-contract-behavior (draft -> approved).',
@@ -4858,7 +4858,7 @@ digraph contract_behavior {
     const restoredState = restoredStore.getState()
 
     expect(restoredState.activeProjectPath).toBeNull()
-    expect(restoredState.viewMode).toBe('projects')
+    expect(restoredState.viewMode).toBe('home')
     expect(restoredState.activeFlow).toBeNull()
     expect(restoredState.selectedRunId).toBeNull()
     expect(restoredState.workingDir).toBe(DEFAULT_WORKING_DIRECTORY)

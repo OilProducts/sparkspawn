@@ -77,22 +77,26 @@ For project-first operation, the UI MUST additionally support a complete project
 - **Pipeline Author:** defines workflow structure and stage configuration.
 - **Operator:** executes and monitors runs in real time.
 - **Reviewer/Auditor:** inspects run artifacts, context, and decisions after execution.
-- **Project Owner/Planner:** selects project scope and drives project-scoped spec-to-plan-to-build loops.
+- **Project Owner/Planner:** selects project scope and drives project-scoped spec-to-plan-to-tracker-to-build loops.
 
 ### 3.2 Primary Workflows
 
-1. Create/register project from a unique local directory.
-2. Verify project directory is a Git repository (or initialize with explicit user confirmation).
-3. Select active project.
-4. Open or continue a project-scoped AI conversation.
-5. Draft/refine project specification and prepare implementation plan inputs.
-6. Create/open flow within active project context.
-7. Edit graph, nodes, edges, subgraph/default behavior.
-8. Validate and resolve diagnostics.
-9. Start run with model and project-scoped working directory.
-10. Monitor live state, events, and human-gate prompts.
-11. Inspect checkpoint, context, artifacts, graph render.
-12. Iterate and re-run within the same project scope.
+1. Open `Home`.
+2. Create/register project from a unique local directory and verify Git invariant.
+3. Select active project from the Home sidebar.
+4. Open or continue a project-scoped AI conversation in Home.
+5. Draft/refine project specification via explicit AI edit proposals.
+6. Accept a spec edit proposal to apply the spec change.
+7. Automatically trigger a DOT plan-and-tracker workflow that generates implementation plan artifacts and staged work items.
+8. Complete a human approval gate for staged work items (`approve`, `reject`, `request-revision`).
+9. Publish approved work items to tracker `ready` state for implementation agents.
+10. Create/open flow within active project context.
+11. Edit graph, nodes, edges, subgraph/default behavior.
+12. Validate and resolve diagnostics.
+13. Start run with model and project-scoped working directory.
+14. Monitor live state, events, and human-gate prompts.
+15. Inspect checkpoint, context, artifacts, graph render.
+16. Iterate and re-run within the same project scope.
 
 ---
 
@@ -100,7 +104,7 @@ For project-first operation, the UI MUST additionally support a complete project
 
 The UI MUST provide these first-class areas:
 
-1. **Projects**
+1. **Home**
 2. **Editor**
 3. **Execution**
 4. **Runs**
@@ -110,7 +114,10 @@ Each area MUST have deterministic, deep-linkable state (project/flow/run/convers
 
 ### 4.1 Global Regions
 
-- **Top navigation:** mode switching, active project identity, active flow identity, run action.
+- **Left navigation rail:** top-level area switching.
+- **Top navigation/header:** active project identity, active flow identity, run action.
+- **Home project sidebar:** project list/quick switch at top plus a running workflow event log at bottom.
+- **Home main workspace:** project-scoped AI conversation with inline spec-proposal cards and review/apply controls.
 - **Canvas workspace:** graph and contextual overlays.
 - **Inspector panel:** graph/node/edge properties.
 - **Footer/stream area:** execution controls and runtime output.
@@ -125,19 +132,23 @@ The UI MUST treat project scope as a first-class operational boundary.
 - Exactly one project is active at a time for authoring/execution actions.
 - Conversations, specs, plans, runs, and artifacts MUST be project-scoped.
 - Cross-project context/file leakage MUST be prevented by default.
-- Project workspace SHOULD provide direct access to project-scoped conversation, spec, and plan artifacts.
+- Home workspace SHOULD provide direct access to project-scoped conversation, spec, plan, and tracker artifacts.
 
-### 4.3 Projects Workspace Requirements
+### 4.3 Home Workspace Requirements
 
-The Projects area MUST provide:
+The Home area MUST provide:
 
 - Create/register from local directory path.
 - Duplicate-path prevention at registration/update time.
 - Git repository verification for selected directory with an explicit initialize action.
-- Active project selection with persistent display in top navigation.
-- Fast switching across recent and favorited projects.
+- Active project selection in a left sidebar with persistent display in top navigation.
+- Fast switching across recent and favorited projects via sidebar selection.
 - Glanceable project metadata (`name`, `directory`, current branch, last activity timestamp).
-- Deterministic deep-link state including active project identity.
+- Active project directory path visible and copyable from Home.
+- Project-scoped AI conversation in the main Home pane.
+- Agent-emitted proposal/review/apply controls for spec edits inline within the conversation pane (no user-triggered proposal-generation button).
+- Automatic trigger wiring from accepted spec edit proposals to plan/tracker orchestration.
+- Deterministic deep-link state including active project identity and active conversation.
 
 ---
 
@@ -167,18 +178,21 @@ The UI MUST support:
 
 - Actions that mutate flow state or start runs MUST require an active project.
 - AI conversation context MUST include active project directory and repository metadata.
-- Project switching MUST reset selection context to the target project (flow/run/conversation) and MUST NOT carry hidden state across projects.
+- Project switching from the Home sidebar MUST reset selection context to the target project (flow/run/conversation) and MUST NOT carry hidden state across projects.
 
 ### 5.5 AI Conversation and Spec Authoring Loop
 
 The UI MUST provide a project-scoped AI conversation surface that supports iterative specification authoring.
 
-- Users MUST be able to start/continue a conversation within active project context.
+- Users MUST be able to start/continue a conversation within active project context from Home.
 - Conversation history MUST persist per project and remain discoverable.
-- AI-proposed spec edits MUST be presented as explicit, reviewable changes before apply.
+- Chat history in the conversation surface MUST represent user/assistant turns; workflow/system events MUST render in the sidebar event log, not as chat cards.
+- AI-proposed spec edits MUST be emitted by the assistant/agent turn pipeline and presented as inline conversation cards with explicit, reviewable before/after changes before apply.
+- Proposal cards SHOULD render Git-like diff styling and MUST support collapsed/expanded viewing for long diffs.
 - Applying spec edits MUST require explicit user confirmation.
 - Rejected proposals MUST not mutate spec files.
 - Conversation context and proposal artifacts MUST remain isolated to the originating project.
+- Accepted spec-edit proposals MUST trigger a plan/tracker orchestration run in project scope.
 
 ---
 
@@ -308,16 +322,18 @@ The canvas MUST reflect node runtime status transitions in near real time.
 
 Execution controls and status MUST stay visible in canvas footer during active runs.
 
-### 8.5 Spec -> Plan -> Build Workflow Orchestration
+### 8.5 Spec -> Plan -> Tracker -> Build Workflow Orchestration
 
-The UI MUST support workflow chaining from project specification to implementation execution.
+The UI MUST support workflow chaining from project specification to implementation execution with tracker gating.
 
-- Users MUST be able to launch a plan-generation workflow from approved project spec state.
+- Accepted spec edit proposals MUST trigger a DOT workflow execution that performs plan generation and tracker staging.
 - Generated implementation plans MUST be written to project files with visible status and provenance metadata.
-- Plan state MUST support human gating actions: approve, reject, request-revision.
-- Build workflows MUST be launchable from approved plan state.
+- The DOT workflow MUST produce candidate work items and stage them pending human decision.
+- Human gate actions (`approve`, `reject`, `request-revision`) MUST be supported for staged work publication.
+- `approve` MUST publish staged items to tracker `ready` state; `reject`/`request-revision` MUST keep items non-ready.
+- Build/implementation workflows MUST be launchable from approved tracker-ready work.
 - Failed planning/build runs MUST expose actionable diagnostics and rerun options.
-- Live status/log/artifact visibility MUST be available for planning and build workflows.
+- Live status/log/artifact visibility MUST be available for planning, approval, and build workflows.
 
 ---
 
@@ -435,14 +451,16 @@ Attributes outside core spec SHOULD be preserved and editable through a generic 
 ### 11.5 Project Workspace Persistence
 
 - Project registry data MUST persist across sessions with unique-directory enforcement.
-- Project-scoped conversation history and spec/plan artifacts MUST remain linked to the originating project.
+- Project-scoped conversation history and spec/plan/tracker artifacts MUST remain linked to the originating project.
 - Restore-on-reopen behavior MUST rehydrate the last active project context safely.
+- Home sidebar ordering/preferences (recent/favorite) SHOULD persist across sessions.
 
 ### 11.6 Spec and Plan Artifact Provenance
 
-- Spec/plan files produced through UI workflows MUST include or reference provenance metadata.
+- Spec/plan/work-item artifacts produced through UI workflows MUST include or reference provenance metadata.
 - Provenance MUST include run linkage and timestamps, and SHOULD include available branch/commit context.
 - Plan status transitions (draft/approved/rejected/revision-requested) MUST be persisted and recoverable.
+- Work-item publication transitions (staged/approved-ready/rejected/revision-requested) MUST be persisted and recoverable.
 
 ---
 
@@ -484,9 +502,12 @@ UI integrations MUST cover backend contracts for:
 
 - Project-scoped conversation turns and history retrieval.
 - Proposal of spec edits and explicit apply/reject actions.
+- Triggering DOT orchestration on accepted spec edits.
 - Plan-generation workflow invocation and status retrieval.
-- Plan approval/rejection/revision state transitions.
-- Build workflow invocation from approved plan state.
+- Staged work-item creation/update in tracker scope.
+- Human approval/rejection/revision transitions for staged work items.
+- Publication of approved items to tracker `ready` state.
+- Build workflow invocation from approved plan/tracker-ready state.
 
 ---
 
@@ -524,20 +545,21 @@ Targets:
 
 Project + parity delivery is intentionally large and is decomposed into implementation elements.
 
-### 14.0 E0 - Project Workspace Foundation (P0)
+### 14.0 E0 - Home Workspace Foundation (P0)
 
 Scope:
 
-- Add Projects as a first-class top-level area.
-- Implement project registration and active-project selection.
+- Add Home as a first-class top-level area.
+- Move project registration and active-project selection into Home.
 - Enforce unique-directory and Git-repository invariants.
+- Establish Home sidebar quick-switch behavior for active project selection.
 - Establish project-scoped conversation/session state and deep-linking.
 - Enforce cross-project context isolation for authoring/execution surfaces.
-- Add recent/favorite project switching and glanceable metadata views.
+- Add recent/favorite switching and glanceable metadata in Home sidebar.
 
 User story:
 
-- As a user, I can choose an active project and safely run the spec-to-plan-to-build loop without context leakage.
+- As a user, I can choose an active project from Home and safely run the spec-to-plan-to-tracker-to-build loop without context leakage.
 
 ### 14.1 E1 - Data Model Parity Foundation (P0)
 
@@ -675,25 +697,27 @@ Scope:
 
 Scope:
 
-- Project-scoped AI conversation for iterative spec drafting.
+- Home-based project-scoped AI conversation for iterative spec drafting.
 - Explicit proposal/review/apply model for spec edits.
 - Durable conversation history and artifact linkage by project.
+- Trigger DOT plan/tracker orchestration automatically on accepted spec edits.
 
 User story:
 
-- As a project author, I can collaborate with AI on spec drafting without silent edits or cross-project leakage.
+- As a project author, I can collaborate with AI on spec drafting, accept explicit edits, and automatically trigger planning without cross-project leakage.
 
 ### 14.16 E16 - Plan Governance and Build Launch (P0)
 
 Scope:
 
-- Plan-generation workflow execution from approved spec.
-- Plan provenance/status persistence and human gating.
-- Build launch from approved plan and failure-recovery UX.
+- Plan-generation + tracker-staging workflow execution from accepted spec edits.
+- Human gate for staged work publication (`approve`, `reject`, `request-revision`).
+- Tracker transition of approved work to `ready`.
+- Build launch from approved ready work and failure-recovery UX.
 
 User story:
 
-- As an operator/reviewer, I can gate and run project builds from approved plans with full traceability.
+- As an operator/reviewer, I can gate staged work publication and run builds from approved ready work with full traceability.
 
 ---
 
@@ -708,9 +732,9 @@ A parity-complete UI release is done when all conditions hold:
 5. Human gates are fully operable from UI for supported question types.
 6. Full frontend build/lint/test passes.
 7. End-to-end parity tests pass against representative fixtures.
-8. Projects are first-class in IA, enforce unique-directory + Git invariants, and isolate context across projects.
-9. Project-scoped conversation/spec/plan/build loop is fully operable with explicit spec-edit and plan-approval gates.
-10. Per-project run history/provenance supports audit reconstruction of spec/plan/build outcomes.
+8. Home is first-class in IA with integrated project sidebar, enforces unique-directory + Git invariants, and isolates context across projects.
+9. Project-scoped conversation/spec/plan/tracker/build loop is fully operable with explicit spec-edit and work-publication approval gates.
+10. Per-project run history/provenance supports audit reconstruction of spec/plan/tracker/build outcomes.
 
 ---
 
@@ -804,23 +828,27 @@ The following map identifies where implementing this spec satisfies each story i
 - `US-PROJ-04`: Sections 4.1, 4.3
 - `US-PROJ-05`: Section 4.3
 - `US-PROJ-06`: Section 4.3
+- `US-HOME-01`: Sections 3.2, 4, 4.1, 4.3
+- `US-HOME-02`: Sections 3.2, 4.1, 4.3, 5.4
+- `US-HOME-03`: Sections 4.1, 4.3
 - `US-CONV-01`: Sections 3.2, 5.5
 - `US-CONV-02`: Sections 5.4, 5.5
 - `US-CONV-03`: Sections 3.2, 5.5
 - `US-CONV-04`: Sections 5.5, 12.4
 - `US-CONV-05`: Sections 5.5, 11.5
 - `US-CONV-06`: Sections 4.2, 5.4, 5.5
-- `US-WORK-01`: Sections 3.2, 8.5, 12.4
-- `US-WORK-02`: Sections 8.5, 11.6
-- `US-WORK-03`: Sections 8.5, 11.6, 12.4
-- `US-WORK-04`: Sections 8.5, 12.4
-- `US-WORK-05`: Sections 8.5, 9.1, 9.4, 9.5
-- `US-WORK-06`: Sections 7, 8.5, 9.4, 9.5
+- `US-WORK-01`: Sections 3.2, 5.5, 8.5, 12.4
+- `US-WORK-02`: Sections 8.5, 11.6, 12.4
+- `US-WORK-03`: Sections 8.5, 10, 12.4
+- `US-WORK-04`: Sections 3.2, 8.5, 11.6, 12.4
+- `US-WORK-05`: Sections 8.5, 12.4
+- `US-WORK-06`: Sections 7, 8.5, 9.1, 9.4, 9.5
+- `US-WORK-07`: Sections 7, 8.5, 9.4, 9.5
 - `US-GOV-01`: Sections 4.2, 5.4, 8.1
 - `US-GOV-02`: Sections 8.1, 12.3
 - `US-GOV-03`: Sections 9.1, 9.6, 11.6
-- `US-GOV-04`: Sections 9.6, 11.5
+- `US-GOV-04`: Sections 9.6, 11.5, 11.6
 - `US-GOV-05`: Sections 2, 5.3, 11.3, 12.2
-- `US-IA-01`: Sections 4, 4.3
+- `US-IA-01`: Sections 4, 4.1, 4.3
 - `US-IA-02`: Sections 4, 4.3, 12.3
 - `US-IA-03`: Sections 3.2, 4.1, 4.3, 8.5, 9

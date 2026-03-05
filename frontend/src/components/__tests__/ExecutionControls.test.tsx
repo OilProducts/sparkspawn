@@ -102,7 +102,12 @@ describe('Execution controls behavior', () => {
 
   it('requests cancel and transitions runtime status to cancel_requested', async () => {
     const user = userEvent.setup()
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ status: 'accepted', pipeline_id: 'run-99' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
     vi.stubGlobal('fetch', fetchMock)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
 
