@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent } from "react"
 import { useStore, type ViewMode } from "@/store"
 import { buildPipelineStartPayload } from "@/lib/pipelineStartPayload"
 import { ApiHttpError, fetchFlowPayloadValidated, fetchPipelineStartValidated } from '@/lib/apiClient'
+import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { Play, Settings2 } from "lucide-react"
 
 type WorkflowFailureDiagnostics = {
@@ -15,6 +16,7 @@ const NAV_MODES_REQUIRING_ACTIVE_PROJECT = new Set<ViewMode>(['editor', 'executi
 
 export function Navbar() {
     const { viewMode, setViewMode, activeFlow, setSelectedRunId } = useStore()
+    const isNarrowViewport = useNarrowViewport()
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const activeProjectScope = useStore((state) =>
         state.activeProjectPath ? state.projectScopedWorkspaces[state.activeProjectPath] : null
@@ -156,14 +158,25 @@ export function Navbar() {
         : `${runtimeStatus} · no run selected`
 
     return (
-        <header data-testid="top-nav" className="h-14 border-b bg-background flex items-center justify-between px-6 shrink-0 z-50">
-            <div className="flex items-center gap-8">
+        <header
+            data-testid="top-nav"
+            data-responsive-layout={isNarrowViewport ? 'stacked' : 'inline'}
+            className={`border-b bg-background shrink-0 z-50 ${isNarrowViewport
+                ? 'flex min-h-14 flex-col items-stretch gap-2 px-3 py-2'
+                : 'h-14 flex items-center justify-between px-6'
+                }`}
+        >
+            <div className={isNarrowViewport ? 'flex flex-col gap-2' : 'flex items-center gap-8'}>
                 <div className="flex items-center gap-2">
                     <Settings2 className="w-5 h-5" />
                     <span className="font-semibold tracking-tight">Attractor React</span>
                 </div>
 
-                <div data-testid="view-mode-tabs" className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground w-[480px]">
+                <div
+                    data-testid="view-mode-tabs"
+                    data-responsive-layout={isNarrowViewport ? 'stacked' : 'inline'}
+                    className={`inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground ${isNarrowViewport ? 'w-full' : 'w-[480px]'}`}
+                >
                     <button
                         data-testid="nav-mode-projects"
                         onClick={() => setViewMode('projects')}
@@ -211,7 +224,7 @@ export function Navbar() {
                     </button>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className={`text-xs text-muted-foreground ${isNarrowViewport ? 'flex flex-wrap gap-1.5' : 'flex items-center gap-2'}`}>
                     <div data-testid="top-nav-active-project" className="max-w-56 truncate rounded border border-border bg-muted/40 px-2 py-1">
                         <span className="font-medium text-foreground">Project:</span> {projectLabel}
                     </div>
@@ -224,7 +237,7 @@ export function Navbar() {
                 </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className={`flex items-center gap-2 ${isNarrowViewport ? 'w-full flex-wrap' : ''}`}>
                 <div
                     data-testid="run-initiation-form"
                     className="hidden max-w-[560px] items-center gap-2 truncate rounded-md border border-border bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground xl:flex"

@@ -1543,6 +1543,20 @@ describe('Frontend contract behavior', () => {
       expect(screen.getByTestId('execution-footer-controls')).toHaveAttribute('data-responsive-layout', 'stacked')
       expect(screen.getByTestId('execution-footer-cancel-button')).toBeVisible()
       expect(screen.getByTestId('execution-footer-unsupported-controls-reason')).toBeVisible()
+
+      cleanup()
+      act(() => {
+        resetContractState()
+        useStore.setState((state) => ({
+          ...state,
+          viewMode: 'projects',
+        }))
+      })
+      render(<Navbar />)
+
+      expect(screen.getByTestId('top-nav')).toHaveAttribute('data-responsive-layout', 'stacked')
+      expect(screen.getByTestId('view-mode-tabs')).toHaveAttribute('data-responsive-layout', 'stacked')
+      expect(screen.getByTestId('execute-button')).toBeVisible()
     } finally {
       setViewportWidth(originalViewportWidth)
     }

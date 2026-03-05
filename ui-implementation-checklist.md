@@ -395,8 +395,8 @@ Status key:
 ### 13.2 Responsiveness
 - [x] [13.2-01] Add responsive layout behavior for inspector, timeline, and diagnostics.
   - Evidence (2026-03-05): Evaluator `pass`; added narrow-viewport responsive layout modes across `Sidebar` inspector, `ValidationPanel` diagnostics, and `RunsPanel` event timeline via shared viewport hook (`frontend/src/lib/useNarrowViewport.ts`) with contract coverage `CID:13.2.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_accessibility_contracts.py`), plus visual QA review on `frontend/artifacts/ui-smoke/03-node-inspector.png`, `frontend/artifacts/ui-smoke/13-validation-panel-filter-sort.png`, `frontend/artifacts/ui-smoke/08i-runs-panel-event-timeline.png`, and `frontend/artifacts/ui-smoke/08j-runs-panel-event-timeline-filters.png` (`just ui-smoke` reported unrelated backend `ECONNREFUSED`/HTTP 500 failures in other scenarios).
-- [ ] [13.2-02] Ensure mobile and narrow viewport usability for core project and operational tasks.
-  - Blocker (2026-03-05): Evaluator `needs-human` because provided ui-smoke artifacts are desktop-width only, so narrow/mobile visual usability is not directly verified yet.
+- [x] [13.2-02] Ensure mobile and narrow viewport usability for core project and operational tasks.
+  - Evidence (2026-03-05): Evaluator `pass`; narrow/mobile usability now includes stacked top-nav + mode tabs and wrapping action controls in `frontend/src/components/Navbar.tsx`, expanded frontend contract coverage in `frontend/src/components/__tests__/ContractBehavior.test.tsx` (`CID:13.2.02`), and dedicated 390x844 ui-smoke visual QA captures at `frontend/artifacts/ui-smoke/13a-mobile-projects-operations.png` and `frontend/artifacts/ui-smoke/13b-mobile-execution-controls.png` from `frontend/e2e/smoke/responsive-mobile.spec.ts`.
 - [ ] [13.2-03] Add viewport-based regression tests/screenshots.
 
 ### 13.3 Performance
