@@ -1,5 +1,5 @@
 import { type ConversationHistoryEntry, type PlanStatus, type ProjectRegistrationResult, useStore } from "@/store"
-import { type FormEvent, type KeyboardEvent, useEffect, useState } from "react"
+import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import { buildPipelineStartPayload } from "@/lib/pipelineStartPayload"
 import { ApiHttpError, fetchFlowPayloadValidated, fetchPipelineStartValidated, fetchPipelineStatusValidated } from '@/lib/apiClient'
@@ -67,6 +67,117 @@ const asProjectGitMetadataField = (value: unknown): string | null => {
     return trimmed.length > 0 ? trimmed : null
 }
 
+type PickerFileWithPath = File & {
+    path?: string
+    webkitRelativePath?: string
+}
+
+const parseAbsoluteProjectPath = (value: string): { prefix: string; segments: string[] } | null => {
+    const normalized = normalizeProjectPath(value)
+    if (!isAbsoluteProjectPath(normalized)) {
+        return null
+    }
+    if (normalized.startsWith("/")) {
+        return { prefix: "/", segments: normalized.slice(1).split("/").filter(Boolean) }
+    }
+    const windowsPrefixMatch = normalized.match(/^[A-Za-z]:\//)
+    if (!windowsPrefixMatch) {
+        return null
+    }
+    return {
+        prefix: windowsPrefixMatch[0],
+        segments: normalized.slice(windowsPrefixMatch[0].length).split("/").filter(Boolean),
+    }
+}
+
+const buildAbsoluteProjectPath = (prefix: string, segments: string[]) => {
+    if (segments.length === 0) {
+        return prefix
+    }
+    return `${prefix}${segments.join("/")}`
+}
+
+const deriveCommonAbsoluteDirectory = (directoryPaths: string[]): string | null => {
+    const parsedDirectories = directoryPaths
+        .map((path) => parseAbsoluteProjectPath(path))
+        .filter((parsed): parsed is { prefix: string; segments: string[] } => Boolean(parsed))
+    if (parsedDirectories.length === 0) {
+        return null
+    }
+    const firstPrefix = parsedDirectories[0].prefix
+    if (parsedDirectories.some((parsed) => parsed.prefix !== firstPrefix)) {
+        return null
+    }
+    let commonSegments = [...parsedDirectories[0].segments]
+    for (const parsed of parsedDirectories.slice(1)) {
+        let index = 0
+        while (
+            index < commonSegments.length
+            && index < parsed.segments.length
+            && commonSegments[index] === parsed.segments[index]
+        ) {
+            index += 1
+        }
+        commonSegments = commonSegments.slice(0, index)
+    }
+    if (commonSegments.length === 0) {
+        return firstPrefix
+    }
+    return buildAbsoluteProjectPath(firstPrefix, commonSegments)
+}
+
+const deriveProjectPathFromDirectorySelection = (files: FileList | null): string | null => {
+    if (!files || files.length === 0) {
+        return null
+    }
+    const inferredProjectPaths: string[] = []
+    const fallbackDirectories: string[] = []
+    for (const file of Array.from(files)) {
+        const pickerFile = file as PickerFileWithPath
+        const rawAbsoluteFilePath = typeof pickerFile.path === "string" ? pickerFile.path : ""
+        const absoluteFilePath = normalizeProjectPath(rawAbsoluteFilePath)
+        if (!absoluteFilePath || !isAbsoluteProjectPath(absoluteFilePath)) {
+            continue
+        }
+        const fileSlashIndex = absoluteFilePath.lastIndexOf("/")
+        if (fileSlashIndex <= 0) {
+            continue
+        }
+        const absoluteDirectoryPath = normalizeProjectPath(absoluteFilePath.slice(0, fileSlashIndex))
+        if (absoluteDirectoryPath && isAbsoluteProjectPath(absoluteDirectoryPath)) {
+            fallbackDirectories.push(absoluteDirectoryPath)
+        }
+
+        const rawRelativePath = typeof pickerFile.webkitRelativePath === "string"
+            ? pickerFile.webkitRelativePath.trim()
+            : ""
+        if (!rawRelativePath) {
+            continue
+        }
+        const relativePath = normalizeProjectPath(rawRelativePath).replace(/^\/+/, "")
+        if (!relativePath || !absoluteFilePath.endsWith(relativePath)) {
+            continue
+        }
+        const basePath = normalizeProjectPath(absoluteFilePath.slice(0, absoluteFilePath.length - relativePath.length))
+        const relativeSegments = relativePath.split("/").filter(Boolean)
+        if (!basePath || relativeSegments.length === 0) {
+            continue
+        }
+        const inferredProjectPath = normalizeProjectPath(`${basePath}/${relativeSegments[0]}`)
+        if (inferredProjectPath && isAbsoluteProjectPath(inferredProjectPath)) {
+            inferredProjectPaths.push(inferredProjectPath)
+        }
+    }
+
+    const uniqueInferredPaths = [...new Set(inferredProjectPaths)]
+    if (uniqueInferredPaths.length > 0) {
+        uniqueInferredPaths.sort((left, right) => left.length - right.length)
+        return uniqueInferredPaths[0]
+    }
+
+    return deriveCommonAbsoluteDirectory(fallbackDirectories)
+}
+
 export function HomePanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
     const projects = Object.values(projectRegistry)
@@ -102,6 +213,7 @@ export function HomePanel() {
     const [planGenerationStatusDegraded, setPlanGenerationStatusDegraded] = useState<string | null>(null)
     const [lastPlanGenerationFailure, setLastPlanGenerationFailure] = useState<WorkflowFailureDiagnostics | null>(null)
     const [isPlanGenerationLaunching, setIsPlanGenerationLaunching] = useState(false)
+    const projectDirectoryPickerInputRef = useRef<HTMLInputElement | null>(null)
     const [chatDraft, setChatDraft] = useState("")
     const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
     const isNarrowViewport = useNarrowViewport()
@@ -180,6 +292,14 @@ export function HomePanel() {
     useEffect(() => {
         setExpandedProposalChanges({})
     }, [activeProjectPath, activeProjectProposalPreview?.id])
+
+    useEffect(() => {
+        if (!projectDirectoryPickerInputRef.current) {
+            return
+        }
+        projectDirectoryPickerInputRef.current.setAttribute("webkitdirectory", "")
+        projectDirectoryPickerInputRef.current.setAttribute("directory", "")
+    }, [])
 
     const resolveProjectPathValidation = (rawPath: string, currentPath?: string | null): ProjectRegistrationResult => {
         const normalizedPath = normalizeProjectPath(rawPath)
@@ -262,8 +382,8 @@ export function HomePanel() {
         return parsed.toLocaleString()
     }
 
-    const onRegisterProject = async () => {
-        const validation = resolveProjectPathValidation(directoryPathInput)
+    const registerProjectFromPath = async (rawProjectPath: string) => {
+        const validation = resolveProjectPathValidation(rawProjectPath)
         if (!validation.ok || !validation.normalizedPath) {
             setProjectRegistrationError(validation.error ?? 'Project directory path is required.')
             return
@@ -279,9 +399,36 @@ export function HomePanel() {
         }
     }
 
+    const onRegisterProject = async () => {
+        await registerProjectFromPath(directoryPathInput)
+    }
+
     const onSubmitProjectRegistration = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         void onRegisterProject()
+    }
+
+    const onOpenProjectDirectoryChooser = () => {
+        clearProjectRegistrationError()
+        if (!projectDirectoryPickerInputRef.current) {
+            setProjectRegistrationError('Directory picker is unavailable. Enter an absolute path manually.')
+            return
+        }
+        projectDirectoryPickerInputRef.current.value = ""
+        projectDirectoryPickerInputRef.current.click()
+    }
+
+    const onProjectDirectorySelected = (event: ChangeEvent<HTMLInputElement>) => {
+        const selectedProjectPath = deriveProjectPathFromDirectorySelection(event.target.files)
+        event.target.value = ""
+        if (!selectedProjectPath) {
+            setProjectRegistrationError(
+                'Unable to resolve an absolute project path from the selected directory. Enter an absolute path manually.',
+            )
+            return
+        }
+        setDirectoryPathInput(selectedProjectPath)
+        void registerProjectFromPath(selectedProjectPath)
     }
 
     const onSaveProjectPathEdit = async (projectPath: string) => {
@@ -624,9 +771,29 @@ export function HomePanel() {
                 >
                     <HomeProjectSidebar>
                         <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-                    <div className="mb-3 space-y-1">
-                        <h3 className="text-sm font-semibold text-foreground">Quick Switch</h3>
+                    <div className="mb-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-sm font-semibold text-foreground">Quick Switch</h3>
+                            <button
+                                data-testid="quick-switch-new-button"
+                                type="button"
+                                onClick={onOpenProjectDirectoryChooser}
+                                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                                New
+                            </button>
+                        </div>
                         <p className="text-xs text-muted-foreground">Use favorites and recents to switch project context quickly.</p>
+                        <input
+                            ref={projectDirectoryPickerInputRef}
+                            data-testid="project-directory-picker-input"
+                            type="file"
+                            multiple
+                            onChange={onProjectDirectorySelected}
+                            className="hidden"
+                            tabIndex={-1}
+                            aria-hidden="true"
+                        />
                     </div>
                     <div className="grid gap-4">
                         <div className="space-y-2">
