@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -21,24 +22,27 @@ def run_dot_utils_probe(
 ) -> str:
     repo_root, frontend_dir = _repo_paths()
 
-    with tempfile.TemporaryDirectory(prefix=temp_prefix, dir=frontend_dir) as temp_dir:
+    with tempfile.TemporaryDirectory(prefix=temp_prefix) as temp_dir:
         temp_path = Path(temp_dir)
         out_dir = temp_path / "out"
         out_dir.mkdir(parents=True, exist_ok=True)
 
         probe_tsconfig = temp_path / "tsconfig.json"
         probe_tsconfig.write_text(
-            """{
-  \"extends\": \"../tsconfig.app.json\",
-  \"compilerOptions\": {
-    \"noEmit\": false,
-    \"noEmitOnError\": false,
-    \"allowImportingTsExtensions\": false,
-    \"outDir\": \"./out\"
-  },
-  \"include\": [\"../src/lib/dotUtils.ts\"]
-}
-""",
+            json.dumps(
+                {
+                    "extends": (frontend_dir / "tsconfig.app.json").as_posix(),
+                    "compilerOptions": {
+                        "noEmit": False,
+                        "noEmitOnError": False,
+                        "allowImportingTsExtensions": False,
+                        "outDir": "./out",
+                    },
+                    "include": [(frontend_dir / "src" / "lib" / "dotUtils.ts").as_posix()],
+                },
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
 
@@ -93,7 +97,7 @@ def run_graph_attr_validation_probe(
 ) -> str:
     repo_root, frontend_dir = _repo_paths()
 
-    with tempfile.TemporaryDirectory(prefix=temp_prefix, dir=frontend_dir) as temp_dir:
+    with tempfile.TemporaryDirectory(prefix=temp_prefix) as temp_dir:
         out_dir = Path(temp_dir) / "compiled"
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -155,24 +159,27 @@ def run_canonical_flow_model_probe(
 ) -> str:
     repo_root, frontend_dir = _repo_paths()
 
-    with tempfile.TemporaryDirectory(prefix=temp_prefix, dir=frontend_dir) as temp_dir:
+    with tempfile.TemporaryDirectory(prefix=temp_prefix) as temp_dir:
         temp_path = Path(temp_dir)
         out_dir = temp_path / "out"
         out_dir.mkdir(parents=True, exist_ok=True)
 
         probe_tsconfig = temp_path / "tsconfig.json"
         probe_tsconfig.write_text(
-            """{
-  \"extends\": \"../tsconfig.app.json\",
-  \"compilerOptions\": {
-    \"noEmit\": false,
-    \"noEmitOnError\": false,
-    \"allowImportingTsExtensions\": false,
-    \"outDir\": \"./out\"
-  },
-  \"include\": [\"../src/lib/canonicalFlowModel.ts\"]
-}
-""",
+            json.dumps(
+                {
+                    "extends": (frontend_dir / "tsconfig.app.json").as_posix(),
+                    "compilerOptions": {
+                        "noEmit": False,
+                        "noEmitOnError": False,
+                        "allowImportingTsExtensions": False,
+                        "outDir": "./out",
+                    },
+                    "include": [(frontend_dir / "src" / "lib" / "canonicalFlowModel.ts").as_posix()],
+                },
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
 

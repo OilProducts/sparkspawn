@@ -53,6 +53,60 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
     return parsed
 
 
+def _extract_live_assistant_message(raw: str) -> str:
+    text = raw.strip()
+    if not text:
+        return ""
+    try:
+        parsed = _extract_json_object(text)
+    except Exception:
+        parsed = None
+    if isinstance(parsed, dict):
+        assistant_message = _as_non_empty_string(parsed.get("assistant_message"))
+        return assistant_message or ""
+
+    key_match = re.search(r'"assistant_message"\s*:\s*"', text)
+    if key_match is None:
+        return ""
+
+    chars: list[str] = []
+    escape = False
+    index = key_match.end()
+    while index < len(text):
+        char = text[index]
+        if escape:
+            if char == "u" and index + 4 < len(text):
+                hex_digits = text[index + 1 : index + 5]
+                if re.fullmatch(r"[0-9a-fA-F]{4}", hex_digits):
+                    chars.append(chr(int(hex_digits, 16)))
+                    index += 5
+                    escape = False
+                    continue
+            replacements = {
+                '"': '"',
+                "\\": "\\",
+                "/": "/",
+                "b": "\b",
+                "f": "\f",
+                "n": "\n",
+                "r": "\r",
+                "t": "\t",
+            }
+            chars.append(replacements.get(char, char))
+            escape = False
+            index += 1
+            continue
+        if char == "\\":
+            escape = True
+            index += 1
+            continue
+        if char == '"':
+            break
+        chars.append(char)
+        index += 1
+    return "".join(chars).strip()
+
+
 def _as_non_empty_string(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -225,6 +279,8 @@ def resolve_runtime_workspace_path(value: str) -> str:
 
 def build_codex_runtime_environment() -> dict[str, str]:
     env = os.environ.copy()
+    original_home = Path(env.get("HOME", str(Path.home()))).expanduser()
+    original_codex_home = Path(env.get("CODEX_HOME", str(original_home / ".codex"))).expanduser()
     configured_runtime_root = Path(env.get("ATTRACTOR_CODEX_RUNTIME_ROOT", "/codex-runtime")).expanduser()
     runtime_root = configured_runtime_root
     try:
@@ -237,10 +293,18 @@ def build_codex_runtime_environment() -> dict[str, str]:
     for directory in (runtime_root, codex_home, xdg_config_home, xdg_data_home):
         directory.mkdir(parents=True, exist_ok=True)
 
-    seed_dir = Path(env.get("ATTRACTOR_CODEX_SEED_DIR", "/codex-seed")).expanduser()
+    explicit_seed_dir = Path(env.get("ATTRACTOR_CODEX_SEED_DIR", "/codex-seed")).expanduser()
+    seed_candidates: list[Path] = []
+    for candidate in (explicit_seed_dir, original_codex_home):
+        normalized_candidate = candidate.expanduser()
+        if normalized_candidate == codex_home:
+            continue
+        if normalized_candidate in seed_candidates:
+            continue
+        seed_candidates.append(normalized_candidate)
     for file_name in ("auth.json", "config.toml"):
-        source = seed_dir / file_name
-        if not source.exists():
+        source = next((candidate / file_name for candidate in seed_candidates if (candidate / file_name).exists()), None)
+        if source is None:
             continue
         destination = codex_home / file_name
         if destination.exists():
@@ -901,22 +965,28 @@ class CodexAppServerChatSession:
 
     def _emit_progress(
         self,
-        callback: Optional[Callable[[list[ToolCallRecord]], None]],
+        callback: Optional[Callable[[ChatTurnResult], None]],
         tool_calls: list[ToolCallRecord],
+        assistant_message: str,
     ) -> None:
         if callback is None:
             return
-        callback([
-            ToolCallRecord.from_dict(tool_call.to_dict())
-            for tool_call in tool_calls
-        ])
+        callback(
+            ChatTurnResult(
+                assistant_message=assistant_message,
+                tool_calls=[
+                    ToolCallRecord.from_dict(tool_call.to_dict())
+                    for tool_call in tool_calls
+                ],
+            )
+        )
 
     def turn(
         self,
         prompt: str,
         model: Optional[str],
         *,
-        on_progress: Optional[Callable[[list[ToolCallRecord]], None]] = None,
+        on_progress: Optional[Callable[[ChatTurnResult], None]] = None,
     ) -> ChatTurnResult:
         with self._lock:
             self._ensure_process()
@@ -964,7 +1034,7 @@ class CodexAppServerChatSession:
                         item_id = _as_non_empty_string(request_params.get("itemId"))
                         if item_id:
                             tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
-                        self._emit_progress(on_progress, tool_calls)
+                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     elif request_method == "item/fileChange/requestApproval":
                         file_paths = _extract_file_paths(request_params)
                         tool_calls.append(
@@ -978,7 +1048,7 @@ class CodexAppServerChatSession:
                         item_id = _as_non_empty_string(request_params.get("itemId"))
                         if item_id:
                             tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
-                        self._emit_progress(on_progress, tool_calls)
+                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     self._handle_server_request(message)
                     continue
                 method = message.get("method")
@@ -995,7 +1065,7 @@ class CodexAppServerChatSession:
                                 tool_calls.append(tool_call)
                                 if item_id:
                                     tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
-                            self._emit_progress(on_progress, tool_calls)
+                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     continue
                 if method == "item/completed":
                     item = params.get("item")
@@ -1009,22 +1079,25 @@ class CodexAppServerChatSession:
                                 tool_calls.append(tool_call)
                                 if item_id:
                                     tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
-                            self._emit_progress(on_progress, tool_calls)
+                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     continue
                 if method == "item/agentMessage/delta":
                     delta = params.get("delta") or ""
                     if delta:
                         agent_chunks.append(str(delta))
+                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     continue
                 if method == "codex/event/agent_message_delta":
                     delta = (params.get("msg") or {}).get("delta") or ""
                     if delta:
                         agent_chunks.append(str(delta))
+                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     continue
                 if method == "codex/event/agent_message":
                     msg = (params.get("msg") or {}).get("message")
                     if msg:
                         agent_chunks = [str(msg)]
+                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     continue
                 if method == "item/commandExecution/outputDelta":
                     delta = _as_non_empty_string(params.get("delta"))
@@ -1035,7 +1108,7 @@ class CodexAppServerChatSession:
                             tool_calls[tool_call_index].output,
                             delta,
                         )
-                        self._emit_progress(on_progress, tool_calls)
+                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     continue
                 if method == "error":
                     last_error = str(params.get("message") or "codex app-server error")
@@ -1050,7 +1123,7 @@ class CodexAppServerChatSession:
             for tool_call in tool_calls:
                 if tool_call.status == "running":
                     tool_call.status = "failed" if last_error else "completed"
-            self._emit_progress(on_progress, tool_calls)
+            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
             if last_error:
                 raise RuntimeError(last_error)
             response_text = "".join(agent_chunks).strip()
@@ -1223,6 +1296,43 @@ class ProjectChatService:
                 )
         state.turns = next_turns
 
+    def _sync_live_assistant_turn(
+        self,
+        state: ConversationState,
+        user_turn_id: str,
+        assistant_message: str,
+    ) -> None:
+        live_turn_id = f"{user_turn_id}:assistant:live"
+        next_turns = [turn for turn in state.turns if turn.id != live_turn_id]
+        trimmed_message = assistant_message.strip()
+        if not trimmed_message:
+            state.turns = next_turns
+            return
+
+        insert_at = len(next_turns)
+        live_tool_prefix = f"{user_turn_id}:tool:"
+        for index, turn in enumerate(next_turns):
+            if turn.id != user_turn_id:
+                continue
+            insert_at = index + 1
+            while insert_at < len(next_turns):
+                current_turn = next_turns[insert_at]
+                if current_turn.kind != "tool_call" or not current_turn.id.startswith(live_tool_prefix):
+                    break
+                insert_at += 1
+            break
+
+        next_turns.insert(
+            insert_at,
+            ConversationTurn(
+                id=live_turn_id,
+                role="assistant",
+                content=trimmed_message,
+                timestamp=_iso_now(),
+            ),
+        )
+        state.turns = next_turns
+
     def _build_chat_prompt(self, state: ConversationState, message: str) -> str:
         recent_turns = state.turns[-10:]
         history_lines = []
@@ -1235,7 +1345,7 @@ class ProjectChatService:
             "You are the Sparkspawn project chat assistant. "
             "Respond with JSON only. "
             "Schema: "
-            "{\"assistant_message\": string, \"spec_proposal\": null | {\"summary\": string, \"changes\": [{\"path\": string, \"before\": string, \"after\": string}]}}. "
+            "{\"assistant_message\": string, \"spec_proposal\": {\"summary\": string, \"changes\": [{\"path\": string, \"before\": string, \"after\": string}]}} with spec_proposal omitted unless you are actually proposing one. "
             "Do not create an execution card. "
             "Create a spec_proposal when the user is asking for product, UX, workflow, or implementation-intent changes that should be reviewed before execution. "
             "Keep assistant_message concise and practical.\n\n"
@@ -1292,7 +1402,14 @@ class ProjectChatService:
             self._sessions[conversation_id] = session
             return session
 
-    def send_turn(self, conversation_id: str, project_path: str, message: str, model: Optional[str]) -> dict[str, Any]:
+    def send_turn(
+        self,
+        conversation_id: str,
+        project_path: str,
+        message: str,
+        model: Optional[str],
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> dict[str, Any]:
         normalized_project_path = _normalize_project_path(project_path)
         if not normalized_project_path:
             raise ValueError("Project path is required.")
@@ -1314,11 +1431,16 @@ class ProjectChatService:
             )
             state.turns.append(user_turn)
             self._write_state(state)
-        def persist_progress(tool_calls: list[ToolCallRecord]) -> None:
+        def persist_progress(progress: ChatTurnResult) -> None:
+            live_assistant_message = _extract_live_assistant_message(progress.assistant_message)
             with self._lock:
                 current_state = self._read_state(conversation_id) or state
-                self._sync_live_tool_call_turns(current_state, user_turn.id, tool_calls)
+                self._sync_live_tool_call_turns(current_state, user_turn.id, progress.tool_calls)
+                self._sync_live_assistant_turn(current_state, user_turn.id, live_assistant_message)
                 self._write_state(current_state)
+                current_snapshot = current_state.to_dict()
+            if progress_callback is not None:
+                progress_callback(current_snapshot)
 
         turn_result = session.turn(
             self._build_chat_prompt(state, trimmed_message),
@@ -1333,6 +1455,7 @@ class ProjectChatService:
         with self._lock:
             state = self._read_state(conversation_id) or state
             self._sync_live_tool_call_turns(state, user_turn.id, turn_result.tool_calls)
+            self._sync_live_assistant_turn(state, user_turn.id, "")
             assistant_turn = ConversationTurn(
                 id=f"turn-{uuid.uuid4().hex}",
                 role="assistant",

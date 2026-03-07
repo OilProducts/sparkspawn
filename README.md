@@ -38,6 +38,14 @@ Start the server:
 sparkspawn serve --host 127.0.0.1 --port 8000
 ```
 
+For local full-stack development without Docker:
+
+```bash
+just run
+```
+
+This starts the backend on `127.0.0.1:8000` and the Vite frontend dev server with API proxying enabled.
+
 Optional runtime path overrides (CLI args or env vars):
 
 - `SPARKSPAWN_DATA_DIR`

@@ -3,6 +3,9 @@ set shell := ["bash", "-lc"]
 dev:
   docker compose up --build
 
+run:
+  bash -lc 'set -euo pipefail; trap "kill 0" EXIT INT TERM; uv run sparkspawn serve --host 127.0.0.1 --port 8000 & npm --prefix frontend run dev -- --host 127.0.0.1; wait'
+
 stop:
   docker compose down
 

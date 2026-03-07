@@ -895,7 +895,6 @@ export function HomePanel() {
                 conversationId: priorConversationId,
                 conversationHistory: priorConversationHistory,
             })
-            setChatDraft(trimmed)
             const message = extractApiErrorMessage(error, "Unable to send the project chat turn.")
             setPanelError(message)
             appendLocalProjectEvent(`Project chat turn failed: ${message}`)

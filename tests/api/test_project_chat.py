@@ -2,12 +2,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import attractor.api.server as server
 import attractor.api.project_chat as project_chat
 
 
 def test_extract_command_text_handles_list_and_string_payloads() -> None:
     assert project_chat._extract_command_text({"command": ["git", "status", "--short"]}) == "git status --short"
     assert project_chat._extract_command_text({"commandLine": "npm test"}) == "npm test"
+
+
+def test_extract_live_assistant_message_handles_partial_and_complete_json() -> None:
+    assert project_chat._extract_live_assistant_message(
+        '{"assistant_message":"Hello.","spec_proposal":null}'
+    ) == "Hello."
+    assert project_chat._extract_live_assistant_message(
+        '{"assistant_message":"Hello'
+    ) == "Hello"
+    assert project_chat._extract_live_assistant_message("plain text") == ""
 
 
 def test_extract_file_paths_deduplicates_nested_entries() -> None:
@@ -218,3 +229,62 @@ def test_chat_session_starts_new_durable_thread_when_resume_fails(monkeypatch) -
     assert calls[1][1]["ephemeral"] is False
     assert session._thread_id == "thread-fresh"
     assert updated_thread_ids == ["thread-fresh"]
+
+
+def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
+    api_client,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    service = server.PROJECT_CHAT
+    partial_snapshots: list[dict[str, object]] = []
+
+    class FakeSession:
+        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+            if on_progress is not None:
+                on_progress(
+                    project_chat.ChatTurnResult(
+                        assistant_message='{"assistant_message":"Working on it","spec_proposal":null}',
+                        tool_calls=[
+                            project_chat.ToolCallRecord(
+                                kind="command_execution",
+                                status="running",
+                                title="Run command",
+                                command="pwd",
+                            )
+                        ],
+                    )
+                )
+                partial_snapshots.append(service.get_snapshot("conversation-test", str(tmp_path)))
+            return project_chat.ChatTurnResult(
+                assistant_message='{"assistant_message":"ACK","spec_proposal":null}',
+                tool_calls=[
+                    project_chat.ToolCallRecord(
+                        kind="command_execution",
+                        status="completed",
+                        title="Run command",
+                        command="pwd",
+                        output=str(tmp_path),
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: FakeSession())
+
+    response = api_client.post(
+        "/api/conversations/conversation-test/turns",
+        json={
+            "project_path": str(tmp_path),
+            "message": "hello",
+            "model": "gpt-test",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["conversation_id"] == "conversation-test"
+    assert [turn["kind"] for turn in payload["turns"]] == ["message", "tool_call", "message"]
+    assert payload["turns"][2]["content"] == "ACK"
+    assert partial_snapshots
+    assert [turn["kind"] for turn in partial_snapshots[-1]["turns"]] == ["message", "tool_call", "message"]
+    assert partial_snapshots[-1]["turns"][2]["content"] == "Working on it"

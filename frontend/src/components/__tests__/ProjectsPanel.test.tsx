@@ -232,6 +232,52 @@ describe('ProjectsPanel', () => {
     })
   })
 
+  it('keeps the composer cleared when sending a turn fails', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+          return new Response(JSON.stringify({ detail: 'backend unavailable' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && !init?.method) {
+          return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+
+    render(<ProjectsPanel />)
+
+    const composer = screen.getByTestId('project-ai-conversation-input') as HTMLTextAreaElement
+    await user.type(composer, 'This should not jump back into the composer.')
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+
+    await waitFor(() => {
+      expect(screen.getByText('backend unavailable')).toBeVisible()
+    })
+    expect(composer).toHaveValue('')
+  })
+
   it('auto-follows at the live edge and shows a jump control when scrolled away', async () => {
     const user = userEvent.setup()
     act(() => {
