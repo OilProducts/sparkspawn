@@ -25,3 +25,5 @@
 - Resize affordances should be understated but obvious on hover/focus and use the correct resize cursor.
 - Chat-adjacent artifact cards should split into two families: lighter editorial proposal cards for spec review, and more structured tracker-like execution cards for durable work planning.
 - Proposal cards emphasize summary, affected sections, diffs, and explicit review actions. Execution cards emphasize identity, status, work items, dependencies, provenance, and workflow decisions.
+- Inline tool-call rows in chat should use lower-emphasis muted surfaces than assistant/spec/execution content so operational telemetry stays visible without dominating the conversation.
+- Live chat panes should auto-follow only when the operator is already at the bottom; when they scroll away, preserve position and offer a small explicit jump-to-bottom control.

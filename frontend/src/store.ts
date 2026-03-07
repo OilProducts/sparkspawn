@@ -73,8 +73,16 @@ export interface ConversationHistoryEntry {
     role: 'user' | 'assistant' | 'system'
     content: string
     timestamp: string
-    kind?: 'message' | 'spec_edit_proposal' | 'execution_card'
+    kind?: 'message' | 'spec_edit_proposal' | 'execution_card' | 'tool_call'
     artifactId?: string | null
+    toolCall?: {
+        kind: 'command_execution' | 'file_change'
+        status: 'running' | 'completed' | 'failed'
+        title: string
+        command?: string | null
+        output?: string | null
+        filePaths: string[]
+    } | null
 }
 
 export interface ProjectEventLogEntry {
@@ -349,10 +357,34 @@ const coerceConversationHistoryEntry = (value: unknown): ConversationHistoryEntr
             timestamp: candidate.timestamp,
             kind: candidate.kind === "spec_edit_proposal"
                 || candidate.kind === "execution_card"
+                || candidate.kind === "tool_call"
                 || candidate.kind === "message"
                 ? candidate.kind
                 : undefined,
             artifactId: typeof candidate.artifactId === "string" ? candidate.artifactId : null,
+            toolCall: candidate.toolCall && typeof candidate.toolCall === "object"
+                ? {
+                    kind: (candidate.toolCall as { kind?: unknown }).kind === "file_change" ? "file_change" : "command_execution",
+                    status: (candidate.toolCall as { status?: unknown }).status === "running"
+                        || (candidate.toolCall as { status?: unknown }).status === "failed"
+                        ? (candidate.toolCall as { status: "running" | "failed" }).status
+                        : "completed",
+                    title: typeof (candidate.toolCall as { title?: unknown }).title === "string"
+                        ? (candidate.toolCall as { title: string }).title
+                        : "",
+                    command: typeof (candidate.toolCall as { command?: unknown }).command === "string"
+                        ? (candidate.toolCall as { command: string }).command
+                        : null,
+                    output: typeof (candidate.toolCall as { output?: unknown }).output === "string"
+                        ? (candidate.toolCall as { output: string }).output
+                        : null,
+                    filePaths: Array.isArray((candidate.toolCall as { filePaths?: unknown; file_paths?: unknown }).filePaths)
+                        ? ((candidate.toolCall as { filePaths: unknown[] }).filePaths).map((entry) => String(entry))
+                        : Array.isArray((candidate.toolCall as { file_paths?: unknown }).file_paths)
+                            ? ((candidate.toolCall as { file_paths: unknown[] }).file_paths).map((entry) => String(entry))
+                            : [],
+                }
+                : null,
         }
     }
     return null

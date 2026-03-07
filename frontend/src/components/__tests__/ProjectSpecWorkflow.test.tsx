@@ -137,6 +137,22 @@ describe('Project-scoped workflow behavior', () => {
                 artifact_id: null,
               },
               {
+                id: `turn-tool-${conversationId}`,
+                role: 'system',
+                content: 'Run command',
+                timestamp: '2026-03-06T15:00:04Z',
+                kind: 'tool_call',
+                artifact_id: null,
+                tool_call: {
+                  kind: 'command_execution',
+                  status: 'completed',
+                  title: 'Run command',
+                  command: 'git status --short',
+                  output: ' M frontend/src/components/ProjectsPanel.tsx',
+                  file_paths: [],
+                },
+              },
+              {
                 id: `turn-assistant-${conversationId}`,
                 role: 'assistant',
                 content: 'I drafted a spec edit proposal for review.',
@@ -318,6 +334,7 @@ describe('Project-scoped workflow behavior', () => {
         'Please add a project-first home chat flow with approval before planning.',
       )
     })
+    expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('git status --short')
     await waitFor(() => {
       expect(screen.getByTestId('project-spec-edit-proposal-preview')).toBeVisible()
     })

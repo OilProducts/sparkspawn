@@ -104,8 +104,16 @@ export interface ConversationTurnResponse {
     role: 'user' | 'assistant' | 'system'
     content: string
     timestamp: string
-    kind: 'message' | 'spec_edit_proposal' | 'execution_card'
+    kind: 'message' | 'spec_edit_proposal' | 'execution_card' | 'tool_call'
     artifact_id?: string | null
+    tool_call?: {
+        kind: 'command_execution' | 'file_change'
+        status: 'running' | 'completed' | 'failed'
+        title: string
+        command?: string | null
+        output?: string | null
+        file_paths: string[]
+    } | null
 }
 
 export interface WorkflowEventResponse {
@@ -577,7 +585,7 @@ function parseConversationTurnResponse(value: unknown, endpoint: string): Conver
     if (role !== 'user' && role !== 'assistant' && role !== 'system') {
         return null
     }
-    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'execution_card' || record.kind === 'message'
+    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'execution_card' || record.kind === 'tool_call' || record.kind === 'message'
         ? record.kind
         : 'message'
     if (typeof record.id !== 'string' || typeof record.content !== 'string' || typeof record.timestamp !== 'string') {
@@ -590,6 +598,22 @@ function parseConversationTurnResponse(value: unknown, endpoint: string): Conver
         timestamp: record.timestamp,
         kind,
         artifact_id: asOptionalNullableString(record.artifact_id),
+        tool_call: (() => {
+            const toolCall = asUnknownRecord(record.tool_call)
+            if (!toolCall || typeof toolCall.title !== 'string') {
+                return null
+            }
+            const toolKind = toolCall.kind === 'file_change' ? 'file_change' : 'command_execution'
+            const status = toolCall.status === 'running' || toolCall.status === 'failed' ? toolCall.status : 'completed'
+            return {
+                kind: toolKind,
+                status,
+                title: toolCall.title,
+                command: asOptionalNullableString(toolCall.command),
+                output: asOptionalNullableString(toolCall.output),
+                file_paths: Array.isArray(toolCall.file_paths) ? toolCall.file_paths.map((entry) => String(entry)) : [],
+            }
+        })(),
     }
 }
 

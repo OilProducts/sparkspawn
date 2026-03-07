@@ -2086,6 +2086,17 @@ async def project_conversation_events(conversation_id: str, request: Request, pr
 
 @app.post("/api/conversations/{conversation_id}/turns")
 async def send_project_conversation_turn(conversation_id: str, req: ConversationTurnRequest):
+    loop = asyncio.get_running_loop()
+
+    def publish_partial_snapshot(snapshot: dict[str, Any]) -> None:
+        asyncio.run_coroutine_threadsafe(
+            PROJECT_CHAT.events().publish(
+                conversation_id,
+                {"type": "conversation_snapshot", "state": snapshot},
+            ),
+            loop,
+        )
+
     try:
         snapshot = await asyncio.to_thread(
             PROJECT_CHAT.send_turn,
@@ -2093,6 +2104,7 @@ async def send_project_conversation_turn(conversation_id: str, req: Conversation
             req.project_path,
             req.message,
             req.model,
+            publish_partial_snapshot,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

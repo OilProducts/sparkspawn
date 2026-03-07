@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
@@ -51,6 +51,132 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("Expected top-level JSON object from Codex.")
     return parsed
+
+
+def _as_non_empty_string(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed or None
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    return None
+
+
+def _extract_command_text(payload: dict[str, Any]) -> Optional[str]:
+    for key in ("command", "commandLine", "command_line", "cmd", "commandText"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            pieces = [_as_non_empty_string(entry) for entry in value]
+            command = " ".join(piece for piece in pieces if piece)
+            if command:
+                return command
+        text = _as_non_empty_string(value)
+        if text:
+            return text
+    nested = payload.get("command")
+    if isinstance(nested, dict):
+        return _extract_command_text(nested)
+    return None
+
+
+def _extract_file_paths(payload: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for key in ("path", "filePath", "file_path"):
+        text = _as_non_empty_string(payload.get(key))
+        if text:
+            paths.append(text)
+    for key in ("paths", "files"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            for entry in value:
+                if isinstance(entry, dict):
+                    nested_path = _as_non_empty_string(entry.get("path") or entry.get("filePath") or entry.get("file_path"))
+                    if nested_path:
+                        paths.append(nested_path)
+                        continue
+                text = _as_non_empty_string(entry)
+                if text:
+                    paths.append(text)
+    changes = payload.get("changes")
+    if isinstance(changes, list):
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            nested_path = _as_non_empty_string(change.get("path") or change.get("filePath") or change.get("file_path"))
+            if nested_path:
+                paths.append(nested_path)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+    return deduped
+
+
+def _append_tool_output(existing: Optional[str], delta: str, *, limit: int = 2400) -> str:
+    combined = f"{existing or ''}{delta}"
+    if len(combined) <= limit:
+        return combined
+    return combined[-limit:]
+
+
+def _normalize_tool_call_status(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"inprogress", "running"}:
+        return "running"
+    if normalized in {"failed", "error"}:
+        return "failed"
+    return "completed"
+
+
+def _extract_file_paths_from_item(item: dict[str, Any]) -> list[str]:
+    changes = item.get("changes")
+    if not isinstance(changes, list):
+        return []
+    file_paths: list[str] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        path = _as_non_empty_string(change.get("path") or change.get("filePath") or change.get("file_path"))
+        if path:
+            file_paths.append(path)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for path in file_paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+    return deduped
+
+
+def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
+    item_type = str(item.get("type") or "").strip()
+    if item_type == "commandExecution":
+        command = _extract_command_text(item)
+        raw_output = item.get("aggregatedOutput")
+        if raw_output is None:
+            raw_output = item.get("aggregated_output")
+        output = str(raw_output) if raw_output is not None and str(raw_output) else None
+        return ToolCallRecord(
+            kind="command_execution",
+            status=_normalize_tool_call_status(item.get("status")),
+            title="Run command",
+            command=command,
+            output=output,
+        )
+    if item_type == "fileChange":
+        return ToolCallRecord(
+            kind="file_change",
+            status=_normalize_tool_call_status(item.get("status")),
+            title="Apply file changes",
+            file_paths=_extract_file_paths_from_item(item),
+        )
+    return None
 
 
 def resolve_runtime_workspace_path(value: str) -> str:
@@ -144,6 +270,7 @@ class ConversationTurn:
     timestamp: str
     kind: str = "message"
     artifact_id: Optional[str] = None
+    tool_call: Optional["ToolCallRecord"] = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -155,6 +282,8 @@ class ConversationTurn:
         }
         if self.artifact_id:
             payload["artifact_id"] = self.artifact_id
+        if self.tool_call is not None:
+            payload["tool_call"] = self.tool_call.to_dict()
         return payload
 
     @classmethod
@@ -166,7 +295,52 @@ class ConversationTurn:
             timestamp=str(payload.get("timestamp", "")),
             kind=str(payload.get("kind", "message") or "message"),
             artifact_id=str(payload.get("artifact_id")) if payload.get("artifact_id") is not None else None,
+            tool_call=ToolCallRecord.from_dict(payload.get("tool_call"))
+            if isinstance(payload.get("tool_call"), dict)
+            else None,
         )
+
+
+@dataclass
+class ToolCallRecord:
+    kind: str
+    status: str
+    title: str
+    command: Optional[str] = None
+    output: Optional[str] = None
+    file_paths: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "kind": self.kind,
+            "status": self.status,
+            "title": self.title,
+        }
+        if self.command:
+            payload["command"] = self.command
+        if self.output:
+            payload["output"] = self.output
+        if self.file_paths:
+            payload["file_paths"] = list(self.file_paths)
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ToolCallRecord":
+        raw_paths = payload.get("file_paths")
+        return cls(
+            kind=str(payload.get("kind", "")),
+            status=str(payload.get("status", "completed") or "completed"),
+            title=str(payload.get("title", "")),
+            command=str(payload.get("command")) if payload.get("command") is not None else None,
+            output=str(payload.get("output")) if payload.get("output") is not None else None,
+            file_paths=[str(path) for path in raw_paths] if isinstance(raw_paths, list) else [],
+        )
+
+
+@dataclass
+class ChatTurnResult:
+    assistant_message: str
+    tool_calls: list[ToolCallRecord] = field(default_factory=list)
 
 
 @dataclass
@@ -465,6 +639,36 @@ class ConversationState:
         )
 
 
+@dataclass
+class ConversationSessionState:
+    conversation_id: str
+    updated_at: str
+    project_path: str
+    runtime_project_path: str
+    thread_id: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "conversation_id": self.conversation_id,
+            "updated_at": self.updated_at,
+            "project_path": self.project_path,
+            "runtime_project_path": self.runtime_project_path,
+        }
+        if self.thread_id:
+            payload["thread_id"] = self.thread_id
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ConversationSessionState":
+        return cls(
+            conversation_id=str(payload.get("conversation_id", "")),
+            updated_at=str(payload.get("updated_at", "")),
+            project_path=_normalize_project_path(str(payload.get("project_path", ""))),
+            runtime_project_path=_normalize_project_path(str(payload.get("runtime_project_path", ""))),
+            thread_id=str(payload.get("thread_id")) if payload.get("thread_id") is not None else None,
+        )
+
+
 class ConversationEventHub:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -504,13 +708,21 @@ class ConversationEventHub:
 
 
 class CodexAppServerChatSession:
-    def __init__(self, working_dir: str) -> None:
+    def __init__(
+        self,
+        working_dir: str,
+        *,
+        persisted_thread_id: Optional[str] = None,
+        on_thread_id_updated: Optional[Callable[[str], None]] = None,
+    ) -> None:
         self.requested_working_dir = _normalize_project_path(working_dir)
         self.working_dir = resolve_runtime_workspace_path(working_dir)
         self._proc: Optional[subprocess.Popen[str]] = None
         self._selector: Optional[selectors.DefaultSelector] = None
         self._request_id = 0
-        self._thread_id: Optional[str] = None
+        self._thread_id: Optional[str] = persisted_thread_id
+        self._thread_initialized = False
+        self._on_thread_id_updated = on_thread_id_updated
         self._lock = threading.Lock()
 
     def _close(self) -> None:
@@ -531,7 +743,7 @@ class CodexAppServerChatSession:
             except Exception:
                 pass
             self._proc = None
-        self._thread_id = None
+        self._thread_initialized = False
 
     def _ensure_process(self) -> None:
         if self._proc is not None and self._proc.poll() is None:
@@ -564,7 +776,7 @@ class CodexAppServerChatSession:
         self._proc = proc
         self._selector = selector
         self._request_id = 0
-        self._thread_id = None
+        self._thread_initialized = False
         init_response = self._send_request("initialize", {"clientInfo": {"name": "sparkspawn", "version": "0.1"}})
         if init_response.get("error"):
             self._close()
@@ -631,13 +843,42 @@ class CodexAppServerChatSession:
         self._send_json(payload)
         return self._wait_for_response(self._request_id)
 
-    def _ensure_thread(self, model: Optional[str]) -> None:
-        if self._thread_id:
+    def _set_thread_id(self, thread_id: str) -> None:
+        normalized_thread_id = _as_non_empty_string(thread_id)
+        if not normalized_thread_id:
             return
+        self._thread_id = normalized_thread_id
+        if self._on_thread_id_updated is not None:
+            self._on_thread_id_updated(normalized_thread_id)
+
+    def _resume_thread(self, model: Optional[str]) -> bool:
+        if not self._thread_id:
+            return False
+        params: dict[str, Any] = {
+            "threadId": self._thread_id,
+            "cwd": self.working_dir,
+            "sandbox": "danger-full-access",
+            "approvalPolicy": "never",
+        }
+        if model:
+            params["model"] = model
+        response = self._send_request("thread/resume", params)
+        if response.get("error"):
+            return False
+        thread = (response.get("result") or {}).get("thread") or {}
+        thread_id = thread.get("id")
+        if not thread_id:
+            return False
+        self._set_thread_id(str(thread_id))
+        self._thread_initialized = True
+        return True
+
+    def _start_thread(self, model: Optional[str]) -> None:
         params: dict[str, Any] = {
             "cwd": self.working_dir,
             "sandbox": "danger-full-access",
-            "ephemeral": True,
+            "approvalPolicy": "never",
+            "ephemeral": False,
         }
         if model:
             params["model"] = model
@@ -648,14 +889,42 @@ class CodexAppServerChatSession:
         thread_id = thread.get("id")
         if not thread_id:
             raise RuntimeError("codex app-server did not return a thread id")
-        self._thread_id = str(thread_id)
+        self._set_thread_id(str(thread_id))
+        self._thread_initialized = True
 
-    def turn(self, prompt: str, model: Optional[str]) -> str:
+    def _ensure_thread(self, model: Optional[str]) -> None:
+        if self._thread_initialized and self._thread_id:
+            return
+        if self._resume_thread(model):
+            return
+        self._start_thread(model)
+
+    def _emit_progress(
+        self,
+        callback: Optional[Callable[[list[ToolCallRecord]], None]],
+        tool_calls: list[ToolCallRecord],
+    ) -> None:
+        if callback is None:
+            return
+        callback([
+            ToolCallRecord.from_dict(tool_call.to_dict())
+            for tool_call in tool_calls
+        ])
+
+    def turn(
+        self,
+        prompt: str,
+        model: Optional[str],
+        *,
+        on_progress: Optional[Callable[[list[ToolCallRecord]], None]] = None,
+    ) -> ChatTurnResult:
         with self._lock:
             self._ensure_process()
             self._ensure_thread(model)
             agent_chunks: list[str] = []
             last_error: Optional[str] = None
+            tool_calls: list[ToolCallRecord] = []
+            tool_call_index_by_item_id: dict[str, int] = {}
             params: dict[str, Any] = {
                 "threadId": self._thread_id,
                 "input": [{"type": "text", "text": prompt}],
@@ -680,10 +949,68 @@ class CodexAppServerChatSession:
                 except json.JSONDecodeError:
                     continue
                 if "id" in message and "method" in message:
+                    request_method = message.get("method")
+                    request_params = message.get("params") or {}
+                    if request_method == "item/commandExecution/requestApproval":
+                        command = _extract_command_text(request_params)
+                        tool_calls.append(
+                            ToolCallRecord(
+                                kind="command_execution",
+                                status="running",
+                                title="Run command",
+                                command=command,
+                            )
+                        )
+                        item_id = _as_non_empty_string(request_params.get("itemId"))
+                        if item_id:
+                            tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
+                        self._emit_progress(on_progress, tool_calls)
+                    elif request_method == "item/fileChange/requestApproval":
+                        file_paths = _extract_file_paths(request_params)
+                        tool_calls.append(
+                            ToolCallRecord(
+                                kind="file_change",
+                                status="running",
+                                title="Apply file changes",
+                                file_paths=file_paths,
+                            )
+                        )
+                        item_id = _as_non_empty_string(request_params.get("itemId"))
+                        if item_id:
+                            tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
+                        self._emit_progress(on_progress, tool_calls)
                     self._handle_server_request(message)
                     continue
                 method = message.get("method")
                 params = message.get("params") or {}
+                if method == "item/started":
+                    item = params.get("item")
+                    if isinstance(item, dict):
+                        item_id = _as_non_empty_string(item.get("id"))
+                        tool_call = _tool_call_from_item(item)
+                        if tool_call is not None:
+                            if item_id and item_id in tool_call_index_by_item_id:
+                                tool_calls[tool_call_index_by_item_id[item_id]] = tool_call
+                            else:
+                                tool_calls.append(tool_call)
+                                if item_id:
+                                    tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
+                            self._emit_progress(on_progress, tool_calls)
+                    continue
+                if method == "item/completed":
+                    item = params.get("item")
+                    if isinstance(item, dict):
+                        item_id = _as_non_empty_string(item.get("id"))
+                        tool_call = _tool_call_from_item(item)
+                        if tool_call is not None:
+                            if item_id and item_id in tool_call_index_by_item_id:
+                                tool_calls[tool_call_index_by_item_id[item_id]] = tool_call
+                            else:
+                                tool_calls.append(tool_call)
+                                if item_id:
+                                    tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
+                            self._emit_progress(on_progress, tool_calls)
+                    continue
                 if method == "item/agentMessage/delta":
                     delta = params.get("delta") or ""
                     if delta:
@@ -699,6 +1026,17 @@ class CodexAppServerChatSession:
                     if msg:
                         agent_chunks = [str(msg)]
                     continue
+                if method == "item/commandExecution/outputDelta":
+                    delta = _as_non_empty_string(params.get("delta"))
+                    item_id = _as_non_empty_string(params.get("itemId"))
+                    tool_call_index = tool_call_index_by_item_id.get(item_id or "")
+                    if delta and tool_call_index is not None and tool_call_index < len(tool_calls):
+                        tool_calls[tool_call_index].output = _append_tool_output(
+                            tool_calls[tool_call_index].output,
+                            delta,
+                        )
+                        self._emit_progress(on_progress, tool_calls)
+                    continue
                 if method == "error":
                     last_error = str(params.get("message") or "codex app-server error")
                     continue
@@ -709,12 +1047,19 @@ class CodexAppServerChatSession:
                         error = turn.get("error") or {}
                         last_error = str(error.get("message") or last_error or f"turn ended with status '{status}'")
                     break
+            for tool_call in tool_calls:
+                if tool_call.status == "running":
+                    tool_call.status = "failed" if last_error else "completed"
+            self._emit_progress(on_progress, tool_calls)
             if last_error:
                 raise RuntimeError(last_error)
             response_text = "".join(agent_chunks).strip()
             if not response_text:
                 raise RuntimeError("codex app-server returned an empty chat response")
-            return response_text
+            return ChatTurnResult(
+                assistant_message=response_text,
+                tool_calls=tool_calls,
+            )
 
 
 class ProjectChatService:
@@ -741,6 +1086,9 @@ class ProjectChatService:
     def _conversation_state_path(self, conversation_id: str) -> Path:
         return self._conversation_root(conversation_id) / "state.json"
 
+    def _conversation_session_path(self, conversation_id: str) -> Path:
+        return self._conversation_root(conversation_id) / "session.json"
+
     def _read_state(self, conversation_id: str) -> Optional[ConversationState]:
         path = self._conversation_state_path(conversation_id)
         try:
@@ -758,6 +1106,47 @@ class ProjectChatService:
         path = self._conversation_state_path(state.conversation_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(state.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+
+    def _read_session_state(self, conversation_id: str) -> Optional[ConversationSessionState]:
+        path = self._conversation_session_path(conversation_id)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        state = ConversationSessionState.from_dict(payload)
+        if not state.conversation_id:
+            state.conversation_id = conversation_id
+        return state
+
+    def _write_session_state(self, state: ConversationSessionState) -> None:
+        path = self._conversation_session_path(state.conversation_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+
+    def _persist_session_thread(
+        self,
+        conversation_id: str,
+        project_path: str,
+        thread_id: str,
+    ) -> None:
+        normalized_project_path = _normalize_project_path(project_path)
+        runtime_project_path = resolve_runtime_workspace_path(normalized_project_path)
+        with self._lock:
+            session_state = self._read_session_state(conversation_id)
+            if session_state is None:
+                session_state = ConversationSessionState(
+                    conversation_id=conversation_id,
+                    updated_at=_iso_now(),
+                    project_path=normalized_project_path,
+                    runtime_project_path=runtime_project_path,
+                )
+            session_state.thread_id = thread_id
+            session_state.project_path = normalized_project_path
+            session_state.runtime_project_path = runtime_project_path
+            session_state.updated_at = _iso_now()
+            self._write_session_state(session_state)
 
     async def publish_snapshot(self, conversation_id: str) -> None:
         snapshot = self.get_snapshot(conversation_id)
@@ -783,6 +1172,56 @@ class ProjectChatService:
 
     def _append_event(self, state: ConversationState, message: str) -> None:
         state.event_log.append(WorkflowEvent(message=message, timestamp=_iso_now()))
+
+    def _sync_live_tool_call_turns(
+        self,
+        state: ConversationState,
+        user_turn_id: str,
+        tool_calls: list[ToolCallRecord],
+    ) -> None:
+        live_turn_id_prefix = f"{user_turn_id}:tool:"
+        existing_live_turn_ids = {
+            turn.id
+            for turn in state.turns
+            if turn.kind == "tool_call" and turn.id.startswith(live_turn_id_prefix)
+        }
+        next_turns: list[ConversationTurn] = []
+        emitted_live_turn_ids: set[str] = set()
+        inserted = False
+        for turn in state.turns:
+            if turn.id in existing_live_turn_ids:
+                continue
+            next_turns.append(turn)
+            if turn.id == user_turn_id:
+                for index, tool_call in enumerate(tool_calls):
+                    live_turn_id = f"{live_turn_id_prefix}{index}"
+                    emitted_live_turn_ids.add(live_turn_id)
+                    next_turns.append(
+                        ConversationTurn(
+                            id=live_turn_id,
+                            role="system",
+                            content=tool_call.title,
+                            timestamp=_iso_now(),
+                            kind="tool_call",
+                            tool_call=tool_call,
+                        )
+                    )
+                inserted = True
+        if not inserted and tool_calls:
+            for index, tool_call in enumerate(tool_calls):
+                live_turn_id = f"{live_turn_id_prefix}{index}"
+                emitted_live_turn_ids.add(live_turn_id)
+                next_turns.append(
+                    ConversationTurn(
+                        id=live_turn_id,
+                        role="system",
+                        content=tool_call.title,
+                        timestamp=_iso_now(),
+                        kind="tool_call",
+                        tool_call=tool_call,
+                    )
+                )
+        state.turns = next_turns
 
     def _build_chat_prompt(self, state: ConversationState, message: str) -> str:
         recent_turns = state.turns[-10:]
@@ -840,7 +1279,16 @@ class ProjectChatService:
             session = self._sessions.get(conversation_id)
             if session is not None:
                 return session
-            session = CodexAppServerChatSession(project_path)
+            persisted_session = self._read_session_state(conversation_id)
+            session = CodexAppServerChatSession(
+                project_path,
+                persisted_thread_id=persisted_session.thread_id if persisted_session is not None else None,
+                on_thread_id_updated=lambda thread_id: self._persist_session_thread(
+                    conversation_id,
+                    project_path,
+                    thread_id,
+                ),
+            )
             self._sessions[conversation_id] = session
             return session
 
@@ -866,14 +1314,25 @@ class ProjectChatService:
             )
             state.turns.append(user_turn)
             self._write_state(state)
-        raw_response = session.turn(self._build_chat_prompt(state, trimmed_message), model.strip() if model else None)
-        parsed = _extract_json_object(raw_response)
+        def persist_progress(tool_calls: list[ToolCallRecord]) -> None:
+            with self._lock:
+                current_state = self._read_state(conversation_id) or state
+                self._sync_live_tool_call_turns(current_state, user_turn.id, tool_calls)
+                self._write_state(current_state)
+
+        turn_result = session.turn(
+            self._build_chat_prompt(state, trimmed_message),
+            model.strip() if model else None,
+            on_progress=persist_progress,
+        )
+        parsed = _extract_json_object(turn_result.assistant_message)
         assistant_message = str(parsed.get("assistant_message", "")).strip()
         if not assistant_message:
             assistant_message = "I reviewed that request."
         spec_proposal_payload = parsed.get("spec_proposal")
         with self._lock:
             state = self._read_state(conversation_id) or state
+            self._sync_live_tool_call_turns(state, user_turn.id, turn_result.tool_calls)
             assistant_turn = ConversationTurn(
                 id=f"turn-{uuid.uuid4().hex}",
                 role="assistant",

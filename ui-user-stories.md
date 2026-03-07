@@ -60,6 +60,9 @@ A **project** is a user-selected work target with these invariants:
 - **US-CONV-06**
   As a user, I want strict isolation between project conversations so that context and files from one project never leak into another.
 
+- **US-CONV-07**
+  As a user, I want to close and reopen the app without losing a project conversation so that I can resume the same AI thread later.
+
 ---
 
 ## 3. Spec -> Plan -> Work Tracker -> Build Chain

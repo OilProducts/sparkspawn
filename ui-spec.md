@@ -186,6 +186,7 @@ The UI MUST provide a project-scoped AI conversation surface that supports itera
 
 - Users MUST be able to start/continue a conversation within active project context from Home.
 - Conversation history MUST persist per project and remain discoverable.
+- Project-scoped conversations MUST survive app restart and SHOULD resume the same underlying AI thread when the runtime can restore it.
 - Chat history in the conversation surface MUST represent user/assistant turns; workflow/system events MUST render in the sidebar event log, not as chat cards.
 - AI-proposed spec edits MUST be emitted by the assistant/agent turn pipeline and presented as inline conversation cards with explicit, reviewable before/after changes before apply.
 - Proposal cards SHOULD render Git-like diff styling and MUST support collapsed/expanded viewing for long diffs.

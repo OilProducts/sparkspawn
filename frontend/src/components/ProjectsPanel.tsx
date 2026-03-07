@@ -32,6 +32,7 @@ const DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT = 320
 const HOME_SIDEBAR_MIN_PRIMARY_HEIGHT = 208
 const HOME_SIDEBAR_MIN_SECONDARY_HEIGHT = 208
 const HOME_SIDEBAR_RESIZE_HANDLE_HEIGHT = 12
+const CONVERSATION_BOTTOM_THRESHOLD_PX = 24
 
 type ProjectGitMetadata = {
     branch: string | null
@@ -83,6 +84,16 @@ const getExecutionCardStatusPresentation = (status: ExecutionCardResponse["statu
         return { label: "Revision requested", tone: "warning" as const }
     }
     return { label: "Draft", tone: "info" as const }
+}
+
+const getToolCallStatusPresentation = (status: "running" | "completed" | "failed") => {
+    if (status === "running") {
+        return { label: "Running", tone: "info" as const }
+    }
+    if (status === "failed") {
+        return { label: "Failed", tone: "danger" as const }
+    }
+    return { label: "Completed", tone: "success" as const }
 }
 
 const derivePlanStatusFromExecutionCard = (executionCard: ExecutionCardResponse | null): PlanStatus => {
@@ -263,6 +274,16 @@ const buildConversationHistoryEntries = (snapshot: ConversationSnapshotResponse)
         timestamp: turn.timestamp,
         kind: turn.kind,
         artifactId: turn.artifact_id ?? null,
+        toolCall: turn.tool_call
+            ? {
+                kind: turn.tool_call.kind,
+                status: turn.tool_call.status,
+                title: turn.tool_call.title,
+                command: turn.tool_call.command ?? null,
+                output: turn.tool_call.output ?? null,
+                filePaths: turn.tool_call.file_paths,
+            }
+            : null,
     }))
 )
 
@@ -294,10 +315,12 @@ export function HomePanel() {
     const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
     const [homeSidebarPrimaryHeight, setHomeSidebarPrimaryHeight] = useState(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT)
     const [isHomeSidebarResizing, setIsHomeSidebarResizing] = useState(false)
+    const [isConversationPinnedToBottom, setIsConversationPinnedToBottom] = useState(true)
 
     const projectDirectoryPickerInputRef = useRef<HTMLInputElement | null>(null)
     const homeSidebarRef = useRef<HTMLDivElement | null>(null)
     const homeSidebarResizeRef = useRef<{ startY: number; startHeight: number } | null>(null)
+    const conversationBodyRef = useRef<HTMLDivElement | null>(null)
     const applyConversationSnapshotRef = useRef<((projectPath: string, snapshot: ConversationSnapshotResponse) => void) | null>(null)
 
     const isNarrowViewport = useNarrowViewport()
@@ -324,6 +347,7 @@ export function HomePanel() {
     const hasRenderableConversationHistory = activeConversationHistory.some((entry) => (
         entry.kind === "spec_edit_proposal"
         || entry.kind === "execution_card"
+        || entry.kind === "tool_call"
         || entry.role === "user"
         || entry.role === "assistant"
     ))
@@ -357,6 +381,27 @@ export function HomePanel() {
             message,
             timestamp: new Date().toISOString(),
         })
+    }
+
+    const syncConversationPinnedState = () => {
+        const node = conversationBodyRef.current
+        if (!node) {
+            return
+        }
+        const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight
+        setIsConversationPinnedToBottom(distanceFromBottom <= CONVERSATION_BOTTOM_THRESHOLD_PX)
+    }
+
+    const scrollConversationToBottom = () => {
+        const node = conversationBodyRef.current
+        if (!node) {
+            return
+        }
+        node.scrollTo({
+            top: node.scrollHeight,
+            behavior: "smooth",
+        })
+        setIsConversationPinnedToBottom(true)
     }
 
     const applyConversationSnapshot = (projectPath: string, snapshot: ConversationSnapshotResponse) => {
@@ -548,6 +593,26 @@ export function HomePanel() {
             document.body.style.userSelect = ""
         }
     }, [isHomeSidebarResizing])
+
+    useEffect(() => {
+        setIsConversationPinnedToBottom(true)
+    }, [activeProjectPath])
+
+    useEffect(() => {
+        if (!isConversationPinnedToBottom) {
+            return
+        }
+        const frame = window.requestAnimationFrame(() => {
+            const node = conversationBodyRef.current
+            if (!node) {
+                return
+            }
+            node.scrollTop = node.scrollHeight
+        })
+        return () => {
+            window.cancelAnimationFrame(frame)
+        }
+    }, [activeConversationHistory, activeProjectPath, isConversationPinnedToBottom])
 
     useEffect(() => {
         if (!activeProjectPath || !activeConversationId) {
@@ -1139,7 +1204,9 @@ export function HomePanel() {
                             ) : (
                                 <div className="flex min-h-0 flex-1 flex-col gap-3">
                                     <div
+                                        ref={conversationBodyRef}
                                         data-testid="project-ai-conversation-body"
+                                        onScroll={syncConversationPinnedState}
                                         className={`flex min-h-0 flex-1 flex-col gap-3 ${isNarrowViewport ? "" : "overflow-y-auto pr-1"}`}
                                     >
                                         <div data-testid="project-ai-conversation-history" className="flex min-h-0 flex-col">
@@ -1151,6 +1218,44 @@ export function HomePanel() {
                                                 <ol data-testid="project-ai-conversation-history-list" className="space-y-3">
                                                     {activeConversationHistory.map((entry, index) => {
                                                         const key = `${entry.timestamp}-${entry.artifactId || index}`
+                                                        if (entry.kind === "tool_call" && entry.toolCall) {
+                                                            const statusPresentation = getToolCallStatusPresentation(entry.toolCall.status)
+                                                            return (
+                                                                <li key={key} className="flex justify-start">
+                                                                    <div className="w-full rounded-md border border-border bg-muted/40 px-3 py-2">
+                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                                                {entry.toolCall.kind === "file_change" ? "File change" : "Tool call"}
+                                                                            </p>
+                                                                            <span className={getSurfaceToneClassName(statusPresentation.tone)}>
+                                                                                {statusPresentation.label}
+                                                                            </span>
+                                                                            <p className="text-xs font-medium text-foreground">{entry.toolCall.title}</p>
+                                                                        </div>
+                                                                        {entry.toolCall.command ? (
+                                                                            <p className="mt-2 whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground">
+                                                                                {entry.toolCall.command}
+                                                                            </p>
+                                                                        ) : null}
+                                                                        {entry.toolCall.filePaths.length > 0 ? (
+                                                                            <ul className="mt-2 space-y-1">
+                                                                                {entry.toolCall.filePaths.map((path) => (
+                                                                                    <li key={`${key}-${path}`} className="font-mono text-[11px] text-muted-foreground">
+                                                                                        {path}
+                                                                                    </li>
+                                                                                ))}
+                                                                            </ul>
+                                                                        ) : null}
+                                                                        {entry.toolCall.output ? (
+                                                                            <pre className="mt-2 max-h-40 overflow-auto rounded border border-border/60 bg-background/80 px-2 py-1 whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">
+                                                                                {entry.toolCall.output}
+                                                                            </pre>
+                                                                        ) : null}
+                                                                    </div>
+                                                                </li>
+                                                            )
+                                                        }
+
                                                         if (entry.kind === "spec_edit_proposal" && entry.artifactId) {
                                                             const proposal = activeSpecEditProposalsById.get(entry.artifactId) || null
                                                             if (!proposal) {
@@ -1473,6 +1578,18 @@ export function HomePanel() {
                                             )}
                                         </div>
                                     </div>
+                                    {!isConversationPinnedToBottom && hasRenderableConversationHistory ? (
+                                        <div className="flex justify-end">
+                                            <button
+                                                type="button"
+                                                data-testid="project-ai-conversation-jump-to-bottom"
+                                                onClick={scrollConversationToBottom}
+                                                className="rounded border border-border bg-background/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            >
+                                                Jump to bottom
+                                            </button>
+                                        </div>
+                                    ) : null}
                                     <form
                                         data-testid="project-ai-conversation-composer"
                                         onSubmit={onChatComposerSubmit}

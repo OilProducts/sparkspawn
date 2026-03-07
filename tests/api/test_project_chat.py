@@ -1,0 +1,220 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import attractor.api.project_chat as project_chat
+
+
+def test_extract_command_text_handles_list_and_string_payloads() -> None:
+    assert project_chat._extract_command_text({"command": ["git", "status", "--short"]}) == "git status --short"
+    assert project_chat._extract_command_text({"commandLine": "npm test"}) == "npm test"
+
+
+def test_extract_file_paths_deduplicates_nested_entries() -> None:
+    payload = {
+        "path": "frontend/src/components/ProjectsPanel.tsx",
+        "files": [
+            "frontend/src/components/ProjectsPanel.tsx",
+            {"path": "frontend/src/lib/apiClient.ts"},
+        ],
+        "changes": [
+            {"filePath": "frontend/src/components/ProjectsPanel.tsx"},
+            {"file_path": "frontend/src/store.ts"},
+        ],
+    }
+
+    assert project_chat._extract_file_paths(payload) == [
+        "frontend/src/components/ProjectsPanel.tsx",
+        "frontend/src/lib/apiClient.ts",
+        "frontend/src/store.ts",
+    ]
+
+
+def test_append_tool_output_keeps_latest_tail() -> None:
+    output = project_chat._append_tool_output("abc", "def", limit=4)
+
+    assert output == "cdef"
+
+
+def test_tool_call_from_command_execution_item_uses_completed_payload() -> None:
+    tool_call = project_chat._tool_call_from_item(
+        {
+            "type": "commandExecution",
+            "id": "call_123",
+            "command": "/bin/bash -lc 'ls -1 /app | head -n 5'",
+            "status": "completed",
+            "aggregatedOutput": "AGENTS.md\nDockerfile\n",
+            "exitCode": 0,
+        }
+    )
+
+    assert tool_call is not None
+    assert tool_call.kind == "command_execution"
+    assert tool_call.status == "completed"
+    assert tool_call.command == "/bin/bash -lc 'ls -1 /app | head -n 5'"
+    assert tool_call.output == "AGENTS.md\nDockerfile\n"
+
+
+def test_tool_call_from_file_change_item_collects_paths() -> None:
+    tool_call = project_chat._tool_call_from_item(
+        {
+            "type": "fileChange",
+            "status": "inProgress",
+            "changes": [
+                {"path": "frontend/src/components/ProjectsPanel.tsx"},
+                {"filePath": "frontend/src/store.ts"},
+            ],
+        }
+    )
+
+    assert tool_call is not None
+    assert tool_call.kind == "file_change"
+    assert tool_call.status == "running"
+    assert tool_call.file_paths == [
+        "frontend/src/components/ProjectsPanel.tsx",
+        "frontend/src/store.ts",
+    ]
+
+
+def test_sync_live_tool_call_turns_upserts_after_user_turn(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    state = project_chat.ConversationState(
+        conversation_id="conversation-test",
+        project_path="/tmp/project",
+        turns=[
+            project_chat.ConversationTurn(
+                id="turn-user-1",
+                role="user",
+                content="Run ls",
+                timestamp="2026-03-06T23:00:00Z",
+            )
+        ],
+    )
+
+    service._sync_live_tool_call_turns(
+        state,
+        "turn-user-1",
+        [
+            project_chat.ToolCallRecord(
+                kind="command_execution",
+                status="running",
+                title="Run command",
+                command="ls -1 /app",
+                output=None,
+            )
+        ],
+    )
+
+    assert [turn.kind for turn in state.turns] == ["message", "tool_call"]
+    assert state.turns[1].tool_call is not None
+    assert state.turns[1].tool_call.command == "ls -1 /app"
+
+    service._sync_live_tool_call_turns(
+        state,
+        "turn-user-1",
+        [
+            project_chat.ToolCallRecord(
+                kind="command_execution",
+                status="completed",
+                title="Run command",
+                command="ls -1 /app",
+                output="AGENTS.md\n",
+            )
+        ],
+    )
+
+    assert [turn.kind for turn in state.turns] == ["message", "tool_call"]
+    assert state.turns[1].tool_call is not None
+    assert state.turns[1].tool_call.status == "completed"
+    assert state.turns[1].tool_call.output == "AGENTS.md\n"
+
+
+def test_conversation_session_state_round_trips(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    session_state = project_chat.ConversationSessionState(
+        conversation_id="conversation-test",
+        updated_at="2026-03-06T23:59:00Z",
+        project_path="/tmp/project",
+        runtime_project_path="/runtime/project",
+        thread_id="thread-123",
+    )
+
+    service._write_session_state(session_state)
+    loaded = service._read_session_state("conversation-test")
+
+    assert loaded is not None
+    assert loaded.conversation_id == "conversation-test"
+    assert loaded.thread_id == "thread-123"
+    assert loaded.project_path == project_chat._normalize_project_path("/tmp/project")
+    assert loaded.runtime_project_path == project_chat._normalize_project_path("/runtime/project")
+
+
+def test_build_session_restores_persisted_thread_id(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    service._write_session_state(
+        project_chat.ConversationSessionState(
+            conversation_id="conversation-test",
+            updated_at="2026-03-06T23:59:00Z",
+            project_path="/tmp/project",
+            runtime_project_path="/runtime/project",
+            thread_id="thread-restored",
+        )
+    )
+
+    session = service._build_session("conversation-test", "/tmp/project")
+
+    assert session._thread_id == "thread-restored"
+
+
+def test_chat_session_resumes_persisted_thread_before_starting(monkeypatch) -> None:
+    updated_thread_ids: list[str] = []
+    session = project_chat.CodexAppServerChatSession(
+        "/tmp/project",
+        persisted_thread_id="thread-existing",
+        on_thread_id_updated=updated_thread_ids.append,
+    )
+    calls: list[tuple[str, dict[str, object] | None]] = []
+
+    def fake_send_request(method: str, params: dict[str, object] | None) -> dict[str, object]:
+        calls.append((method, params))
+        if method == "thread/resume":
+            return {"result": {"thread": {"id": "thread-existing"}}}
+        raise AssertionError(f"unexpected method {method}")
+
+    monkeypatch.setattr(session, "_send_request", fake_send_request)
+
+    session._ensure_thread("gpt-test")
+
+    assert [method for method, _ in calls] == ["thread/resume"]
+    assert calls[0][1] is not None
+    assert calls[0][1]["threadId"] == "thread-existing"
+    assert session._thread_id == "thread-existing"
+    assert updated_thread_ids == ["thread-existing"]
+
+
+def test_chat_session_starts_new_durable_thread_when_resume_fails(monkeypatch) -> None:
+    updated_thread_ids: list[str] = []
+    session = project_chat.CodexAppServerChatSession(
+        "/tmp/project",
+        persisted_thread_id="thread-stale",
+        on_thread_id_updated=updated_thread_ids.append,
+    )
+    calls: list[tuple[str, dict[str, object] | None]] = []
+
+    def fake_send_request(method: str, params: dict[str, object] | None) -> dict[str, object]:
+        calls.append((method, params))
+        if method == "thread/resume":
+            return {"error": {"code": -32600, "message": "no rollout found"}}
+        if method == "thread/start":
+            return {"result": {"thread": {"id": "thread-fresh"}}}
+        raise AssertionError(f"unexpected method {method}")
+
+    monkeypatch.setattr(session, "_send_request", fake_send_request)
+
+    session._ensure_thread("gpt-test")
+
+    assert [method for method, _ in calls] == ["thread/resume", "thread/start"]
+    assert calls[1][1] is not None
+    assert calls[1][1]["ephemeral"] is False
+    assert session._thread_id == "thread-fresh"
+    assert updated_thread_ids == ["thread-fresh"]

@@ -1,6 +1,6 @@
 import { ProjectsPanel } from '@/components/ProjectsPanel'
 import { useStore } from '@/store'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -230,5 +230,117 @@ describe('ProjectsPanel', () => {
     await waitFor(() => {
       expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Visible.')
     })
+  })
+
+  it('auto-follows at the live edge and shows a jump control when scrolled away', async () => {
+    const user = userEvent.setup()
+    act(() => {
+      useStore.getState().registerProject('/tmp/chat-scroll-project')
+      useStore.getState().setActiveProjectPath('/tmp/chat-scroll-project')
+      useStore.getState().updateProjectScopedWorkspace('/tmp/chat-scroll-project', {
+        conversationHistory: [
+          {
+            role: 'user',
+            content: 'First',
+            timestamp: '2026-03-06T18:00:00Z',
+            kind: 'message',
+            artifactId: null,
+            toolCall: null,
+          },
+          {
+            role: 'assistant',
+            content: 'Second',
+            timestamp: '2026-03-06T18:00:05Z',
+            kind: 'message',
+            artifactId: null,
+            toolCall: null,
+          },
+        ],
+      })
+    })
+
+    render(<ProjectsPanel />)
+
+    const conversationBody = screen.getByTestId('project-ai-conversation-body') as HTMLDivElement
+    let scrollTop = 200
+    let scrollHeight = 400
+    Object.defineProperty(conversationBody, 'clientHeight', {
+      configurable: true,
+      get: () => 200,
+    })
+    Object.defineProperty(conversationBody, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    })
+    Object.defineProperty(conversationBody, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value
+      },
+    })
+    conversationBody.scrollTo = vi.fn(({ top }: ScrollToOptions) => {
+      if (typeof top === 'number') {
+        scrollTop = top
+      }
+    })
+
+    fireEvent.scroll(conversationBody)
+
+    scrollHeight = 520
+    act(() => {
+      useStore.getState().updateProjectScopedWorkspace('/tmp/chat-scroll-project', {
+        conversationHistory: [
+          ...useStore.getState().projectScopedWorkspaces['/tmp/chat-scroll-project']!.conversationHistory,
+          {
+            role: 'assistant',
+            content: 'Third',
+            timestamp: '2026-03-06T18:00:10Z',
+            kind: 'message',
+            artifactId: null,
+            toolCall: null,
+          },
+        ],
+      })
+    })
+
+    await waitFor(() => {
+      expect(scrollTop).toBe(520)
+    })
+    expect(screen.queryByTestId('project-ai-conversation-jump-to-bottom')).not.toBeInTheDocument()
+
+    scrollTop = 120
+    fireEvent.scroll(conversationBody)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-jump-to-bottom')).toBeVisible()
+    })
+
+    scrollHeight = 640
+    act(() => {
+      useStore.getState().updateProjectScopedWorkspace('/tmp/chat-scroll-project', {
+        conversationHistory: [
+          ...useStore.getState().projectScopedWorkspaces['/tmp/chat-scroll-project']!.conversationHistory,
+          {
+            role: 'assistant',
+            content: 'Fourth',
+            timestamp: '2026-03-06T18:00:15Z',
+            kind: 'message',
+            artifactId: null,
+            toolCall: null,
+          },
+        ],
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-jump-to-bottom')).toBeVisible()
+    })
+    expect(scrollTop).toBe(120)
+
+    await user.click(screen.getByTestId('project-ai-conversation-jump-to-bottom'))
+
+    expect(conversationBody.scrollTo).toHaveBeenCalled()
+    expect(scrollTop).toBe(640)
   })
 })
