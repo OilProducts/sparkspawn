@@ -91,7 +91,6 @@ describe('Execution controls behavior', () => {
           selectedRunId: null,
           workingDir: '/tmp/project',
           conversationId: null,
-          conversationHistory: [],
           projectEventLog: [],
           specId: 'spec-123',
           specStatus: 'approved',

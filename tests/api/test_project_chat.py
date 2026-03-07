@@ -61,6 +61,7 @@ def test_tool_call_from_command_execution_item_uses_completed_payload() -> None:
     )
 
     assert tool_call is not None
+    assert tool_call.id == "call_123"
     assert tool_call.kind == "command_execution"
     assert tool_call.status == "completed"
     assert tool_call.command == "/bin/bash -lc 'ls -1 /app | head -n 5'"
@@ -80,6 +81,7 @@ def test_tool_call_from_file_change_item_collects_paths() -> None:
     )
 
     assert tool_call is not None
+    assert tool_call.id
     assert tool_call.kind == "file_change"
     assert tool_call.status == "running"
     assert tool_call.file_paths == [
@@ -88,7 +90,7 @@ def test_tool_call_from_file_change_item_collects_paths() -> None:
     ]
 
 
-def test_sync_live_tool_call_turns_upserts_after_user_turn(tmp_path: Path) -> None:
+def test_append_turn_event_records_tool_call_against_assistant_turn(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     state = project_chat.ConversationState(
         conversation_id="conversation-test",
@@ -99,46 +101,53 @@ def test_sync_live_tool_call_turns_upserts_after_user_turn(tmp_path: Path) -> No
                 role="user",
                 content="Run ls",
                 timestamp="2026-03-06T23:00:00Z",
-            )
+            ),
+            project_chat.ConversationTurn(
+                id="turn-assistant-1",
+                role="assistant",
+                content="",
+                timestamp="2026-03-06T23:00:01Z",
+                status="streaming",
+                parent_turn_id="turn-user-1",
+            ),
         ],
     )
 
-    service._sync_live_tool_call_turns(
+    started_event = service._append_turn_event(
         state,
-        "turn-user-1",
-        [
-            project_chat.ToolCallRecord(
-                kind="command_execution",
-                status="running",
-                title="Run command",
-                command="ls -1 /app",
-                output=None,
-            )
-        ],
+        "turn-assistant-1",
+        "tool_call_started",
+        tool_call_id="call-1",
+        tool_call=project_chat.ToolCallRecord(
+            id="call-1",
+            kind="command_execution",
+            status="running",
+            title="Run command",
+            command="ls -1 /app",
+            output=None,
+        ),
     )
-
-    assert [turn.kind for turn in state.turns] == ["message", "tool_call"]
-    assert state.turns[1].tool_call is not None
-    assert state.turns[1].tool_call.command == "ls -1 /app"
-
-    service._sync_live_tool_call_turns(
+    completed_event = service._append_turn_event(
         state,
-        "turn-user-1",
-        [
-            project_chat.ToolCallRecord(
-                kind="command_execution",
-                status="completed",
-                title="Run command",
-                command="ls -1 /app",
-                output="AGENTS.md\n",
-            )
-        ],
+        "turn-assistant-1",
+        "tool_call_completed",
+        tool_call_id="call-1",
+        tool_call=project_chat.ToolCallRecord(
+            id="call-1",
+            kind="command_execution",
+            status="completed",
+            title="Run command",
+            command="ls -1 /app",
+            output="AGENTS.md\n",
+        ),
     )
 
-    assert [turn.kind for turn in state.turns] == ["message", "tool_call"]
-    assert state.turns[1].tool_call is not None
-    assert state.turns[1].tool_call.status == "completed"
-    assert state.turns[1].tool_call.output == "AGENTS.md\n"
+    assert [event.kind for event in state.turn_events] == ["tool_call_started", "tool_call_completed"]
+    assert started_event.turn_id == "turn-assistant-1"
+    assert started_event.sequence == 1
+    assert completed_event.sequence == 2
+    assert completed_event.tool_call is not None
+    assert completed_event.tool_call.output == "AGENTS.md\n"
 
 
 def test_conversation_session_state_round_trips(tmp_path: Path) -> None:
@@ -302,7 +311,7 @@ def test_chat_session_turn_completes_after_final_answer_quiet_period(monkeypatch
             None,
         ]
     )
-    monotonic_values = iter([0.0, 0.0, 0.0, 1.5])
+    monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.5, 1.5, 1.5])
 
     monkeypatch.setattr(session, "_ensure_process", lambda: None)
 
@@ -322,6 +331,144 @@ def test_chat_session_turn_completes_after_final_answer_quiet_period(monkeypatch
     result = session.turn("hello", None)
 
     assert result.assistant_message == '{"assistant_message":"Ack"}'
+
+
+def test_chat_session_turn_completes_after_live_assistant_quiet_period(monkeypatch) -> None:
+    session = project_chat.CodexAppServerChatSession("/tmp/project")
+    lines = iter(
+        [
+            json.dumps(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "{\"assistant_message\":\"Ack"},
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "\"}"},
+                }
+            ),
+            None,
+            None,
+        ]
+    )
+    monotonic_values = iter([0.0, 0.0, 0.4, 0.4, 0.8, 3.3, 3.3, 3.3])
+
+    monkeypatch.setattr(session, "_ensure_process", lambda: None)
+
+    def fake_ensure_thread(model: str | None) -> None:
+        session._thread_id = "thread-123"
+        session._thread_initialized = True
+
+    monkeypatch.setattr(project_chat.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
+    monkeypatch.setattr(
+        session,
+        "_send_request",
+        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
+    )
+    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
+
+    result = session.turn("hello", None)
+
+    assert result.assistant_message == '{"assistant_message":"Ack"}'
+
+
+def test_send_turn_retries_when_app_server_request_times_out_before_progress(tmp_path: Path, monkeypatch) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+
+    class TimedOutSession:
+        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+            raise RuntimeError("codex app-server request timed out waiting for response")
+
+        def _close(self) -> None:
+            return None
+
+    class FreshSession:
+        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+            return project_chat.ChatTurnResult(
+                assistant_message='{"assistant_message":"hi"}',
+                tool_calls=[],
+            )
+
+        def _close(self) -> None:
+            return None
+
+    sessions = [TimedOutSession(), FreshSession()]
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: sessions.pop(0))
+    monkeypatch.setattr(
+        service,
+        "_replace_session",
+        lambda conversation_id, project_path, persisted_thread_id=None: sessions.pop(0),
+    )
+
+    snapshot = service.send_turn("conversation-test", str(tmp_path), "hi", None)
+
+    assert snapshot["turns"][-1]["role"] == "assistant"
+    assert snapshot["turns"][-1]["content"] == "hi"
+
+
+def test_chat_session_ignores_duplicate_codex_agent_delta_channel(monkeypatch) -> None:
+    session = project_chat.CodexAppServerChatSession("/tmp/project")
+    lines = iter(
+        [
+            json.dumps(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "{\"assistant_message\":\"Ack"},
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "codex/event/agent_message_delta",
+                    "params": {"msg": {"delta": "{\"assistant_message\":\"Ack"}},
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "\"}"},
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "codex/event/task_complete",
+                    "params": {
+                        "msg": {
+                            "type": "task_complete",
+                            "last_agent_message": '{"assistant_message":"Ack"}',
+                        }
+                    },
+                }
+            ),
+        ]
+    )
+    progress_messages: list[str] = []
+
+    monkeypatch.setattr(session, "_ensure_process", lambda: None)
+
+    def fake_ensure_thread(model: str | None) -> None:
+        session._thread_id = "thread-123"
+        session._thread_initialized = True
+
+    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
+    monkeypatch.setattr(
+        session,
+        "_send_request",
+        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
+    )
+    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
+
+    result = session.turn(
+        "hello",
+        None,
+        on_progress=lambda progress: progress_messages.append(progress.assistant_message),
+    )
+
+    assert result.assistant_message == '{"assistant_message":"Ack"}'
+    assert any(message == '{"assistant_message":"Ack' for message in progress_messages)
+    assert all("assistantassistant" not in message for message in progress_messages)
 
 
 def test_send_turn_retries_with_fresh_session_after_timeout(tmp_path: Path, monkeypatch) -> None:
@@ -431,6 +578,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
                         assistant_message='{"assistant_message":"Working on it","spec_proposal":null}',
                         tool_calls=[
                             project_chat.ToolCallRecord(
+                                id="call-pwd",
                                 kind="command_execution",
                                 status="running",
                                 title="Run command",
@@ -444,6 +592,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
                 assistant_message='{"assistant_message":"ACK","spec_proposal":null}',
                 tool_calls=[
                     project_chat.ToolCallRecord(
+                        id="call-pwd",
                         kind="command_execution",
                         status="completed",
                         title="Run command",
@@ -467,11 +616,23 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     assert response.status_code == 200
     payload = response.json()
     assert payload["conversation_id"] == "conversation-test"
-    assert [turn["kind"] for turn in payload["turns"]] == ["message", "tool_call", "message"]
-    assert payload["turns"][2]["content"] == "ACK"
+    assert [turn["role"] for turn in payload["turns"]] == ["user", "assistant"]
+    assert payload["turns"][1]["content"] == "ACK"
+    assert payload["turns"][1]["status"] == "complete"
+    assert [event["kind"] for event in payload["turn_events"]] == [
+        "assistant_delta",
+        "tool_call_started",
+        "assistant_delta",
+        "assistant_completed",
+    ]
     assert partial_snapshots
-    assert [turn["kind"] for turn in partial_snapshots[-1]["turns"]] == ["message", "tool_call", "message"]
-    assert partial_snapshots[-1]["turns"][2]["content"] == "Working on it"
+    assert [turn["role"] for turn in partial_snapshots[-1]["turns"]] == ["user", "assistant"]
+    assert partial_snapshots[-1]["turns"][1]["content"] == "Working on it"
+    assert partial_snapshots[-1]["turns"][1]["status"] == "streaming"
+    assert [event["kind"] for event in partial_snapshots[-1]["turn_events"]] == [
+        "assistant_delta",
+        "tool_call_started",
+    ]
 
 
 def test_list_project_conversations_endpoint_returns_project_threads(api_client, tmp_path: Path) -> None:

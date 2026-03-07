@@ -6,7 +6,7 @@ Date: 2026-03-03
 
 ## Scope
 
-This report lists configuration required by [`ui-spec.md`](/Users/chris/tinker/sparkspawn/ui-spec.md) that is still not authorable through first-class UI controls, forcing users to leave the UI and edit raw DOT.
+This report lists configuration required by [`ui-spec.md`](/Users/chris/tinker/sparkspawn/specs/ui-spec.md) that is still not authorable through first-class UI controls, forcing users to leave the UI and edit raw DOT.
 
 ## Current Required Raw-DOT Surfaces
 

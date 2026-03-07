@@ -104,11 +104,34 @@ export interface ConversationTurnResponse {
     role: 'user' | 'assistant' | 'system'
     content: string
     timestamp: string
-    kind: 'message' | 'spec_edit_proposal' | 'execution_card' | 'tool_call'
+    status: 'pending' | 'streaming' | 'complete' | 'failed'
+    kind: 'message' | 'spec_edit_proposal' | 'execution_card'
     artifact_id?: string | null
+    parent_turn_id?: string | null
+    error?: string | null
+}
+
+export interface ConversationTurnEventResponse {
+    id: string
+    turn_id: string
+    sequence: number
+    timestamp: string
+    kind:
+        | 'assistant_delta'
+        | 'assistant_completed'
+        | 'assistant_failed'
+        | 'tool_call_started'
+        | 'tool_call_updated'
+        | 'tool_call_completed'
+        | 'tool_call_failed'
+        | 'retry_started'
+    content_delta?: string | null
+    message?: string | null
+    tool_call_id?: string | null
     tool_call?: {
         kind: 'command_execution' | 'file_change'
         status: 'running' | 'completed' | 'failed'
+        id: string
         title: string
         command?: string | null
         output?: string | null
@@ -171,6 +194,7 @@ export interface ConversationSnapshotResponse {
     created_at: string
     updated_at: string
     turns: ConversationTurnResponse[]
+    turn_events: ConversationTurnEventResponse[]
     event_log: WorkflowEventResponse[]
     spec_edit_proposals: SpecEditProposalResponse[]
     execution_cards: ExecutionCardResponse[]
@@ -189,6 +213,24 @@ export interface ConversationSummaryResponse {
     created_at: string
     updated_at: string
     last_message_preview?: string | null
+}
+
+export interface ConversationTurnUpsertEventResponse {
+    type: 'turn_upsert'
+    conversation_id: string
+    project_path: string
+    title: string
+    updated_at: string
+    turn: ConversationTurnResponse
+}
+
+export interface ConversationTurnEventStreamResponse {
+    type: 'turn_event'
+    conversation_id: string
+    project_path: string
+    title: string
+    updated_at: string
+    event: ConversationTurnEventResponse
 }
 
 export class ApiSchemaError extends Error {
@@ -597,35 +639,76 @@ function parseConversationTurnResponse(value: unknown, endpoint: string): Conver
     if (role !== 'user' && role !== 'assistant' && role !== 'system') {
         return null
     }
-    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'execution_card' || record.kind === 'tool_call' || record.kind === 'message'
+    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'execution_card' || record.kind === 'message'
         ? record.kind
         : 'message'
     if (typeof record.id !== 'string' || typeof record.content !== 'string' || typeof record.timestamp !== 'string') {
         return null
     }
+    const status = record.status === 'pending'
+        || record.status === 'streaming'
+        || record.status === 'failed'
+        ? record.status
+        : 'complete'
     return {
         id: record.id,
         role,
         content: record.content,
         timestamp: record.timestamp,
+        status,
         kind,
         artifact_id: asOptionalNullableString(record.artifact_id),
-        tool_call: (() => {
-            const toolCall = asUnknownRecord(record.tool_call)
-            if (!toolCall || typeof toolCall.title !== 'string') {
-                return null
-            }
-            const toolKind = toolCall.kind === 'file_change' ? 'file_change' : 'command_execution'
-            const status = toolCall.status === 'running' || toolCall.status === 'failed' ? toolCall.status : 'completed'
-            return {
-                kind: toolKind,
-                status,
+        parent_turn_id: asOptionalNullableString(record.parent_turn_id),
+        error: asOptionalNullableString(record.error),
+    }
+}
+
+function parseConversationTurnEventResponse(value: unknown, endpoint: string): ConversationTurnEventResponse | null {
+    const record = asUnknownRecord(value)
+    if (
+        !record
+        || typeof record.id !== 'string'
+        || typeof record.turn_id !== 'string'
+        || typeof record.sequence !== 'number'
+        || typeof record.timestamp !== 'string'
+        || typeof record.kind !== 'string'
+    ) {
+        return null
+    }
+    const kind = record.kind === 'assistant_delta'
+        || record.kind === 'assistant_completed'
+        || record.kind === 'assistant_failed'
+        || record.kind === 'tool_call_started'
+        || record.kind === 'tool_call_updated'
+        || record.kind === 'tool_call_completed'
+        || record.kind === 'tool_call_failed'
+        || record.kind === 'retry_started'
+        ? record.kind
+        : null
+    if (!kind) {
+        return null
+    }
+    const toolCall = asUnknownRecord(record.tool_call)
+    return {
+        id: record.id,
+        turn_id: record.turn_id,
+        sequence: record.sequence,
+        timestamp: record.timestamp,
+        kind,
+        content_delta: asOptionalNullableString(record.content_delta),
+        message: asOptionalNullableString(record.message),
+        tool_call_id: asOptionalNullableString(record.tool_call_id),
+        tool_call: toolCall && typeof toolCall.title === 'string' && typeof toolCall.id === 'string'
+            ? {
+                id: toolCall.id,
+                kind: toolCall.kind === 'file_change' ? 'file_change' : 'command_execution',
+                status: toolCall.status === 'running' || toolCall.status === 'failed' ? toolCall.status : 'completed',
                 title: toolCall.title,
                 command: asOptionalNullableString(toolCall.command),
                 output: asOptionalNullableString(toolCall.output),
                 file_paths: Array.isArray(toolCall.file_paths) ? toolCall.file_paths.map((entry) => String(entry)) : [],
             }
-        })(),
+            : null,
     }
 }
 
@@ -784,6 +867,11 @@ export function parseConversationSnapshotResponse(
             .map((entry) => parseWorkflowEventResponse(entry))
             .filter((entry): entry is WorkflowEventResponse => entry !== null)
         : []
+    const turn_events = Array.isArray(record.turn_events)
+        ? record.turn_events
+            .map((entry) => parseConversationTurnEventResponse(entry, endpoint))
+            .filter((entry): entry is ConversationTurnEventResponse => entry !== null)
+        : []
     const spec_edit_proposals = Array.isArray(record.spec_edit_proposals)
         ? record.spec_edit_proposals
             .map((entry) => parseSpecEditProposalResponse(entry))
@@ -802,6 +890,7 @@ export function parseConversationSnapshotResponse(
         created_at: asOptionalString(record.created_at) || '',
         updated_at: asOptionalString(record.updated_at) || asOptionalString(record.created_at) || '',
         turns,
+        turn_events,
         event_log,
         spec_edit_proposals,
         execution_cards,
@@ -814,6 +903,55 @@ export function parseConversationSnapshotResponse(
             flow_source: asOptionalNullableString(executionWorkflowRecord.flow_source),
         },
     }
+}
+
+export function parseConversationStreamEventResponse(
+    payload: unknown,
+    endpoint = '/api/conversations/{id}/events',
+): ConversationTurnUpsertEventResponse | ConversationTurnEventStreamResponse | null {
+    const record = expectObjectRecord(payload, endpoint)
+    const type = typeof record.type === 'string' ? record.type : ''
+    if (type === 'turn_upsert') {
+        const turn = parseConversationTurnResponse(record.turn, endpoint)
+        if (
+            !turn
+            || typeof record.conversation_id !== 'string'
+            || typeof record.project_path !== 'string'
+            || typeof record.title !== 'string'
+            || typeof record.updated_at !== 'string'
+        ) {
+            return null
+        }
+        return {
+            type: 'turn_upsert',
+            conversation_id: record.conversation_id,
+            project_path: record.project_path,
+            title: record.title,
+            updated_at: record.updated_at,
+            turn,
+        }
+    }
+    if (type === 'turn_event') {
+        const event = parseConversationTurnEventResponse(record.event, endpoint)
+        if (
+            !event
+            || typeof record.conversation_id !== 'string'
+            || typeof record.project_path !== 'string'
+            || typeof record.title !== 'string'
+            || typeof record.updated_at !== 'string'
+        ) {
+            return null
+        }
+        return {
+            type: 'turn_event',
+            conversation_id: record.conversation_id,
+            project_path: record.project_path,
+            title: record.title,
+            updated_at: record.updated_at,
+            event,
+        }
+    }
+    return null
 }
 
 export async function fetchFlowListValidated(): Promise<string[]> {

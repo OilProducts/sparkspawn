@@ -31,7 +31,6 @@ const resetGraphSettingsState = () => {
         selectedRunId: null,
         workingDir: DEFAULT_WORKING_DIRECTORY,
         conversationId: null,
-        conversationHistory: [],
         specId: null,
         specStatus: 'draft',
         planId: null,

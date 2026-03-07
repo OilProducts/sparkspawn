@@ -84,7 +84,7 @@ def _extract_ui_spec_refs(cell_text: str) -> set[str]:
 
 
 def test_advanced_feature_access_doc_contract() -> None:
-    _, doc_text = _load_doc("ui-advanced-feature-access.md")
+    _, doc_text = _load_doc("specs/ui-advanced-feature-access.md")
     assert _checklist_item_id(doc_text) == "1.3-03"
 
     headings = set(_h2_headings(doc_text))
@@ -102,7 +102,7 @@ def test_advanced_feature_access_doc_contract() -> None:
 
 
 def test_parity_complete_user_journey_doc_contract() -> None:
-    _, doc_text = _load_doc("ui-parity-complete-user-journey.md")
+    _, doc_text = _load_doc("specs/ui-parity-complete-user-journey.md")
     assert _checklist_item_id(doc_text) == "1.2-01"
 
     headings = set(_h2_headings(doc_text))
@@ -203,7 +203,7 @@ def test_raw_dot_required_config_doc_contract() -> None:
 
 
 def test_role_persona_scenarios_doc_contract() -> None:
-    _, doc_text = _load_doc("ui-role-persona-scenarios.md")
+    _, doc_text = _load_doc("specs/ui-role-persona-scenarios.md")
     assert _checklist_item_id(doc_text) == "3.1-01"
 
     persona_headings = {
@@ -225,7 +225,7 @@ def test_role_persona_scenarios_doc_contract() -> None:
 
 
 def test_runtime_parser_boundaries_doc_contract() -> None:
-    _, doc_text = _load_doc("ui-runtime-parser-boundaries.md")
+    _, doc_text = _load_doc("specs/ui-runtime-parser-boundaries.md")
     assert _checklist_item_id(doc_text) == "1.3-01"
 
     headings = set(_h2_headings(doc_text))
@@ -249,7 +249,7 @@ def test_runtime_parser_boundaries_doc_contract() -> None:
 
 
 def test_spec_first_behavior_mapping_doc_contract() -> None:
-    _, doc_text = _load_doc("ui-spec-first-behavior-map.md")
+    _, doc_text = _load_doc("specs/ui-spec-first-behavior-map.md")
     assert _checklist_item_id(doc_text) == "2-01"
 
     headings = set(_h2_headings(doc_text))

@@ -25,7 +25,7 @@ def _count_section_11_checkbox_items(spec_text: str) -> int:
 
 def test_release_gate_traceability_covers_section_11_and_parity_matrix() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    spec_path = repo_root / "attractor-spec.md"
+    spec_path = repo_root / "specs/attractor-spec.md"
     spec_text = spec_path.read_text(encoding="utf-8")
 
     records = build_release_gate_traceability_records(spec_text)
@@ -39,7 +39,7 @@ def test_release_gate_traceability_covers_section_11_and_parity_matrix() -> None
 
 def test_release_gate_traceability_links_reference_existing_artifacts() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    spec_text = (repo_root / "attractor-spec.md").read_text(encoding="utf-8")
+    spec_text = (repo_root / "specs/attractor-spec.md").read_text(encoding="utf-8")
 
     records = build_release_gate_traceability_records(spec_text)
     assert records

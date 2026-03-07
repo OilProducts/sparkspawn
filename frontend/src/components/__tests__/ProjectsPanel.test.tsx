@@ -205,7 +205,7 @@ describe('ProjectsPanel', () => {
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
 
     expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Show this message immediately.')
-    expect(screen.getByTestId('project-ai-conversation-pending-row')).toHaveTextContent('Thinking...')
+    expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Thinking...')
     expect(screen.getByTestId('project-ai-conversation-send-button')).toHaveTextContent('Thinking...')
 
     resolveTurnResponse?.(
@@ -219,6 +219,7 @@ describe('ProjectsPanel', () => {
               role: 'user',
               content: 'Show this message immediately.',
               timestamp: '2026-03-06T21:45:00Z',
+              status: 'complete',
               kind: 'message',
               artifact_id: null,
             },
@@ -227,8 +228,27 @@ describe('ProjectsPanel', () => {
               role: 'assistant',
               content: 'Visible.',
               timestamp: '2026-03-06T21:45:02Z',
+              status: 'complete',
               kind: 'message',
               artifact_id: null,
+            },
+          ],
+          turn_events: [
+            {
+              id: 'event-assistant-delta-1',
+              turn_id: 'turn-assistant-1',
+              sequence: 1,
+              timestamp: '2026-03-06T21:45:01Z',
+              kind: 'assistant_delta',
+              content_delta: 'Visible.',
+            },
+            {
+              id: 'event-assistant-complete-1',
+              turn_id: 'turn-assistant-1',
+              sequence: 2,
+              timestamp: '2026-03-06T21:45:02Z',
+              kind: 'assistant_completed',
+              message: 'Assistant turn completed.',
             },
           ],
           event_log: [],
@@ -250,9 +270,6 @@ describe('ProjectsPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Visible.')
-    })
-    await waitFor(() => {
-      expect(screen.queryByTestId('project-ai-conversation-pending-row')).not.toBeInTheDocument()
     })
     expect(screen.getByTestId('project-ai-conversation-send-button')).toHaveTextContent('Send')
   })
@@ -343,6 +360,174 @@ describe('ProjectsPanel', () => {
     })
   })
 
+  it('streams assistant text into the history before the turn response completes', async () => {
+    class MockEventSource {
+      static instances: MockEventSource[] = []
+
+      url: string
+      onmessage: ((event: MessageEvent) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        MockEventSource.instances.push(this)
+      }
+
+      close() {}
+    }
+
+    const user = userEvent.setup()
+    let resolveTurnResponse: ((response: Response) => void) | null = null
+
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && !init?.method) {
+          return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+          return await new Promise<Response>((resolve) => {
+            resolveTurnResponse = resolve
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+
+    render(<ProjectsPanel />)
+
+    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Stream this reply.')
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    expect(conversationId).toBeTruthy()
+
+    await waitFor(() => {
+      expect(MockEventSource.instances.length).toBeGreaterThan(0)
+    })
+    expect(MockEventSource.instances).toHaveLength(1)
+
+    act(() => {
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'conversation_snapshot',
+          state: {
+            conversation_id: conversationId,
+            project_path: '/tmp/chat-project',
+            title: 'Stream this reply.',
+            created_at: '2026-03-07T15:30:00Z',
+            updated_at: '2026-03-07T15:30:02Z',
+            turns: [
+              {
+                id: 'turn-user-1',
+                role: 'user',
+                content: 'Stream this reply.',
+                timestamp: '2026-03-07T15:30:00Z',
+                kind: 'message',
+                artifact_id: null,
+              },
+              {
+                id: 'turn-assistant-live',
+                role: 'assistant',
+                content: 'Working on',
+                timestamp: '2026-03-07T15:30:02Z',
+                kind: 'message',
+                artifact_id: null,
+              },
+            ],
+            event_log: [],
+            spec_edit_proposals: [],
+            execution_cards: [],
+            execution_workflow: {
+              run_id: null,
+              status: 'idle',
+              error: null,
+              flow_source: null,
+            },
+          },
+        }),
+      } as MessageEvent)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Working on')
+    })
+    expect(MockEventSource.instances).toHaveLength(1)
+    expect(screen.getByTestId('project-ai-conversation-send-button')).toHaveTextContent('Thinking...')
+
+    resolveTurnResponse?.(
+      new Response(
+        JSON.stringify({
+          conversation_id: conversationId,
+          project_path: '/tmp/chat-project',
+          title: 'Stream this reply.',
+          created_at: '2026-03-07T15:30:00Z',
+          updated_at: '2026-03-07T15:30:04Z',
+          turns: [
+            {
+              id: 'turn-user-1',
+              role: 'user',
+              content: 'Stream this reply.',
+              timestamp: '2026-03-07T15:30:00Z',
+              kind: 'message',
+              artifact_id: null,
+            },
+            {
+              id: 'turn-assistant-1',
+              role: 'assistant',
+              content: 'Working on it.',
+              timestamp: '2026-03-07T15:30:04Z',
+              kind: 'message',
+              artifact_id: null,
+            },
+          ],
+          event_log: [],
+          spec_edit_proposals: [],
+          execution_cards: [],
+          execution_workflow: {
+            run_id: null,
+            status: 'idle',
+            error: null,
+            flow_source: null,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Working on it.')
+    })
+    expect(MockEventSource.instances).toHaveLength(1)
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-send-button')).toHaveTextContent('Send')
+    })
+  })
+
   it('keeps the composer cleared when sending a turn fails', async () => {
     const user = userEvent.setup()
     vi.stubGlobal(
@@ -396,33 +581,98 @@ describe('ProjectsPanel', () => {
   })
 
   it('auto-follows at the live edge and shows a jump control when scrolled away', async () => {
+    class MockEventSource {
+      static instances: MockEventSource[] = []
+
+      onmessage: ((event: MessageEvent) => void) | null = null
+
+      constructor(public url: string) {
+        MockEventSource.instances.push(this)
+      }
+
+      close() {}
+    }
+
     const user = userEvent.setup()
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && !init?.method) {
+          return new Response(JSON.stringify({
+            conversation_id: 'conversation-scroll-1',
+            project_path: '/tmp/chat-scroll-project',
+            title: 'Scroll thread',
+            created_at: '2026-03-06T18:00:00Z',
+            updated_at: '2026-03-06T18:00:05Z',
+            turns: [
+              {
+                id: 'turn-user-1',
+                role: 'user',
+                content: 'First',
+                timestamp: '2026-03-06T18:00:00Z',
+                status: 'complete',
+                kind: 'message',
+                artifact_id: null,
+              },
+              {
+                id: 'turn-assistant-1',
+                role: 'assistant',
+                content: 'Second',
+                timestamp: '2026-03-06T18:00:05Z',
+                status: 'complete',
+                kind: 'message',
+                artifact_id: null,
+              },
+            ],
+            turn_events: [],
+            event_log: [],
+            spec_edit_proposals: [],
+            execution_cards: [],
+            execution_workflow: {
+              run_id: null,
+              status: 'idle',
+              error: null,
+              flow_source: null,
+            },
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
     act(() => {
       useStore.getState().registerProject('/tmp/chat-scroll-project')
       useStore.getState().setActiveProjectPath('/tmp/chat-scroll-project')
       useStore.getState().updateProjectScopedWorkspace('/tmp/chat-scroll-project', {
-        conversationHistory: [
-          {
-            role: 'user',
-            content: 'First',
-            timestamp: '2026-03-06T18:00:00Z',
-            kind: 'message',
-            artifactId: null,
-            toolCall: null,
-          },
-          {
-            role: 'assistant',
-            content: 'Second',
-            timestamp: '2026-03-06T18:00:05Z',
-            kind: 'message',
-            artifactId: null,
-            toolCall: null,
-          },
-        ],
+        conversationId: 'conversation-scroll-1',
       })
     })
 
     render(<ProjectsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Second')
+    })
 
     const conversationBody = screen.getByTestId('project-ai-conversation-body') as HTMLDivElement
     let scrollTop = 200
@@ -452,19 +702,24 @@ describe('ProjectsPanel', () => {
 
     scrollHeight = 520
     act(() => {
-      useStore.getState().updateProjectScopedWorkspace('/tmp/chat-scroll-project', {
-        conversationHistory: [
-          ...useStore.getState().projectScopedWorkspaces['/tmp/chat-scroll-project']!.conversationHistory,
-          {
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn_upsert',
+          conversation_id: 'conversation-scroll-1',
+          project_path: '/tmp/chat-scroll-project',
+          title: 'Scroll thread',
+          updated_at: '2026-03-06T18:00:10Z',
+          turn: {
+            id: 'turn-assistant-2',
             role: 'assistant',
             content: 'Third',
             timestamp: '2026-03-06T18:00:10Z',
+            status: 'complete',
             kind: 'message',
-            artifactId: null,
-            toolCall: null,
+            artifact_id: null,
           },
-        ],
-      })
+        }),
+      } as MessageEvent)
     })
 
     await waitFor(() => {
@@ -481,19 +736,24 @@ describe('ProjectsPanel', () => {
 
     scrollHeight = 640
     act(() => {
-      useStore.getState().updateProjectScopedWorkspace('/tmp/chat-scroll-project', {
-        conversationHistory: [
-          ...useStore.getState().projectScopedWorkspaces['/tmp/chat-scroll-project']!.conversationHistory,
-          {
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn_upsert',
+          conversation_id: 'conversation-scroll-1',
+          project_path: '/tmp/chat-scroll-project',
+          title: 'Scroll thread',
+          updated_at: '2026-03-06T18:00:15Z',
+          turn: {
+            id: 'turn-assistant-3',
             role: 'assistant',
             content: 'Fourth',
             timestamp: '2026-03-06T18:00:15Z',
+            status: 'complete',
             kind: 'message',
-            artifactId: null,
-            toolCall: null,
+            artifact_id: null,
           },
-        ],
-      })
+        }),
+      } as MessageEvent)
     })
 
     await waitFor(() => {

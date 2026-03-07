@@ -1,6 +1,6 @@
 # Attractor UI Implementation Checklist
 
-Companion to `/Users/chris/tinker/sparkspawn/ui-spec.md`.
+Companion to `/Users/chris/tinker/sparkspawn/specs/ui-spec.md`.
 
 Use this as the execution plan and verification ledger for full UI spec coverage. Tasks are ordered to match the UI spec section/subsection sequence.
 
@@ -31,7 +31,7 @@ Status key:
 
 ## 2. Design Principles
 
-- [x] [2-01] Implement spec-first behavior mapping for each UI control with direct spec references. (See `ui-spec-first-behavior-map.md`.)
+- [x] [2-01] Implement spec-first behavior mapping for each UI control with direct spec references. (See `specs/ui-spec-first-behavior-map.md`.)
 - [x] [2-02] Add no-silent-loss save protections and user-visible failure states.
 - [x] [2-03] Ensure progressive disclosure for advanced fields while preserving full editability.
 - [x] [2-04] Add explainability views for routing, retry, and failure decisions.
@@ -43,7 +43,7 @@ Status key:
 ## 3. Users and Primary Workflows
 
 ### 3.1 User Roles
-- [x] [3.1-01] Capture author/operator/reviewer/project-owner persona scenarios with concrete UI success criteria. (See `ui-role-persona-scenarios.md`.)
+- [x] [3.1-01] Capture author/operator/reviewer/project-owner persona scenarios with concrete UI success criteria. (See `specs/ui-role-persona-scenarios.md`.)
 
 ### 3.2 Primary Workflows
 - Deferred to `Deferred Tasks` until project-scoped conversation/spec/plan/build surfaces exist.
@@ -332,7 +332,7 @@ Status key:
 - [x] [11.5-01] Persist project registry across sessions with unique-directory enforcement.
   - Evidence (2026-03-04): Evaluator `pass`; added persisted project-registry load/save hydration (`sparkspawn.project_registry_state`) with normalized absolute-path dedupe and duplicate-directory enforcement retained in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) and screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
 - [x] [11.5-02] Persist and restore project-scoped conversation/spec/plan linkage.
-  - Evidence (2026-03-04): Evaluator `pass`; normalized project-key hydration now restores persisted `conversationId`/`conversationHistory`/`specId`/`planId` linkage for project-scoped workspaces in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.02` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) with screenshot-based visual QA review using `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
+  - Evidence (2026-03-04): Evaluator `pass`; normalized project-key hydration now restores persisted `conversationId`/`specId`/`planId` linkage for project-scoped workspaces in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.02` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) with screenshot-based visual QA review using `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
 - [x] [11.5-03] Rehydrate last active project context safely on reopen.
   - Evidence (2026-03-04): Evaluator `pass`; route-state hydration now clears persisted `activeFlow`/`selectedRunId` unless `activeProjectPath` is a valid absolute path (`frontend/src/store.ts`), covered by frontend contract `CID:11.5.03` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) with screenshot-based visual QA on `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
 

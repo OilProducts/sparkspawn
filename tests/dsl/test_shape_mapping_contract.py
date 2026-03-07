@@ -6,7 +6,7 @@ from attractor.handlers.registry import SHAPE_TO_TYPE
 
 
 def _shape_mapping_from_spec() -> dict[str, str]:
-    spec_path = Path(__file__).resolve().parents[2] / "attractor-spec.md"
+    spec_path = Path(__file__).resolve().parents[2] / "specs/attractor-spec.md"
     lines = spec_path.read_text(encoding="utf-8").splitlines()
 
     start_idx = lines.index("### 2.8 Shape-to-Handler-Type Mapping")

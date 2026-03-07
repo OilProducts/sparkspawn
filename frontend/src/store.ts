@@ -69,22 +69,6 @@ export interface ProjectRegistrationResult {
     error?: string
 }
 
-export interface ConversationHistoryEntry {
-    role: 'user' | 'assistant' | 'system'
-    content: string
-    timestamp: string
-    kind?: 'message' | 'spec_edit_proposal' | 'execution_card' | 'tool_call'
-    artifactId?: string | null
-    toolCall?: {
-        kind: 'command_execution' | 'file_change'
-        status: 'running' | 'completed' | 'failed'
-        title: string
-        command?: string | null
-        output?: string | null
-        filePaths: string[]
-    } | null
-}
-
 export interface ProjectEventLogEntry {
     message: string
     timestamp: string
@@ -280,7 +264,6 @@ interface ProjectScopedWorkspace {
     selectedRunId: string | null
     workingDir: string
     conversationId: string | null
-    conversationHistory: ConversationHistoryEntry[]
     projectEventLog: ProjectEventLogEntry[]
     specId: string | null
     specStatus: 'draft' | 'approved'
@@ -305,7 +288,6 @@ type PersistedProjectWorkspaceState = Record<
     string,
     {
         conversationId: string | null
-        conversationHistory: ConversationHistoryEntry[]
         projectEventLog?: ProjectEventLogEntry[]
         specId: string | null
         specStatus: 'draft' | 'approved'
@@ -330,7 +312,6 @@ const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     conversationId: null,
-    conversationHistory: [],
     projectEventLog: [],
     specId: null,
     specStatus: 'draft',
@@ -339,55 +320,6 @@ const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
     planStatus: 'draft',
     planProvenance: null,
     artifactRunId: null,
-}
-
-const coerceConversationHistoryEntry = (value: unknown): ConversationHistoryEntry | null => {
-    if (!value || typeof value !== "object") {
-        return null
-    }
-    const candidate = value as Partial<ConversationHistoryEntry>
-    if (
-        (candidate.role === "user" || candidate.role === "assistant" || candidate.role === "system")
-        && typeof candidate.content === "string"
-        && typeof candidate.timestamp === "string"
-    ) {
-        return {
-            role: candidate.role,
-            content: candidate.content,
-            timestamp: candidate.timestamp,
-            kind: candidate.kind === "spec_edit_proposal"
-                || candidate.kind === "execution_card"
-                || candidate.kind === "tool_call"
-                || candidate.kind === "message"
-                ? candidate.kind
-                : undefined,
-            artifactId: typeof candidate.artifactId === "string" ? candidate.artifactId : null,
-            toolCall: candidate.toolCall && typeof candidate.toolCall === "object"
-                ? {
-                    kind: (candidate.toolCall as { kind?: unknown }).kind === "file_change" ? "file_change" : "command_execution",
-                    status: (candidate.toolCall as { status?: unknown }).status === "running"
-                        || (candidate.toolCall as { status?: unknown }).status === "failed"
-                        ? (candidate.toolCall as { status: "running" | "failed" }).status
-                        : "completed",
-                    title: typeof (candidate.toolCall as { title?: unknown }).title === "string"
-                        ? (candidate.toolCall as { title: string }).title
-                        : "",
-                    command: typeof (candidate.toolCall as { command?: unknown }).command === "string"
-                        ? (candidate.toolCall as { command: string }).command
-                        : null,
-                    output: typeof (candidate.toolCall as { output?: unknown }).output === "string"
-                        ? (candidate.toolCall as { output: string }).output
-                        : null,
-                    filePaths: Array.isArray((candidate.toolCall as { filePaths?: unknown; file_paths?: unknown }).filePaths)
-                        ? ((candidate.toolCall as { filePaths: unknown[] }).filePaths).map((entry) => String(entry))
-                        : Array.isArray((candidate.toolCall as { file_paths?: unknown }).file_paths)
-                            ? ((candidate.toolCall as { file_paths: unknown[] }).file_paths).map((entry) => String(entry))
-                            : [],
-                }
-                : null,
-        }
-    }
-    return null
 }
 
 const coerceProjectEventLogEntry = (value: unknown): ProjectEventLogEntry | null => {
@@ -459,7 +391,6 @@ const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
             }
             const scope = value as {
                 conversationId?: unknown
-                conversationHistory?: unknown
                 projectEventLog?: unknown
                 specId?: unknown
                 specStatus?: unknown
@@ -468,23 +399,6 @@ const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
                 planStatus?: unknown
                 planProvenance?: unknown
             }
-            const historyEntries = Array.isArray(scope.conversationHistory)
-                ? scope.conversationHistory
-                    .map(coerceConversationHistoryEntry)
-                    .filter((entry): entry is ConversationHistoryEntry => entry !== null)
-                : []
-            const conversationHistory = historyEntries.filter((entry): entry is ConversationHistoryEntry => {
-                if (entry.kind === "spec_edit_proposal" || entry.kind === "execution_card") {
-                    return true
-                }
-                return entry.role === "user" || entry.role === "assistant"
-            })
-            const legacySystemEventEntries = historyEntries
-                .filter((entry) => entry.role === "system" && entry.kind !== "spec_edit_proposal" && entry.kind !== "execution_card")
-                .map((entry) => ({
-                    message: entry.content,
-                    timestamp: entry.timestamp,
-                }))
             const persistedProjectEventLog = Array.isArray(scope.projectEventLog)
                 ? scope.projectEventLog
                     .map(coerceProjectEventLogEntry)
@@ -494,8 +408,7 @@ const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
             const planProvenance = coerceArtifactProvenanceReference(scope.planProvenance)
             restored[normalizedProjectPath] = {
                 conversationId: typeof scope.conversationId === "string" ? scope.conversationId : null,
-                conversationHistory,
-                projectEventLog: [...legacySystemEventEntries, ...persistedProjectEventLog].slice(-PROJECT_EVENT_LOG_LIMIT),
+                projectEventLog: persistedProjectEventLog.slice(-PROJECT_EVENT_LOG_LIMIT),
                 specId: typeof scope.specId === "string" ? scope.specId : null,
                 specStatus: scope.specStatus === "approved" ? "approved" : "draft",
                 specProvenance,
@@ -523,7 +436,6 @@ const saveProjectConversationState = (projectScopedWorkspaces: Record<string, Pr
         Object.entries(projectScopedWorkspaces).forEach(([projectPath, workspace]) => {
             persisted[projectPath] = {
                 conversationId: workspace.conversationId,
-                conversationHistory: workspace.conversationHistory,
                 projectEventLog: workspace.projectEventLog,
                 specId: workspace.specId,
                 specStatus: workspace.specStatus,
@@ -738,7 +650,6 @@ interface AppState {
     selectedRunId: string | null
     setSelectedRunId: (id: string | null) => void
     setConversationId: (id: string | null) => void
-    appendConversationHistoryEntry: (entry: ConversationHistoryEntry) => void
     appendProjectEventEntry: (entry: ProjectEventLogEntry) => void
     updateProjectScopedWorkspace: (projectPath: string, patch: ProjectScopedWorkspacePatch) => void
     setSpecId: (id: string | null) => void
@@ -1174,22 +1085,6 @@ export const useStore = create<AppState>((set, get) => ({
             nextProjectScopedWorkspaces[state.activeProjectPath] = {
                 ...scoped,
                 conversationId: id,
-            }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
-            return {
-                projectScopedWorkspaces: nextProjectScopedWorkspaces,
-            }
-        }),
-    appendConversationHistoryEntry: (entry) =>
-        set((state) => {
-            if (!state.activeProjectPath) {
-                return {}
-            }
-            const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
-            const scoped = resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[state.activeProjectPath], state.activeProjectPath)
-            nextProjectScopedWorkspaces[state.activeProjectPath] = {
-                ...scoped,
-                conversationHistory: [...scoped.conversationHistory, entry],
             }
             saveProjectConversationState(nextProjectScopedWorkspaces)
             return {

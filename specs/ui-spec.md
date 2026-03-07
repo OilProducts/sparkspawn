@@ -184,6 +184,9 @@ The UI MUST support:
 
 The UI MUST provide a project-scoped AI conversation surface that supports iterative specification authoring.
 
+Source of truth for conversation lifecycle, streaming, retry semantics, and artifact placement:
+- `conversation-paradigm.md`
+
 - Users MUST be able to start/continue a conversation within active project context from Home.
 - Conversation history MUST persist per project and remain discoverable.
 - Project-scoped conversations MUST survive app restart and SHOULD resume the same underlying AI thread when the runtime can restore it.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import selectors
@@ -19,7 +20,10 @@ from typing import Any, Callable, Optional
 CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
 RUNTIME_REPO_ROOT = Path(__file__).resolve().parents[2]
 FINAL_ANSWER_IDLE_GRACE_SECONDS = 1.0
+LIVE_ASSISTANT_IDLE_COMPLETION_GRACE_SECONDS = 2.5
 CHAT_TURN_IDLE_TIMEOUT_SECONDS = 15.0
+APP_SERVER_REQUEST_TIMEOUT_SECONDS = 15.0
+LOGGER = logging.getLogger(__name__)
 
 
 def _iso_now() -> str:
@@ -207,6 +211,33 @@ def _append_tool_output(existing: Optional[str], delta: str, *, limit: int = 240
     return combined[-limit:]
 
 
+def _is_project_chat_debug_enabled() -> bool:
+    value = str(os.environ.get("SPARKSPAWN_DEBUG_PROJECT_CHAT", "")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _summarize_turns_for_debug(turns: list["ConversationTurn"]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": turn.id,
+            "role": turn.role,
+            "kind": turn.kind,
+            "artifact_id": turn.artifact_id,
+            "content": turn.content[:160],
+        }
+        for turn in turns
+    ]
+
+
+def _log_project_chat_debug(message: str, **fields: Any) -> None:
+    if not _is_project_chat_debug_enabled():
+        return
+    if fields:
+        LOGGER.info("[project-chat] %s | %s", message, json.dumps(fields, sort_keys=True, default=str))
+        return
+    LOGGER.info("[project-chat] %s", message)
+
+
 def _normalize_tool_call_status(value: Any) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in {"inprogress", "running"}:
@@ -239,6 +270,7 @@ def _extract_file_paths_from_item(item: dict[str, Any]) -> list[str]:
 
 def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
     item_type = str(item.get("type") or "").strip()
+    item_id = _as_non_empty_string(item.get("id")) or f"tool-{uuid.uuid4().hex}"
     if item_type == "commandExecution":
         command = _extract_command_text(item)
         raw_output = item.get("aggregatedOutput")
@@ -246,6 +278,7 @@ def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
             raw_output = item.get("aggregated_output")
         output = str(raw_output) if raw_output is not None and str(raw_output) else None
         return ToolCallRecord(
+            id=item_id,
             kind="command_execution",
             status=_normalize_tool_call_status(item.get("status")),
             title="Run command",
@@ -254,6 +287,7 @@ def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
         )
     if item_type == "fileChange":
         return ToolCallRecord(
+            id=item_id,
             kind="file_change",
             status=_normalize_tool_call_status(item.get("status")),
             title="Apply file changes",
@@ -361,9 +395,11 @@ class ConversationTurn:
     role: str
     content: str
     timestamp: str
+    status: str = "complete"
     kind: str = "message"
     artifact_id: Optional[str] = None
-    tool_call: Optional["ToolCallRecord"] = None
+    parent_turn_id: Optional[str] = None
+    error: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -371,12 +407,15 @@ class ConversationTurn:
             "role": self.role,
             "content": self.content,
             "timestamp": self.timestamp,
+            "status": self.status,
             "kind": self.kind,
         }
         if self.artifact_id:
             payload["artifact_id"] = self.artifact_id
-        if self.tool_call is not None:
-            payload["tool_call"] = self.tool_call.to_dict()
+        if self.parent_turn_id:
+            payload["parent_turn_id"] = self.parent_turn_id
+        if self.error:
+            payload["error"] = self.error
         return payload
 
     @classmethod
@@ -386,16 +425,17 @@ class ConversationTurn:
             role=str(payload.get("role", "assistant")),
             content=str(payload.get("content", "")),
             timestamp=str(payload.get("timestamp", "")),
+            status=str(payload.get("status", "complete") or "complete"),
             kind=str(payload.get("kind", "message") or "message"),
             artifact_id=str(payload.get("artifact_id")) if payload.get("artifact_id") is not None else None,
-            tool_call=ToolCallRecord.from_dict(payload.get("tool_call"))
-            if isinstance(payload.get("tool_call"), dict)
-            else None,
+            parent_turn_id=str(payload.get("parent_turn_id")) if payload.get("parent_turn_id") is not None else None,
+            error=str(payload.get("error")) if payload.get("error") is not None else None,
         )
 
 
 @dataclass
 class ToolCallRecord:
+    id: str
     kind: str
     status: str
     title: str
@@ -405,6 +445,7 @@ class ToolCallRecord:
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
+            "id": self.id,
             "kind": self.kind,
             "status": self.status,
             "title": self.title,
@@ -421,6 +462,7 @@ class ToolCallRecord:
     def from_dict(cls, payload: dict[str, Any]) -> "ToolCallRecord":
         raw_paths = payload.get("file_paths")
         return cls(
+            id=str(payload.get("id", "")),
             kind=str(payload.get("kind", "")),
             status=str(payload.get("status", "completed") or "completed"),
             title=str(payload.get("title", "")),
@@ -434,6 +476,119 @@ class ToolCallRecord:
 class ChatTurnResult:
     assistant_message: str
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
+
+
+@dataclass
+class ConversationTurnEvent:
+    id: str
+    turn_id: str
+    sequence: int
+    timestamp: str
+    kind: str
+    content_delta: Optional[str] = None
+    message: Optional[str] = None
+    tool_call_id: Optional[str] = None
+    tool_call: Optional[ToolCallRecord] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "turn_id": self.turn_id,
+            "sequence": self.sequence,
+            "timestamp": self.timestamp,
+            "kind": self.kind,
+        }
+        if self.content_delta is not None:
+            payload["content_delta"] = self.content_delta
+        if self.message is not None:
+            payload["message"] = self.message
+        if self.tool_call_id is not None:
+            payload["tool_call_id"] = self.tool_call_id
+        if self.tool_call is not None:
+            payload["tool_call"] = self.tool_call.to_dict()
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ConversationTurnEvent":
+        return cls(
+            id=str(payload.get("id", "")),
+            turn_id=str(payload.get("turn_id", "")),
+            sequence=int(payload.get("sequence", 0) or 0),
+            timestamp=str(payload.get("timestamp", "")),
+            kind=str(payload.get("kind", "")),
+            content_delta=str(payload.get("content_delta")) if payload.get("content_delta") is not None else None,
+            message=str(payload.get("message")) if payload.get("message") is not None else None,
+            tool_call_id=str(payload.get("tool_call_id")) if payload.get("tool_call_id") is not None else None,
+            tool_call=ToolCallRecord.from_dict(payload.get("tool_call"))
+            if isinstance(payload.get("tool_call"), dict)
+            else None,
+        )
+
+
+def _migrate_legacy_turns(raw_turns: list[dict[str, Any]]) -> tuple[list[ConversationTurn], list[ConversationTurnEvent]]:
+    turns: list[ConversationTurn] = []
+    turn_events: list[ConversationTurnEvent] = []
+    last_user_turn_id: Optional[str] = None
+    last_assistant_turn_id: Optional[str] = None
+    event_sequence_by_turn: dict[str, int] = {}
+
+    for raw_turn in raw_turns:
+        if not isinstance(raw_turn, dict):
+            continue
+        legacy_turn = ConversationTurn.from_dict(raw_turn)
+        legacy_tool_call = ToolCallRecord.from_dict(raw_turn["tool_call"]) if isinstance(raw_turn.get("tool_call"), dict) else None
+        if legacy_turn.kind == "tool_call" and legacy_tool_call is not None:
+            target_turn_id = last_assistant_turn_id
+            if target_turn_id is None:
+                synthetic_assistant_turn = ConversationTurn(
+                    id=f"turn-{uuid.uuid4().hex}",
+                    role="assistant",
+                    content="",
+                    timestamp=legacy_turn.timestamp or _iso_now(),
+                    status="complete" if legacy_tool_call.status != "running" else "streaming",
+                    parent_turn_id=last_user_turn_id,
+                )
+                turns.append(synthetic_assistant_turn)
+                last_assistant_turn_id = synthetic_assistant_turn.id
+                target_turn_id = synthetic_assistant_turn.id
+            next_sequence = event_sequence_by_turn.get(target_turn_id, 0) + 1
+            event_sequence_by_turn[target_turn_id] = next_sequence
+            event_kind = {
+                "running": "tool_call_started",
+                "failed": "tool_call_failed",
+            }.get(legacy_tool_call.status, "tool_call_completed")
+            turn_events.append(
+                ConversationTurnEvent(
+                    id=f"event-{uuid.uuid4().hex}",
+                    turn_id=target_turn_id,
+                    sequence=next_sequence,
+                    timestamp=legacy_turn.timestamp or _iso_now(),
+                    kind=event_kind,
+                    tool_call_id=legacy_tool_call.id or legacy_turn.id,
+                    tool_call=legacy_tool_call,
+                )
+            )
+            continue
+
+        migrated_turn = ConversationTurn(
+            id=legacy_turn.id,
+            role=legacy_turn.role,
+            content=legacy_turn.content,
+            timestamp=legacy_turn.timestamp,
+            status="streaming" if legacy_turn.id.endswith(":assistant:live") else legacy_turn.status,
+            kind=legacy_turn.kind,
+            artifact_id=legacy_turn.artifact_id,
+            parent_turn_id=legacy_turn.parent_turn_id or last_user_turn_id if legacy_turn.role == "assistant" else legacy_turn.parent_turn_id,
+            error=legacy_turn.error,
+        )
+        turns.append(migrated_turn)
+        if migrated_turn.role == "user":
+            last_user_turn_id = migrated_turn.id
+            last_assistant_turn_id = None
+        elif migrated_turn.role == "assistant":
+            last_assistant_turn_id = migrated_turn.id
+
+    return turns, turn_events
 
 
 @dataclass
@@ -684,6 +839,7 @@ class ConversationState:
     created_at: str = ""
     updated_at: str = ""
     turns: list[ConversationTurn] = field(default_factory=list)
+    turn_events: list[ConversationTurnEvent] = field(default_factory=list)
     event_log: list[WorkflowEvent] = field(default_factory=list)
     spec_edit_proposals: list[SpecEditProposal] = field(default_factory=list)
     execution_cards: list[ExecutionCard] = field(default_factory=list)
@@ -697,6 +853,7 @@ class ConversationState:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "turns": [turn.to_dict() for turn in self.turns],
+            "turn_events": [event.to_dict() for event in self.turn_events],
             "event_log": [entry.to_dict() for entry in self.event_log],
             "spec_edit_proposals": [proposal.to_dict() for proposal in self.spec_edit_proposals],
             "execution_cards": [card.to_dict() for card in self.execution_cards],
@@ -706,14 +863,23 @@ class ConversationState:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ConversationState":
         raw_turns = payload.get("turns")
+        raw_turn_events = payload.get("turn_events")
         raw_events = payload.get("event_log")
         raw_proposals = payload.get("spec_edit_proposals")
         raw_cards = payload.get("execution_cards")
-        turns = [
-            ConversationTurn.from_dict(turn)
-            for turn in raw_turns
-            if isinstance(turn, dict)
-        ] if isinstance(raw_turns, list) else []
+        if isinstance(raw_turn_events, list):
+            turns = [
+                ConversationTurn.from_dict(turn)
+                for turn in raw_turns
+                if isinstance(turn, dict)
+            ] if isinstance(raw_turns, list) else []
+            turn_events = [
+                ConversationTurnEvent.from_dict(event)
+                for event in raw_turn_events
+                if isinstance(event, dict)
+            ]
+        else:
+            turns, turn_events = _migrate_legacy_turns(raw_turns if isinstance(raw_turns, list) else [])
         created_at = _as_non_empty_string(payload.get("created_at"))
         updated_at = _as_non_empty_string(payload.get("updated_at"))
         if not created_at:
@@ -727,6 +893,7 @@ class ConversationState:
             created_at=created_at or _iso_now(),
             updated_at=updated_at or created_at or _iso_now(),
             turns=turns,
+            turn_events=turn_events,
             event_log=[
                 WorkflowEvent.from_dict(entry)
                 for entry in raw_events
@@ -950,11 +1117,15 @@ class CodexAppServerChatSession:
         })
 
     def _wait_for_response(self, target_id: int) -> dict[str, Any]:
+        started_at = time.monotonic()
         while True:
             line = self._read_line(0.1)
             if line is None:
                 if self._proc is not None and self._proc.poll() is not None:
                     raise RuntimeError("codex app-server exited unexpectedly")
+                if time.monotonic() - started_at >= APP_SERVER_REQUEST_TIMEOUT_SECONDS:
+                    self._close()
+                    raise RuntimeError("codex app-server request timed out waiting for response")
                 continue
             try:
                 message = json.loads(line)
@@ -1061,7 +1232,9 @@ class CodexAppServerChatSession:
             agent_chunks: list[str] = []
             last_error: Optional[str] = None
             saw_final_agent_message = False
+            saw_item_agent_message_delta = False
             last_activity_at = time.monotonic()
+            last_agent_activity_at: float | None = None
             tool_calls: list[ToolCallRecord] = []
             tool_call_index_by_item_id: dict[str, int] = {}
             params: dict[str, Any] = {
@@ -1085,6 +1258,28 @@ class CodexAppServerChatSession:
                         raise RuntimeError("codex app-server turn timed out waiting for activity")
                     if saw_final_agent_message and "".join(agent_chunks).strip():
                         if idle_for >= FINAL_ANSWER_IDLE_GRACE_SECONDS:
+                            _log_project_chat_debug(
+                                "completed turn after final-answer quiet period",
+                                thread_id=self._thread_id,
+                                idle_for=idle_for,
+                                assistant_message="".join(agent_chunks).strip(),
+                            )
+                            break
+                    if (
+                        not saw_final_agent_message
+                        and last_agent_activity_at is not None
+                        and "".join(agent_chunks).strip()
+                        and not any(tool_call.status == "running" for tool_call in tool_calls)
+                    ):
+                        agent_idle_for = time.monotonic() - last_agent_activity_at
+                        if agent_idle_for >= LIVE_ASSISTANT_IDLE_COMPLETION_GRACE_SECONDS:
+                            _log_project_chat_debug(
+                                "completed turn after live-assistant quiet period",
+                                thread_id=self._thread_id,
+                                idle_for=idle_for,
+                                agent_idle_for=agent_idle_for,
+                                assistant_message="".join(agent_chunks).strip(),
+                            )
                             break
                     if self._proc is not None and self._proc.poll() is not None:
                         self._close()
@@ -1100,29 +1295,31 @@ class CodexAppServerChatSession:
                     request_params = message.get("params") or {}
                     if request_method == "item/commandExecution/requestApproval":
                         command = _extract_command_text(request_params)
+                        item_id = _as_non_empty_string(request_params.get("itemId")) or f"tool-{uuid.uuid4().hex}"
                         tool_calls.append(
                             ToolCallRecord(
+                                id=item_id,
                                 kind="command_execution",
                                 status="running",
                                 title="Run command",
                                 command=command,
                             )
                         )
-                        item_id = _as_non_empty_string(request_params.get("itemId"))
                         if item_id:
                             tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
                         self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     elif request_method == "item/fileChange/requestApproval":
                         file_paths = _extract_file_paths(request_params)
+                        item_id = _as_non_empty_string(request_params.get("itemId")) or f"tool-{uuid.uuid4().hex}"
                         tool_calls.append(
                             ToolCallRecord(
+                                id=item_id,
                                 kind="file_change",
                                 status="running",
                                 title="Apply file changes",
                                 file_paths=file_paths,
                             )
                         )
-                        item_id = _as_non_empty_string(request_params.get("itemId"))
                         if item_id:
                             tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
                         self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
@@ -1153,6 +1350,7 @@ class CodexAppServerChatSession:
                         item_phase = str(item.get("phase") or "").strip().lower()
                         if item_type == "agentmessage" and item_phase == "final_answer":
                             saw_final_agent_message = True
+                            last_agent_activity_at = time.monotonic()
                         if tool_call is not None:
                             if item_id and item_id in tool_call_index_by_item_id:
                                 tool_calls[tool_call_index_by_item_id[item_id]] = tool_call
@@ -1165,13 +1363,18 @@ class CodexAppServerChatSession:
                 if method == "item/agentMessage/delta":
                     delta = params.get("delta") or ""
                     if delta:
+                        saw_item_agent_message_delta = True
                         agent_chunks.append(str(delta))
+                        last_agent_activity_at = time.monotonic()
                         self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     continue
                 if method == "codex/event/agent_message_delta":
+                    if saw_item_agent_message_delta:
+                        continue
                     delta = (params.get("msg") or {}).get("delta") or ""
                     if delta:
                         agent_chunks.append(str(delta))
+                        last_agent_activity_at = time.monotonic()
                         self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     continue
                 if method == "codex/event/agent_message":
@@ -1179,6 +1382,7 @@ class CodexAppServerChatSession:
                     phase = str((params.get("msg") or {}).get("phase") or "").strip().lower()
                     if msg:
                         agent_chunks = [str(msg)]
+                        last_agent_activity_at = time.monotonic()
                         self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
                     if phase == "final_answer":
                         saw_final_agent_message = True
@@ -1393,92 +1597,89 @@ class ProjectChatService:
     def _append_event(self, state: ConversationState, message: str) -> None:
         state.event_log.append(WorkflowEvent(message=message, timestamp=_iso_now()))
 
-    def _sync_live_tool_call_turns(
+    def _next_turn_event_sequence(self, state: ConversationState, turn_id: str) -> int:
+        max_sequence = 0
+        for event in state.turn_events:
+            if event.turn_id == turn_id and event.sequence > max_sequence:
+                max_sequence = event.sequence
+        return max_sequence + 1
+
+    def _append_turn_event(
         self,
         state: ConversationState,
-        user_turn_id: str,
-        tool_calls: list[ToolCallRecord],
-    ) -> None:
-        live_turn_id_prefix = f"{user_turn_id}:tool:"
-        existing_live_turn_ids = {
-            turn.id
-            for turn in state.turns
-            if turn.kind == "tool_call" and turn.id.startswith(live_turn_id_prefix)
-        }
-        next_turns: list[ConversationTurn] = []
-        emitted_live_turn_ids: set[str] = set()
-        inserted = False
-        for turn in state.turns:
-            if turn.id in existing_live_turn_ids:
-                continue
-            next_turns.append(turn)
-            if turn.id == user_turn_id:
-                for index, tool_call in enumerate(tool_calls):
-                    live_turn_id = f"{live_turn_id_prefix}{index}"
-                    emitted_live_turn_ids.add(live_turn_id)
-                    next_turns.append(
-                        ConversationTurn(
-                            id=live_turn_id,
-                            role="system",
-                            content=tool_call.title,
-                            timestamp=_iso_now(),
-                            kind="tool_call",
-                            tool_call=tool_call,
-                        )
-                    )
-                inserted = True
-        if not inserted and tool_calls:
-            for index, tool_call in enumerate(tool_calls):
-                live_turn_id = f"{live_turn_id_prefix}{index}"
-                emitted_live_turn_ids.add(live_turn_id)
-                next_turns.append(
-                    ConversationTurn(
-                        id=live_turn_id,
-                        role="system",
-                        content=tool_call.title,
-                        timestamp=_iso_now(),
-                        kind="tool_call",
-                        tool_call=tool_call,
-                    )
-                )
-        state.turns = next_turns
-
-    def _sync_live_assistant_turn(
-        self,
-        state: ConversationState,
-        user_turn_id: str,
-        assistant_message: str,
-    ) -> None:
-        live_turn_id = f"{user_turn_id}:assistant:live"
-        next_turns = [turn for turn in state.turns if turn.id != live_turn_id]
-        trimmed_message = assistant_message.strip()
-        if not trimmed_message:
-            state.turns = next_turns
-            return
-
-        insert_at = len(next_turns)
-        live_tool_prefix = f"{user_turn_id}:tool:"
-        for index, turn in enumerate(next_turns):
-            if turn.id != user_turn_id:
-                continue
-            insert_at = index + 1
-            while insert_at < len(next_turns):
-                current_turn = next_turns[insert_at]
-                if current_turn.kind != "tool_call" or not current_turn.id.startswith(live_tool_prefix):
-                    break
-                insert_at += 1
-            break
-
-        next_turns.insert(
-            insert_at,
-            ConversationTurn(
-                id=live_turn_id,
-                role="assistant",
-                content=trimmed_message,
-                timestamp=_iso_now(),
-            ),
+        turn_id: str,
+        kind: str,
+        *,
+        content_delta: Optional[str] = None,
+        message: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
+        tool_call: Optional[ToolCallRecord] = None,
+        timestamp: Optional[str] = None,
+    ) -> ConversationTurnEvent:
+        event = ConversationTurnEvent(
+            id=f"event-{uuid.uuid4().hex}",
+            turn_id=turn_id,
+            sequence=self._next_turn_event_sequence(state, turn_id),
+            timestamp=timestamp or _iso_now(),
+            kind=kind,
+            content_delta=content_delta,
+            message=message,
+            tool_call_id=tool_call_id,
+            tool_call=ToolCallRecord.from_dict(tool_call.to_dict()) if tool_call is not None else None,
         )
-        state.turns = next_turns
+        state.turn_events.append(event)
+        return event
+
+    def _upsert_turn(self, state: ConversationState, turn: ConversationTurn) -> None:
+        for index, existing_turn in enumerate(state.turns):
+            if existing_turn.id != turn.id:
+                continue
+            state.turns[index] = turn
+            return
+        state.turns.append(turn)
+
+    def _get_turn(self, state: ConversationState, turn_id: str) -> Optional[ConversationTurn]:
+        for turn in state.turns:
+            if turn.id == turn_id:
+                return turn
+        return None
+
+    def _publish_progress_payload(
+        self,
+        progress_callback: Optional[Callable[[dict[str, Any]], None]],
+        payload: dict[str, Any],
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(payload)
+
+    def _build_turn_upsert_payload(
+        self,
+        state: ConversationState,
+        turn: ConversationTurn,
+    ) -> dict[str, Any]:
+        return {
+            "type": "turn_upsert",
+            "conversation_id": state.conversation_id,
+            "project_path": state.project_path,
+            "title": state.title,
+            "updated_at": state.updated_at,
+            "turn": turn.to_dict(),
+        }
+
+    def _build_turn_event_payload(
+        self,
+        state: ConversationState,
+        event: ConversationTurnEvent,
+    ) -> dict[str, Any]:
+        return {
+            "type": "turn_event",
+            "conversation_id": state.conversation_id,
+            "project_path": state.project_path,
+            "title": state.title,
+            "updated_at": state.updated_at,
+            "event": event.to_dict(),
+        }
 
     def _build_chat_prompt(self, state: ConversationState, message: str) -> str:
         recent_turns = state.turns[-10:]
@@ -1598,21 +1799,106 @@ class ProjectChatService:
                 role="user",
                 content=trimmed_message,
                 timestamp=_iso_now(),
+                status="complete",
+            )
+            assistant_turn = ConversationTurn(
+                id=f"turn-{uuid.uuid4().hex}",
+                role="assistant",
+                content="",
+                timestamp=_iso_now(),
+                status="pending",
+                parent_turn_id=user_turn.id,
             )
             state.turns.append(user_turn)
+            state.turns.append(assistant_turn)
             self._touch_conversation_state(state, title_hint=trimmed_message)
             self._write_state(state)
+            _log_project_chat_debug(
+                "appended user and assistant turns",
+                conversation_id=conversation_id,
+                project_path=normalized_project_path,
+                turns=_summarize_turns_for_debug(state.turns),
+            )
+            self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, user_turn))
+            self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, assistant_turn))
+
+        previous_live_assistant_message = ""
+        known_tool_calls: dict[str, ToolCallRecord] = {}
+
         def persist_progress(progress: ChatTurnResult) -> None:
+            nonlocal previous_live_assistant_message, known_tool_calls
             live_assistant_message = _extract_live_assistant_message(progress.assistant_message)
             with self._lock:
                 current_state = self._read_state(conversation_id) or state
-                self._sync_live_tool_call_turns(current_state, user_turn.id, progress.tool_calls)
-                self._sync_live_assistant_turn(current_state, user_turn.id, live_assistant_message)
+                current_assistant_turn = self._get_turn(current_state, assistant_turn.id)
+                if current_assistant_turn is None:
+                    current_assistant_turn = ConversationTurn(
+                        id=assistant_turn.id,
+                        role="assistant",
+                        content="",
+                        timestamp=assistant_turn.timestamp,
+                        status="pending",
+                        parent_turn_id=user_turn.id,
+                    )
+                    self._upsert_turn(current_state, current_assistant_turn)
+
+                emitted_payloads: list[dict[str, Any]] = []
+                if live_assistant_message != previous_live_assistant_message:
+                    content_delta = live_assistant_message
+                    if live_assistant_message.startswith(previous_live_assistant_message):
+                        content_delta = live_assistant_message[len(previous_live_assistant_message):]
+                    previous_live_assistant_message = live_assistant_message
+                    current_assistant_turn.content = live_assistant_message
+                    current_assistant_turn.status = "streaming"
+                    self._upsert_turn(current_state, current_assistant_turn)
+                    if content_delta:
+                        assistant_delta_event = self._append_turn_event(
+                            current_state,
+                            current_assistant_turn.id,
+                            "assistant_delta",
+                            content_delta=content_delta,
+                        )
+                        emitted_payloads.append(self._build_turn_event_payload(current_state, assistant_delta_event))
+                    emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
+
+                for tool_call in progress.tool_calls:
+                    previous_tool_call = known_tool_calls.get(tool_call.id)
+                    event_kind: Optional[str] = None
+                    if previous_tool_call is None:
+                        event_kind = {
+                            "running": "tool_call_started",
+                            "failed": "tool_call_failed",
+                        }.get(tool_call.status, "tool_call_completed")
+                    elif tool_call.status != previous_tool_call.status:
+                        event_kind = {
+                            "failed": "tool_call_failed",
+                            "completed": "tool_call_completed",
+                        }.get(tool_call.status, "tool_call_updated")
+                    elif tool_call.to_dict() != previous_tool_call.to_dict():
+                        event_kind = "tool_call_updated"
+                    known_tool_calls[tool_call.id] = ToolCallRecord.from_dict(tool_call.to_dict())
+                    if event_kind is None:
+                        continue
+                    tool_event = self._append_turn_event(
+                        current_state,
+                        current_assistant_turn.id,
+                        event_kind,
+                        tool_call_id=tool_call.id,
+                        tool_call=tool_call,
+                    )
+                    emitted_payloads.append(self._build_turn_event_payload(current_state, tool_event))
+
                 self._touch_conversation_state(current_state)
                 self._write_state(current_state)
-                current_snapshot = current_state.to_dict()
-            if progress_callback is not None:
-                progress_callback(current_snapshot)
+                _log_project_chat_debug(
+                    "persisted progress events",
+                    conversation_id=conversation_id,
+                    live_assistant_message=live_assistant_message,
+                    tool_call_count=len(progress.tool_calls),
+                    turns=_summarize_turns_for_debug(current_state.turns),
+                )
+            for payload in emitted_payloads:
+                self._publish_progress_payload(progress_callback, payload)
 
         prompt = self._build_chat_prompt(state, trimmed_message)
         normalized_model = model.strip() if model else None
@@ -1624,13 +1910,44 @@ class ProjectChatService:
             )
         except RuntimeError as exc:
             if "timed out" not in str(exc).lower():
+                with self._lock:
+                    current_state = self._read_state(conversation_id) or state
+                    current_assistant_turn = self._get_turn(current_state, assistant_turn.id)
+                    if current_assistant_turn is not None:
+                        current_assistant_turn.status = "failed"
+                        current_assistant_turn.error = str(exc)
+                        self._upsert_turn(current_state, current_assistant_turn)
+                        assistant_failed_event = self._append_turn_event(
+                            current_state,
+                            current_assistant_turn.id,
+                            "assistant_failed",
+                            message=str(exc),
+                        )
+                        self._touch_conversation_state(current_state)
+                        self._write_state(current_state)
+                        self._publish_progress_payload(progress_callback, self._build_turn_event_payload(current_state, assistant_failed_event))
+                        self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(current_state, current_assistant_turn))
                 raise
             with self._lock:
                 current_state = self._read_state(conversation_id) or state
-                self._sync_live_tool_call_turns(current_state, user_turn.id, [])
-                self._sync_live_assistant_turn(current_state, user_turn.id, "")
+                current_assistant_turn = self._get_turn(current_state, assistant_turn.id)
+                retry_event: Optional[ConversationTurnEvent] = None
+                if current_assistant_turn is not None:
+                    retry_event = self._append_turn_event(
+                        current_state,
+                        current_assistant_turn.id,
+                        "retry_started",
+                        message="Retrying turn after timeout.",
+                    )
                 self._touch_conversation_state(current_state)
                 self._write_state(current_state)
+                _log_project_chat_debug(
+                    "retrying turn after timeout",
+                    conversation_id=conversation_id,
+                    turns=_summarize_turns_for_debug(current_state.turns),
+                )
+                if retry_event is not None:
+                    self._publish_progress_payload(progress_callback, self._build_turn_event_payload(current_state, retry_event))
             session = self._replace_session(conversation_id, normalized_project_path, persisted_thread_id=None)
             turn_result = session.turn(
                 prompt,
@@ -1644,15 +1961,41 @@ class ProjectChatService:
         spec_proposal_payload = parsed.get("spec_proposal")
         with self._lock:
             state = self._read_state(conversation_id) or state
-            self._sync_live_tool_call_turns(state, user_turn.id, turn_result.tool_calls)
-            self._sync_live_assistant_turn(state, user_turn.id, "")
-            assistant_turn = ConversationTurn(
-                id=f"turn-{uuid.uuid4().hex}",
-                role="assistant",
-                content=assistant_message,
-                timestamp=_iso_now(),
+            current_assistant_turn = self._get_turn(state, assistant_turn.id)
+            if current_assistant_turn is None:
+                current_assistant_turn = ConversationTurn(
+                    id=assistant_turn.id,
+                    role="assistant",
+                    content="",
+                    timestamp=assistant_turn.timestamp,
+                    status="pending",
+                    parent_turn_id=user_turn.id,
+                )
+            emitted_payloads: list[dict[str, Any]] = []
+            if assistant_message != previous_live_assistant_message:
+                content_delta = assistant_message
+                if assistant_message.startswith(previous_live_assistant_message):
+                    content_delta = assistant_message[len(previous_live_assistant_message):]
+                if content_delta:
+                    assistant_delta_event = self._append_turn_event(
+                        state,
+                        current_assistant_turn.id,
+                        "assistant_delta",
+                        content_delta=content_delta,
+                    )
+                    emitted_payloads.append(self._build_turn_event_payload(state, assistant_delta_event))
+            current_assistant_turn.content = assistant_message
+            current_assistant_turn.status = "complete"
+            current_assistant_turn.error = None
+            self._upsert_turn(state, current_assistant_turn)
+            assistant_completed_event = self._append_turn_event(
+                state,
+                current_assistant_turn.id,
+                "assistant_completed",
+                message="Assistant turn completed.",
             )
-            state.turns.append(assistant_turn)
+            emitted_payloads.append(self._build_turn_event_payload(state, assistant_completed_event))
+            emitted_payloads.append(self._build_turn_upsert_payload(state, current_assistant_turn))
             if isinstance(spec_proposal_payload, dict):
                 raw_changes = spec_proposal_payload.get("changes")
                 changes = [
@@ -1669,19 +2012,29 @@ class ProjectChatService:
                         status="pending",
                     )
                     state.spec_edit_proposals.append(proposal)
-                    state.turns.append(
-                        ConversationTurn(
-                            id=f"turn-{uuid.uuid4().hex}",
-                            role="system",
-                            content="",
-                            timestamp=proposal.created_at,
-                            kind="spec_edit_proposal",
-                            artifact_id=proposal.id,
-                        )
+                    proposal_turn = ConversationTurn(
+                        id=f"turn-{uuid.uuid4().hex}",
+                        role="system",
+                        content="",
+                        timestamp=proposal.created_at,
+                        status="complete",
+                        kind="spec_edit_proposal",
+                        artifact_id=proposal.id,
+                        parent_turn_id=current_assistant_turn.id,
                     )
+                    state.turns.append(proposal_turn)
                     self._append_event(state, f"Drafted spec edit proposal {proposal.id}.")
+                    emitted_payloads.append(self._build_turn_upsert_payload(state, proposal_turn))
             self._touch_conversation_state(state)
             self._write_state(state)
+            _log_project_chat_debug(
+                "persisted final assistant turn",
+                conversation_id=conversation_id,
+                assistant_message=assistant_message,
+                turns=_summarize_turns_for_debug(state.turns),
+            )
+        for payload in emitted_payloads:
+            self._publish_progress_payload(progress_callback, payload)
         return state.to_dict()
 
     def reject_spec_edit(self, conversation_id: str, project_path: str, proposal_id: str) -> dict[str, Any]:

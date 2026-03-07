@@ -6,7 +6,7 @@ Date: 2026-02-28
 
 ## Scope
 
-This report scores parity risks where current UI surfaces can lose behavior or hide required configuration from users, based on [`ui-spec.md`](/Users/chris/tinker/sparkspawn/ui-spec.md) and the raw-DOT gap inventory in [`ui-raw-dot-required-config.md`](/Users/chris/tinker/sparkspawn/ui-raw-dot-required-config.md).
+This report scores parity risks where current UI surfaces can lose behavior or hide required configuration from users, based on [`ui-spec.md`](/Users/chris/tinker/sparkspawn/specs/ui-spec.md) and the raw-DOT gap inventory in [`ui-raw-dot-required-config.md`](/Users/chris/tinker/sparkspawn/ui-raw-dot-required-config.md).
 
 ## Behavior-Loss Failure Modes
 

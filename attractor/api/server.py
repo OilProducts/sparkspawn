@@ -1088,16 +1088,21 @@ class LocalCodexAppServerBackend(CodergenBackend):
                 return
             send_response(req_id, error={"code": -32000, "message": f"Unsupported request: {method}"})
 
+        saw_item_agent_message_delta = False
+
         def handle_notification(message: dict) -> None:
-            nonlocal last_token_total, turn_status, turn_error
+            nonlocal last_token_total, turn_status, turn_error, saw_item_agent_message_delta
             method = message.get("method")
             params = message.get("params") or {}
             if method == "item/agentMessage/delta":
                 delta = params.get("delta") or ""
                 if delta:
+                    saw_item_agent_message_delta = True
                     agent_chunks.append(delta)
                 return
             if method == "codex/event/agent_message_delta":
+                if saw_item_agent_message_delta:
+                    return
                 delta = (params.get("msg") or {}).get("delta") or ""
                 if delta:
                     agent_chunks.append(delta)
@@ -2101,11 +2106,11 @@ async def project_conversation_events(conversation_id: str, request: Request, pr
 async def send_project_conversation_turn(conversation_id: str, req: ConversationTurnRequest):
     loop = asyncio.get_running_loop()
 
-    def publish_partial_snapshot(snapshot: dict[str, Any]) -> None:
+    def publish_progress_event(event: dict[str, Any]) -> None:
         asyncio.run_coroutine_threadsafe(
             PROJECT_CHAT.events().publish(
                 conversation_id,
-                {"type": "conversation_snapshot", "state": snapshot},
+                event,
             ),
             loop,
         )
@@ -2117,13 +2122,12 @@ async def send_project_conversation_turn(conversation_id: str, req: Conversation
             req.project_path,
             req.message,
             req.model,
-            publish_partial_snapshot,
+            publish_progress_event,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    await PROJECT_CHAT.publish_snapshot(conversation_id)
     return snapshot
 
 

@@ -1,6 +1,6 @@
 # Attractor Implementation Checklist
 
-Companion to `/Users/chris/tinker/sparkspawn/attractor-spec.md`.
+Companion to `/Users/chris/tinker/sparkspawn/specs/attractor-spec.md`.
 
 Use this as the execution plan and verification ledger for full spec coverage. Tasks are ordered to match the spec section/subsection sequence.
 

@@ -75,6 +75,11 @@ A **project** is a user-selected work target with these invariants:
 - **US-CONV-11**
   As a user, I want new threads to start empty but remain scoped to the same active project directory and repository so that thread isolation does not break project isolation.
 
+- **US-CONV-12**
+  As a user, when I send a message in project chat, I want to see the assistant reply stream into the conversation as it is generated so that I can tell the model is actively responding and follow the answer before it completes.
+
+  Detailed record: `ui-story-records.md#us-conv-12`
+
 ---
 
 ## 3. Spec -> Plan -> Work Tracker -> Build Chain

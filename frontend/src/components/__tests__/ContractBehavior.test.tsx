@@ -215,7 +215,6 @@ const resetContractState = () => {
         selectedRunId: null,
         workingDir: DEFAULT_WORKING_DIRECTORY,
         conversationId: null,
-        conversationHistory: [],
         specId: null,
         specStatus: 'draft',
         planId: null,
@@ -1173,7 +1172,6 @@ describe('Frontend contract behavior', () => {
       JSON.stringify({
         '/tmp/project-a': {
           conversationId: 'conversation-a',
-          conversationHistory: [],
           specId: 'spec-a',
           specStatus: 'approved',
           planId: 'plan-a',
@@ -1181,7 +1179,6 @@ describe('Frontend contract behavior', () => {
         },
         '/tmp/project-b/./': {
           conversationId: 'conversation-b',
-          conversationHistory: [],
           specId: 'spec-b',
           specStatus: 'draft',
           planId: 'plan-b',
@@ -1380,7 +1377,6 @@ describe('Frontend contract behavior', () => {
             ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
             specId: null,
             specStatus: 'draft',
-            conversationHistory: [],
           },
         },
       }))
@@ -1573,7 +1569,6 @@ describe('Frontend contract behavior', () => {
           '/tmp/project-contract-behavior': {
             ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
             conversationId,
-            conversationHistory: [],
           },
         },
       }))
@@ -5226,13 +5221,6 @@ digraph contract_behavior {
       JSON.stringify({
         '/tmp/persisted-project/./': {
           conversationId: 'conversation-persisted-project',
-          conversationHistory: [
-            {
-              role: 'user',
-              content: 'Persisted scope history',
-              timestamp: '2026-03-04T00:05:00.000Z',
-            },
-          ],
           specId: 'spec-persisted-project',
           specStatus: 'approved',
           planId: 'plan-persisted-project',
@@ -5240,13 +5228,6 @@ digraph contract_behavior {
         },
         '/tmp/other-project': {
           conversationId: 'conversation-other-project',
-          conversationHistory: [
-            {
-              role: 'assistant',
-              content: 'Other scope history',
-              timestamp: '2026-03-04T00:06:00.000Z',
-            },
-          ],
           specId: 'spec-other-project',
           specStatus: 'draft',
           planId: 'plan-other-project',
@@ -5263,8 +5244,6 @@ digraph contract_behavior {
     expect(persistedScope.specStatus).toBe('approved')
     expect(persistedScope.planId).toBe('plan-persisted-project')
     expect(persistedScope.planStatus).toBe('rejected')
-    expect(persistedScope.conversationHistory).toHaveLength(1)
-    expect(persistedScope.conversationHistory[0]?.content).toBe('Persisted scope history')
 
     restoredStore.getState().setActiveProjectPath('/tmp/other-project')
     const switchedScope = restoredStore.getState().projectScopedWorkspaces['/tmp/other-project']
@@ -5272,8 +5251,6 @@ digraph contract_behavior {
     expect(switchedScope.specId).toBe('spec-other-project')
     expect(switchedScope.planId).toBe('plan-other-project')
     expect(switchedScope.planStatus).toBe('revision-requested')
-    expect(switchedScope.conversationHistory).toHaveLength(1)
-    expect(switchedScope.conversationHistory[0]?.content).toBe('Other scope history')
   })
 
   it('[CID:11.5.03] clears stale flow/run route context when persisted active project path is invalid on reopen', async () => {
@@ -5374,7 +5351,6 @@ digraph contract_behavior {
       JSON.stringify({
         '/tmp/persisted-project': {
           conversationId: 'conversation-persisted-project',
-          conversationHistory: [],
           specId: 'spec-persisted-project',
           specStatus: 'approved',
           specProvenance: {
@@ -5503,7 +5479,6 @@ digraph contract_behavior {
       JSON.stringify({
         '/tmp/persisted-project': {
           conversationId: null,
-          conversationHistory: [],
           specId: 'spec-persisted-project',
           specStatus: 'approved',
           specProvenance: {
@@ -5650,7 +5625,6 @@ digraph contract_behavior {
       JSON.stringify({
         '/tmp/lifecycle-project': {
           conversationId: null,
-          conversationHistory: [],
           specId: 'spec-lifecycle-project',
           specStatus: 'approved',
           planId: 'plan-lifecycle-project',

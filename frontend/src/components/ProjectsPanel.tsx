@@ -1,16 +1,21 @@
-import { type ConversationHistoryEntry, type PlanStatus, type ProjectRegistrationResult, useStore } from "@/store"
-import { type ChangeEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react"
+import { type PlanStatus, type ProjectRegistrationResult, useStore } from "@/store"
+import { type ChangeEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import {
     ApiHttpError,
     type ConversationSummaryResponse,
     type ConversationSnapshotResponse,
+    type ConversationTurnEventStreamResponse,
+    type ConversationTurnUpsertEventResponse,
+    type ConversationTurnEventResponse,
+    type ConversationTurnResponse,
     type ExecutionCardResponse,
     type SpecEditProposalResponse,
     approveSpecEditProposalValidated,
     fetchConversationSnapshotValidated,
     fetchProjectConversationListValidated,
     parseConversationSnapshotResponse,
+    parseConversationStreamEventResponse,
     rejectSpecEditProposalValidated,
     reviewExecutionCardValidated,
     sendConversationTurnValidated,
@@ -252,6 +257,44 @@ const extractApiErrorMessage = (error: unknown, fallback: string) => {
     return fallback
 }
 
+const isProjectChatDebugEnabled = () => {
+    if (typeof window === "undefined") {
+        return false
+    }
+    try {
+        const params = new URLSearchParams(window.location.search)
+        if (params.get("debugProjectChat") === "1") {
+            return true
+        }
+        return window.localStorage.getItem("sparkspawn.debug.project_chat") === "1"
+    } catch {
+        return false
+    }
+}
+
+const summarizeConversationTurnsForDebug = (turns: ConversationSnapshotResponse["turns"]) => (
+    turns.map((turn, index) => ({
+        index,
+        id: turn.id,
+        role: turn.role,
+        kind: turn.kind,
+        status: turn.status,
+        artifactId: turn.artifact_id ?? null,
+        content: turn.content.slice(0, 120),
+    }))
+)
+
+const debugProjectChat = (message: string, details?: Record<string, unknown>) => {
+    if (!isProjectChatDebugEnabled()) {
+        return
+    }
+    if (details) {
+        console.debug(`[project-chat] ${message}`, details)
+        return
+    }
+    console.debug(`[project-chat] ${message}`)
+}
+
 const getLatestApprovedSpecEditProposal = (snapshot: ConversationSnapshotResponse | null) => {
     if (!snapshot) {
         return null
@@ -272,25 +315,240 @@ const getLatestExecutionCard = (snapshot: ConversationSnapshotResponse | null) =
     return snapshot.execution_cards[snapshot.execution_cards.length - 1] || null
 }
 
-const buildConversationHistoryEntries = (snapshot: ConversationSnapshotResponse): ConversationHistoryEntry[] => (
-    snapshot.turns.map((turn) => ({
-        role: turn.role,
-        content: turn.content,
-        timestamp: turn.timestamp,
-        kind: turn.kind,
-        artifactId: turn.artifact_id ?? null,
-        toolCall: turn.tool_call
-            ? {
-                kind: turn.tool_call.kind,
-                status: turn.tool_call.status,
-                title: turn.tool_call.title,
-                command: turn.tool_call.command ?? null,
-                output: turn.tool_call.output ?? null,
-                filePaths: turn.tool_call.file_paths,
-            }
-            : null,
-    }))
-)
+type ConversationTimelineEntry =
+    | {
+        id: string
+        kind: "message"
+        role: "user" | "assistant"
+        content: string
+        timestamp: string
+        status: ConversationTurnResponse["status"]
+        error?: string | null
+    }
+    | {
+        id: string
+        kind: "tool_call"
+        role: "system"
+        timestamp: string
+        toolCall: {
+            id: string
+            kind: "command_execution" | "file_change"
+            status: "running" | "completed" | "failed"
+            title: string
+            command?: string | null
+            output?: string | null
+            filePaths: string[]
+        }
+    }
+    | {
+        id: string
+        kind: "spec_edit_proposal" | "execution_card"
+        role: "system"
+        artifactId: string
+        timestamp: string
+    }
+
+type OptimisticSendState = {
+    conversationId: string
+    projectPath: string
+    message: string
+    createdAt: string
+}
+
+const ensureConversationSnapshotShell = (
+    conversationId: string,
+    projectPath: string,
+    title = "New thread",
+): ConversationSnapshotResponse => ({
+    conversation_id: conversationId,
+    project_path: projectPath,
+    title,
+    created_at: "",
+    updated_at: "",
+    turns: [],
+    turn_events: [],
+    event_log: [],
+    spec_edit_proposals: [],
+    execution_cards: [],
+    execution_workflow: {
+        status: "idle",
+        run_id: null,
+        error: null,
+        flow_source: null,
+    },
+})
+
+const upsertConversationTurn = (
+    snapshot: ConversationSnapshotResponse,
+    turn: ConversationTurnResponse,
+): ConversationSnapshotResponse => {
+    const nextTurns = [...snapshot.turns]
+    const existingIndex = nextTurns.findIndex((entry) => entry.id === turn.id)
+    if (existingIndex >= 0) {
+        nextTurns[existingIndex] = turn
+    } else {
+        nextTurns.push(turn)
+    }
+    return {
+        ...snapshot,
+        turns: nextTurns,
+    }
+}
+
+const appendConversationTurnEvent = (
+    snapshot: ConversationSnapshotResponse,
+    event: ConversationTurnEventResponse,
+): ConversationSnapshotResponse => {
+    if (snapshot.turn_events.some((entry) => entry.id === event.id)) {
+        return snapshot
+    }
+    return {
+        ...snapshot,
+        turn_events: [...snapshot.turn_events, event],
+    }
+}
+
+const buildConversationTimelineEntries = (
+    snapshot: ConversationSnapshotResponse | null,
+    optimisticSend: OptimisticSendState | null,
+): ConversationTimelineEntry[] => {
+    if (!snapshot) {
+        if (!optimisticSend) {
+            return []
+        }
+        return [
+            {
+                id: `${optimisticSend.conversationId}:optimistic:user`,
+                kind: "message",
+                role: "user",
+                content: optimisticSend.message,
+                timestamp: optimisticSend.createdAt,
+                status: "complete",
+            },
+            {
+                id: `${optimisticSend.conversationId}:optimistic:assistant`,
+                kind: "message",
+                role: "assistant",
+                content: "",
+                timestamp: optimisticSend.createdAt,
+                status: "streaming",
+            },
+        ]
+    }
+
+    const toolCallsByTurn = new Map<string, ConversationTimelineEntry[]>()
+    const sortedEvents = [...snapshot.turn_events].sort((left, right) => {
+        if (left.turn_id === right.turn_id) {
+            return left.sequence - right.sequence
+        }
+        return left.timestamp.localeCompare(right.timestamp)
+    })
+    sortedEvents.forEach((event) => {
+        if (!event.tool_call || !event.tool_call_id) {
+            return
+        }
+        const entries = toolCallsByTurn.get(event.turn_id) || []
+        const nextEntry: ConversationTimelineEntry = {
+            id: event.tool_call_id,
+            kind: "tool_call",
+            role: "system",
+            timestamp: event.timestamp,
+            toolCall: {
+                id: event.tool_call.id,
+                kind: event.tool_call.kind,
+                status: event.tool_call.status,
+                title: event.tool_call.title,
+                command: event.tool_call.command ?? null,
+                output: event.tool_call.output ?? null,
+                filePaths: event.tool_call.file_paths,
+            },
+        }
+        const existingIndex = entries.findIndex((entry) => entry.kind === "tool_call" && entry.id === event.tool_call_id)
+        if (existingIndex >= 0) {
+            entries[existingIndex] = nextEntry
+        } else {
+            entries.push(nextEntry)
+        }
+        toolCallsByTurn.set(event.turn_id, entries)
+    })
+
+    const timeline: ConversationTimelineEntry[] = []
+    snapshot.turns.forEach((turn) => {
+        if (turn.kind === "spec_edit_proposal" && turn.artifact_id) {
+            timeline.push({
+                id: turn.id,
+                kind: "spec_edit_proposal",
+                role: "system",
+                artifactId: turn.artifact_id,
+                timestamp: turn.timestamp,
+            })
+            return
+        }
+        if (turn.kind === "execution_card" && turn.artifact_id) {
+            timeline.push({
+                id: turn.id,
+                kind: "execution_card",
+                role: "system",
+                artifactId: turn.artifact_id,
+                timestamp: turn.timestamp,
+            })
+            return
+        }
+        if (turn.role === "user" || turn.role === "assistant") {
+            timeline.push({
+                id: turn.id,
+                kind: "message",
+                role: turn.role,
+                content: turn.content,
+                timestamp: turn.timestamp,
+                status: turn.status,
+                error: turn.error ?? null,
+            })
+        }
+        if (turn.role === "assistant") {
+            timeline.push(...(toolCallsByTurn.get(turn.id) || []))
+        }
+    })
+
+    if (!optimisticSend) {
+        return timeline
+    }
+
+    const hasMatchingUserTurn = timeline.some((entry) => (
+        entry.kind === "message"
+        && entry.role === "user"
+        && entry.content === optimisticSend.message
+        && entry.timestamp >= optimisticSend.createdAt
+    ))
+    const hasMatchingAssistantTurn = timeline.some((entry) => (
+        entry.kind === "message"
+        && entry.role === "assistant"
+        && entry.timestamp >= optimisticSend.createdAt
+    ))
+
+    const optimisticEntries: ConversationTimelineEntry[] = []
+    if (!hasMatchingUserTurn) {
+        optimisticEntries.push({
+            id: `${optimisticSend.conversationId}:optimistic:user`,
+            kind: "message",
+            role: "user",
+            content: optimisticSend.message,
+            timestamp: optimisticSend.createdAt,
+            status: "complete",
+        })
+    }
+    if (!hasMatchingAssistantTurn) {
+        optimisticEntries.push({
+            id: `${optimisticSend.conversationId}:optimistic:assistant`,
+            kind: "message",
+            role: "assistant",
+            content: "",
+            timestamp: optimisticSend.createdAt,
+            status: "streaming",
+        })
+    }
+    return [...timeline, ...optimisticEntries]
+}
 
 const sortConversationSummaries = (items: ConversationSummaryResponse[]) => (
     [...items].sort((left, right) => right.updated_at.localeCompare(left.updated_at))
@@ -304,26 +562,6 @@ const upsertConversationSummary = (
     ...items.filter((entry) => entry.conversation_id !== summary.conversation_id),
 ])
 
-const hasAgentActivityAfterLatestUserTurn = (entries: ConversationHistoryEntry[]) => {
-    let latestUserTurnIndex = -1
-    entries.forEach((entry, index) => {
-        if (entry.role === "user") {
-            latestUserTurnIndex = index
-        }
-    })
-
-    if (latestUserTurnIndex === -1) {
-        return false
-    }
-
-    return entries.slice(latestUserTurnIndex + 1).some((entry) => (
-        entry.kind === "tool_call"
-        || entry.kind === "spec_edit_proposal"
-        || entry.kind === "execution_card"
-        || entry.role === "assistant"
-    ))
-}
-
 export function HomePanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
     const projects = Object.values(projectRegistry)
@@ -336,7 +574,6 @@ export function HomePanel() {
     const clearProjectRegistrationError = useStore((state) => state.clearProjectRegistrationError)
     const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
     const setConversationId = useStore((state) => state.setConversationId)
-    const appendConversationHistoryEntry = useStore((state) => state.appendConversationHistoryEntry)
     const appendProjectEventEntry = useStore((state) => state.appendProjectEventEntry)
     const updateProjectScopedWorkspace = useStore((state) => state.updateProjectScopedWorkspace)
     const activeFlow = useStore((state) => state.activeFlow)
@@ -348,6 +585,7 @@ export function HomePanel() {
     const [chatDraft, setChatDraft] = useState("")
     const [panelError, setPanelError] = useState<string | null>(null)
     const [isSendingChat, setIsSendingChat] = useState(false)
+    const [optimisticSend, setOptimisticSend] = useState<OptimisticSendState | null>(null)
     const [pendingSpecProposalId, setPendingSpecProposalId] = useState<string | null>(null)
     const [pendingExecutionCardId, setPendingExecutionCardId] = useState<string | null>(null)
     const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
@@ -359,7 +597,8 @@ export function HomePanel() {
     const homeSidebarRef = useRef<HTMLDivElement | null>(null)
     const homeSidebarResizeRef = useRef<{ startY: number; startHeight: number } | null>(null)
     const conversationBodyRef = useRef<HTMLDivElement | null>(null)
-    const applyConversationSnapshotRef = useRef<((projectPath: string, snapshot: ConversationSnapshotResponse) => void) | null>(null)
+    const applyConversationSnapshotRef = useRef<((projectPath: string, snapshot: ConversationSnapshotResponse, source?: string) => void) | null>(null)
+    const applyConversationStreamEventRef = useRef<((projectPath: string, event: ConversationTurnUpsertEventResponse | ConversationTurnEventStreamResponse, source?: string) => void) | null>(null)
 
     const isNarrowViewport = useNarrowViewport()
     const activeProjectScope = activeProjectPath ? projectScopedWorkspaces[activeProjectPath] : null
@@ -369,10 +608,15 @@ export function HomePanel() {
         : EMPTY_PROJECT_GIT_METADATA
     const activeConversationId = activeProjectScope?.conversationId ?? null
     const activeConversationSnapshot = activeConversationId ? projectConversationSnapshots[activeConversationId] || null : null
-    const hasLoadedActiveConversationSnapshot = Boolean(activeConversationId && projectConversationSnapshots[activeConversationId])
     const activeProjectConversationSummaries = activeProjectPath ? projectConversationSummaries[activeProjectPath] || [] : []
-    const activeConversationHistory = activeProjectScope?.conversationHistory || []
     const activeProjectEventLog = activeProjectScope?.projectEventLog || []
+    const activeConversationHistory = useMemo(
+        () => buildConversationTimelineEntries(
+            activeConversationSnapshot,
+            optimisticSend && optimisticSend.conversationId === activeConversationId ? optimisticSend : null,
+        ),
+        [activeConversationId, activeConversationSnapshot, optimisticSend],
+    )
     const activeSpecEditProposals = activeConversationSnapshot?.spec_edit_proposals || []
     const activeExecutionCards = activeConversationSnapshot?.execution_cards || []
     const latestSpecEditProposalId = activeSpecEditProposals.length > 0
@@ -390,7 +634,6 @@ export function HomePanel() {
         || entry.role === "user"
         || entry.role === "assistant"
     ))
-    const showPendingAssistantRow = isSendingChat && !hasAgentActivityAfterLatestUserTurn(activeConversationHistory)
 
     const orderedProjects = (() => {
         const seenProjectPaths = new Set<string>()
@@ -433,11 +676,16 @@ export function HomePanel() {
         }))
     }
 
-    const activateConversationThread = (projectPath: string, conversationId: string) => {
+    const activateConversationThread = (projectPath: string, conversationId: string, source = "unknown") => {
+        debugProjectChat("activate conversation thread", {
+            source,
+            projectPath,
+            conversationId,
+        })
+        setOptimisticSend(null)
         setConversationId(conversationId)
         updateProjectScopedWorkspace(projectPath, {
             conversationId,
-            conversationHistory: [],
             specId: null,
             specStatus: "draft",
             specProvenance: null,
@@ -480,7 +728,11 @@ export function HomePanel() {
         setIsConversationPinnedToBottom(true)
     }
 
-    const applyConversationSnapshot = (projectPath: string, snapshot: ConversationSnapshotResponse) => {
+    const applyConversationSnapshot = (
+        projectPath: string,
+        snapshot: ConversationSnapshotResponse,
+        source = "unknown",
+    ) => {
         const currentScope = projectScopedWorkspaces[projectPath]
         const latestApprovedProposal = getLatestApprovedSpecEditProposal(snapshot)
         const latestExecutionCard = getLatestExecutionCard(snapshot)
@@ -492,6 +744,14 @@ export function HomePanel() {
             || latestExecutionCard?.flow_source
             || currentScope?.activeFlow
             || null
+        debugProjectChat("apply conversation snapshot", {
+            source,
+            projectPath,
+            snapshotProjectPath: snapshot.project_path,
+            conversationId: snapshot.conversation_id,
+            turnCount: snapshot.turns.length,
+            turns: summarizeConversationTurnsForDebug(snapshot.turns),
+        })
 
         setProjectConversationSnapshots((current) => ({
             ...current,
@@ -513,7 +773,6 @@ export function HomePanel() {
 
         updateProjectScopedWorkspace(projectPath, {
             conversationId: snapshot.conversation_id,
-            conversationHistory: buildConversationHistoryEntries(snapshot),
             projectEventLog: snapshot.event_log.map((entry) => ({
                 message: entry.message,
                 timestamp: entry.timestamp,
@@ -558,7 +817,60 @@ export function HomePanel() {
         }
     }
 
+    const applyConversationStreamEvent = (
+        projectPath: string,
+        event: ConversationTurnUpsertEventResponse | ConversationTurnEventStreamResponse,
+        source = "unknown",
+    ) => {
+        debugProjectChat("apply conversation stream event", {
+            source,
+            projectPath,
+            eventType: event.type,
+            conversationId: event.conversation_id,
+        })
+        let nextSnapshot: ConversationSnapshotResponse | null = null
+        setProjectConversationSnapshots((current) => {
+            const existingSnapshot = current[event.conversation_id]
+                || ensureConversationSnapshotShell(event.conversation_id, event.project_path, event.title)
+            const mergedSnapshot = event.type === "turn_upsert"
+                ? {
+                    ...upsertConversationTurn(existingSnapshot, event.turn),
+                    project_path: event.project_path,
+                    title: event.title,
+                    updated_at: event.updated_at,
+                }
+                : {
+                    ...appendConversationTurnEvent(existingSnapshot, event.event),
+                    project_path: event.project_path,
+                    title: event.title,
+                    updated_at: event.updated_at,
+                }
+            nextSnapshot = mergedSnapshot
+            return {
+                ...current,
+                [event.conversation_id]: mergedSnapshot,
+            }
+        })
+        if (!nextSnapshot) {
+            return
+        }
+        setProjectConversationSummaries((current) => ({
+            ...current,
+            [projectPath]: upsertConversationSummary(current[projectPath] || [], {
+                conversation_id: nextSnapshot.conversation_id,
+                project_path: nextSnapshot.project_path,
+                title: nextSnapshot.title,
+                created_at: nextSnapshot.created_at,
+                updated_at: nextSnapshot.updated_at,
+                last_message_preview: nextSnapshot.turns
+                    .filter((turn) => turn.kind === "message" && turn.content.trim().length > 0)
+                    .slice(-1)[0]?.content || null,
+            }),
+        }))
+    }
+
     applyConversationSnapshotRef.current = applyConversationSnapshot
+    applyConversationStreamEventRef.current = applyConversationStreamEvent
 
     useEffect(() => {
         const projectPathsToFetch = projects
@@ -626,7 +938,7 @@ export function HomePanel() {
             }
             const latestConversation = summaries[0] || null
             if (latestConversation) {
-                activateConversationThread(activeProjectPath, latestConversation.conversation_id)
+                activateConversationThread(activeProjectPath, latestConversation.conversation_id, "load-latest-thread")
             }
         }
 
@@ -639,6 +951,7 @@ export function HomePanel() {
     useEffect(() => {
         setChatDraft("")
         setPanelError(null)
+        setOptimisticSend(null)
     }, [activeProjectPath])
 
     useEffect(() => {
@@ -743,12 +1056,12 @@ export function HomePanel() {
                 if (isCancelled) {
                     return
                 }
-                applyConversationSnapshotRef.current?.(activeProjectPath, snapshot)
+                applyConversationSnapshotRef.current?.(activeProjectPath, snapshot, "snapshot-fetch")
             } catch (error) {
                 if (isCancelled) {
                     return
                 }
-                if (error instanceof ApiHttpError && error.status === 404 && !hasLoadedActiveConversationSnapshot) {
+                if (error instanceof ApiHttpError && error.status === 404) {
                     return
                 }
                 const message = extractApiErrorMessage(error, "Unable to load project conversation.")
@@ -768,11 +1081,16 @@ export function HomePanel() {
                 }
                 try {
                     const payload = JSON.parse(event.data) as { type?: string; state?: unknown }
-                    if (payload.type !== "conversation_snapshot") {
+                    if (payload.type === "conversation_snapshot") {
+                        const snapshot = parseConversationSnapshotResponse(payload.state, "/api/conversations/{id}/events")
+                        applyConversationSnapshotRef.current?.(activeProjectPath, snapshot, "event-stream-snapshot")
                         return
                     }
-                    const snapshot = parseConversationSnapshotResponse(payload.state, "/api/conversations/{id}/events")
-                    applyConversationSnapshotRef.current?.(activeProjectPath, snapshot)
+                    const parsedEvent = parseConversationStreamEventResponse(payload, "/api/conversations/{id}/events")
+                    if (!parsedEvent) {
+                        return
+                    }
+                    applyConversationStreamEventRef.current?.(activeProjectPath, parsedEvent, "event-stream")
                 } catch {
                     // Ignore malformed stream events.
                 }
@@ -783,7 +1101,7 @@ export function HomePanel() {
             isCancelled = true
             eventSource?.close()
         }
-    }, [activeConversationId, activeProjectPath, hasLoadedActiveConversationSnapshot])
+    }, [activeConversationId, activeProjectPath])
 
     const resolveProjectPathValidation = (rawPath: string): ProjectRegistrationResult => {
         const normalizedPath = normalizeProjectPath(rawPath)
@@ -978,7 +1296,7 @@ export function HomePanel() {
                 last_message_preview: null,
             },
         ))
-        activateConversationThread(activeProjectPath, conversationId)
+        activateConversationThread(activeProjectPath, conversationId, "create-thread")
     }
 
     const onSelectConversationThread = (conversationId: string) => {
@@ -986,10 +1304,10 @@ export function HomePanel() {
             return
         }
         setPanelError(null)
-        activateConversationThread(activeProjectPath, conversationId)
+        activateConversationThread(activeProjectPath, conversationId, "select-thread")
         const cachedSnapshot = projectConversationSnapshots[conversationId]
         if (cachedSnapshot) {
-            applyConversationSnapshot(activeProjectPath, cachedSnapshot)
+            applyConversationSnapshot(activeProjectPath, cachedSnapshot, "thread-cache")
         }
     }
 
@@ -1001,7 +1319,7 @@ export function HomePanel() {
             return activeConversationId
         }
         const conversationId = buildProjectConversationId(activeProjectPath)
-        activateConversationThread(activeProjectPath, conversationId)
+        activateConversationThread(activeProjectPath, conversationId, "ensure-conversation")
         return conversationId
     }
 
@@ -1017,37 +1335,31 @@ export function HomePanel() {
         if (!conversationId) {
             return
         }
-        const priorConversationId = activeConversationId
-        const priorConversationHistory = activeConversationHistory
-        const optimisticUserTurn: ConversationHistoryEntry = {
-            role: "user",
-            content: trimmed,
-            timestamp: new Date().toISOString(),
-            kind: "message",
-            artifactId: null,
-        }
+        const optimisticCreatedAt = new Date().toISOString()
 
         setIsSendingChat(true)
         setPanelError(null)
         setChatDraft("")
-        appendConversationHistoryEntry(optimisticUserTurn)
+        setOptimisticSend({
+            conversationId,
+            projectPath: activeProjectPath,
+            message: trimmed,
+            createdAt: optimisticCreatedAt,
+        })
         try {
             const snapshot = await sendConversationTurnValidated(conversationId, {
                 project_path: activeProjectPath,
                 message: trimmed,
                 model: model.trim() || null,
             })
-            applyConversationSnapshot(activeProjectPath, snapshot)
+            applyConversationSnapshot(activeProjectPath, snapshot, "send-response")
         } catch (error) {
-            updateProjectScopedWorkspace(activeProjectPath, {
-                conversationId: priorConversationId,
-                conversationHistory: priorConversationHistory,
-            })
             const message = extractApiErrorMessage(error, "Unable to send the project chat turn.")
             setPanelError(message)
             appendLocalProjectEvent(`Project chat turn failed: ${message}`)
         } finally {
             setIsSendingChat(false)
+            setOptimisticSend(null)
         }
     }
 
@@ -1079,7 +1391,7 @@ export function HomePanel() {
                 model: model.trim() || null,
                 flow_source: activeFlow || null,
             })
-            applyConversationSnapshot(activeProjectPath, snapshot)
+            applyConversationSnapshot(activeProjectPath, snapshot, "spec-approve")
         } catch (error) {
             const message = extractApiErrorMessage(error, "Unable to approve the spec edit proposal.")
             setPanelError(message)
@@ -1100,7 +1412,7 @@ export function HomePanel() {
             const snapshot = await rejectSpecEditProposalValidated(activeConversationId, proposal.id, {
                 project_path: activeProjectPath,
             })
-            applyConversationSnapshot(activeProjectPath, snapshot)
+            applyConversationSnapshot(activeProjectPath, snapshot, "spec-reject")
         } catch (error) {
             const message = extractApiErrorMessage(error, "Unable to reject the spec edit proposal.")
             setPanelError(message)
@@ -1141,7 +1453,7 @@ export function HomePanel() {
                 model: model.trim() || null,
                 flow_source: activeFlow || executionCard.flow_source || null,
             })
-            applyConversationSnapshot(activeProjectPath, snapshot)
+            applyConversationSnapshot(activeProjectPath, snapshot, "execution-review")
         } catch (error) {
             const message = extractApiErrorMessage(error, "Unable to review the execution card.")
             setPanelError(message)
@@ -1429,8 +1741,8 @@ export function HomePanel() {
                                             ) : (
                                                 <ol data-testid="project-ai-conversation-history-list" className="space-y-3">
                                                     {activeConversationHistory.map((entry, index) => {
-                                                        const key = `${entry.timestamp}-${entry.artifactId || index}`
-                                                        if (entry.kind === "tool_call" && entry.toolCall) {
+                                                        const key = `${entry.id}-${entry.timestamp}-${index}`
+                                                        if (entry.kind === "tool_call") {
                                                             const statusPresentation = getToolCallStatusPresentation(entry.toolCall.status)
                                                             return (
                                                                 <li key={key} className="flex justify-start">
@@ -1468,7 +1780,7 @@ export function HomePanel() {
                                                             )
                                                         }
 
-                                                        if (entry.kind === "spec_edit_proposal" && entry.artifactId) {
+                                                        if (entry.kind === "spec_edit_proposal") {
                                                             const proposal = activeSpecEditProposalsById.get(entry.artifactId) || null
                                                             if (!proposal) {
                                                                 return (
@@ -1615,7 +1927,7 @@ export function HomePanel() {
                                                             )
                                                         }
 
-                                                        if (entry.kind === "execution_card" && entry.artifactId) {
+                                                        if (entry.kind === "execution_card") {
                                                             const executionCard = activeExecutionCardsById.get(entry.artifactId) || null
                                                             if (!executionCard) {
                                                                 return (
@@ -1762,10 +2074,6 @@ export function HomePanel() {
                                                             )
                                                         }
 
-                                                        if (entry.role !== "user" && entry.role !== "assistant") {
-                                                            return null
-                                                        }
-
                                                         return (
                                                             <li
                                                                 key={key}
@@ -1780,27 +2088,18 @@ export function HomePanel() {
                                                                     <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
                                                                         {entry.role === "assistant" ? "Attractor" : entry.role}
                                                                     </p>
-                                                                    <p className="whitespace-pre-wrap text-xs leading-5">{entry.content}</p>
+                                                                    <p className="whitespace-pre-wrap text-xs leading-5">
+                                                                        {entry.role === "assistant" && entry.status !== "complete" && !entry.content.trim()
+                                                                            ? entry.status === "failed"
+                                                                                ? (entry.error || "Response failed.")
+                                                                                : "Thinking..."
+                                                                            : entry.content}
+                                                                    </p>
                                                                     <p className="mt-1 text-[10px] opacity-70">{formatConversationTimestamp(entry.timestamp)}</p>
                                                                 </div>
                                                             </li>
                                                         )
                                                     })}
-                                                    {showPendingAssistantRow ? (
-                                                        <li
-                                                            data-testid="project-ai-conversation-pending-row"
-                                                            className="flex justify-start"
-                                                        >
-                                                            <div className="max-w-[85%] rounded border border-border bg-muted/30 px-3 py-2 text-foreground">
-                                                                <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
-                                                                    Attractor
-                                                                </p>
-                                                                <p className="text-xs leading-5 text-muted-foreground">
-                                                                    Thinking...
-                                                                </p>
-                                                            </div>
-                                                        </li>
-                                                    ) : null}
                                                 </ol>
                                             )}
                                         </div>
