@@ -779,23 +779,29 @@ export function HomePanel() {
         projectPath: string,
         snapshot: ConversationSnapshotResponse,
         source = "unknown",
+        options?: {
+            forceWorkspaceSync?: boolean
+        },
     ) => {
-        const currentScope = projectScopedWorkspaces[projectPath]
+        const latestProjectScope = useStore.getState().projectScopedWorkspaces[projectPath]
+        const shouldSyncActiveWorkspace = options?.forceWorkspaceSync === true
+            || latestProjectScope?.conversationId === snapshot.conversation_id
         const latestApprovedProposal = getLatestApprovedSpecEditProposal(snapshot)
         const latestExecutionCard = getLatestExecutionCard(snapshot)
         const selectedRunId = snapshot.execution_workflow.run_id
             || latestExecutionCard?.source_workflow_run_id
-            || currentScope?.selectedRunId
+            || latestProjectScope?.selectedRunId
             || null
         const flowSource = snapshot.execution_workflow.flow_source
             || latestExecutionCard?.flow_source
-            || currentScope?.activeFlow
+            || latestProjectScope?.activeFlow
             || null
         debugProjectChat("apply conversation snapshot", {
             source,
             projectPath,
             snapshotProjectPath: snapshot.project_path,
             conversationId: snapshot.conversation_id,
+            shouldSyncActiveWorkspace,
             turnCount: snapshot.turns.length,
             turns: summarizeConversationTurnsForDebug(snapshot.turns),
         })
@@ -818,40 +824,42 @@ export function HomePanel() {
             }),
         }))
 
-        updateProjectScopedWorkspace(projectPath, {
-            conversationId: snapshot.conversation_id,
-            projectEventLog: snapshot.event_log.map((entry) => ({
-                message: entry.message,
-                timestamp: entry.timestamp,
-            })),
-            specId: latestApprovedProposal?.canonical_spec_edit_id ?? null,
-            specStatus: latestApprovedProposal ? "approved" : "draft",
-            specProvenance: latestApprovedProposal
-                ? {
-                    source: "spec-edit-proposal",
-                    referenceId: latestApprovedProposal.id,
-                    capturedAt: latestApprovedProposal.approved_at || latestApprovedProposal.created_at,
-                    runId: null,
-                    gitBranch: latestApprovedProposal.git_branch ?? null,
-                    gitCommit: latestApprovedProposal.git_commit ?? null,
-                }
-                : null,
-            planId: latestExecutionCard?.id ?? null,
-            planStatus: derivePlanStatusFromExecutionCard(latestExecutionCard),
-            planProvenance: latestExecutionCard
-                ? {
-                    source: "execution-card",
-                    referenceId: latestExecutionCard.id,
-                    capturedAt: latestExecutionCard.updated_at,
-                    runId: latestExecutionCard.source_workflow_run_id,
-                    gitBranch: latestApprovedProposal?.git_branch ?? null,
-                    gitCommit: latestApprovedProposal?.git_commit ?? null,
-                }
-                : null,
-            artifactRunId: snapshot.execution_workflow.run_id ?? latestExecutionCard?.source_workflow_run_id ?? null,
-            selectedRunId,
-            activeFlow: flowSource,
-        })
+        if (shouldSyncActiveWorkspace) {
+            updateProjectScopedWorkspace(projectPath, {
+                conversationId: snapshot.conversation_id,
+                projectEventLog: snapshot.event_log.map((entry) => ({
+                    message: entry.message,
+                    timestamp: entry.timestamp,
+                })),
+                specId: latestApprovedProposal?.canonical_spec_edit_id ?? null,
+                specStatus: latestApprovedProposal ? "approved" : "draft",
+                specProvenance: latestApprovedProposal
+                    ? {
+                        source: "spec-edit-proposal",
+                        referenceId: latestApprovedProposal.id,
+                        capturedAt: latestApprovedProposal.approved_at || latestApprovedProposal.created_at,
+                        runId: null,
+                        gitBranch: latestApprovedProposal.git_branch ?? null,
+                        gitCommit: latestApprovedProposal.git_commit ?? null,
+                    }
+                    : null,
+                planId: latestExecutionCard?.id ?? null,
+                planStatus: derivePlanStatusFromExecutionCard(latestExecutionCard),
+                planProvenance: latestExecutionCard
+                    ? {
+                        source: "execution-card",
+                        referenceId: latestExecutionCard.id,
+                        capturedAt: latestExecutionCard.updated_at,
+                        runId: latestExecutionCard.source_workflow_run_id,
+                        gitBranch: latestApprovedProposal?.git_branch ?? null,
+                        gitCommit: latestApprovedProposal?.git_commit ?? null,
+                    }
+                    : null,
+                artifactRunId: snapshot.execution_workflow.run_id ?? latestExecutionCard?.source_workflow_run_id ?? null,
+                selectedRunId,
+                activeFlow: flowSource,
+            })
+        }
 
         if (latestApprovedProposal?.git_branch || latestApprovedProposal?.git_commit) {
             setProjectGitMetadata((current) => ({
@@ -1399,7 +1407,11 @@ export function HomePanel() {
                 message: trimmed,
                 model: model.trim() || null,
             })
-            applyConversationSnapshot(activeProjectPath, snapshot, "send-response")
+            const latestProjectScope = useStore.getState().projectScopedWorkspaces[activeProjectPath]
+            const shouldKeepFocusOnReplyThread = latestProjectScope?.conversationId === conversationId
+            applyConversationSnapshot(activeProjectPath, snapshot, "send-response", {
+                forceWorkspaceSync: shouldKeepFocusOnReplyThread,
+            })
         } catch (error) {
             const message = extractApiErrorMessage(error, "Unable to send the project chat turn.")
             setPanelError(message)
@@ -1543,15 +1555,6 @@ export function HomePanel() {
             className={`flex-1 ${isNarrowViewport ? "overflow-auto p-3" : "flex min-h-0 flex-col overflow-hidden p-6"}`}
         >
             <div className={`w-full ${isNarrowViewport ? "space-y-6" : "flex min-h-0 flex-1 flex-col gap-6"}`}>
-                <div className="space-y-1">
-                    <h2 className="text-lg font-semibold">Home</h2>
-                    <p className="text-sm text-muted-foreground">
-                        Project selection and AI collaboration start in this workspace.
-                    </p>
-                </div>
-                <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm">
-                    Home is now the first-class workspace for project-scoped conversation, spec edit review, and workflow planning.
-                </div>
                 <div
                     data-testid="home-main-layout"
                     className={`grid gap-4 ${isNarrowViewport ? "grid-cols-1" : "min-h-0 flex-1 grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"}`}

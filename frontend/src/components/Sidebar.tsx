@@ -268,8 +268,9 @@ export function Sidebar() {
                     ? 'Save Conflict'
                 : saveState === 'error'
                     ? 'Save Failed'
-                    : 'Idle'
+                    : ''
     const remediation = resolveSaveRemediation(saveState, saveErrorKind)
+    const showSaveStateIndicator = saveState !== 'idle' || Boolean(saveErrorMessage) || Boolean(remediation)
 
     const handleRetrySave = () => {
         void retryLastSaveContent()
@@ -442,37 +443,39 @@ export function Sidebar() {
                     <span>{inspectorTitle}</span>
                     <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
                 </div>
-                <div
-                    data-testid="save-state-indicator"
-                    className={`mt-2 rounded-md border px-2 py-1 text-[11px] font-medium ${
-                        saveState === 'error'
-                            ? 'border-destructive/50 bg-destructive/10 text-destructive'
-                            : saveState === 'conflict'
-                                ? 'border-amber-500/50 bg-amber-500/10 text-amber-800'
-                            : saveState === 'saved'
-                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
-                                : 'border-border bg-muted/30 text-muted-foreground'
-                    }`}
-                    title={saveErrorMessage || undefined}
-                >
-                    <span>{saveStateLabel}</span>
-                    {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
-                    {remediation ? (
-                        <p data-testid="save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
-                            {remediation.message}
-                        </p>
-                    ) : null}
-                    {remediation?.allowRetry ? (
-                        <button
-                            type="button"
-                            data-testid="save-remediation-retry"
-                            onClick={handleRetrySave}
-                            className="mt-2 inline-flex rounded border border-current px-2 py-0.5 text-[10px] font-semibold hover:bg-current/10"
-                        >
-                            Retry Save
-                        </button>
-                    ) : null}
-                </div>
+                {showSaveStateIndicator ? (
+                    <div
+                        data-testid="save-state-indicator"
+                        className={`mt-2 rounded-md border px-2 py-1 text-[11px] font-medium ${
+                            saveState === 'error'
+                                ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                                : saveState === 'conflict'
+                                    ? 'border-amber-500/50 bg-amber-500/10 text-amber-800'
+                                : saveState === 'saved'
+                                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
+                                    : 'border-border bg-muted/30 text-muted-foreground'
+                        }`}
+                        title={saveErrorMessage || undefined}
+                    >
+                        <span>{saveStateLabel}</span>
+                        {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
+                        {remediation ? (
+                            <p data-testid="save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
+                                {remediation.message}
+                            </p>
+                        ) : null}
+                        {remediation?.allowRetry ? (
+                            <button
+                                type="button"
+                                data-testid="save-remediation-retry"
+                                onClick={handleRetrySave}
+                                className="mt-2 inline-flex rounded border border-current px-2 py-0.5 text-[10px] font-semibold hover:bg-current/10"
+                            >
+                                Retry Save
+                            </button>
+                        ) : null}
+                    </div>
+                ) : null}
             </div>
 
             {activeTab === 'flows' && (

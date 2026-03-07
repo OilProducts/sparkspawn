@@ -852,7 +852,7 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByTestId('runtime-api-degraded-banner')).toHaveTextContent(
       'Runtime status endpoint is unavailable or incompatible.',
     )
-    expect(screen.getByTestId('global-save-state-indicator')).toHaveTextContent('Idle')
+    expect(screen.getByTestId('global-save-state-indicator')).not.toHaveTextContent('Idle')
   })
 
   it('[CID:12.2.02] keeps non-dependent run-inspector surfaces functional under partial API failure', async () => {

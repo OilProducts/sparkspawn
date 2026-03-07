@@ -91,8 +91,14 @@ export function RunStream() {
                     ? 'Save Conflict'
                 : saveState === 'error'
                     ? 'Save Failed'
-                    : 'Idle'
+                    : ''
     const remediation = resolveSaveRemediation(saveState, saveErrorKind)
+    const showSaveStateIndicator = (
+        saveState !== 'idle'
+        || Boolean(saveErrorMessage)
+        || Boolean(runtimeApiDegradedMessage)
+        || Boolean(remediation)
+    )
 
     useEffect(() => {
         stageCursorsRef.current = {}
@@ -325,32 +331,34 @@ export function RunStream() {
 
     return (
         <div data-testid="execution-runtime-stream-indicator" className="pointer-events-none fixed right-4 top-16 z-[70]">
-            <div
-                data-testid="global-save-state-indicator"
-                className={`rounded-md border px-2 py-1 text-[11px] font-medium shadow-sm ${
-                    saveState === 'error'
-                        ? 'border-destructive/50 bg-destructive/10 text-destructive'
-                        : saveState === 'conflict'
-                            ? 'border-amber-500/50 bg-amber-500/10 text-amber-800'
-                        : saveState === 'saved'
-                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
-                            : 'border-border bg-background/95 text-muted-foreground'
-                }`}
-                title={saveErrorMessage || undefined}
-            >
-                <span>{saveStateLabel}</span>
-                {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
-                {runtimeApiDegradedMessage ? (
-                    <p data-testid="runtime-api-degraded-banner" className="mt-1 text-[10px] font-normal leading-4 text-amber-800">
-                        {runtimeApiDegradedMessage}
-                    </p>
-                ) : null}
-                {remediation ? (
-                    <p data-testid="global-save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
-                        {remediation.message}
-                    </p>
-                ) : null}
-            </div>
+            {showSaveStateIndicator ? (
+                <div
+                    data-testid="global-save-state-indicator"
+                    className={`rounded-md border px-2 py-1 text-[11px] font-medium shadow-sm ${
+                        saveState === 'error'
+                            ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                            : saveState === 'conflict'
+                                ? 'border-amber-500/50 bg-amber-500/10 text-amber-800'
+                            : saveState === 'saved'
+                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
+                                : 'border-border bg-background/95 text-muted-foreground'
+                    }`}
+                    title={saveErrorMessage || undefined}
+                >
+                    {saveStateLabel ? <span>{saveStateLabel}</span> : null}
+                    {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
+                    {runtimeApiDegradedMessage ? (
+                        <p data-testid="runtime-api-degraded-banner" className="mt-1 text-[10px] font-normal leading-4 text-amber-800">
+                            {runtimeApiDegradedMessage}
+                        </p>
+                    ) : null}
+                    {remediation ? (
+                        <p data-testid="global-save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
+                            {remediation.message}
+                        </p>
+                    ) : null}
+                </div>
+            ) : null}
         </div>
     )
 }
