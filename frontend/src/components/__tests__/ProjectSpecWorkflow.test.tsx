@@ -45,6 +45,9 @@ const createConversationSnapshot = (
 ): ConversationSnapshotResponse => ({
   conversation_id: conversationId,
   project_path: projectPath,
+  title: overrides?.title ?? 'New thread',
+  created_at: overrides?.created_at ?? '2026-03-06T15:00:00Z',
+  updated_at: overrides?.updated_at ?? overrides?.created_at ?? '2026-03-06T15:00:00Z',
   turns: overrides?.turns ?? [],
   event_log: overrides?.event_log ?? [],
   spec_edit_proposals: overrides?.spec_edit_proposals ?? [],
@@ -105,6 +108,27 @@ describe('Project-scoped workflow behavior', () => {
 
         if (endpoint.pathname === '/api/projects/metadata') {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (endpoint.pathname === '/api/projects/conversations') {
+          const projectPath = endpoint.searchParams.get('project_path') || '/tmp/unknown-project'
+          const summaries = Object.values(conversationSnapshots)
+            .filter((snapshot) => snapshot.project_path === projectPath)
+            .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+            .map((snapshot) => ({
+              conversation_id: snapshot.conversation_id,
+              project_path: snapshot.project_path,
+              title: snapshot.title,
+              created_at: snapshot.created_at,
+              updated_at: snapshot.updated_at,
+              last_message_preview: snapshot.turns
+                .filter((turn) => turn.kind === 'message' && turn.content.trim().length > 0)
+                .slice(-1)[0]?.content ?? null,
+            }))
+          return new Response(JSON.stringify(summaries), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -453,7 +477,7 @@ describe('Project-scoped workflow behavior', () => {
       expect(screen.getByTestId('project-ai-conversation-surface')).toBeVisible()
     })
     expect(screen.queryByTestId('project-spec-edit-proposal-preview')).not.toBeInTheDocument()
-    expect(screen.getByTestId('project-ai-conversation-surface')).toHaveTextContent('No conversation history for this project yet.')
+    expect(screen.getByTestId('project-ai-conversation-surface')).toHaveTextContent('Create or select a thread to begin chatting.')
   })
 
   it('adds the execution card from streamed workflow completion and records run context', async () => {

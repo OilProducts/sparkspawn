@@ -2049,6 +2049,14 @@ async def get_project_conversation(conversation_id: str, project_path: Optional[
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/projects/conversations")
+async def list_project_conversations(project_path: str):
+    try:
+        return await asyncio.to_thread(PROJECT_CHAT.list_conversations, project_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/conversations/{conversation_id}/events")
 async def project_conversation_events(conversation_id: str, request: Request, project_path: Optional[str] = None):
     try:

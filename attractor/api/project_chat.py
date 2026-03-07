@@ -29,6 +29,13 @@ def _slugify(value: str) -> str:
     return slug or "project"
 
 
+def _truncate_text(value: str, limit: int) -> str:
+    trimmed = value.strip()
+    if len(trimmed) <= limit:
+        return trimmed
+    return trimmed[: max(0, limit - 1)].rstrip() + "…"
+
+
 def _normalize_project_path(value: str) -> str:
     trimmed = value.strip()
     if not trimmed:
@@ -115,6 +122,26 @@ def _as_non_empty_string(value: Any) -> Optional[str]:
         return trimmed or None
     if isinstance(value, (int, float, bool)):
         return str(value)
+    return None
+
+
+def _derive_conversation_title(turns: list["ConversationTurn"]) -> str:
+    for turn in turns:
+        if turn.role != "user":
+            continue
+        title = _as_non_empty_string(turn.content)
+        if title:
+            return _truncate_text(title, 64)
+    return "New thread"
+
+
+def _build_conversation_preview(turns: list["ConversationTurn"]) -> Optional[str]:
+    for turn in reversed(turns):
+        if turn.kind != "message":
+            continue
+        preview = _as_non_empty_string(turn.content)
+        if preview:
+            return _truncate_text(preview, 96)
     return None
 
 
@@ -651,6 +678,9 @@ class ExecutionWorkflowState:
 class ConversationState:
     conversation_id: str
     project_path: str
+    title: str = "New thread"
+    created_at: str = ""
+    updated_at: str = ""
     turns: list[ConversationTurn] = field(default_factory=list)
     event_log: list[WorkflowEvent] = field(default_factory=list)
     spec_edit_proposals: list[SpecEditProposal] = field(default_factory=list)
@@ -661,6 +691,9 @@ class ConversationState:
         return {
             "conversation_id": self.conversation_id,
             "project_path": self.project_path,
+            "title": self.title,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
             "turns": [turn.to_dict() for turn in self.turns],
             "event_log": [entry.to_dict() for entry in self.event_log],
             "spec_edit_proposals": [proposal.to_dict() for proposal in self.spec_edit_proposals],
@@ -674,14 +707,24 @@ class ConversationState:
         raw_events = payload.get("event_log")
         raw_proposals = payload.get("spec_edit_proposals")
         raw_cards = payload.get("execution_cards")
+        turns = [
+            ConversationTurn.from_dict(turn)
+            for turn in raw_turns
+            if isinstance(turn, dict)
+        ] if isinstance(raw_turns, list) else []
+        created_at = _as_non_empty_string(payload.get("created_at"))
+        updated_at = _as_non_empty_string(payload.get("updated_at"))
+        if not created_at:
+            created_at = turns[0].timestamp if turns else ""
+        if not updated_at:
+            updated_at = turns[-1].timestamp if turns else created_at
         return cls(
             conversation_id=str(payload.get("conversation_id", "")),
             project_path=_normalize_project_path(str(payload.get("project_path", ""))),
-            turns=[
-                ConversationTurn.from_dict(turn)
-                for turn in raw_turns
-                if isinstance(turn, dict)
-            ] if isinstance(raw_turns, list) else [],
+            title=_as_non_empty_string(payload.get("title")) or _derive_conversation_title(turns),
+            created_at=created_at or _iso_now(),
+            updated_at=updated_at or created_at or _iso_now(),
+            turns=turns,
             event_log=[
                 WorkflowEvent.from_dict(entry)
                 for entry in raw_events
@@ -701,6 +744,28 @@ class ConversationState:
             if isinstance(payload.get("execution_workflow"), dict)
             else ExecutionWorkflowState(),
         )
+
+
+@dataclass
+class ConversationSummary:
+    conversation_id: str
+    project_path: str
+    title: str
+    created_at: str
+    updated_at: str
+    last_message_preview: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "conversation_id": self.conversation_id,
+            "project_path": self.project_path,
+            "title": self.title,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        if self.last_message_preview:
+            payload["last_message_preview"] = self.last_message_preview
+        return payload
 
 
 @dataclass
@@ -1162,6 +1227,31 @@ class ProjectChatService:
     def _conversation_session_path(self, conversation_id: str) -> Path:
         return self._conversation_root(conversation_id) / "session.json"
 
+    def _touch_conversation_state(self, state: ConversationState, *, title_hint: Optional[str] = None) -> None:
+        if not state.created_at:
+            state.created_at = _iso_now()
+        if title_hint:
+            normalized_title_hint = _truncate_text(title_hint, 64)
+            if state.title == "New thread" or not _as_non_empty_string(state.title):
+                state.title = normalized_title_hint
+        elif not _as_non_empty_string(state.title):
+            state.title = _derive_conversation_title(state.turns)
+        if state.title == "New thread":
+            derived_title = _derive_conversation_title(state.turns)
+            if derived_title != "New thread":
+                state.title = derived_title
+        state.updated_at = _iso_now()
+
+    def _build_conversation_summary(self, state: ConversationState) -> ConversationSummary:
+        return ConversationSummary(
+            conversation_id=state.conversation_id,
+            project_path=state.project_path,
+            title=_as_non_empty_string(state.title) or _derive_conversation_title(state.turns),
+            created_at=state.created_at or _iso_now(),
+            updated_at=state.updated_at or state.created_at or _iso_now(),
+            last_message_preview=_build_conversation_preview(state.turns),
+        )
+
     def _read_state(self, conversation_id: str) -> Optional[ConversationState]:
         path = self._conversation_state_path(conversation_id)
         try:
@@ -1225,8 +1315,29 @@ class ProjectChatService:
         snapshot = self.get_snapshot(conversation_id)
         await self._event_hub.publish(conversation_id, {"type": "conversation_snapshot", "state": snapshot})
 
+    def list_conversations(self, project_path: str) -> list[dict[str, Any]]:
+        normalized_project_path = _normalize_project_path(project_path)
+        if not normalized_project_path:
+            raise ValueError("Project path is required.")
+        with self._lock:
+            summaries: list[ConversationSummary] = []
+            for state_path in self._conversations_root().glob("*/state.json"):
+                try:
+                    payload = json.loads(state_path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                state = ConversationState.from_dict(payload)
+                if state.project_path != normalized_project_path:
+                    continue
+                summaries.append(self._build_conversation_summary(state))
+        summaries.sort(key=lambda entry: entry.updated_at, reverse=True)
+        return [summary.to_dict() for summary in summaries]
+
     def get_snapshot(self, conversation_id: str, project_path: Optional[str] = None) -> dict[str, Any]:
         with self._lock:
+            should_write_state = False
             state = self._read_state(conversation_id)
             if state is None:
                 normalized_project_path = _normalize_project_path(project_path or "")
@@ -1236,11 +1347,22 @@ class ProjectChatService:
                     conversation_id=conversation_id,
                     project_path=normalized_project_path,
                 )
-                self._write_state(state)
+                self._touch_conversation_state(state)
+                should_write_state = True
             elif project_path:
                 normalized_project_path = _normalize_project_path(project_path)
                 if normalized_project_path and normalized_project_path != state.project_path:
                     raise ValueError("Conversation is already bound to a different project path.")
+            if not state.created_at or not state.updated_at or not _as_non_empty_string(state.title):
+                if not state.created_at:
+                    state.created_at = _iso_now()
+                if not state.updated_at:
+                    state.updated_at = state.created_at
+                if not _as_non_empty_string(state.title):
+                    state.title = _derive_conversation_title(state.turns)
+                should_write_state = True
+            if should_write_state:
+                self._write_state(state)
         return state.to_dict()
 
     def _append_event(self, state: ConversationState, message: str) -> None:
@@ -1430,6 +1552,7 @@ class ProjectChatService:
                 timestamp=_iso_now(),
             )
             state.turns.append(user_turn)
+            self._touch_conversation_state(state, title_hint=trimmed_message)
             self._write_state(state)
         def persist_progress(progress: ChatTurnResult) -> None:
             live_assistant_message = _extract_live_assistant_message(progress.assistant_message)
@@ -1437,6 +1560,7 @@ class ProjectChatService:
                 current_state = self._read_state(conversation_id) or state
                 self._sync_live_tool_call_turns(current_state, user_turn.id, progress.tool_calls)
                 self._sync_live_assistant_turn(current_state, user_turn.id, live_assistant_message)
+                self._touch_conversation_state(current_state)
                 self._write_state(current_state)
                 current_snapshot = current_state.to_dict()
             if progress_callback is not None:
@@ -1490,6 +1614,7 @@ class ProjectChatService:
                         )
                     )
                     self._append_event(state, f"Drafted spec edit proposal {proposal.id}.")
+            self._touch_conversation_state(state)
             self._write_state(state)
         return state.to_dict()
 
@@ -1504,6 +1629,7 @@ class ProjectChatService:
                 raise ValueError("Unknown spec edit proposal.")
             proposal.status = "rejected"
             self._append_event(state, f"Rejected spec edit proposal {proposal.id}.")
+            self._touch_conversation_state(state)
             self._write_state(state)
         return state.to_dict()
 
@@ -1595,6 +1721,7 @@ class ProjectChatService:
                 state,
                 f"Approved spec edit proposal {proposal.id} as canonical spec edit {canonical_spec_edit_id} and committed it to git.",
             )
+            self._touch_conversation_state(state)
             self._write_state(state)
         return state.to_dict(), proposal
 
@@ -1618,6 +1745,7 @@ class ProjectChatService:
                 self._append_event(state, f"Execution planning started ({workflow_run_id}) using {flow_source}.")
             else:
                 self._append_event(state, f"Execution planning started ({workflow_run_id}).")
+            self._touch_conversation_state(state)
             self._write_state(state)
         return state.to_dict()
 
@@ -1685,6 +1813,7 @@ class ProjectChatService:
                     flow_source=flow_source,
                 )
                 self._append_event(state, f"Execution planning completed and produced {execution_card.id}.")
+                self._touch_conversation_state(state)
                 self._write_state(state)
             await self.publish_snapshot(conversation_id)
         except Exception as exc:  # noqa: BLE001
@@ -1699,6 +1828,7 @@ class ProjectChatService:
                     flow_source=flow_source,
                 )
                 self._append_event(state, f"Execution planning failed: {exc}")
+                self._touch_conversation_state(state)
                 self._write_state(state)
             await self.publish_snapshot(conversation_id)
 
@@ -1768,5 +1898,6 @@ class ProjectChatService:
                     state,
                     f"{'Requested revision for' if disposition == 'revision_requested' else 'Rejected'} execution card {execution_card.id}; regenerating with reviewer feedback.",
                 )
+            self._touch_conversation_state(state, title_hint=trimmed_message)
             self._write_state(state)
         return state.to_dict(), execution_card, source_proposal_id, workflow_run_id

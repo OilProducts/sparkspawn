@@ -16,6 +16,7 @@
 - In the home workspace, the main content is a two-pane shell: project sidebar on the left, project conversation workspace on the right.
 - Major panes own their own scroll regions instead of forcing the whole page to scroll.
 - The home sidebar is a split stack: quick-switch context above, workflow event log below.
+- Within the home sidebar, the active project's thread list lives with project selection rather than inside the chat canvas so operators can change conversational context without losing the workspace layout.
 - Desktop sidebar stack uses a visible draggable separator with keyboard support. Narrow layouts collapse to stacked cards and remove the separator.
 - Chat composers should stay anchored to the bottom of their working card when the surrounding surface is full-height.
 

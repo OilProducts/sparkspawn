@@ -231,6 +231,63 @@ def test_chat_session_starts_new_durable_thread_when_resume_fails(monkeypatch) -
     assert updated_thread_ids == ["thread-fresh"]
 
 
+def test_list_conversations_filters_by_project_and_sorts_latest_first(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    shared_project = str(tmp_path / "project-a")
+    other_project = str(tmp_path / "project-b")
+
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-a",
+            project_path=shared_project,
+            title="First thread",
+            created_at="2026-03-07T13:00:00Z",
+            updated_at="2026-03-07T13:01:00Z",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-a-1",
+                    role="user",
+                    content="First thread context",
+                    timestamp="2026-03-07T13:01:00Z",
+                )
+            ],
+        )
+    )
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-b",
+            project_path=shared_project,
+            title="Second thread",
+            created_at="2026-03-07T13:02:00Z",
+            updated_at="2026-03-07T13:05:00Z",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-b-1",
+                    role="assistant",
+                    content="Second thread context",
+                    timestamp="2026-03-07T13:05:00Z",
+                )
+            ],
+        )
+    )
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-c",
+            project_path=other_project,
+            title="Other project thread",
+            created_at="2026-03-07T13:03:00Z",
+            updated_at="2026-03-07T13:04:00Z",
+        )
+    )
+
+    summaries = service.list_conversations(shared_project)
+
+    assert [summary["conversation_id"] for summary in summaries] == ["conversation-b", "conversation-a"]
+    assert summaries[0]["title"] == "Second thread"
+    assert summaries[0]["last_message_preview"] == "Second thread context"
+    assert all(summary["project_path"] == shared_project for summary in summaries)
+
+
 def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     api_client,
     monkeypatch,
@@ -288,3 +345,32 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     assert partial_snapshots
     assert [turn["kind"] for turn in partial_snapshots[-1]["turns"]] == ["message", "tool_call", "message"]
     assert partial_snapshots[-1]["turns"][2]["content"] == "Working on it"
+
+
+def test_list_project_conversations_endpoint_returns_project_threads(api_client, tmp_path: Path) -> None:
+    service = server.PROJECT_CHAT
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-a",
+            project_path=str(tmp_path),
+            title="Design thread",
+            created_at="2026-03-07T14:00:00Z",
+            updated_at="2026-03-07T14:02:00Z",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-a-1",
+                    role="user",
+                    content="Design thread preview",
+                    timestamp="2026-03-07T14:02:00Z",
+                )
+            ],
+        )
+    )
+
+    response = api_client.get("/api/projects/conversations", params={"project_path": str(tmp_path)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [entry["conversation_id"] for entry in payload] == ["conversation-a"]
+    assert payload[0]["title"] == "Design thread"
+    assert payload[0]["last_message_preview"] == "Design thread preview"

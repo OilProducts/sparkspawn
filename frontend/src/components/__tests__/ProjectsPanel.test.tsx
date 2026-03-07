@@ -43,12 +43,25 @@ describe('ProjectsPanel', () => {
     resetProjectScopeState()
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(JSON.stringify({ branch: 'main' }), {
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
-        }),
-      ),
+        })
+      }),
     )
   })
 
@@ -159,6 +172,12 @@ describe('ProjectsPanel', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
         if (url.includes('/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
@@ -186,6 +205,8 @@ describe('ProjectsPanel', () => {
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
 
     expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Show this message immediately.')
+    expect(screen.getByTestId('project-ai-conversation-pending-row')).toHaveTextContent('Thinking...')
+    expect(screen.getByTestId('project-ai-conversation-send-button')).toHaveTextContent('Thinking...')
 
     resolveTurnResponse?.(
       new Response(
@@ -230,6 +251,10 @@ describe('ProjectsPanel', () => {
     await waitFor(() => {
       expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Visible.')
     })
+    await waitFor(() => {
+      expect(screen.queryByTestId('project-ai-conversation-pending-row')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('project-ai-conversation-send-button')).toHaveTextContent('Send')
   })
 
   it('keeps the composer cleared when sending a turn fails', async () => {
@@ -240,6 +265,12 @@ describe('ProjectsPanel', () => {
         const url = resolveRequestUrl(input)
         if (url.includes('/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -388,5 +419,136 @@ describe('ProjectsPanel', () => {
 
     expect(conversationBody.scrollTo).toHaveBeenCalled()
     expect(scrollTop).toBe(640)
+  })
+
+  it('switches between project threads without mixing their histories', async () => {
+    const user = userEvent.setup()
+    const conversationSnapshots = {
+      'conversation-thread-a': {
+        conversation_id: 'conversation-thread-a',
+        project_path: '/tmp/thread-project',
+        title: 'Design thread',
+        created_at: '2026-03-07T14:00:00Z',
+        updated_at: '2026-03-07T14:05:00Z',
+        turns: [
+          {
+            id: 'turn-a-1',
+            role: 'user',
+            content: 'Discuss the design changes.',
+            timestamp: '2026-03-07T14:05:00Z',
+            kind: 'message',
+            artifact_id: null,
+          },
+        ],
+        event_log: [],
+        spec_edit_proposals: [],
+        execution_cards: [],
+        execution_workflow: {
+          run_id: null,
+          status: 'idle',
+          error: null,
+          flow_source: null,
+        },
+      },
+      'conversation-thread-b': {
+        conversation_id: 'conversation-thread-b',
+        project_path: '/tmp/thread-project',
+        title: 'Planning thread',
+        created_at: '2026-03-07T15:00:00Z',
+        updated_at: '2026-03-07T15:10:00Z',
+        turns: [
+          {
+            id: 'turn-b-1',
+            role: 'assistant',
+            content: 'This is the planning thread history.',
+            timestamp: '2026-03-07T15:10:00Z',
+            kind: 'message',
+            artifact_id: null,
+          },
+        ],
+        event_log: [],
+        spec_edit_proposals: [],
+        execution_cards: [],
+        execution_workflow: {
+          run_id: null,
+          status: 'idle',
+          error: null,
+          flow_source: null,
+        },
+      },
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(
+            JSON.stringify([
+              {
+                conversation_id: 'conversation-thread-b',
+                project_path: '/tmp/thread-project',
+                title: 'Planning thread',
+                created_at: '2026-03-07T15:00:00Z',
+                updated_at: '2026-03-07T15:10:00Z',
+                last_message_preview: 'This is the planning thread history.',
+              },
+              {
+                conversation_id: 'conversation-thread-a',
+                project_path: '/tmp/thread-project',
+                title: 'Design thread',
+                created_at: '2026-03-07T14:00:00Z',
+                updated_at: '2026-03-07T14:05:00Z',
+                last_message_preview: 'Discuss the design changes.',
+              },
+            ]),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          )
+        }
+        const conversationIdMatch = url.match(/\/api\/conversations\/([^/?]+)/)
+        const conversationId = conversationIdMatch ? decodeURIComponent(conversationIdMatch[1]!) : null
+        if (conversationId && !url.includes('/turns')) {
+          return new Response(JSON.stringify(conversationSnapshots[conversationId as keyof typeof conversationSnapshots]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/thread-project')
+      useStore.getState().setActiveProjectPath('/tmp/thread-project')
+      useStore.getState().setConversationId('conversation-thread-a')
+    })
+
+    render(<ProjectsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-thread-list')).toHaveTextContent('Design thread')
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Discuss the design changes.')
+    })
+
+    await user.click(screen.getByRole('button', { name: /Planning thread/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('This is the planning thread history.')
+    })
+    expect(screen.getByTestId('project-ai-conversation-history-list')).not.toHaveTextContent('Discuss the design changes.')
   })
 })

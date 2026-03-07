@@ -3,11 +3,13 @@ import { type ChangeEvent, type FormEvent, type KeyboardEvent, type PointerEvent
 import { ChevronDown, ChevronUp } from "lucide-react"
 import {
     ApiHttpError,
+    type ConversationSummaryResponse,
     type ConversationSnapshotResponse,
     type ExecutionCardResponse,
     type SpecEditProposalResponse,
     approveSpecEditProposalValidated,
     fetchConversationSnapshotValidated,
+    fetchProjectConversationListValidated,
     parseConversationSnapshotResponse,
     rejectSpecEditProposalValidated,
     reviewExecutionCardValidated,
@@ -18,13 +20,16 @@ import { isAbsoluteProjectPath, normalizeProjectPath } from "@/lib/projectPaths"
 import { HomeProjectSidebar } from "@/components/HomeProjectSidebar"
 import { HomeWorkspace } from "@/components/HomeWorkspace"
 
-const buildProjectScopedConversationId = (projectPath: string) => {
+const buildProjectConversationId = (projectPath: string) => {
     const normalizedProjectKey = projectPath
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "")
     const suffix = normalizedProjectKey || "project"
-    return `conversation-${suffix}-${Date.now()}`
+    const randomSuffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID().slice(0, 8)
+        : Math.random().toString(36).slice(2, 10)
+    return `conversation-${suffix}-${randomSuffix}`
 }
 
 const PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT = 12
@@ -287,6 +292,38 @@ const buildConversationHistoryEntries = (snapshot: ConversationSnapshotResponse)
     }))
 )
 
+const sortConversationSummaries = (items: ConversationSummaryResponse[]) => (
+    [...items].sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+)
+
+const upsertConversationSummary = (
+    items: ConversationSummaryResponse[],
+    summary: ConversationSummaryResponse,
+) => sortConversationSummaries([
+    summary,
+    ...items.filter((entry) => entry.conversation_id !== summary.conversation_id),
+])
+
+const hasAgentActivityAfterLatestUserTurn = (entries: ConversationHistoryEntry[]) => {
+    let latestUserTurnIndex = -1
+    entries.forEach((entry, index) => {
+        if (entry.role === "user") {
+            latestUserTurnIndex = index
+        }
+    })
+
+    if (latestUserTurnIndex === -1) {
+        return false
+    }
+
+    return entries.slice(latestUserTurnIndex + 1).some((entry) => (
+        entry.kind === "tool_call"
+        || entry.kind === "spec_edit_proposal"
+        || entry.kind === "execution_card"
+        || entry.role === "assistant"
+    ))
+}
+
 export function HomePanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
     const projects = Object.values(projectRegistry)
@@ -307,6 +344,7 @@ export function HomePanel() {
 
     const [projectGitMetadata, setProjectGitMetadata] = useState<Record<string, ProjectGitMetadata>>({})
     const [projectConversationSnapshots, setProjectConversationSnapshots] = useState<Record<string, ConversationSnapshotResponse>>({})
+    const [projectConversationSummaries, setProjectConversationSummaries] = useState<Record<string, ConversationSummaryResponse[]>>({})
     const [chatDraft, setChatDraft] = useState("")
     const [panelError, setPanelError] = useState<string | null>(null)
     const [isSendingChat, setIsSendingChat] = useState(false)
@@ -330,8 +368,9 @@ export function HomePanel() {
         ? projectGitMetadata[activeProjectPath] || EMPTY_PROJECT_GIT_METADATA
         : EMPTY_PROJECT_GIT_METADATA
     const activeConversationId = activeProjectScope?.conversationId ?? null
-    const activeConversationSnapshot = activeProjectPath ? projectConversationSnapshots[activeProjectPath] || null : null
-    const hasLoadedActiveConversationSnapshot = Boolean(activeProjectPath && projectConversationSnapshots[activeProjectPath])
+    const activeConversationSnapshot = activeConversationId ? projectConversationSnapshots[activeConversationId] || null : null
+    const hasLoadedActiveConversationSnapshot = Boolean(activeConversationId && projectConversationSnapshots[activeConversationId])
+    const activeProjectConversationSummaries = activeProjectPath ? projectConversationSummaries[activeProjectPath] || [] : []
     const activeConversationHistory = activeProjectScope?.conversationHistory || []
     const activeProjectEventLog = activeProjectScope?.projectEventLog || []
     const activeSpecEditProposals = activeConversationSnapshot?.spec_edit_proposals || []
@@ -351,6 +390,7 @@ export function HomePanel() {
         || entry.role === "user"
         || entry.role === "assistant"
     ))
+    const showPendingAssistantRow = isSendingChat && !hasAgentActivityAfterLatestUserTurn(activeConversationHistory)
 
     const orderedProjects = (() => {
         const seenProjectPaths = new Set<string>()
@@ -381,6 +421,42 @@ export function HomePanel() {
             message,
             timestamp: new Date().toISOString(),
         })
+    }
+
+    const setProjectConversationSummaryList = (
+        projectPath: string,
+        summaries: ConversationSummaryResponse[],
+    ) => {
+        setProjectConversationSummaries((current) => ({
+            ...current,
+            [projectPath]: sortConversationSummaries(summaries),
+        }))
+    }
+
+    const activateConversationThread = (projectPath: string, conversationId: string) => {
+        setConversationId(conversationId)
+        updateProjectScopedWorkspace(projectPath, {
+            conversationId,
+            conversationHistory: [],
+            specId: null,
+            specStatus: "draft",
+            specProvenance: null,
+            planId: null,
+            planStatus: "draft",
+            planProvenance: null,
+            artifactRunId: null,
+        })
+    }
+
+    const loadProjectConversationSummaries = async (projectPath: string) => {
+        try {
+            const summaries = await fetchProjectConversationListValidated(projectPath)
+            setProjectConversationSummaryList(projectPath, summaries)
+            return summaries
+        } catch {
+            setProjectConversationSummaryList(projectPath, [])
+            return []
+        }
     }
 
     const syncConversationPinnedState = () => {
@@ -419,7 +495,20 @@ export function HomePanel() {
 
         setProjectConversationSnapshots((current) => ({
             ...current,
-            [projectPath]: snapshot,
+            [snapshot.conversation_id]: snapshot,
+        }))
+        setProjectConversationSummaries((current) => ({
+            ...current,
+            [projectPath]: upsertConversationSummary(current[projectPath] || [], {
+                conversation_id: snapshot.conversation_id,
+                project_path: snapshot.project_path,
+                title: snapshot.title,
+                created_at: snapshot.created_at,
+                updated_at: snapshot.updated_at,
+                last_message_preview: snapshot.turns
+                    .filter((turn) => turn.kind === "message" && typeof turn.content === "string" && turn.content.trim().length > 0)
+                    .slice(-1)[0]?.content || null,
+            }),
         }))
 
         updateProjectScopedWorkspace(projectPath, {
@@ -520,6 +609,32 @@ export function HomePanel() {
             isCancelled = true
         }
     }, [projectGitMetadata, projects])
+
+    useEffect(() => {
+        if (!activeProjectPath) {
+            return
+        }
+
+        let isCancelled = false
+        const loadThreadSummaries = async () => {
+            const summaries = await loadProjectConversationSummaries(activeProjectPath)
+            if (isCancelled) {
+                return
+            }
+            if (activeConversationId) {
+                return
+            }
+            const latestConversation = summaries[0] || null
+            if (latestConversation) {
+                activateConversationThread(activeProjectPath, latestConversation.conversation_id)
+            }
+        }
+
+        void loadThreadSummaries()
+        return () => {
+            isCancelled = true
+        }
+    }, [activeConversationId, activeProjectPath])
 
     useEffect(() => {
         setChatDraft("")
@@ -845,6 +960,39 @@ export function HomePanel() {
         setActiveProjectPath(projectPath)
     }
 
+    const onCreateConversationThread = () => {
+        if (!activeProjectPath) {
+            return
+        }
+        const now = new Date().toISOString()
+        const conversationId = buildProjectConversationId(activeProjectPath)
+        setPanelError(null)
+        setProjectConversationSummaryList(activeProjectPath, upsertConversationSummary(
+            projectConversationSummaries[activeProjectPath] || [],
+            {
+                conversation_id: conversationId,
+                project_path: activeProjectPath,
+                title: "New thread",
+                created_at: now,
+                updated_at: now,
+                last_message_preview: null,
+            },
+        ))
+        activateConversationThread(activeProjectPath, conversationId)
+    }
+
+    const onSelectConversationThread = (conversationId: string) => {
+        if (!activeProjectPath) {
+            return
+        }
+        setPanelError(null)
+        activateConversationThread(activeProjectPath, conversationId)
+        const cachedSnapshot = projectConversationSnapshots[conversationId]
+        if (cachedSnapshot) {
+            applyConversationSnapshot(activeProjectPath, cachedSnapshot)
+        }
+    }
+
     const ensureConversationId = () => {
         if (!activeProjectPath) {
             return null
@@ -852,8 +1000,8 @@ export function HomePanel() {
         if (activeConversationId) {
             return activeConversationId
         }
-        const conversationId = buildProjectScopedConversationId(activeProjectPath)
-        setConversationId(conversationId)
+        const conversationId = buildProjectConversationId(activeProjectPath)
+        activateConversationThread(activeProjectPath, conversationId)
         return conversationId
     }
 
@@ -1140,6 +1288,69 @@ export function HomePanel() {
                                                 })
                                             )}
                                         </ul>
+                                        {activeProjectPath ? (
+                                            <div className="mt-4 border-t border-border pt-4">
+                                                <div
+                                                    data-testid="project-thread-controls"
+                                                    className="flex items-start justify-between gap-2"
+                                                >
+                                                    <div className="space-y-1">
+                                                        <h4 className="text-sm font-semibold text-foreground">Threads</h4>
+                                                        <p className="text-[11px] text-muted-foreground">
+                                                            Separate conversation history within this project.
+                                                        </p>
+                                                    </div>
+                                                    <button
+                                                        data-testid="project-thread-new-button"
+                                                        type="button"
+                                                        onClick={onCreateConversationThread}
+                                                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    >
+                                                        New thread
+                                                    </button>
+                                                </div>
+                                                <ul data-testid="project-thread-list" className="mt-3 space-y-2">
+                                                    {activeProjectConversationSummaries.length === 0 ? (
+                                                        <li className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                                                            No threads yet.
+                                                        </li>
+                                                    ) : (
+                                                        activeProjectConversationSummaries.map((conversation) => {
+                                                            const isActiveConversation = conversation.conversation_id === activeConversationId
+                                                            return (
+                                                                <li key={conversation.conversation_id}>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => onSelectConversationThread(conversation.conversation_id)}
+                                                                        aria-current={isActiveConversation ? "true" : undefined}
+                                                                        className={`w-full rounded border px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActiveConversation
+                                                                            ? "border-primary/60 bg-primary/10 text-foreground"
+                                                                            : "border-border hover:bg-muted"
+                                                                            }`}
+                                                                    >
+                                                                        <div className="flex items-start justify-between gap-2">
+                                                                            <div className="min-w-0 space-y-1">
+                                                                                <p className="truncate text-xs font-medium text-foreground">
+                                                                                    {conversation.title}
+                                                                                </p>
+                                                                                <p className="truncate text-[11px] text-muted-foreground">
+                                                                                    {conversation.last_message_preview || formatConversationTimestamp(conversation.updated_at)}
+                                                                                </p>
+                                                                            </div>
+                                                                            {isActiveConversation ? (
+                                                                                <span className="rounded bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                                                                                    Active
+                                                                                </span>
+                                                                            ) : null}
+                                                                        </div>
+                                                                    </button>
+                                                                </li>
+                                                            )
+                                                        })
+                                                    )}
+                                                </ul>
+                                            </div>
+                                        ) : null}
                                     </div>
                                 </div>
                             </div>
@@ -1211,7 +1422,9 @@ export function HomePanel() {
                                         <div data-testid="project-ai-conversation-history" className="flex min-h-0 flex-col">
                                             {!hasRenderableConversationHistory ? (
                                                 <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                                                    No conversation history for this project yet.
+                                                    {activeConversationId
+                                                        ? "No conversation history for this thread yet."
+                                                        : "Create or select a thread to begin chatting."}
                                                 </p>
                                             ) : (
                                                 <ol data-testid="project-ai-conversation-history-list" className="space-y-3">
@@ -1573,6 +1786,21 @@ export function HomePanel() {
                                                             </li>
                                                         )
                                                     })}
+                                                    {showPendingAssistantRow ? (
+                                                        <li
+                                                            data-testid="project-ai-conversation-pending-row"
+                                                            className="flex justify-start"
+                                                        >
+                                                            <div className="max-w-[85%] rounded border border-border bg-muted/30 px-3 py-2 text-foreground">
+                                                                <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                                                                    Attractor
+                                                                </p>
+                                                                <p className="text-xs leading-5 text-muted-foreground">
+                                                                    Thinking...
+                                                                </p>
+                                                            </div>
+                                                        </li>
+                                                    ) : null}
                                                 </ol>
                                             )}
                                         </div>
@@ -1615,7 +1843,7 @@ export function HomePanel() {
                                                 disabled={chatDraft.trim().length === 0 || isSendingChat}
                                                 className="rounded border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                                             >
-                                                Send
+                                                {isSendingChat ? "Thinking..." : "Send"}
                                             </button>
                                         </div>
                                         {panelError ? (

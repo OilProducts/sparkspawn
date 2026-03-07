@@ -63,6 +63,18 @@ A **project** is a user-selected work target with these invariants:
 - **US-CONV-07**
   As a user, I want to close and reopen the app without losing a project conversation so that I can resume the same AI thread later.
 
+- **US-CONV-08**
+  As a user, I want to start a new conversation thread within the active project so that I can explore a new line of work without mixing it into the existing thread.
+
+- **US-CONV-09**
+  As a user, I want to see the list of conversation threads for the active project so that I can switch between prior discussions and recover the right context quickly.
+
+- **US-CONV-10**
+  As a user, I want each conversation thread to preserve its own history, artifacts, and underlying AI session so that returning to a thread resumes the correct context.
+
+- **US-CONV-11**
+  As a user, I want new threads to start empty but remain scoped to the same active project directory and repository so that thread isolation does not break project isolation.
+
 ---
 
 ## 3. Spec -> Plan -> Work Tracker -> Build Chain

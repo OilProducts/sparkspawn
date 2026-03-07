@@ -167,6 +167,9 @@ export interface ExecutionCardResponse {
 export interface ConversationSnapshotResponse {
     conversation_id: string
     project_path: string
+    title: string
+    created_at: string
+    updated_at: string
     turns: ConversationTurnResponse[]
     event_log: WorkflowEventResponse[]
     spec_edit_proposals: SpecEditProposalResponse[]
@@ -177,6 +180,15 @@ export interface ConversationSnapshotResponse {
         error?: string | null
         flow_source?: string | null
     }
+}
+
+export interface ConversationSummaryResponse {
+    conversation_id: string
+    project_path: string
+    title: string
+    created_at: string
+    updated_at: string
+    last_message_preview?: string | null
 }
 
 export class ApiSchemaError extends Error {
@@ -723,6 +735,40 @@ function parseExecutionCardResponse(value: unknown): ExecutionCardResponse | nul
     }
 }
 
+function parseConversationSummaryResponse(value: unknown, endpoint: string): ConversationSummaryResponse | null {
+    const record = asUnknownRecord(value)
+    if (
+        !record
+        || typeof record.conversation_id !== 'string'
+        || typeof record.project_path !== 'string'
+        || typeof record.title !== 'string'
+        || typeof record.created_at !== 'string'
+        || typeof record.updated_at !== 'string'
+    ) {
+        return null
+    }
+    return {
+        conversation_id: record.conversation_id,
+        project_path: record.project_path,
+        title: record.title,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        last_message_preview: asOptionalNullableString(record.last_message_preview),
+    }
+}
+
+export function parseConversationSummaryListResponse(
+    payload: unknown,
+    endpoint = '/api/projects/conversations',
+): ConversationSummaryResponse[] {
+    if (!Array.isArray(payload)) {
+        throw new ApiSchemaError(endpoint, 'Expected an array of conversation summaries.')
+    }
+    return payload
+        .map((entry) => parseConversationSummaryResponse(entry, endpoint))
+        .filter((entry): entry is ConversationSummaryResponse => entry !== null)
+}
+
 export function parseConversationSnapshotResponse(
     payload: unknown,
     endpoint = '/api/conversations/{id}',
@@ -752,6 +798,9 @@ export function parseConversationSnapshotResponse(
     return {
         conversation_id: expectString(record.conversation_id, endpoint, 'conversation_id'),
         project_path: expectString(record.project_path, endpoint, 'project_path'),
+        title: asOptionalString(record.title) || 'New thread',
+        created_at: asOptionalString(record.created_at) || '',
+        updated_at: asOptionalString(record.updated_at) || asOptionalString(record.created_at) || '',
         turns,
         event_log,
         spec_edit_proposals,
@@ -872,6 +921,13 @@ export async function fetchConversationSnapshotValidated(
 ): Promise<ConversationSnapshotResponse> {
     const url = `/api/conversations/${encodeURIComponent(conversationId)}?project_path=${encodeURIComponent(projectPath)}`
     return fetchJsonWithValidation(url, undefined, '/api/conversations/{id}', parseConversationSnapshotResponse)
+}
+
+export async function fetchProjectConversationListValidated(
+    projectPath: string,
+): Promise<ConversationSummaryResponse[]> {
+    const url = `/api/projects/conversations?project_path=${encodeURIComponent(projectPath)}`
+    return fetchJsonWithValidation(url, undefined, '/api/projects/conversations', parseConversationSummaryListResponse)
 }
 
 export async function sendConversationTurnValidated(
