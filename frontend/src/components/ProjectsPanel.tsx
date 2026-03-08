@@ -374,7 +374,7 @@ type ConversationTimelineEntry =
         timestamp: string
         toolCall: {
             id: string
-            kind: "command_execution" | "file_change"
+            kind: "command_execution" | "file_change" | "dynamic_tool"
             status: "running" | "completed" | "failed"
             title: string
             command?: string | null

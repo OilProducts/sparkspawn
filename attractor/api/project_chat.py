@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from attractor.prompt_templates import load_prompt_templates, render_prompt_template
 from attractor.storage import (
     ProjectPaths,
     ensure_project_paths,
@@ -139,52 +140,6 @@ def _parse_chat_response_payload(raw: str) -> tuple[str, Optional[dict[str, Any]
         return assistant_message, parsed if isinstance(parsed, dict) else None
     fallback_text = text if not text.startswith("{") else ""
     return fallback_text, parsed if isinstance(parsed, dict) else None
-
-
-def _should_draft_spec_proposal(message: str) -> bool:
-    normalized = message.strip().lower()
-    if not normalized:
-        return False
-    informational_starts = (
-        "what is",
-        "what's",
-        "whats",
-        "explain",
-        "summarize",
-        "list",
-        "show",
-        "tell me",
-        "why is",
-        "how does",
-        "how do",
-    )
-    if normalized.startswith(informational_starts):
-        return False
-    proposal_signals = (
-        "change",
-        "update",
-        "remove",
-        "replace",
-        "rename",
-        "rework",
-        "refactor",
-        "clean up",
-        "cleanup",
-        "redesign",
-        "adjust",
-        "should",
-        "need to",
-        "let's",
-        "lets",
-        "implement",
-        "add ",
-        "move ",
-        "spec",
-        "workflow",
-        "ux",
-        "ui",
-    )
-    return any(signal in normalized for signal in proposal_signals)
 
 
 def _as_non_empty_string(value: Any) -> Optional[str]:
@@ -361,6 +316,37 @@ def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
             file_paths=_extract_file_paths_from_item(item),
         )
     return None
+
+
+def _extract_spec_proposal_payload(arguments: Any) -> dict[str, Any]:
+    if not isinstance(arguments, dict):
+        raise ValueError("draft_spec_proposal requires an object argument payload.")
+    summary = _as_non_empty_string(arguments.get("summary"))
+    raw_changes = arguments.get("changes")
+    if not summary:
+        raise ValueError("draft_spec_proposal requires a non-empty summary.")
+    if not isinstance(raw_changes, list):
+        raise ValueError("draft_spec_proposal requires a changes array.")
+    changes: list[dict[str, str]] = []
+    for raw_change in raw_changes:
+        if not isinstance(raw_change, dict):
+            continue
+        path = _as_non_empty_string(raw_change.get("path"))
+        before = _as_non_empty_string(raw_change.get("before"))
+        after = _as_non_empty_string(raw_change.get("after"))
+        if not path or before is None or after is None:
+            continue
+        changes.append({"path": path, "before": before, "after": after})
+    if not changes:
+        raise ValueError("draft_spec_proposal requires at least one valid change.")
+    payload: dict[str, Any] = {
+        "summary": summary,
+        "changes": changes,
+    }
+    rationale = _as_non_empty_string(arguments.get("rationale"))
+    if rationale:
+        payload["rationale"] = rationale
+    return payload
 
 
 def resolve_runtime_workspace_path(value: str) -> str:
@@ -543,6 +529,14 @@ class ToolCallRecord:
 class ChatTurnResult:
     assistant_message: str
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
+    spec_proposal_payloads: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class DynamicToolInvocationResult:
+    tool_call: ToolCallRecord
+    response: dict[str, Any]
+    spec_proposal_payload: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -1194,6 +1188,38 @@ class CodexAppServerChatSession:
             "error": {"code": -32000, "message": f"Unsupported request: {method}"},
         })
 
+    def _dynamic_tool_specs(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": "draft_spec_proposal",
+                "title": "Draft spec proposal",
+                "description": (
+                    "Draft a structured spec proposal when the conversation has converged on a concrete "
+                    "user-story or specification change."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["summary", "changes"],
+                    "properties": {
+                        "summary": {"type": "string"},
+                        "rationale": {"type": "string"},
+                        "changes": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["path", "before", "after"],
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "before": {"type": "string"},
+                                    "after": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                },
+            }
+        ]
+
     def _wait_for_response(self, target_id: int) -> dict[str, Any]:
         started_at = time.monotonic()
         while True:
@@ -1259,6 +1285,7 @@ class CodexAppServerChatSession:
             "sandbox": "danger-full-access",
             "approvalPolicy": "never",
             "ephemeral": False,
+            "config": {"tools": self._dynamic_tool_specs()},
         }
         if model:
             params["model"] = model
@@ -1303,6 +1330,7 @@ class CodexAppServerChatSession:
         model: Optional[str],
         *,
         on_progress: Optional[Callable[[ChatTurnResult], None]] = None,
+        on_dynamic_tool_call: Optional[Callable[[str, Any, str], DynamicToolInvocationResult]] = None,
     ) -> ChatTurnResult:
         with self._lock:
             self._ensure_process()
@@ -1314,6 +1342,7 @@ class CodexAppServerChatSession:
             last_activity_at = time.monotonic()
             last_agent_activity_at: float | None = None
             tool_calls: list[ToolCallRecord] = []
+            spec_proposal_payloads: list[dict[str, Any]] = []
             tool_call_index_by_item_id: dict[str, int] = {}
             params: dict[str, Any] = {
                 "threadId": self._thread_id,
@@ -1401,6 +1430,62 @@ class CodexAppServerChatSession:
                         if item_id:
                             tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
                         self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
+                    elif request_method == "item/tool/call":
+                        tool_name = _as_non_empty_string(request_params.get("tool")) or "unknown_tool"
+                        call_id = _as_non_empty_string(request_params.get("callId")) or f"tool-{uuid.uuid4().hex}"
+                        initial_tool_call = ToolCallRecord(
+                            id=call_id,
+                            kind="dynamic_tool",
+                            status="running",
+                            title=tool_name,
+                        )
+                        tool_calls.append(initial_tool_call)
+                        tool_call_index_by_item_id[call_id] = len(tool_calls) - 1
+                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
+                        if on_dynamic_tool_call is None:
+                            tool_calls[tool_call_index_by_item_id[call_id]] = ToolCallRecord(
+                                id=call_id,
+                                kind="dynamic_tool",
+                                status="failed",
+                                title=tool_name,
+                                output="Dynamic tools are not available in this session.",
+                            )
+                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
+                            self._send_response(
+                                message.get("id"),
+                                {
+                                    "success": False,
+                                    "contentItems": [
+                                        {"type": "inputText", "text": "Dynamic tools are not available in this session."}
+                                    ],
+                                },
+                            )
+                            continue
+                        try:
+                            tool_result = on_dynamic_tool_call(tool_name, request_params.get("arguments"), call_id)
+                            tool_result.tool_call.id = call_id
+                            tool_calls[tool_call_index_by_item_id[call_id]] = tool_result.tool_call
+                            if tool_result.spec_proposal_payload is not None:
+                                spec_proposal_payloads.append(tool_result.spec_proposal_payload)
+                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
+                            self._send_response(message.get("id"), tool_result.response)
+                        except Exception as exc:
+                            tool_calls[tool_call_index_by_item_id[call_id]] = ToolCallRecord(
+                                id=call_id,
+                                kind="dynamic_tool",
+                                status="failed",
+                                title=tool_name,
+                                output=str(exc),
+                            )
+                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip())
+                            self._send_response(
+                                message.get("id"),
+                                {
+                                    "success": False,
+                                    "contentItems": [{"type": "inputText", "text": f"Tool call failed: {exc}"}],
+                                },
+                            )
+                        continue
                     self._handle_server_request(message)
                     continue
                 method = message.get("method")
@@ -1504,12 +1589,14 @@ class CodexAppServerChatSession:
             return ChatTurnResult(
                 assistant_message=response_text,
                 tool_calls=tool_calls,
+                spec_proposal_payloads=spec_proposal_payloads,
             )
 
 
 class ProjectChatService:
     def __init__(self, data_dir: Path) -> None:
         self._data_dir = data_dir
+        self._prompt_templates = load_prompt_templates(data_dir / "config")
         self._lock = threading.Lock()
         self._event_hub = ConversationEventHub()
         self._sessions_lock = threading.Lock()
@@ -1906,41 +1993,13 @@ class ProjectChatService:
                 continue
             history_lines.append(f"{turn.role.upper()}: {turn.content}")
         history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
-        return (
-            "You are the Sparkspawn project chat assistant. "
-            "Reply in plain text only. "
-            "Do not wrap your answer in JSON. "
-            "Do not create spec proposals or execution cards inline; those are drafted separately by the app when needed. "
-            "Keep the reply concise and practical.\n\n"
-            f"Project path: {state.project_path}\n"
-            f"Recent conversation:\n{history_text}\n\n"
-            f"Latest user message:\n{message}\n"
-        )
-
-    def _build_spec_proposal_prompt(
-        self,
-        state: ConversationState,
-        message: str,
-        assistant_message: str,
-    ) -> str:
-        recent_turns = state.turns[-10:]
-        history_lines = []
-        for turn in recent_turns:
-            if turn.kind != "message":
-                continue
-            history_lines.append(f"{turn.role.upper()}: {turn.content}")
-        history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
-        return (
-            "You are drafting a reviewable Spark Spawn spec edit proposal. "
-            "Respond with JSON only. "
-            "Schema: "
-            "{\"summary\": string, \"changes\": [{\"path\": string, \"before\": string, \"after\": string}]}. "
-            "Return only valid JSON with at least one concrete change when a proposal is warranted. "
-            "If no proposal is warranted, return {\"summary\":\"\",\"changes\":[]}.\n\n"
-            f"Project path: {state.project_path}\n"
-            f"Recent conversation:\n{history_text}\n\n"
-            f"Latest user message:\n{message}\n\n"
-            f"Assistant reply:\n{assistant_message}\n"
+        return render_prompt_template(
+            self._prompt_templates.chat,
+            {
+                "project_path": state.project_path,
+                "recent_conversation": history_text,
+                "latest_user_message": message,
+            },
         )
 
     def _build_execution_planning_prompt(
@@ -1958,19 +2017,39 @@ class ProjectChatService:
         history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
         review_text = review_feedback or "None."
         proposal_payload = json.dumps(proposal.to_dict(), indent=2, sort_keys=True)
-        return (
-            "You are generating a tracker-ready execution card from an approved spec edit. "
-            "Respond with JSON only. "
-            "Schema: "
-            "{\"title\": string, \"summary\": string, \"objective\": string, "
-            "\"work_items\": [{\"id\": string, \"title\": string, \"description\": string, "
-            "\"acceptance_criteria\": [string], \"depends_on\": [string]}]}. "
-            "Return 1-6 concrete work items. "
-            "Do not include markdown fences.\n\n"
-            f"Project path: {state.project_path}\n"
-            f"Approved spec edit proposal:\n{proposal_payload}\n\n"
-            f"Recent conversation:\n{history_text}\n\n"
-            f"Latest reviewer feedback for this execution card:\n{review_text}\n"
+        return render_prompt_template(
+            self._prompt_templates.execution_planning,
+            {
+                "project_path": state.project_path,
+                "approved_spec_edit_proposal": proposal_payload,
+                "recent_conversation": history_text,
+                "review_feedback": review_text,
+            },
+        )
+
+    def _handle_dynamic_tool_call(
+        self,
+        tool_name: str,
+        arguments: Any,
+        call_id: str,
+    ) -> DynamicToolInvocationResult:
+        if tool_name != "draft_spec_proposal":
+            raise ValueError(f"Unsupported dynamic tool: {tool_name}")
+        payload = _extract_spec_proposal_payload(arguments)
+        summary = _as_non_empty_string(payload.get("summary")) or "Draft spec proposal"
+        return DynamicToolInvocationResult(
+            tool_call=ToolCallRecord(
+                id=call_id,
+                kind="dynamic_tool",
+                status="completed",
+                title="Draft spec proposal",
+                output=summary,
+            ),
+            response={
+                "success": True,
+                "contentItems": [{"type": "inputText", "text": f"Drafted spec proposal: {summary}"}],
+            },
+            spec_proposal_payload=payload,
         )
 
     def _build_session(self, conversation_id: str, project_path: str) -> CodexAppServerChatSession:
@@ -2021,7 +2100,6 @@ class ProjectChatService:
         message: str,
         model: Optional[str],
         progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
-        spec_proposal_drafter: Optional[Callable[[str, Optional[str]], str]] = None,
     ) -> dict[str, Any]:
         normalized_project_path = _normalize_project_path(project_path)
         if not normalized_project_path:
@@ -2149,6 +2227,7 @@ class ProjectChatService:
                 prompt,
                 normalized_model,
                 on_progress=persist_progress,
+                on_dynamic_tool_call=self._handle_dynamic_tool_call,
             )
         except RuntimeError as exc:
             if "timed out" not in str(exc).lower():
@@ -2195,24 +2274,11 @@ class ProjectChatService:
                 prompt,
                 normalized_model,
                 on_progress=persist_progress,
+                on_dynamic_tool_call=self._handle_dynamic_tool_call,
             )
         assistant_message, _ = _parse_chat_response_payload(turn_result.assistant_message)
         if not assistant_message:
             assistant_message = "I reviewed that request."
-        spec_proposal_payload: Optional[dict[str, Any]] = None
-        if spec_proposal_drafter is not None and _should_draft_spec_proposal(trimmed_message):
-            try:
-                proposal_prompt = self._build_spec_proposal_prompt(state, trimmed_message, assistant_message)
-                proposal_raw = spec_proposal_drafter(proposal_prompt, normalized_model)
-                parsed_proposal = _extract_json_object(proposal_raw)
-                if isinstance(parsed_proposal, dict):
-                    spec_proposal_payload = parsed_proposal
-            except Exception as exc:
-                _log_project_chat_debug(
-                    "spec proposal drafting failed",
-                    conversation_id=conversation_id,
-                    error=str(exc),
-                )
         with self._lock:
             state = self._read_state(conversation_id, normalized_project_path) or state
             current_assistant_turn = self._get_turn(state, assistant_turn.id)
@@ -2250,7 +2316,7 @@ class ProjectChatService:
             )
             emitted_payloads.append(self._build_turn_event_payload(state, assistant_completed_event))
             emitted_payloads.append(self._build_turn_upsert_payload(state, current_assistant_turn))
-            if isinstance(spec_proposal_payload, dict):
+            for spec_proposal_payload in turn_result.spec_proposal_payloads:
                 raw_changes = spec_proposal_payload.get("changes")
                 changes = [
                     SpecEditProposalChange.from_dict(change)

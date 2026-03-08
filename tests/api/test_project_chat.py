@@ -5,6 +5,7 @@ from pathlib import Path
 
 import attractor.api.server as server
 import attractor.api.project_chat as project_chat
+from attractor.prompt_templates import PROMPTS_FILE_NAME
 from attractor.storage import ensure_project_paths
 
 
@@ -40,11 +41,83 @@ def test_parse_chat_response_payload_accepts_plain_text_and_json() -> None:
     }
 
 
-def test_should_draft_spec_proposal_uses_change_intent_not_informational_queries() -> None:
-    assert project_chat._should_draft_spec_proposal("Let's clean up the top bar.")
-    assert project_chat._should_draft_spec_proposal("We should rename this panel.")
-    assert not project_chat._should_draft_spec_proposal("What's this project about?")
-    assert not project_chat._should_draft_spec_proposal("Summarize the tools you have available.")
+def test_project_chat_service_creates_default_prompt_templates_file(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+
+    prompts_path = tmp_path / "config" / PROMPTS_FILE_NAME
+
+    assert prompts_path.exists()
+    prompt_text = prompts_path.read_text(encoding="utf-8")
+    assert "[project_chat]" in prompt_text
+    assert "Help the user understand the project" in prompt_text
+    assert "call the draft_spec_proposal tool" in prompt_text
+    assert service._prompt_templates.chat
+
+
+def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "config" / PROMPTS_FILE_NAME
+    prompts_path.parent.mkdir(parents=True, exist_ok=True)
+    prompts_path.write_text(
+        "\n".join(
+            [
+                "[project_chat]",
+                "chat = '''CHAT {{project_path}} :: {{latest_user_message}} :: {{recent_conversation}}'''",
+                "execution_planning = '''PLAN {{approved_spec_edit_proposal}} :: {{review_feedback}}'''",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    service = project_chat.ProjectChatService(tmp_path)
+    state = project_chat.ConversationState(
+        conversation_id="conversation-test",
+        project_path="/tmp/project",
+        turns=[
+            project_chat.ConversationTurn(
+                id="turn-user-1",
+                role="user",
+                content="Older message",
+                timestamp="2026-03-08T12:00:00Z",
+            )
+        ],
+    )
+
+    chat_prompt = service._build_chat_prompt(state, "Latest message")
+    execution_prompt = service._build_execution_planning_prompt(
+        state,
+        project_chat.SpecEditProposal(
+            id="proposal-1",
+            created_at="2026-03-08T12:01:00Z",
+            summary="Summary",
+            changes=[project_chat.SpecEditProposalChange(path="specs/ui-spec.md", before="old", after="new")],
+            status="approved",
+        ),
+        "Needs refinement",
+    )
+
+    assert chat_prompt == "CHAT /tmp/project :: Latest message :: USER: Older message"
+    assert '"id": "proposal-1"' in execution_prompt
+    assert execution_prompt.endswith(":: Needs refinement")
+
+
+def test_extract_spec_proposal_payload_requires_summary_and_changes() -> None:
+    payload = project_chat._extract_spec_proposal_payload(
+        {
+            "summary": "Tighten the top bar.",
+            "changes": [
+                {
+                    "path": "specs/ui-spec.md",
+                    "before": "Header includes runtime metadata.",
+                    "after": "Header includes only navigation and active project context.",
+                }
+            ],
+            "rationale": "Reduce chrome noise.",
+        }
+    )
+
+    assert payload["summary"] == "Tighten the top bar."
+    assert payload["rationale"] == "Reduce chrome noise."
+    assert payload["changes"][0]["path"] == "specs/ui-spec.md"
 
 
 def test_extract_file_paths_deduplicates_nested_entries() -> None:
@@ -311,6 +384,91 @@ def test_chat_session_turn_completes_on_task_complete_event(monkeypatch) -> None
     assert result.assistant_message == '{"assistant_message":"Ack"}'
 
 
+def test_chat_session_handles_dynamic_tool_call(monkeypatch) -> None:
+    session = project_chat.CodexAppServerChatSession("/tmp/project")
+    lines = iter(
+        [
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 99,
+                    "method": "item/tool/call",
+                    "params": {
+                        "tool": "draft_spec_proposal",
+                        "callId": "call-1",
+                        "turnId": "turn-123",
+                        "threadId": "thread-123",
+                        "arguments": {
+                            "summary": "Reduce header chrome.",
+                            "changes": [
+                                {
+                                    "path": "specs/ui-spec.md",
+                                    "before": "Header contains extra metadata.",
+                                    "after": "Header contains only navigation and active project context.",
+                                }
+                            ],
+                        },
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "codex/event/task_complete",
+                    "params": {
+                        "msg": {
+                            "last_agent_message": "I drafted the spec proposal for review.",
+                        }
+                    },
+                }
+            ),
+            None,
+        ]
+    )
+    responses: list[dict[str, object]] = []
+
+    monkeypatch.setattr(session, "_ensure_process", lambda: None)
+
+    def fake_ensure_thread(model: str | None) -> None:
+        session._thread_id = "thread-123"
+        session._thread_initialized = True
+
+    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
+    monkeypatch.setattr(
+        session,
+        "_send_request",
+        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
+    )
+    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
+    monkeypatch.setattr(session, "_send_response", lambda request_id, result=None: responses.append({"id": request_id, "result": result or {}}))
+
+    result = session.turn(
+        "hello",
+        None,
+        on_dynamic_tool_call=lambda tool, arguments, call_id: project_chat.DynamicToolInvocationResult(
+            tool_call=project_chat.ToolCallRecord(
+                id=call_id,
+                kind="dynamic_tool",
+                status="completed",
+                title="Draft spec proposal",
+                output="Reduce header chrome.",
+            ),
+            response={
+                "success": True,
+                "contentItems": [{"type": "inputText", "text": "Drafted spec proposal."}],
+            },
+            spec_proposal_payload=project_chat._extract_spec_proposal_payload(arguments),
+        ),
+    )
+
+    assert result.assistant_message == "I drafted the spec proposal for review."
+    assert result.spec_proposal_payloads[0]["summary"] == "Reduce header chrome."
+    assert result.tool_calls[0].kind == "dynamic_tool"
+    assert responses[0]["result"] == {
+        "success": True,
+        "contentItems": [{"type": "inputText", "text": "Drafted spec proposal."}],
+    }
+
+
 def test_chat_session_turn_completes_after_final_answer_quiet_period(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     lines = iter(
@@ -406,14 +564,28 @@ def test_send_turn_retries_when_app_server_request_times_out_before_progress(tmp
     service = project_chat.ProjectChatService(tmp_path)
 
     class TimedOutSession:
-        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            on_progress=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
             raise RuntimeError("codex app-server request timed out waiting for response")
 
         def _close(self) -> None:
             return None
 
     class FreshSession:
-        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            on_progress=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"hi"}',
                 tool_calls=[],
@@ -440,7 +612,14 @@ def test_send_turn_accepts_plain_text_final_response(tmp_path: Path, monkeypatch
     service = project_chat.ProjectChatService(tmp_path)
 
     class PlainTextSession:
-        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            on_progress=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
             return project_chat.ChatTurnResult(
                 assistant_message="This looks like a Collatz implementation project.",
                 tool_calls=[],
@@ -458,38 +637,49 @@ def test_send_turn_accepts_plain_text_final_response(tmp_path: Path, monkeypatch
     assert snapshot["turns"][-1]["content"] == "This looks like a Collatz implementation project."
 
 
-def test_send_turn_drafts_spec_proposal_separately_from_plain_text_reply(tmp_path: Path, monkeypatch) -> None:
+def test_send_turn_persists_spec_proposal_from_dynamic_tool_call(tmp_path: Path, monkeypatch) -> None:
     service = project_chat.ProjectChatService(tmp_path)
 
-    class PlainTextSession:
-        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+    class ToolCallingSession:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            on_progress=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            assert on_dynamic_tool_call is not None
+            tool_result = on_dynamic_tool_call(
+                "draft_spec_proposal",
+                {
+                    "summary": "Reduce top-bar chrome and keep only project context.",
+                    "changes": [
+                        {
+                            "path": "specs/ui-spec.md#home-header",
+                            "before": "The home header surfaces execution controls and runtime metadata.",
+                            "after": "The home header shows only navigation and active project context.",
+                        }
+                    ],
+                },
+                "call-1",
+            )
             return project_chat.ChatTurnResult(
                 assistant_message="I can tighten the top bar and relocate the overflow metadata.",
-                tool_calls=[],
+                tool_calls=[tool_result.tool_call],
+                spec_proposal_payloads=[tool_result.spec_proposal_payload] if tool_result.spec_proposal_payload else [],
             )
 
         def _close(self) -> None:
             return None
 
-    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: PlainTextSession())
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: ToolCallingSession())
 
     snapshot = service.send_turn(
         "conversation-test",
         str(tmp_path),
         "Let's clean up the top bar.",
         None,
-        spec_proposal_drafter=lambda prompt, model: json.dumps(
-            {
-                "summary": "Reduce top-bar chrome and keep only project context.",
-                "changes": [
-                    {
-                        "path": "specs/ui-spec.md#home-header",
-                        "before": "The home header surfaces execution controls and runtime metadata.",
-                        "after": "The home header shows only navigation and active project context.",
-                    }
-                ],
-            }
-        ),
     )
 
     assert snapshot["turns"][-1]["kind"] == "spec_edit_proposal"
@@ -564,14 +754,28 @@ def test_send_turn_retries_with_fresh_session_after_timeout(tmp_path: Path, monk
     service = project_chat.ProjectChatService(tmp_path)
 
     class TimedOutSession:
-        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            on_progress=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
             raise RuntimeError("codex app-server turn timed out waiting for activity")
 
         def _close(self) -> None:
             return None
 
     class FreshSession:
-        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            on_progress=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"Recovered."}',
                 tool_calls=[],
@@ -660,7 +864,14 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     partial_snapshots: list[dict[str, object]] = []
 
     class FakeSession:
-        def turn(self, prompt: str, model: str | None, *, on_progress=None) -> project_chat.ChatTurnResult:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            on_progress=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
             if on_progress is not None:
                 on_progress(
                     project_chat.ChatTurnResult(

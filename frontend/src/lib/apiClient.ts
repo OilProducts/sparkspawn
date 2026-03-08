@@ -129,7 +129,7 @@ export interface ConversationTurnEventResponse {
     message?: string | null
     tool_call_id?: string | null
     tool_call?: {
-        kind: 'command_execution' | 'file_change'
+        kind: 'command_execution' | 'file_change' | 'dynamic_tool'
         status: 'running' | 'completed' | 'failed'
         id: string
         title: string
@@ -727,7 +727,11 @@ function parseConversationTurnEventResponse(value: unknown, endpoint: string): C
         tool_call: toolCall && typeof toolCall.title === 'string' && typeof toolCall.id === 'string'
             ? {
                 id: toolCall.id,
-                kind: toolCall.kind === 'file_change' ? 'file_change' : 'command_execution',
+                kind: toolCall.kind === 'file_change'
+                    ? 'file_change'
+                    : toolCall.kind === 'dynamic_tool'
+                        ? 'dynamic_tool'
+                        : 'command_execution',
                 status: toolCall.status === 'running' || toolCall.status === 'failed' ? toolCall.status : 'completed',
                 title: toolCall.title,
                 command: asOptionalNullableString(toolCall.command),

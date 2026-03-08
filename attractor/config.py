@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Mapping, Optional
 
+from attractor.prompt_templates import ensure_prompt_templates
+
 
 ENV_HOME_DIR = "SPARKSPAWN_HOME"
 ENV_FLOWS_DIR = "SPARKSPAWN_FLOWS_DIR"
@@ -89,6 +91,7 @@ def validate_settings(settings: Settings) -> None:
     ensure_writable_directory(settings.logs_dir, "logs")
     ensure_writable_directory(settings.projects_dir, "projects")
     ensure_writable_directory(settings.flows_dir, "flows")
+    ensure_prompt_templates(settings.config_dir)
     if settings.ui_dir:
         ui_index = settings.ui_dir / "index.html"
         if not ui_index.exists():

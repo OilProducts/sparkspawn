@@ -2321,7 +2321,6 @@ async def send_project_conversation_turn(conversation_id: str, req: Conversation
             req.message,
             req.model,
             publish_progress_event,
-            lambda prompt, model: _run_project_chat_codex_prompt(req.project_path, prompt, model),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

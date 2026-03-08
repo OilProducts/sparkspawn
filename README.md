@@ -51,9 +51,11 @@ If the backend cannot bind to `127.0.0.1:8000`, `sparkspawn serve` reports that 
 Optional runtime path overrides (CLI args or env vars):
 
 - `SPARKSPAWN_HOME`
-- `SPARKSPAWN_RUNS_DIR`
 - `SPARKSPAWN_FLOWS_DIR`
 - `SPARKSPAWN_UI_DIR`
+
+`SPARKSPAWN_HOME/config/prompts.toml` stores user-configurable Spark Spawn chat prompts.
+That file is created with defaults on first startup.
 
 Open: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
