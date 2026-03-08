@@ -14,13 +14,16 @@ import {
     type SpecEditProposalResponse,
     approveSpecEditProposalValidated,
     fetchConversationSnapshotValidated,
+    fetchProjectRegistryValidated,
     fetchProjectConversationListValidated,
     pickProjectDirectoryValidated,
     parseConversationSnapshotResponse,
     parseConversationStreamEventResponse,
     rejectSpecEditProposalValidated,
+    registerProjectValidated,
     reviewExecutionCardValidated,
     sendConversationTurnValidated,
+    updateProjectStateValidated,
 } from "@/lib/apiClient"
 import { useNarrowViewport } from "@/lib/useNarrowViewport"
 import { isAbsoluteProjectPath, normalizeProjectPath } from "@/lib/projectPaths"
@@ -237,6 +240,18 @@ const formatProjectListLabel = (projectPath: string) => {
     }
     return segments[segments.length - 1]
 }
+
+const toHydratedProjectRecord = (project: {
+    project_path: string
+    is_favorite: boolean
+    last_accessed_at?: string | null
+    active_conversation_id?: string | null
+}) => ({
+    directoryPath: project.project_path,
+    isFavorite: project.is_favorite === true,
+    lastAccessedAt: typeof project.last_accessed_at === "string" ? project.last_accessed_at : null,
+    activeConversationId: typeof project.active_conversation_id === "string" ? project.active_conversation_id : null,
+})
 
 const formatConversationAgeShort = (value: string) => {
     const parsed = new Date(value)
@@ -638,6 +653,8 @@ const upsertConversationSummary = (
 
 export function HomePanel() {
     const projectRegistry = useStore((state) => state.projectRegistry)
+    const hydrateProjectRegistry = useStore((state) => state.hydrateProjectRegistry)
+    const upsertProjectRegistryEntry = useStore((state) => state.upsertProjectRegistryEntry)
     const projects = Object.values(projectRegistry)
     const recentProjectPaths = useStore((state) => state.recentProjectPaths)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
@@ -751,6 +768,25 @@ export function HomePanel() {
         }))
     }
 
+    const persistProjectState = async (
+        projectPath: string,
+        patch: {
+            last_accessed_at?: string | null
+            active_conversation_id?: string | null
+            is_favorite?: boolean | null
+        },
+    ) => {
+        try {
+            const project = await updateProjectStateValidated({
+                project_path: projectPath,
+                ...patch,
+            })
+            upsertProjectRegistryEntry(toHydratedProjectRecord(project))
+        } catch {
+            // Keep the UI responsive if the background state sync fails.
+        }
+    }
+
     const activateConversationThread = (projectPath: string, conversationId: string, source = "unknown") => {
         debugProjectChat("activate conversation thread", {
             source,
@@ -768,6 +804,10 @@ export function HomePanel() {
             planStatus: "draft",
             planProvenance: null,
             artifactRunId: null,
+        })
+        void persistProjectState(projectPath, {
+            active_conversation_id: conversationId,
+            last_accessed_at: new Date().toISOString(),
         })
     }
 
@@ -887,6 +927,12 @@ export function HomePanel() {
                 selectedRunId,
                 activeFlow: flowSource,
             })
+            if (latestProjectScope?.conversationId !== snapshot.conversation_id) {
+                void persistProjectState(projectPath, {
+                    active_conversation_id: snapshot.conversation_id,
+                    last_accessed_at: new Date().toISOString(),
+                })
+            }
         }
 
         if (latestApprovedProposal?.git_branch || latestApprovedProposal?.git_commit) {
@@ -954,6 +1000,27 @@ export function HomePanel() {
 
     applyConversationSnapshotRef.current = applyConversationSnapshot
     applyConversationStreamEventRef.current = applyConversationStreamEvent
+
+    useEffect(() => {
+        let isCancelled = false
+
+        const loadProjectRegistry = async () => {
+            try {
+                const projects = await fetchProjectRegistryValidated()
+                if (isCancelled) {
+                    return
+                }
+                hydrateProjectRegistry(projects.map(toHydratedProjectRecord))
+            } catch {
+                // Leave the in-memory registry untouched if the initial load fails.
+            }
+        }
+
+        void loadProjectRegistry()
+        return () => {
+            isCancelled = true
+        }
+    }, [hydrateProjectRegistry])
 
     useEffect(() => {
         const projectPathsToFetch = projects
@@ -1266,6 +1333,32 @@ export function HomePanel() {
             return
         }
         const result = registerProject(validation.normalizedPath)
+        if (!result.ok) {
+            setProjectRegistrationError(result.error ?? "Unable to register the project.")
+            return
+        }
+        try {
+            const projectRecord = await registerProjectValidated(validation.normalizedPath)
+            upsertProjectRegistryEntry(toHydratedProjectRecord(projectRecord))
+        } catch (error) {
+            useStore.setState((state) => {
+                const nextProjectRegistry = { ...state.projectRegistry }
+                const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
+                delete nextProjectRegistry[validation.normalizedPath]
+                delete nextProjectScopedWorkspaces[validation.normalizedPath]
+                const nextActiveProjectPath = state.activeProjectPath === validation.normalizedPath ? null : state.activeProjectPath
+                return {
+                    projectRegistry: nextProjectRegistry,
+                    projectScopedWorkspaces: nextProjectScopedWorkspaces,
+                    activeProjectPath: nextActiveProjectPath,
+                    activeFlow: nextActiveProjectPath ? state.activeFlow : null,
+                    selectedRunId: nextActiveProjectPath ? state.selectedRunId : null,
+                    workingDir: nextActiveProjectPath ? state.workingDir : "./test-app",
+                }
+            })
+            setProjectRegistrationError(extractApiErrorMessage(error, "Unable to register the project."))
+            return
+        }
         if (result.ok) {
             setProjectRegistrationError(null)
         }
@@ -1376,6 +1469,9 @@ export function HomePanel() {
         }
         setProjectRegistrationError(null)
         setActiveProjectPath(projectPath)
+        void persistProjectState(projectPath, {
+            last_accessed_at: new Date().toISOString(),
+        })
     }
 
     const onCreateConversationThread = () => {
@@ -1451,6 +1547,10 @@ export function HomePanel() {
                         conversationId: fallbackConversationId,
                     })
                 }
+                void persistProjectState(activeProjectPath, {
+                    active_conversation_id: fallbackConversationId,
+                    last_accessed_at: new Date().toISOString(),
+                })
             }
         } catch (error) {
             const message = extractApiErrorMessage(error, "Unable to delete the thread.")

@@ -126,3 +126,59 @@ def test_project_directory_picker_reports_unavailable_runtime(
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Native directory picker is unavailable."
+
+
+def test_project_registry_endpoints_persist_project_metadata(
+    api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    project_dir = (tmp_path / "registered-project").resolve()
+    project_dir.mkdir()
+
+    register_response = api_client.post(
+        "/api/projects/register",
+        json={"project_path": str(project_dir)},
+    )
+
+    assert register_response.status_code == 200
+    register_payload = register_response.json()
+    assert register_payload["project_path"] == str(project_dir)
+    assert register_payload["display_name"] == "registered-project"
+    assert register_payload["is_favorite"] is False
+    assert register_payload["active_conversation_id"] is None
+
+    list_response = api_client.get("/api/projects")
+
+    assert list_response.status_code == 200
+    assert list_response.json() == [register_payload]
+
+    project_file = server.get_settings().projects_dir / register_payload["project_id"] / "project.toml"
+    assert project_file.exists()
+    project_text = project_file.read_text(encoding="utf-8")
+    assert f'project_path = "{project_dir}"' in project_text
+
+
+def test_project_state_endpoint_updates_favorite_and_active_conversation(
+    api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    project_dir = (tmp_path / "tracked-project").resolve()
+    project_dir.mkdir()
+
+    api_client.post("/api/projects/register", json={"project_path": str(project_dir)})
+
+    response = api_client.patch(
+        "/api/projects/state",
+        json={
+            "project_path": str(project_dir),
+            "is_favorite": True,
+            "last_accessed_at": "2026-03-08T12:00:00Z",
+            "active_conversation_id": "conversation-tracked-project",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["is_favorite"] is True
+    assert payload["last_accessed_at"] == "2026-03-08T12:00:00Z"
+    assert payload["active_conversation_id"] == "conversation-tracked-project"

@@ -27,7 +27,6 @@ def test_pipeline_start_request_accepts_dot_source_alias(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     payload = _start_pipeline_via_http(
@@ -124,7 +123,6 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     flow = """
@@ -149,6 +147,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
     run_id = payload["run_id"]
     run_root = server._run_root(run_id)
     assert run_root.exists()
+    assert run_root == tmp_path / ".sparkspawn" / "projects" / server.build_project_id(str((tmp_path / "work").resolve())) / "runs" / run_id
 
     checkpoint = load_checkpoint(run_root / "state.json")
     assert checkpoint is not None

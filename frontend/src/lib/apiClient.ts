@@ -221,6 +221,17 @@ export interface ConversationDeleteResponse {
     project_path: string
 }
 
+export interface ProjectRecordResponse {
+    project_id: string
+    project_path: string
+    display_name: string
+    created_at: string
+    last_opened_at: string
+    last_accessed_at?: string | null
+    is_favorite: boolean
+    active_conversation_id?: string | null
+}
+
 export type ProjectDirectoryPickResponse =
     | {
         status: 'selected'
@@ -855,6 +866,45 @@ function parseConversationSummaryResponse(value: unknown, endpoint: string): Con
     }
 }
 
+function parseProjectRecordResponse(value: unknown, endpoint: string): ProjectRecordResponse | null {
+    const record = asUnknownRecord(value)
+    if (
+        !record
+        || typeof record.project_id !== 'string'
+        || typeof record.project_path !== 'string'
+        || typeof record.display_name !== 'string'
+    ) {
+        return null
+    }
+    return {
+        project_id: record.project_id,
+        project_path: record.project_path,
+        display_name: record.display_name,
+        created_at: typeof record.created_at === 'string' ? record.created_at : '',
+        last_opened_at: typeof record.last_opened_at === 'string' ? record.last_opened_at : '',
+        last_accessed_at: asOptionalNullableString(record.last_accessed_at),
+        is_favorite: record.is_favorite === true,
+        active_conversation_id: asOptionalNullableString(record.active_conversation_id),
+    }
+}
+
+export function parseProjectRecordListResponse(payload: unknown, endpoint = '/api/projects'): ProjectRecordResponse[] {
+    if (!Array.isArray(payload)) {
+        throw new ApiSchemaError(endpoint, 'Expected an array of projects.')
+    }
+    return payload
+        .map((entry) => parseProjectRecordResponse(entry, endpoint))
+        .filter((entry): entry is ProjectRecordResponse => entry !== null)
+}
+
+export function parseProjectRecordResponsePayload(payload: unknown, endpoint = '/api/projects/register'): ProjectRecordResponse {
+    const record = parseProjectRecordResponse(payload, endpoint)
+    if (!record) {
+        throw new ApiSchemaError(endpoint, 'Expected a project record response.')
+    }
+    return record
+}
+
 export function parseConversationSummaryListResponse(
     payload: unknown,
     endpoint = '/api/projects/conversations',
@@ -1126,6 +1176,41 @@ export async function fetchProjectConversationListValidated(
 ): Promise<ConversationSummaryResponse[]> {
     const url = `/api/projects/conversations?project_path=${encodeURIComponent(projectPath)}`
     return fetchJsonWithValidation(url, undefined, '/api/projects/conversations', parseConversationSummaryListResponse)
+}
+
+export async function fetchProjectRegistryValidated(): Promise<ProjectRecordResponse[]> {
+    return fetchJsonWithValidation('/api/projects', undefined, '/api/projects', parseProjectRecordListResponse)
+}
+
+export async function registerProjectValidated(projectPath: string): Promise<ProjectRecordResponse> {
+    return fetchJsonWithValidation(
+        '/api/projects/register',
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_path: projectPath }),
+        },
+        '/api/projects/register',
+        parseProjectRecordResponsePayload,
+    )
+}
+
+export async function updateProjectStateValidated(payload: {
+    project_path: string
+    is_favorite?: boolean | null
+    last_accessed_at?: string | null
+    active_conversation_id?: string | null
+}): Promise<ProjectRecordResponse> {
+    return fetchJsonWithValidation(
+        '/api/projects/state',
+        {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        },
+        '/api/projects/state',
+        parseProjectRecordResponsePayload,
+    )
 }
 
 export async function pickProjectDirectoryValidated(): Promise<ProjectDirectoryPickResponse> {

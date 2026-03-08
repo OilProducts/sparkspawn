@@ -19,7 +19,6 @@ def test_run_serve_uses_import_string_when_reload_enabled(monkeypatch, tmp_path:
         port=8000,
         reload=True,
         data_dir=tmp_path / "data",
-        runs_dir=tmp_path / "runs",
         flows_dir=tmp_path / "flows",
         ui_dir=tmp_path / "ui",
         command="serve",
@@ -44,7 +43,6 @@ def test_run_serve_preserves_runtime_path_env_for_reload(monkeypatch, tmp_path: 
     monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: None)
 
     data_dir = tmp_path / "data"
-    runs_dir = tmp_path / "runs"
     flows_dir = tmp_path / "flows"
     ui_dir = tmp_path / "ui"
     ui_dir.mkdir(parents=True, exist_ok=True)
@@ -55,7 +53,6 @@ def test_run_serve_preserves_runtime_path_env_for_reload(monkeypatch, tmp_path: 
         port=8000,
         reload=True,
         data_dir=data_dir,
-        runs_dir=runs_dir,
         flows_dir=flows_dir,
         ui_dir=ui_dir,
         command="serve",
@@ -64,6 +61,5 @@ def test_run_serve_preserves_runtime_path_env_for_reload(monkeypatch, tmp_path: 
     cli._run_serve(args)
 
     assert cli.os.environ["SPARKSPAWN_HOME"] == str(data_dir.resolve(strict=False))
-    assert cli.os.environ["SPARKSPAWN_RUNS_DIR"] == str(runs_dir.resolve(strict=False))
     assert cli.os.environ["SPARKSPAWN_FLOWS_DIR"] == str(flows_dir.resolve(strict=False))
     assert cli.os.environ["SPARKSPAWN_UI_DIR"] == str(ui_dir.resolve(strict=False))

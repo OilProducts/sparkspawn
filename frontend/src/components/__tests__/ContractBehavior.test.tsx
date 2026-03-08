@@ -1157,70 +1157,42 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:12.3.03] retrieves conversation/spec/plan state by project identity', async () => {
     vi.resetModules()
-    const storage = new Map<string, string>()
-    const localStorageMock = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        storage.set(key, value)
-      },
-      removeItem: (key: string) => {
-        storage.delete(key)
-      },
-      clear: () => {
-        storage.clear()
-      },
-    }
-    vi.stubGlobal('localStorage', localStorageMock)
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: localStorageMock,
-    })
-
-    localStorageMock.setItem(
-      'sparkspawn.project_registry_state',
-      JSON.stringify({
+    const { useStore: restoredStore } = await import('@/store')
+    restoredStore.setState((state) => ({
+      projectScopedWorkspaces: {
+        ...state.projectScopedWorkspaces,
         '/tmp/project-a': {
-          directoryPath: '/tmp/project-a',
-          isFavorite: false,
-          lastAccessedAt: null,
-        },
-        '/tmp/project-b': {
-          directoryPath: '/tmp/project-b',
-          isFavorite: false,
-          lastAccessedAt: null,
-        },
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.ui_route_state',
-      JSON.stringify({
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/project-a',
-        activeFlow: null,
-        selectedRunId: null,
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.project_conversation_state',
-      JSON.stringify({
-        '/tmp/project-a': {
+          ...state.projectScopedWorkspaces['/tmp/project-a'],
+          activeFlow: null,
+          selectedRunId: null,
+          workingDir: '/tmp/project-a',
           conversationId: 'conversation-a',
+          projectEventLog: [],
           specId: 'spec-a',
           specStatus: 'approved',
+          specProvenance: null,
           planId: 'plan-a',
           planStatus: 'rejected',
+          planProvenance: null,
+          artifactRunId: null,
         },
-        '/tmp/project-b/./': {
+        '/tmp/project-b': {
+          ...state.projectScopedWorkspaces['/tmp/project-b'],
+          activeFlow: null,
+          selectedRunId: null,
+          workingDir: '/tmp/project-b',
           conversationId: 'conversation-b',
+          projectEventLog: [],
           specId: 'spec-b',
           specStatus: 'draft',
+          specProvenance: null,
           planId: 'plan-b',
           planStatus: 'revision-requested',
+          planProvenance: null,
+          artifactRunId: null,
         },
-      }),
-    )
-
-    const { useStore: restoredStore } = await import('@/store')
+      },
+    }))
     const projectAState = restoredStore.getState().getProjectScopedArtifactState('/tmp/project-a')
     expect(projectAState).toEqual({
       conversationId: 'conversation-a',
@@ -2495,11 +2467,33 @@ describe('Frontend contract behavior', () => {
       '/tmp/detached-git-project',
       '/tmp/git-project',
     ]
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
+      if (url.endsWith('/api/projects')) {
+        return jsonResponse([
+          {
+            project_id: 'project-contract-behavior-1234',
+            project_path: '/tmp/project-contract-behavior',
+            display_name: 'project-contract-behavior',
+            is_favorite: false,
+            active_conversation_id: null,
+          },
+        ])
+      }
       if (url.includes('/api/projects/pick-directory')) {
         const nextDirectory = pickedDirectories.shift()
         return jsonResponse(nextDirectory ? { status: 'selected', directory_path: nextDirectory } : { status: 'canceled' })
+      }
+      if (url.includes('/api/projects/register')) {
+        const payload = init?.body ? JSON.parse(String(init.body)) as { project_path?: string } : {}
+        const projectPath = payload.project_path ?? '/tmp/registered-project'
+        return jsonResponse({
+          project_id: `project-${Math.random().toString(36).slice(2, 8)}`,
+          project_path: projectPath,
+          display_name: projectPath.split('/').filter(Boolean).at(-1) ?? 'registered-project',
+          is_favorite: false,
+          active_conversation_id: null,
+        })
       }
       if (url.includes('/api/projects/metadata')) {
         const directory = new URL(url, 'http://localhost').searchParams.get('directory') ?? ''
@@ -5111,7 +5105,7 @@ digraph contract_behavior {
     })
   })
 
-  it('[CID:11.5.01] restores persisted project registry across sessions and keeps unique-directory enforcement active', async () => {
+  it('[CID:11.5.01] ignores browser-persisted project and workflow state that now belongs to Spark Spawn storage', async () => {
     vi.resetModules()
     const storage = new Map<string, string>()
     const localStorageMock = {
@@ -5132,534 +5126,59 @@ digraph contract_behavior {
       value: localStorageMock,
     })
 
-    localStorageMock.setItem(
-      'sparkspawn.project_registry_state',
-      JSON.stringify({
-        '/tmp/persisted-project': {
-          directoryPath: '/tmp/persisted-project',
-          isFavorite: true,
-          lastAccessedAt: '2026-03-04T00:00:00.000Z',
-        },
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.ui_route_state',
-      JSON.stringify({
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/persisted-project',
-        activeFlow: null,
-        selectedRunId: null,
-      }),
-    )
-
-    const { useStore: restoredStore } = await import('@/store')
-    const restoredState = restoredStore.getState()
-
-    expect(restoredState.projectRegistry).toEqual({
+    localStorageMock.setItem('sparkspawn.project_registry_state', JSON.stringify({
       '/tmp/persisted-project': {
         directoryPath: '/tmp/persisted-project',
         isFavorite: true,
         lastAccessedAt: '2026-03-04T00:00:00.000Z',
       },
-    })
-
-    const duplicateResult = restoredState.registerProject('/tmp/persisted-project')
-    expect(duplicateResult.ok).toBe(false)
-    expect(duplicateResult.error).toBe('Project already registered: /tmp/persisted-project')
-
-    const newProjectResult = restoredState.registerProject('/tmp/new-project')
-    expect(newProjectResult.ok).toBe(true)
-    const persistedRegistryRaw = localStorageMock.getItem('sparkspawn.project_registry_state')
-    expect(persistedRegistryRaw).toBeTruthy()
-    const persistedRegistry = JSON.parse(String(persistedRegistryRaw)) as Record<string, { directoryPath: string }>
-    expect(persistedRegistry['/tmp/persisted-project']?.directoryPath).toBe('/tmp/persisted-project')
-    expect(persistedRegistry['/tmp/new-project']?.directoryPath).toBe('/tmp/new-project')
-  })
-
-  it('[CID:11.5.02] restores project-scoped conversation/spec/plan linkage for normalized project paths', async () => {
-    vi.resetModules()
-    const storage = new Map<string, string>()
-    const localStorageMock = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        storage.set(key, value)
+    }))
+    localStorageMock.setItem('sparkspawn.project_conversation_state', JSON.stringify({
+      '/tmp/persisted-project': {
+        conversationId: 'conversation-persisted-project',
+        specId: 'spec-persisted-project',
+        specStatus: 'approved',
+        planId: 'plan-persisted-project',
+        planStatus: 'approved',
       },
-      removeItem: (key: string) => {
-        storage.delete(key)
-      },
-      clear: () => {
-        storage.clear()
-      },
-    }
-    vi.stubGlobal('localStorage', localStorageMock)
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: localStorageMock,
-    })
-
-    localStorageMock.setItem(
-      'sparkspawn.project_registry_state',
-      JSON.stringify({
-        '/tmp/persisted-project': {
-          directoryPath: '/tmp/persisted-project',
-          isFavorite: false,
-          lastAccessedAt: '2026-03-04T00:00:00.000Z',
-        },
-        '/tmp/other-project': {
-          directoryPath: '/tmp/other-project',
-          isFavorite: false,
-          lastAccessedAt: '2026-03-04T00:00:00.000Z',
-        },
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.ui_route_state',
-      JSON.stringify({
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/persisted-project',
-        activeFlow: null,
-        selectedRunId: null,
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.project_conversation_state',
-      JSON.stringify({
-        '/tmp/persisted-project/./': {
-          conversationId: 'conversation-persisted-project',
-          specId: 'spec-persisted-project',
-          specStatus: 'approved',
-          planId: 'plan-persisted-project',
-          planStatus: 'rejected',
-        },
-        '/tmp/other-project': {
-          conversationId: 'conversation-other-project',
-          specId: 'spec-other-project',
-          specStatus: 'draft',
-          planId: 'plan-other-project',
-          planStatus: 'revision-requested',
-        },
-      }),
-    )
-
-    const { useStore: restoredStore } = await import('@/store')
-
-    const persistedScope = restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']
-    expect(persistedScope.conversationId).toBe('conversation-persisted-project')
-    expect(persistedScope.specId).toBe('spec-persisted-project')
-    expect(persistedScope.specStatus).toBe('approved')
-    expect(persistedScope.planId).toBe('plan-persisted-project')
-    expect(persistedScope.planStatus).toBe('rejected')
-
-    restoredStore.getState().setActiveProjectPath('/tmp/other-project')
-    const switchedScope = restoredStore.getState().projectScopedWorkspaces['/tmp/other-project']
-    expect(switchedScope.conversationId).toBe('conversation-other-project')
-    expect(switchedScope.specId).toBe('spec-other-project')
-    expect(switchedScope.planId).toBe('plan-other-project')
-    expect(switchedScope.planStatus).toBe('revision-requested')
-  })
-
-  it('[CID:11.5.03] clears stale flow/run route context when persisted active project path is invalid on reopen', async () => {
-    vi.resetModules()
-    const storage = new Map<string, string>()
-    const localStorageMock = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        storage.set(key, value)
-      },
-      removeItem: (key: string) => {
-        storage.delete(key)
-      },
-      clear: () => {
-        storage.clear()
-      },
-    }
-    vi.stubGlobal('localStorage', localStorageMock)
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: localStorageMock,
-    })
-
-    localStorageMock.setItem(
-      'sparkspawn.project_registry_state',
-      JSON.stringify({
-        '/tmp/persisted-project': {
-          directoryPath: '/tmp/persisted-project',
-          isFavorite: true,
-          lastAccessedAt: '2026-03-04T00:00:00.000Z',
-        },
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.ui_route_state',
-      JSON.stringify({
-        viewMode: 'editor',
-        activeProjectPath: 'relative/project',
-        activeFlow: 'leaked-flow.dot',
-        selectedRunId: 'leaked-run-id',
-      }),
-    )
+    }))
+    localStorageMock.setItem('sparkspawn.ui_route_state', JSON.stringify({
+      viewMode: 'projects',
+      activeProjectPath: '/tmp/persisted-project',
+      activeFlow: null,
+      selectedRunId: null,
+    }))
 
     const { useStore: restoredStore } = await import('@/store')
     const restoredState = restoredStore.getState()
 
-    expect(restoredState.activeProjectPath).toBeNull()
-    expect(restoredState.viewMode).toBe('home')
-    expect(restoredState.activeFlow).toBeNull()
-    expect(restoredState.selectedRunId).toBeNull()
-    expect(restoredState.workingDir).toBe(DEFAULT_WORKING_DIRECTORY)
-    expect(restoredState.projectScopedWorkspaces).toEqual({})
-    expect(restoredState.projectRegistry['/tmp/persisted-project']).toBeDefined()
+    expect(restoredState.projectRegistry).toEqual({})
+    expect(restoredState.projectScopedWorkspaces['/tmp/persisted-project']?.conversationId).toBeNull()
+    expect(restoredState.projectScopedWorkspaces['/tmp/persisted-project']?.specId).toBeNull()
+    expect(restoredState.projectScopedWorkspaces['/tmp/persisted-project']?.planId).toBeNull()
+    expect(restoredState.activeProjectPath).toBe('/tmp/persisted-project')
   })
 
-  it('[CID:11.6.01] persists and restores spec/plan provenance references for workflow-generated artifacts', async () => {
+  it('[CID:11.5.02] hydrates backend-owned project registry and active conversation linkage into in-memory UI state', async () => {
     vi.resetModules()
-    const storage = new Map<string, string>()
-    const localStorageMock = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        storage.set(key, value)
-      },
-      removeItem: (key: string) => {
-        storage.delete(key)
-      },
-      clear: () => {
-        storage.clear()
-      },
-    }
-    vi.stubGlobal('localStorage', localStorageMock)
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: localStorageMock,
-    })
-
-    localStorageMock.setItem(
-      'sparkspawn.project_registry_state',
-      JSON.stringify({
-        '/tmp/persisted-project': {
-          directoryPath: '/tmp/persisted-project',
-          isFavorite: false,
-          lastAccessedAt: '2026-03-04T00:00:00.000Z',
-        },
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.ui_route_state',
-      JSON.stringify({
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/persisted-project',
-        activeFlow: null,
-        selectedRunId: null,
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.project_conversation_state',
-      JSON.stringify({
-        '/tmp/persisted-project': {
-          conversationId: 'conversation-persisted-project',
-          specId: 'spec-persisted-project',
-          specStatus: 'approved',
-          specProvenance: {
-            source: 'spec-edit-proposal',
-            referenceId: 'proposal-123',
-            capturedAt: '2026-03-04T00:05:00.000Z',
-          },
-          planId: 'plan-persisted-project',
-          planStatus: 'draft',
-          planProvenance: {
-            source: 'plan-generation-workflow',
-            referenceId: 'run-plan-123',
-            capturedAt: '2026-03-04T00:10:00.000Z',
-          },
-        },
-      }),
-    )
-
     const { useStore: restoredStore } = await import('@/store')
-    const restoredScope = restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']
-    expect(restoredScope.specProvenance).toEqual({
-      source: 'spec-edit-proposal',
-      referenceId: 'proposal-123',
-      capturedAt: '2026-03-04T00:05:00.000Z',
-      runId: null,
-      gitBranch: null,
-      gitCommit: null,
-    })
-    expect(restoredScope.planProvenance).toEqual({
-      source: 'plan-generation-workflow',
-      referenceId: 'run-plan-123',
-      capturedAt: '2026-03-04T00:10:00.000Z',
-      runId: null,
-      gitBranch: null,
-      gitCommit: null,
-    })
 
-    restoredStore.getState().setSpecProvenance({
-      source: 'spec-edit-proposal',
-      referenceId: 'proposal-456',
-      capturedAt: '2026-03-04T00:15:00.000Z',
-    })
-    restoredStore.getState().setPlanProvenance({
-      source: 'plan-generation-workflow',
-      referenceId: 'run-plan-456',
-      capturedAt: '2026-03-04T00:20:00.000Z',
-    })
-
-    const persistedConversationStateRaw = localStorageMock.getItem('sparkspawn.project_conversation_state')
-    expect(persistedConversationStateRaw).toBeTruthy()
-    const persistedConversationState = JSON.parse(String(persistedConversationStateRaw)) as Record<
-      string,
+    restoredStore.getState().hydrateProjectRegistry([
       {
-        specProvenance?: {
-          source?: string
-          referenceId?: string
-          capturedAt?: string
-          runId?: string | null
-          gitBranch?: string | null
-          gitCommit?: string | null
-        }
-        planProvenance?: {
-          source?: string
-          referenceId?: string
-          capturedAt?: string
-          runId?: string | null
-          gitBranch?: string | null
-          gitCommit?: string | null
-        }
-      }
-    >
-    expect(persistedConversationState['/tmp/persisted-project']?.specProvenance).toMatchObject({
-      source: 'spec-edit-proposal',
-      referenceId: 'proposal-456',
-      capturedAt: '2026-03-04T00:15:00.000Z',
-    })
-    expect(persistedConversationState['/tmp/persisted-project']?.planProvenance).toMatchObject({
-      source: 'plan-generation-workflow',
-      referenceId: 'run-plan-456',
-      capturedAt: '2026-03-04T00:20:00.000Z',
-    })
-  })
-
-  it('[CID:11.6.02] persists and restores provenance run-linkage and available git branch/commit context', async () => {
-    vi.resetModules()
-    const storage = new Map<string, string>()
-    const localStorageMock = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        storage.set(key, value)
+        directoryPath: '/tmp/persisted-project',
+        isFavorite: true,
+        lastAccessedAt: '2026-03-04T00:00:00.000Z',
+        activeConversationId: 'conversation-persisted-project',
       },
-      removeItem: (key: string) => {
-        storage.delete(key)
-      },
-      clear: () => {
-        storage.clear()
-      },
-    }
-    vi.stubGlobal('localStorage', localStorageMock)
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: localStorageMock,
-    })
+    ])
 
-    localStorageMock.setItem(
-      'sparkspawn.project_registry_state',
-      JSON.stringify({
-        '/tmp/persisted-project': {
-          directoryPath: '/tmp/persisted-project',
-          isFavorite: false,
-          lastAccessedAt: '2026-03-04T00:00:00.000Z',
-        },
-      }),
+    expect(restoredStore.getState().projectRegistry['/tmp/persisted-project']).toEqual({
+      directoryPath: '/tmp/persisted-project',
+      isFavorite: true,
+      lastAccessedAt: '2026-03-04T00:00:00.000Z',
+    })
+    expect(restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']?.conversationId).toBe(
+      'conversation-persisted-project',
     )
-    localStorageMock.setItem(
-      'sparkspawn.ui_route_state',
-      JSON.stringify({
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/persisted-project',
-        activeFlow: null,
-        selectedRunId: null,
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.project_conversation_state',
-      JSON.stringify({
-        '/tmp/persisted-project': {
-          conversationId: null,
-          specId: 'spec-persisted-project',
-          specStatus: 'approved',
-          specProvenance: {
-            source: 'spec-edit-proposal',
-            referenceId: 'proposal-123',
-            capturedAt: '2026-03-04T00:05:00.000Z',
-            runId: 'run-spec-123',
-            gitBranch: 'feature/spec-provenance',
-            gitCommit: 'abcde12345',
-          },
-          planId: 'plan-persisted-project',
-          planStatus: 'approved',
-          planProvenance: {
-            source: 'plan-generation-workflow',
-            referenceId: 'run-plan-123',
-            capturedAt: '2026-03-04T00:10:00.000Z',
-            runId: 'run-plan-123',
-            gitBranch: 'feature/plan-provenance',
-            gitCommit: '98765fedcb',
-          },
-        },
-      }),
-    )
-
-    const { useStore: restoredStore } = await import('@/store')
-    const restoredScope = restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']
-    expect(restoredScope.specProvenance).toEqual({
-      source: 'spec-edit-proposal',
-      referenceId: 'proposal-123',
-      capturedAt: '2026-03-04T00:05:00.000Z',
-      runId: 'run-spec-123',
-      gitBranch: 'feature/spec-provenance',
-      gitCommit: 'abcde12345',
-    })
-    expect(restoredScope.planProvenance).toEqual({
-      source: 'plan-generation-workflow',
-      referenceId: 'run-plan-123',
-      capturedAt: '2026-03-04T00:10:00.000Z',
-      runId: 'run-plan-123',
-      gitBranch: 'feature/plan-provenance',
-      gitCommit: '98765fedcb',
-    })
-
-    restoredStore.getState().setSpecProvenance({
-      source: 'spec-edit-proposal',
-      referenceId: 'proposal-456',
-      capturedAt: '2026-03-04T00:15:00.000Z',
-      runId: 'run-spec-456',
-      gitBranch: 'main',
-      gitCommit: '22222aaaaa',
-    })
-    restoredStore.getState().setPlanProvenance({
-      source: 'plan-generation-workflow',
-      referenceId: 'run-plan-456',
-      capturedAt: '2026-03-04T00:20:00.000Z',
-      runId: 'run-plan-456',
-      gitBranch: 'main',
-      gitCommit: '33333bbbbb',
-    })
-
-    const persistedConversationStateRaw = localStorageMock.getItem('sparkspawn.project_conversation_state')
-    expect(persistedConversationStateRaw).toBeTruthy()
-    const persistedConversationState = JSON.parse(String(persistedConversationStateRaw)) as Record<
-      string,
-      {
-        specProvenance?: {
-          source?: string
-          referenceId?: string
-          capturedAt?: string
-          runId?: string | null
-          gitBranch?: string | null
-          gitCommit?: string | null
-        }
-        planProvenance?: {
-          source?: string
-          referenceId?: string
-          capturedAt?: string
-          runId?: string | null
-          gitBranch?: string | null
-          gitCommit?: string | null
-        }
-      }
-    >
-    expect(persistedConversationState['/tmp/persisted-project']?.specProvenance).toEqual({
-      source: 'spec-edit-proposal',
-      referenceId: 'proposal-456',
-      capturedAt: '2026-03-04T00:15:00.000Z',
-      runId: 'run-spec-456',
-      gitBranch: 'main',
-      gitCommit: '22222aaaaa',
-    })
-    expect(persistedConversationState['/tmp/persisted-project']?.planProvenance).toEqual({
-      source: 'plan-generation-workflow',
-      referenceId: 'run-plan-456',
-      capturedAt: '2026-03-04T00:20:00.000Z',
-      runId: 'run-plan-456',
-      gitBranch: 'main',
-      gitCommit: '33333bbbbb',
-    })
-  })
-
-  it('[CID:11.6.03] persists and restores plan status lifecycle transitions', async () => {
-    vi.resetModules()
-    const storage = new Map<string, string>()
-    const localStorageMock = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        storage.set(key, value)
-      },
-      removeItem: (key: string) => {
-        storage.delete(key)
-      },
-      clear: () => {
-        storage.clear()
-      },
-    }
-    vi.stubGlobal('localStorage', localStorageMock)
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: localStorageMock,
-    })
-
-    localStorageMock.setItem(
-      'sparkspawn.project_registry_state',
-      JSON.stringify({
-        '/tmp/lifecycle-project': {
-          directoryPath: '/tmp/lifecycle-project',
-          isFavorite: false,
-          lastAccessedAt: '2026-03-04T00:00:00.000Z',
-        },
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.ui_route_state',
-      JSON.stringify({
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/lifecycle-project',
-        activeFlow: null,
-        selectedRunId: null,
-      }),
-    )
-    localStorageMock.setItem(
-      'sparkspawn.project_conversation_state',
-      JSON.stringify({
-        '/tmp/lifecycle-project': {
-          conversationId: null,
-          specId: 'spec-lifecycle-project',
-          specStatus: 'approved',
-          planId: 'plan-lifecycle-project',
-          planStatus: 'draft',
-        },
-      }),
-    )
-
-    const { useStore: restoredStore } = await import('@/store')
-    expect(restoredStore.getState().projectScopedWorkspaces['/tmp/lifecycle-project']?.planStatus).toBe('draft')
-
-    const lifecycleStatuses = ['approved', 'rejected', 'revision-requested', 'draft'] as const
-    lifecycleStatuses.forEach((status) => {
-      restoredStore.getState().setPlanStatus(status)
-      const persistedConversationStateRaw = localStorageMock.getItem('sparkspawn.project_conversation_state')
-      expect(persistedConversationStateRaw).toBeTruthy()
-      const persistedConversationState = JSON.parse(String(persistedConversationStateRaw)) as Record<
-        string,
-        { planStatus?: string }
-      >
-      expect(persistedConversationState['/tmp/lifecycle-project']?.planStatus).toBe(status)
-    })
-
-    vi.resetModules()
-    vi.stubGlobal('localStorage', localStorageMock)
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: localStorageMock,
-    })
-    const { useStore: reopenedStore } = await import('@/store')
-    expect(reopenedStore.getState().projectScopedWorkspaces['/tmp/lifecycle-project']?.planStatus).toBe('draft')
   })
 })

@@ -130,11 +130,8 @@ const DEFAULT_UI_DEFAULTS: UiDefaults = {
 
 const UI_DEFAULTS_STORAGE_KEY = "sparkspawn.ui_defaults"
 const ROUTE_STATE_STORAGE_KEY = "sparkspawn.ui_route_state"
-const PROJECT_REGISTRY_STATE_STORAGE_KEY = "sparkspawn.project_registry_state"
-const PROJECT_CONVERSATION_STATE_STORAGE_KEY = "sparkspawn.project_conversation_state"
 const DEFAULT_WORKING_DIRECTORY = "./test-app"
 const RECENT_PROJECT_LIMIT = 5
-const PROJECT_EVENT_LOG_LIMIT = 200
 const VIEW_MODES: ViewMode[] = ['home', 'projects', 'editor', 'execution', 'settings', 'runs']
 const modeRequiresActiveProject = (mode: ViewMode) => mode === 'editor' || mode === 'execution'
 const normalizeViewMode = (mode: ViewMode): ViewMode => (mode === 'projects' ? 'home' : mode)
@@ -284,28 +281,12 @@ interface ProjectScopedArtifactState {
     planStatus: PlanStatus
 }
 
-type PersistedProjectWorkspaceState = Record<
-    string,
-    {
-        conversationId: string | null
-        projectEventLog?: ProjectEventLogEntry[]
-        specId: string | null
-        specStatus: 'draft' | 'approved'
-        specProvenance?: ArtifactProvenanceReference | null
-        planId: string | null
-        planStatus: PlanStatus
-        planProvenance?: ArtifactProvenanceReference | null
-    }
->
-
-type PersistedProjectRegistryState = Record<
-    string,
-    {
-        directoryPath?: unknown
-        isFavorite?: unknown
-        lastAccessedAt?: unknown
-    }
->
+interface HydratedProjectRecord {
+    directoryPath: string
+    isFavorite: boolean
+    lastAccessedAt: string | null
+    activeConversationId?: string | null
+}
 
 const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
     activeFlow: null,
@@ -322,204 +303,13 @@ const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
     artifactRunId: null,
 }
 
-const coerceProjectEventLogEntry = (value: unknown): ProjectEventLogEntry | null => {
-    if (!value || typeof value !== "object") {
-        return null
-    }
-    const candidate = value as Partial<ProjectEventLogEntry>
-    if (typeof candidate.message === "string" && typeof candidate.timestamp === "string") {
-        return {
-            message: candidate.message,
-            timestamp: candidate.timestamp,
-        }
-    }
-    return null
-}
-
-const coerceArtifactProvenanceReference = (value: unknown): ArtifactProvenanceReference | null => {
-    if (!value || typeof value !== "object") {
-        return null
-    }
-    const candidate = value as Partial<ArtifactProvenanceReference>
-    if (
-        typeof candidate.source === "string"
-        && candidate.source.trim().length > 0
-        && typeof candidate.referenceId === "string"
-        && candidate.referenceId.trim().length > 0
-        && typeof candidate.capturedAt === "string"
-        && candidate.capturedAt.trim().length > 0
-    ) {
-        const runId = typeof candidate.runId === "string" && candidate.runId.trim().length > 0
-            ? candidate.runId.trim()
-            : null
-        const gitBranch = typeof candidate.gitBranch === "string" && candidate.gitBranch.trim().length > 0
-            ? candidate.gitBranch.trim()
-            : null
-        const gitCommit = typeof candidate.gitCommit === "string" && candidate.gitCommit.trim().length > 0
-            ? candidate.gitCommit.trim()
-            : null
-        return {
-            source: candidate.source,
-            referenceId: candidate.referenceId,
-            capturedAt: candidate.capturedAt,
-            runId,
-            gitBranch,
-            gitCommit,
-        }
-    }
-    return null
-}
-
-const loadProjectConversationState = (): PersistedProjectWorkspaceState => {
-    if (typeof window === "undefined") {
-        return {}
-    }
-    try {
-        const raw = window.localStorage.getItem(PROJECT_CONVERSATION_STATE_STORAGE_KEY)
-        if (!raw) {
-            return {}
-        }
-        const parsed = JSON.parse(raw) as Record<string, unknown>
-        const restored: PersistedProjectWorkspaceState = {}
-        Object.entries(parsed).forEach(([projectPath, value]) => {
-            const normalizedProjectPath = normalizeProjectPath(projectPath)
-            if (!normalizedProjectPath || !isAbsoluteProjectPath(normalizedProjectPath)) {
-                return
-            }
-            if (!value || typeof value !== "object") {
-                return
-            }
-            const scope = value as {
-                conversationId?: unknown
-                projectEventLog?: unknown
-                specId?: unknown
-                specStatus?: unknown
-                specProvenance?: unknown
-                planId?: unknown
-                planStatus?: unknown
-                planProvenance?: unknown
-            }
-            const persistedProjectEventLog = Array.isArray(scope.projectEventLog)
-                ? scope.projectEventLog
-                    .map(coerceProjectEventLogEntry)
-                    .filter((entry): entry is ProjectEventLogEntry => entry !== null)
-                : []
-            const specProvenance = coerceArtifactProvenanceReference(scope.specProvenance)
-            const planProvenance = coerceArtifactProvenanceReference(scope.planProvenance)
-            restored[normalizedProjectPath] = {
-                conversationId: typeof scope.conversationId === "string" ? scope.conversationId : null,
-                projectEventLog: persistedProjectEventLog.slice(-PROJECT_EVENT_LOG_LIMIT),
-                specId: typeof scope.specId === "string" ? scope.specId : null,
-                specStatus: scope.specStatus === "approved" ? "approved" : "draft",
-                specProvenance,
-                planId: typeof scope.planId === "string" ? scope.planId : null,
-                planStatus: scope.planStatus === "approved"
-                    || scope.planStatus === "rejected"
-                    || scope.planStatus === "revision-requested"
-                    ? scope.planStatus
-                    : "draft",
-                planProvenance,
-            }
-        })
-        return restored
-    } catch {
-        return {}
-    }
-}
-
-const saveProjectConversationState = (projectScopedWorkspaces: Record<string, ProjectScopedWorkspace>) => {
-    if (typeof window === "undefined") {
-        return
-    }
-    try {
-        const persisted: PersistedProjectWorkspaceState = {}
-        Object.entries(projectScopedWorkspaces).forEach(([projectPath, workspace]) => {
-            persisted[projectPath] = {
-                conversationId: workspace.conversationId,
-                projectEventLog: workspace.projectEventLog,
-                specId: workspace.specId,
-                specStatus: workspace.specStatus,
-                specProvenance: workspace.specProvenance || null,
-                planId: workspace.planId,
-                planStatus: workspace.planStatus,
-                planProvenance: workspace.planProvenance || null,
-            }
-        })
-        window.localStorage.setItem(PROJECT_CONVERSATION_STATE_STORAGE_KEY, JSON.stringify(persisted))
-    } catch {
-        // Ignore storage failures (private mode, quota, etc.)
-    }
-}
-
-const restoredProjectConversationState = loadProjectConversationState()
-
-const loadProjectRegistryState = (): Record<string, RegisteredProject> => {
-    if (typeof window === "undefined") {
-        return {}
-    }
-    try {
-        const raw = window.localStorage.getItem(PROJECT_REGISTRY_STATE_STORAGE_KEY)
-        if (!raw) {
-            return {}
-        }
-        const parsed = JSON.parse(raw) as PersistedProjectRegistryState
-        const restored: Record<string, RegisteredProject> = {}
-        Object.entries(parsed).forEach(([projectPath, value]) => {
-            if (!value || typeof value !== "object") {
-                return
-            }
-            const candidate = value as PersistedProjectRegistryState[string]
-            const rawDirectoryPath = typeof candidate.directoryPath === "string" ? candidate.directoryPath : projectPath
-            const normalizedPath = normalizeProjectPath(rawDirectoryPath)
-            if (!normalizedPath || !isAbsoluteProjectPath(normalizedPath)) {
-                return
-            }
-            const existing = restored[normalizedPath]
-            restored[normalizedPath] = {
-                directoryPath: normalizedPath,
-                isFavorite: Boolean(existing?.isFavorite) || candidate.isFavorite === true,
-                lastAccessedAt: existing?.lastAccessedAt
-                    || (typeof candidate.lastAccessedAt === "string" ? candidate.lastAccessedAt : null),
-            }
-        })
-        return restored
-    } catch {
-        return {}
-    }
-}
-
-const saveProjectRegistryState = (projectRegistry: Record<string, RegisteredProject>) => {
-    if (typeof window === "undefined") {
-        return
-    }
-    try {
-        const persisted: Record<string, RegisteredProject> = {}
-        Object.entries(projectRegistry).forEach(([projectPath, value]) => {
-            const normalizedPath = normalizeProjectPath(value.directoryPath || projectPath)
-            if (!normalizedPath || !isAbsoluteProjectPath(normalizedPath)) {
-                return
-            }
-            persisted[normalizedPath] = {
-                directoryPath: normalizedPath,
-                isFavorite: value.isFavorite === true,
-                lastAccessedAt: typeof value.lastAccessedAt === "string" ? value.lastAccessedAt : null,
-            }
-        })
-        window.localStorage.setItem(PROJECT_REGISTRY_STATE_STORAGE_KEY, JSON.stringify(persisted))
-    } catch {
-        // Ignore storage failures (private mode, quota, etc.)
-    }
-}
-
 const resolveProjectScopedWorkspace = (
     workspace: Partial<ProjectScopedWorkspace> | undefined,
     projectPath: string | null
 ): ProjectScopedWorkspace => {
     const defaultWorkingDir = projectPath || DEFAULT_WORKING_DIRECTORY
-    const restoredConversationState = projectPath ? restoredProjectConversationState[projectPath] : undefined
     return {
         ...DEFAULT_PROJECT_SCOPED_WORKSPACE,
-        ...restoredConversationState,
         ...workspace,
         workingDir: workspace?.workingDir || defaultWorkingDir,
     }
@@ -537,8 +327,7 @@ const selectProjectScopedArtifactState = (
         return null
     }
     const loadedWorkspace = projectScopedWorkspaces[normalizedProjectPath]
-    const restoredWorkspace = restoredProjectConversationState[normalizedProjectPath]
-    if (!loadedWorkspace && !restoredWorkspace) {
+    if (!loadedWorkspace) {
         return null
     }
     const workspace = resolveProjectScopedWorkspace(loadedWorkspace, normalizedProjectPath)
@@ -633,6 +422,8 @@ interface AppState {
     activeProjectPath: string | null
     setActiveProjectPath: (projectPath: string | null) => void
     projectRegistry: Record<string, RegisteredProject>
+    hydrateProjectRegistry: (projects: HydratedProjectRecord[]) => void
+    upsertProjectRegistryEntry: (project: HydratedProjectRecord) => void
     recentProjectPaths: string[]
     projectScopedWorkspaces: Record<string, ProjectScopedWorkspace>
     projectRegistrationError: string | null
@@ -708,15 +499,7 @@ interface AppState {
 }
 
 const restoredRouteState = loadRouteState()
-const restoredProjectRegistryState = loadProjectRegistryState()
-const initialProjectRegistry: Record<string, RegisteredProject> = { ...restoredProjectRegistryState }
-if (restoredRouteState.activeProjectPath && !initialProjectRegistry[restoredRouteState.activeProjectPath]) {
-    initialProjectRegistry[restoredRouteState.activeProjectPath] = {
-        directoryPath: restoredRouteState.activeProjectPath,
-        isFavorite: false,
-        lastAccessedAt: null,
-    }
-}
+const initialProjectRegistry: Record<string, RegisteredProject> = {}
 const initialProjectScopedWorkspaces: Record<string, ProjectScopedWorkspace> = restoredRouteState.activeProjectPath
     ? {
         [restoredRouteState.activeProjectPath]: resolveProjectScopedWorkspace(
@@ -751,6 +534,85 @@ export const useStore = create<AppState>((set, get) => ({
     activeProjectPath: restoredRouteState.activeProjectPath,
     projectScopedWorkspaces: initialProjectScopedWorkspaces,
     recentProjectPaths: restoredRouteState.activeProjectPath ? [restoredRouteState.activeProjectPath] : [],
+    hydrateProjectRegistry: (projects) =>
+        set((state) => {
+            const nextProjectRegistry: Record<string, RegisteredProject> = {}
+            const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
+            projects.forEach((project) => {
+                const normalizedPath = normalizeProjectPath(project.directoryPath)
+                if (!normalizedPath || !isAbsoluteProjectPath(normalizedPath)) {
+                    return
+                }
+                nextProjectRegistry[normalizedPath] = {
+                    directoryPath: normalizedPath,
+                    isFavorite: project.isFavorite === true,
+                    lastAccessedAt: typeof project.lastAccessedAt === 'string' ? project.lastAccessedAt : null,
+                }
+                nextProjectScopedWorkspaces[normalizedPath] = resolveProjectScopedWorkspace(
+                    {
+                        ...nextProjectScopedWorkspaces[normalizedPath],
+                        conversationId: typeof project.activeConversationId === 'string'
+                            ? project.activeConversationId
+                            : nextProjectScopedWorkspaces[normalizedPath]?.conversationId ?? null,
+                    },
+                    normalizedPath,
+                )
+            })
+            const nextActiveProjectPath = state.activeProjectPath && nextProjectRegistry[state.activeProjectPath]
+                ? state.activeProjectPath
+                : null
+            const nextActiveProjectScope = nextActiveProjectPath
+                ? resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[nextActiveProjectPath], nextActiveProjectPath)
+                : null
+            saveRouteState({
+                viewMode: resolveViewModeForProjectScope(state.viewMode, nextActiveProjectPath),
+                activeProjectPath: nextActiveProjectPath,
+                activeFlow: nextActiveProjectPath ? nextActiveProjectScope?.activeFlow || null : null,
+                selectedRunId: nextActiveProjectPath ? nextActiveProjectScope?.selectedRunId || null : null,
+            })
+            return {
+                projectRegistry: nextProjectRegistry,
+                projectScopedWorkspaces: nextProjectScopedWorkspaces,
+                activeProjectPath: nextActiveProjectPath,
+                viewMode: resolveViewModeForProjectScope(state.viewMode, nextActiveProjectPath),
+                activeFlow: nextActiveProjectPath ? nextActiveProjectScope?.activeFlow || null : null,
+                selectedRunId: nextActiveProjectPath ? nextActiveProjectScope?.selectedRunId || null : null,
+                workingDir: nextActiveProjectPath ? nextActiveProjectScope?.workingDir || DEFAULT_WORKING_DIRECTORY : DEFAULT_WORKING_DIRECTORY,
+                recentProjectPaths: nextActiveProjectPath ? pushRecentProjectPath(state.recentProjectPaths, nextActiveProjectPath) : state.recentProjectPaths,
+            }
+        }),
+    upsertProjectRegistryEntry: (project) =>
+        set((state) => {
+            const normalizedPath = normalizeProjectPath(project.directoryPath)
+            if (!normalizedPath || !isAbsoluteProjectPath(normalizedPath)) {
+                return state
+            }
+            const nextProjectRegistry = {
+                ...state.projectRegistry,
+                [normalizedPath]: {
+                    directoryPath: normalizedPath,
+                    isFavorite: project.isFavorite === true,
+                    lastAccessedAt: typeof project.lastAccessedAt === 'string' ? project.lastAccessedAt : null,
+                },
+            }
+            const nextProjectScopedWorkspaces = {
+                ...state.projectScopedWorkspaces,
+                [normalizedPath]: resolveProjectScopedWorkspace(
+                    {
+                        ...state.projectScopedWorkspaces[normalizedPath],
+                        conversationId: typeof project.activeConversationId === 'string'
+                            ? project.activeConversationId
+                            : state.projectScopedWorkspaces[normalizedPath]?.conversationId ?? null,
+                    },
+                    normalizedPath,
+                ),
+            }
+            return {
+                projectRegistry: nextProjectRegistry,
+                projectScopedWorkspaces: nextProjectScopedWorkspaces,
+                recentProjectPaths: pushRecentProjectPath(state.recentProjectPaths, normalizedPath),
+            }
+        }),
     setActiveProjectPath: (projectPath) =>
         set((state) => {
             const normalizedProjectPath =
@@ -784,7 +646,6 @@ export const useStore = create<AppState>((set, get) => ({
                     lastAccessedAt: new Date().toISOString(),
                 }
             }
-            saveProjectRegistryState(nextProjectRegistry)
             const nextViewMode = resolveViewModeForProjectScope(state.viewMode, nextProjectPath)
             saveRouteState({
                 viewMode: nextViewMode,
@@ -879,7 +740,6 @@ export const useStore = create<AppState>((set, get) => ({
                 activeFlow: state.activeProjectPath ? state.activeFlow : nextActiveProjectScope.activeFlow,
                 selectedRunId: state.activeProjectPath ? state.selectedRunId : nextActiveProjectScope.selectedRunId,
             })
-            saveProjectRegistryState(nextProjectRegistry)
             result = {
                 ok: true,
                 normalizedPath,
@@ -981,8 +841,6 @@ export const useStore = create<AppState>((set, get) => ({
                 activeFlow: state.activeFlow,
                 selectedRunId: state.selectedRunId,
             })
-            saveProjectRegistryState(nextProjectRegistry)
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             result = {
                 ok: true,
                 normalizedPath: normalizedNextPath,
@@ -1012,7 +870,6 @@ export const useStore = create<AppState>((set, get) => ({
                     isFavorite: !project.isFavorite,
                 },
             }
-            saveProjectRegistryState(nextProjectRegistry)
             return {
                 projectRegistry: nextProjectRegistry,
             }
@@ -1086,7 +943,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...scoped,
                 conversationId: id,
             }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -1100,9 +956,8 @@ export const useStore = create<AppState>((set, get) => ({
             const scoped = resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[state.activeProjectPath], state.activeProjectPath)
             nextProjectScopedWorkspaces[state.activeProjectPath] = {
                 ...scoped,
-                projectEventLog: [...scoped.projectEventLog, entry].slice(-PROJECT_EVENT_LOG_LIMIT),
+                projectEventLog: [...scoped.projectEventLog, entry],
             }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -1120,7 +975,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...patch,
             }
             nextProjectScopedWorkspaces[normalizedProjectPath] = nextScopedWorkspace
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             const isActiveScope = state.activeProjectPath === normalizedProjectPath
             if (!isActiveScope) {
                 return {
@@ -1151,7 +1005,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...scoped,
                 specId: id,
             }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -1167,7 +1020,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...scoped,
                 specStatus: status,
             }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -1183,7 +1035,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...scoped,
                 specProvenance: provenance,
             }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -1199,7 +1050,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...scoped,
                 planId: id,
             }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -1215,7 +1065,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...scoped,
                 planStatus: status,
             }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
@@ -1231,7 +1080,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...scoped,
                 planProvenance: provenance,
             }
-            saveProjectConversationState(nextProjectScopedWorkspaces)
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }

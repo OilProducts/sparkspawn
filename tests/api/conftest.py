@@ -12,7 +12,6 @@ import attractor.api.server as server
 def _reset_api_server_state(tmp_path: Path) -> None:
     server.configure_runtime_paths(
         data_dir=tmp_path / ".sparkspawn",
-        runs_dir=tmp_path / "runs",
         flows_dir=tmp_path / "flows",
     )
     with server.ACTIVE_RUNS_LOCK:

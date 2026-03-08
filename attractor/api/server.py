@@ -47,7 +47,15 @@ from attractor.api.project_chat import (
     build_codex_runtime_environment,
     resolve_runtime_workspace_path,
 )
-from attractor.storage import ensure_project_paths, normalize_project_path
+from attractor.storage import (
+    build_project_id,
+    ensure_project_paths,
+    list_project_records,
+    normalize_project_path,
+    read_project_record,
+    read_project_paths_by_id,
+    update_project_record,
+)
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
 from attractor.interviewer.base import Interviewer
@@ -81,9 +89,9 @@ def configure_runtime_paths(
 ) -> Settings:
     global SETTINGS, PROJECT_CHAT
     current = get_settings()
+    _ = runs_dir
     updated = resolve_settings(
         data_dir=data_dir if data_dir is not None else current.data_dir,
-        runs_dir=runs_dir if runs_dir is not None else current.runs_dir,
         flows_dir=flows_dir if flows_dir is not None else current.flows_dir,
         ui_dir=ui_dir if ui_dir is not None else current.ui_dir,
     )
@@ -443,57 +451,62 @@ PIPELINE_LIFECYCLE_PHASES = ("PARSE", "VALIDATE", "INITIALIZE", "EXECUTE", "FINA
 
 
 def _runs_root() -> Path:
-    root = get_settings().runs_dir
+    root = get_settings().projects_dir
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
-def _run_index_path(run_id: str) -> Path:
-    return _runs_root() / f"{run_id}.json"
-
-
-def _read_run_index(run_id: str) -> Optional[dict[str, object]]:
-    try:
-        payload = json.loads(_run_index_path(run_id).read_text(encoding="utf-8"))
-    except Exception:
+def _project_runs_dir(project_path: str) -> Optional[Path]:
+    normalized_project_path = normalize_project_path(project_path)
+    if not normalized_project_path:
         return None
-    return payload if isinstance(payload, dict) else None
+    project_id = build_project_id(normalized_project_path)
+    project_paths = read_project_paths_by_id(get_settings().data_dir, project_id)
+    if project_paths is None:
+        return None
+    return project_paths.runs_dir
 
 
-def _write_run_index(run_id: str, project_path: str) -> Path:
+def _iter_run_roots(*, project_path: Optional[str] = None) -> list[Path]:
+    if project_path:
+        runs_dir = _project_runs_dir(project_path)
+        if runs_dir is None or not runs_dir.exists():
+            return []
+        return sorted((path for path in runs_dir.iterdir() if path.is_dir()), key=lambda item: item.name)
+
+    run_roots: list[Path] = []
+    projects_root = _runs_root()
+    if not projects_root.exists():
+        return run_roots
+    for runs_dir in sorted(projects_root.glob("*/runs")):
+        if not runs_dir.is_dir():
+            continue
+        run_roots.extend(sorted((path for path in runs_dir.iterdir() if path.is_dir()), key=lambda item: item.name))
+    return run_roots
+
+
+def _find_run_root(run_id: str) -> Optional[Path]:
+    for run_root in _iter_run_roots():
+        if run_root.name == run_id:
+            return run_root
+    return None
+
+
+def _ensure_run_root_for_project(run_id: str, project_path: str) -> Path:
     normalized_project_path = normalize_project_path(project_path)
     if not normalized_project_path:
         raise ValueError("Run storage requires a project path.")
     project_paths = ensure_project_paths(get_settings().data_dir, normalized_project_path)
     run_root = project_paths.runs_dir / run_id
     run_root.mkdir(parents=True, exist_ok=True)
-    _run_index_path(run_id).write_text(
-        json.dumps(
-            {
-                "run_id": run_id,
-                "project_id": project_paths.project_id,
-                "project_path": project_paths.project_path,
-                "run_root": str(run_root),
-            },
-            indent=2,
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
     return run_root
 
 
-def _ensure_run_root_for_project(run_id: str, project_path: str) -> Path:
-    return _write_run_index(run_id, project_path)
-
-
 def _run_root(run_id: str) -> Path:
-    index_record = _read_run_index(run_id)
-    if index_record is not None:
-        raw_run_root = index_record.get("run_root")
-        if isinstance(raw_run_root, str) and raw_run_root.strip():
-            return Path(raw_run_root).expanduser().resolve(strict=False)
-    return _runs_root() / run_id
+    run_root = _find_run_root(run_id)
+    if run_root is not None:
+        return run_root
+    return get_settings().runtime_dir / "_missing-runs" / run_id
 
 
 def _resolve_start_node_id(graph) -> str:
@@ -528,7 +541,7 @@ def _run_meta_path(run_id: str) -> Path:
 def _write_run_meta(record: RunRecord) -> None:
     try:
         if record.project_path or record.working_directory:
-            _write_run_index(record.run_id, record.project_path or record.working_directory)
+            _ensure_run_root_for_project(record.run_id, record.project_path or record.working_directory)
         run_meta_path = _run_meta_path(record.run_id)
         run_meta_path.parent.mkdir(parents=True, exist_ok=True)
         with run_meta_path.open("w", encoding="utf-8") as f:
@@ -932,6 +945,17 @@ class ExecutionCardReviewRequest(BaseModel):
     message: str
     model: Optional[str] = None
     flow_source: Optional[str] = None
+
+
+class ProjectRegistrationRequest(BaseModel):
+    project_path: str
+
+
+class ProjectStateUpdateRequest(BaseModel):
+    project_path: str
+    is_favorite: Optional[bool] = None
+    last_accessed_at: Optional[str] = None
+    active_conversation_id: Optional[str] = None
 
 
 DEFAULT_FLOW = """digraph SoftwareFactory {
@@ -1412,19 +1436,7 @@ async def get_status():
 @app.get("/runs")
 async def list_runs(project_path: Optional[str] = None):
     records: List[RunRecord] = []
-    run_dirs: list[Path] = []
-    for index_path in _runs_root().glob("*.json"):
-        try:
-            payload = json.loads(index_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        raw_run_root = payload.get("run_root")
-        if isinstance(raw_run_root, str) and raw_run_root.strip():
-            run_dirs.append(Path(raw_run_root))
-
-    for run_dir in run_dirs:
+    for run_dir in _iter_run_roots():
         if not run_dir.is_dir():
             continue
         meta_path = run_dir / "run.json"
@@ -2033,9 +2045,6 @@ async def answer_pipeline(req: LegacyHumanAnswerRequest):
 
 @app.post("/reset")
 async def reset_checkpoint(req: ResetRequest):
-    runs_root = _runs_root()
-    if runs_root.exists():
-        shutil.rmtree(runs_root, ignore_errors=True)
     projects_root = get_settings().projects_dir
     if projects_root.exists():
         for runs_dir in projects_root.glob("*/runs"):
@@ -2192,6 +2201,58 @@ async def delete_project_conversation(conversation_id: str, project_path: str):
         return await asyncio.to_thread(PROJECT_CHAT.delete_conversation, conversation_id, project_path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Unknown conversation: {conversation_id}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _serialize_project_record(project) -> dict[str, object]:
+    return {
+        "project_id": project.project_id,
+        "project_path": project.project_path,
+        "display_name": project.display_name,
+        "created_at": project.created_at,
+        "last_opened_at": project.last_opened_at,
+        "last_accessed_at": project.last_accessed_at,
+        "is_favorite": project.is_favorite,
+        "active_conversation_id": project.active_conversation_id,
+    }
+
+
+@app.get("/api/projects")
+async def list_projects():
+    projects = await asyncio.to_thread(list_project_records, get_settings().data_dir)
+    return [_serialize_project_record(project) for project in projects]
+
+
+@app.post("/api/projects/register")
+async def register_project(req: ProjectRegistrationRequest):
+    normalized_project_path = normalize_project_path(req.project_path)
+    if not normalized_project_path:
+        raise HTTPException(status_code=400, detail="Project path is required.")
+    try:
+        project = await asyncio.to_thread(read_project_record, get_settings().data_dir, normalized_project_path)
+        if project is None:
+            raise ValueError("Unable to register project.")
+        return _serialize_project_record(project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/projects/state")
+async def update_project_state(req: ProjectStateUpdateRequest):
+    normalized_project_path = normalize_project_path(req.project_path)
+    if not normalized_project_path:
+        raise HTTPException(status_code=400, detail="Project path is required.")
+    try:
+        project = await asyncio.to_thread(
+            update_project_record,
+            get_settings().data_dir,
+            normalized_project_path,
+            last_accessed_at=req.last_accessed_at,
+            is_favorite=req.is_favorite,
+            active_conversation_id=req.active_conversation_id,
+        )
+        return _serialize_project_record(project)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

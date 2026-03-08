@@ -15,8 +15,6 @@ def test_list_runs_includes_project_and_git_metadata_fields(
     tmp_path: Path,
 ) -> None:
     run_id = "run-with-project-metadata"
-    runs_root = tmp_path / "runs"
-    server.configure_runtime_paths(runs_dir=runs_root)
 
     server._write_run_meta(
         server.RunRecord(
@@ -53,8 +51,6 @@ def test_list_runs_includes_spec_and_plan_artifact_links_when_available_item_9_6
     tmp_path: Path,
 ) -> None:
     run_id = "run-with-artifact-links"
-    runs_root = tmp_path / "runs"
-    server.configure_runtime_paths(runs_dir=runs_root)
 
     server._write_run_meta(
         server.RunRecord(
@@ -89,9 +85,6 @@ def test_list_runs_filters_durable_history_by_project_item_9_6_01(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runs_root = tmp_path / "runs"
-    server.configure_runtime_paths(runs_dir=runs_root)
-
     server._write_run_meta(
         server.RunRecord(
             run_id="run-in-project-root",
@@ -148,9 +141,6 @@ def test_list_runs_backfills_missing_timestamps_from_run_log_item_9_6_04(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runs_root = tmp_path / "runs"
-    server.configure_runtime_paths(runs_dir=runs_root)
-
     run_id = "run-with-partial-timestamps"
     server._write_run_meta(
         server.RunRecord(
@@ -192,9 +182,6 @@ def test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runs_root = tmp_path / "runs"
-    server.configure_runtime_paths(runs_dir=runs_root)
-
     older_id = "run-older"
     newer_id = "run-newer"
 

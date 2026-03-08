@@ -173,6 +173,24 @@ describe('ProjectsPanel', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
+        if (url.endsWith('/api/projects')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/register')) {
+          return new Response(JSON.stringify({
+            project_id: 'quick-switch-project-1234',
+            project_path: '/tmp/quick-switch-project',
+            display_name: 'quick-switch-project',
+            is_favorite: false,
+            active_conversation_id: null,
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
         if (url.includes('/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main' }), {
             status: 200,
@@ -210,6 +228,24 @@ describe('ProjectsPanel', () => {
         if (url.includes('/api/projects/pick-directory')) {
           return new Response(JSON.stringify({ detail: 'picker unavailable' }), {
             status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.endsWith('/api/projects')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/register')) {
+          return new Response(JSON.stringify({
+            project_id: 'quick-switch-project-1234',
+            project_path: '/tmp/quick-switch-project',
+            display_name: 'quick-switch-project',
+            is_favorite: false,
+            active_conversation_id: null,
+          }), {
+            status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
