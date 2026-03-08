@@ -1265,6 +1265,7 @@ class CodexAppServerChatSession:
             "cwd": self.working_dir,
             "sandbox": "danger-full-access",
             "approvalPolicy": "never",
+            "tools": self._dynamic_tool_specs(),
         }
         if model:
             params["model"] = model
@@ -1285,12 +1286,15 @@ class CodexAppServerChatSession:
             "sandbox": "danger-full-access",
             "approvalPolicy": "never",
             "ephemeral": False,
-            "config": {"tools": self._dynamic_tool_specs()},
+            "tools": self._dynamic_tool_specs(),
         }
         if model:
             params["model"] = model
         response = self._send_request("thread/start", params)
         if response.get("error"):
+            message = _as_non_empty_string((response.get("error") or {}).get("message"))
+            if message:
+                raise RuntimeError(f"codex app-server thread/start failed: {message}")
             raise RuntimeError("codex app-server thread/start failed")
         thread = (response.get("result") or {}).get("thread") or {}
         thread_id = thread.get("id")
