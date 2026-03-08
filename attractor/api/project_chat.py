@@ -72,62 +72,6 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
     return parsed
 
 
-def _extract_live_assistant_message(raw: str) -> str:
-    text = raw.strip()
-    if not text:
-        return ""
-    try:
-        parsed = _extract_json_object(text)
-    except Exception:
-        parsed = None
-    if isinstance(parsed, dict):
-        assistant_message = _as_non_empty_string(parsed.get("assistant_message"))
-        return assistant_message or ""
-    if not text.startswith("{"):
-        return text
-
-    key_match = re.search(r'"assistant_message"\s*:\s*"', text)
-    if key_match is None:
-        return ""
-
-    chars: list[str] = []
-    escape = False
-    index = key_match.end()
-    while index < len(text):
-        char = text[index]
-        if escape:
-            if char == "u" and index + 4 < len(text):
-                hex_digits = text[index + 1 : index + 5]
-                if re.fullmatch(r"[0-9a-fA-F]{4}", hex_digits):
-                    chars.append(chr(int(hex_digits, 16)))
-                    index += 5
-                    escape = False
-                    continue
-            replacements = {
-                '"': '"',
-                "\\": "\\",
-                "/": "/",
-                "b": "\b",
-                "f": "\f",
-                "n": "\n",
-                "r": "\r",
-                "t": "\t",
-            }
-            chars.append(replacements.get(char, char))
-            escape = False
-            index += 1
-            continue
-        if char == "\\":
-            escape = True
-            index += 1
-            continue
-        if char == '"':
-            break
-        chars.append(char)
-        index += 1
-    return "".join(chars).strip()
-
-
 def _parse_chat_response_payload(raw: str) -> tuple[str, Optional[dict[str, Any]]]:
     text = raw.strip()
     if not text:
@@ -527,10 +471,17 @@ class ToolCallRecord:
 
 
 @dataclass
+class ChatTurnLiveEvent:
+    kind: str
+    content_delta: Optional[str] = None
+    message: Optional[str] = None
+    tool_call_id: Optional[str] = None
+    tool_call: Optional[ToolCallRecord] = None
+
+
+@dataclass
 class ChatTurnResult:
     assistant_message: str
-    reasoning_summary: str = ""
-    tool_calls: list[ToolCallRecord] = field(default_factory=list)
     spec_proposal_payloads: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -1320,47 +1271,36 @@ class CodexAppServerChatSession:
             return
         self._start_thread(model)
 
-    def _emit_progress(
+    def _emit_live_event(
         self,
-        callback: Optional[Callable[[ChatTurnResult], None]],
-        tool_calls: list[ToolCallRecord],
-        assistant_message: str,
-        reasoning_summary: str,
+        callback: Optional[Callable[[ChatTurnLiveEvent], None]],
+        event: ChatTurnLiveEvent,
     ) -> None:
         if callback is None:
             return
-        callback(
-            ChatTurnResult(
-                assistant_message=assistant_message,
-                reasoning_summary=reasoning_summary,
-                tool_calls=[
-                    ToolCallRecord.from_dict(tool_call.to_dict())
-                    for tool_call in tool_calls
-                ],
-            )
-        )
+        callback(event)
 
     def turn(
         self,
         prompt: str,
         model: Optional[str],
         *,
-        on_progress: Optional[Callable[[ChatTurnResult], None]] = None,
+        on_event: Optional[Callable[[ChatTurnLiveEvent], None]] = None,
         on_dynamic_tool_call: Optional[Callable[[str, Any, str], DynamicToolInvocationResult]] = None,
     ) -> ChatTurnResult:
         with self._lock:
             self._ensure_process()
             self._ensure_thread(model)
             agent_chunks: list[str] = []
-            reasoning_chunks: list[str] = []
+            final_agent_message: Optional[str] = None
             last_error: Optional[str] = None
             saw_final_agent_message = False
             saw_item_agent_message_delta = False
+            reasoning_summary_buffer = ""
             last_activity_at = time.monotonic()
             last_agent_activity_at: float | None = None
-            tool_calls: list[ToolCallRecord] = []
             spec_proposal_payloads: list[dict[str, Any]] = []
-            tool_call_index_by_item_id: dict[str, int] = {}
+            tool_calls_by_id: dict[str, ToolCallRecord] = {}
             params: dict[str, Any] = {
                 "threadId": self._thread_id,
                 "input": [{"type": "text", "text": prompt}],
@@ -1393,7 +1333,7 @@ class CodexAppServerChatSession:
                         not saw_final_agent_message
                         and last_agent_activity_at is not None
                         and "".join(agent_chunks).strip()
-                        and not any(tool_call.status == "running" for tool_call in tool_calls)
+                        and not any(tool_call.status == "running" for tool_call in tool_calls_by_id.values())
                     ):
                         agent_idle_for = time.monotonic() - last_agent_activity_at
                         if agent_idle_for >= LIVE_ASSISTANT_IDLE_COMPLETION_GRACE_SECONDS:
@@ -1420,33 +1360,41 @@ class CodexAppServerChatSession:
                     if request_method == "item/commandExecution/requestApproval":
                         command = _extract_command_text(request_params)
                         item_id = _as_non_empty_string(request_params.get("itemId")) or f"tool-{uuid.uuid4().hex}"
-                        tool_calls.append(
-                            ToolCallRecord(
-                                id=item_id,
-                                kind="command_execution",
-                                status="running",
-                                title="Run command",
-                                command=command,
-                            )
+                        tool_call = ToolCallRecord(
+                            id=item_id,
+                            kind="command_execution",
+                            status="running",
+                            title="Run command",
+                            command=command,
                         )
-                        if item_id:
-                            tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                        tool_calls_by_id[item_id] = tool_call
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(
+                                kind="tool_call_started",
+                                tool_call_id=item_id,
+                                tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                            ),
+                        )
                     elif request_method == "item/fileChange/requestApproval":
                         file_paths = _extract_file_paths(request_params)
                         item_id = _as_non_empty_string(request_params.get("itemId")) or f"tool-{uuid.uuid4().hex}"
-                        tool_calls.append(
-                            ToolCallRecord(
-                                id=item_id,
-                                kind="file_change",
-                                status="running",
-                                title="Apply file changes",
-                                file_paths=file_paths,
-                            )
+                        tool_call = ToolCallRecord(
+                            id=item_id,
+                            kind="file_change",
+                            status="running",
+                            title="Apply file changes",
+                            file_paths=file_paths,
                         )
-                        if item_id:
-                            tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                        tool_calls_by_id[item_id] = tool_call
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(
+                                kind="tool_call_started",
+                                tool_call_id=item_id,
+                                tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                            ),
+                        )
                     elif request_method == "item/tool/call":
                         tool_name = _as_non_empty_string(request_params.get("tool")) or "unknown_tool"
                         call_id = _as_non_empty_string(request_params.get("callId")) or f"tool-{uuid.uuid4().hex}"
@@ -1456,18 +1404,32 @@ class CodexAppServerChatSession:
                             status="running",
                             title=tool_name,
                         )
-                        tool_calls.append(initial_tool_call)
-                        tool_call_index_by_item_id[call_id] = len(tool_calls) - 1
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                        tool_calls_by_id[call_id] = initial_tool_call
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(
+                                kind="tool_call_started",
+                                tool_call_id=call_id,
+                                tool_call=ToolCallRecord.from_dict(initial_tool_call.to_dict()),
+                            ),
+                        )
                         if on_dynamic_tool_call is None:
-                            tool_calls[tool_call_index_by_item_id[call_id]] = ToolCallRecord(
+                            failed_tool_call = ToolCallRecord(
                                 id=call_id,
                                 kind="dynamic_tool",
                                 status="failed",
                                 title=tool_name,
                                 output="Dynamic tools are not available in this session.",
                             )
-                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                            tool_calls_by_id[call_id] = failed_tool_call
+                            self._emit_live_event(
+                                on_event,
+                                ChatTurnLiveEvent(
+                                    kind="tool_call_failed",
+                                    tool_call_id=call_id,
+                                    tool_call=ToolCallRecord.from_dict(failed_tool_call.to_dict()),
+                                ),
+                            )
                             self._send_response(
                                 message.get("id"),
                                 {
@@ -1481,20 +1443,35 @@ class CodexAppServerChatSession:
                         try:
                             tool_result = on_dynamic_tool_call(tool_name, request_params.get("arguments"), call_id)
                             tool_result.tool_call.id = call_id
-                            tool_calls[tool_call_index_by_item_id[call_id]] = tool_result.tool_call
+                            tool_calls_by_id[call_id] = tool_result.tool_call
                             if tool_result.spec_proposal_payload is not None:
                                 spec_proposal_payloads.append(tool_result.spec_proposal_payload)
-                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                            self._emit_live_event(
+                                on_event,
+                                ChatTurnLiveEvent(
+                                    kind="tool_call_completed",
+                                    tool_call_id=call_id,
+                                    tool_call=ToolCallRecord.from_dict(tool_result.tool_call.to_dict()),
+                                ),
+                            )
                             self._send_response(message.get("id"), tool_result.response)
                         except Exception as exc:
-                            tool_calls[tool_call_index_by_item_id[call_id]] = ToolCallRecord(
+                            failed_tool_call = ToolCallRecord(
                                 id=call_id,
                                 kind="dynamic_tool",
                                 status="failed",
                                 title=tool_name,
                                 output=str(exc),
                             )
-                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                            tool_calls_by_id[call_id] = failed_tool_call
+                            self._emit_live_event(
+                                on_event,
+                                ChatTurnLiveEvent(
+                                    kind="tool_call_failed",
+                                    tool_call_id=call_id,
+                                    tool_call=ToolCallRecord.from_dict(failed_tool_call.to_dict()),
+                                ),
+                            )
                             self._send_response(
                                 message.get("id"),
                                 {
@@ -1513,13 +1490,16 @@ class CodexAppServerChatSession:
                         item_id = _as_non_empty_string(item.get("id"))
                         tool_call = _tool_call_from_item(item)
                         if tool_call is not None:
-                            if item_id and item_id in tool_call_index_by_item_id:
-                                tool_calls[tool_call_index_by_item_id[item_id]] = tool_call
-                            else:
-                                tool_calls.append(tool_call)
-                                if item_id:
-                                    tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
-                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                            if item_id:
+                                tool_calls_by_id[item_id] = tool_call
+                            self._emit_live_event(
+                                on_event,
+                                ChatTurnLiveEvent(
+                                    kind="tool_call_started",
+                                    tool_call_id=item_id or tool_call.id,
+                                    tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                                ),
+                            )
                     continue
                 if method == "item/completed":
                     item = params.get("item")
@@ -1532,13 +1512,16 @@ class CodexAppServerChatSession:
                             saw_final_agent_message = True
                             last_agent_activity_at = time.monotonic()
                         if tool_call is not None:
-                            if item_id and item_id in tool_call_index_by_item_id:
-                                tool_calls[tool_call_index_by_item_id[item_id]] = tool_call
-                            else:
-                                tool_calls.append(tool_call)
-                                if item_id:
-                                    tool_call_index_by_item_id[item_id] = len(tool_calls) - 1
-                            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                            if item_id:
+                                tool_calls_by_id[item_id] = tool_call
+                            self._emit_live_event(
+                                on_event,
+                                ChatTurnLiveEvent(
+                                    kind="tool_call_failed" if tool_call.status == "failed" else "tool_call_completed",
+                                    tool_call_id=item_id or tool_call.id,
+                                    tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                                ),
+                            )
                     continue
                 if method == "item/agentMessage/delta":
                     delta = params.get("delta") or ""
@@ -1546,11 +1529,19 @@ class CodexAppServerChatSession:
                         saw_item_agent_message_delta = True
                         agent_chunks.append(str(delta))
                         last_agent_activity_at = time.monotonic()
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(kind="assistant_delta", content_delta=str(delta)),
+                        )
                     continue
                 if method == "item/reasoning/summaryTextDelta":
-                    # These are token-like deltas and are too unstable/noisy to render directly.
-                    # We wait for summaryPartAdded, which carries coherent reasoning summary text.
+                    delta = params.get("delta") or ""
+                    if delta:
+                        reasoning_summary_buffer = f"{reasoning_summary_buffer}{delta}"
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(kind="reasoning_summary", content_delta=str(delta)),
+                        )
                     last_agent_activity_at = time.monotonic()
                     continue
                 if method == "item/reasoning/summaryPartAdded":
@@ -1563,9 +1554,21 @@ class CodexAppServerChatSession:
                                 summary_text = str(value)
                                 break
                     if summary_text:
-                        reasoning_chunks.append(summary_text)
                         last_agent_activity_at = time.monotonic()
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                        if reasoning_summary_buffer and summary_text.startswith(reasoning_summary_buffer):
+                            remaining_summary_text = summary_text[len(reasoning_summary_buffer):]
+                            reasoning_summary_buffer = ""
+                            if remaining_summary_text:
+                                self._emit_live_event(
+                                    on_event,
+                                    ChatTurnLiveEvent(kind="reasoning_summary", content_delta=remaining_summary_text),
+                                )
+                        else:
+                            reasoning_summary_buffer = ""
+                            self._emit_live_event(
+                                on_event,
+                                ChatTurnLiveEvent(kind="reasoning_summary", content_delta=summary_text),
+                            )
                     continue
                 if method == "codex/event/agent_message_delta":
                     if saw_item_agent_message_delta:
@@ -1574,28 +1577,37 @@ class CodexAppServerChatSession:
                     if delta:
                         agent_chunks.append(str(delta))
                         last_agent_activity_at = time.monotonic()
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(kind="assistant_delta", content_delta=str(delta)),
+                        )
                     continue
                 if method == "codex/event/agent_message":
                     msg = (params.get("msg") or {}).get("message")
                     phase = str((params.get("msg") or {}).get("phase") or "").strip().lower()
                     if msg:
-                        agent_chunks = [str(msg)]
+                        final_agent_message = str(msg)
                         last_agent_activity_at = time.monotonic()
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
                     if phase == "final_answer":
                         saw_final_agent_message = True
                     continue
                 if method == "item/commandExecution/outputDelta":
                     delta = _as_non_empty_string(params.get("delta"))
                     item_id = _as_non_empty_string(params.get("itemId"))
-                    tool_call_index = tool_call_index_by_item_id.get(item_id or "")
-                    if delta and tool_call_index is not None and tool_call_index < len(tool_calls):
-                        tool_calls[tool_call_index].output = _append_tool_output(
-                            tool_calls[tool_call_index].output,
+                    tool_call = tool_calls_by_id.get(item_id or "")
+                    if delta and tool_call is not None:
+                        tool_call.output = _append_tool_output(
+                            tool_call.output,
                             delta,
                         )
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(
+                                kind="tool_call_updated",
+                                tool_call_id=tool_call.id,
+                                tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                            ),
+                        )
                     continue
                 if method == "error":
                     last_error = str(params.get("message") or "codex app-server error")
@@ -1610,22 +1622,28 @@ class CodexAppServerChatSession:
                 if method == "codex/event/task_complete":
                     msg = params.get("msg") or {}
                     last_agent_message = _as_non_empty_string(msg.get("last_agent_message"))
-                    if last_agent_message and not "".join(agent_chunks).strip():
-                        agent_chunks = [last_agent_message]
+                    if last_agent_message:
+                        final_agent_message = last_agent_message
                     break
-            for tool_call in tool_calls:
+            for tool_call in tool_calls_by_id.values():
                 if tool_call.status == "running":
                     tool_call.status = "failed" if last_error else "completed"
-            self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                    self._emit_live_event(
+                        on_event,
+                        ChatTurnLiveEvent(
+                            kind="tool_call_failed" if last_error else "tool_call_completed",
+                            tool_call_id=tool_call.id,
+                            tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                        ),
+                    )
             if last_error:
                 raise RuntimeError(last_error)
-            response_text = "".join(agent_chunks).strip()
+            response_text = final_agent_message if final_agent_message is not None else "".join(agent_chunks)
+            response_text = response_text.strip()
             if not response_text:
                 raise RuntimeError("codex app-server returned an empty chat response")
             return ChatTurnResult(
                 assistant_message=response_text,
-                reasoning_summary="".join(reasoning_chunks).strip(),
-                tool_calls=tool_calls,
                 spec_proposal_payloads=spec_proposal_payloads,
             )
 
@@ -2194,9 +2212,6 @@ class ProjectChatService:
             self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, user_turn))
             self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, assistant_turn))
 
-        previous_live_assistant_message = ""
-        previous_reasoning_summary = ""
-        known_tool_calls: dict[str, ToolCallRecord] = {}
         live_event_sequence = max(
             (event.sequence for event in state.turn_events if event.turn_id == assistant_turn.id),
             default=0,
@@ -2207,10 +2222,7 @@ class ProjectChatService:
             live_event_sequence += 1
             return live_event_sequence
 
-        def persist_progress(progress: ChatTurnResult) -> None:
-            nonlocal previous_live_assistant_message, previous_reasoning_summary, known_tool_calls
-            live_assistant_message = _extract_live_assistant_message(progress.assistant_message)
-            reasoning_summary = progress.reasoning_summary.strip()
+        def persist_live_event(event: ChatTurnLiveEvent) -> None:
             with self._lock:
                 current_state = self._read_state(conversation_id, normalized_project_path) or state
                 current_assistant_turn = self._get_turn(current_state, assistant_turn.id)
@@ -2226,86 +2238,41 @@ class ProjectChatService:
                     self._upsert_turn(current_state, current_assistant_turn)
 
                 emitted_payloads: list[dict[str, Any]] = []
-                if reasoning_summary != previous_reasoning_summary:
-                    summary_delta = reasoning_summary
-                    if reasoning_summary.startswith(previous_reasoning_summary):
-                        summary_delta = reasoning_summary[len(previous_reasoning_summary):]
-                    previous_reasoning_summary = reasoning_summary
-                    if current_assistant_turn.status == "pending":
-                        current_assistant_turn.status = "streaming"
-                        self._upsert_turn(current_state, current_assistant_turn)
-                        emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
-                    if summary_delta:
-                        reasoning_event = ConversationTurnEvent(
+                if current_assistant_turn.status == "pending":
+                    current_assistant_turn.status = "streaming"
+                    self._upsert_turn(current_state, current_assistant_turn)
+                    emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
+
+                if event.kind in {"assistant_delta", "reasoning_summary"}:
+                    if event.content_delta:
+                        live_event = ConversationTurnEvent(
                             id=f"event-{uuid.uuid4().hex}",
                             turn_id=current_assistant_turn.id,
                             sequence=allocate_event_sequence(),
                             timestamp=_iso_now(),
-                            kind="reasoning_summary",
-                            content_delta=summary_delta,
+                            kind=event.kind,
+                            content_delta=event.content_delta,
                         )
-                        emitted_payloads.append(self._build_turn_event_payload(current_state, reasoning_event))
-
-                if live_assistant_message != previous_live_assistant_message:
-                    content_delta = live_assistant_message
-                    if live_assistant_message.startswith(previous_live_assistant_message):
-                        content_delta = live_assistant_message[len(previous_live_assistant_message):]
-                    previous_live_assistant_message = live_assistant_message
-                    if content_delta:
-                        if current_assistant_turn.status == "pending":
-                            current_assistant_turn.status = "streaming"
-                            self._upsert_turn(current_state, current_assistant_turn)
-                            emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
-                        assistant_delta_event = ConversationTurnEvent(
-                            id=f"event-{uuid.uuid4().hex}",
-                            turn_id=current_assistant_turn.id,
-                            sequence=allocate_event_sequence(),
-                            timestamp=_iso_now(),
-                            kind="assistant_delta",
-                            content_delta=content_delta,
-                        )
-                        emitted_payloads.append(self._build_turn_event_payload(current_state, assistant_delta_event))
-
-                for tool_call in progress.tool_calls:
-                    previous_tool_call = known_tool_calls.get(tool_call.id)
-                    event_kind: Optional[str] = None
-                    if previous_tool_call is None:
-                        event_kind = {
-                            "running": "tool_call_started",
-                            "failed": "tool_call_failed",
-                        }.get(tool_call.status, "tool_call_completed")
-                    elif tool_call.status != previous_tool_call.status:
-                        event_kind = {
-                            "failed": "tool_call_failed",
-                            "completed": "tool_call_completed",
-                        }.get(tool_call.status, "tool_call_updated")
-                    elif tool_call.to_dict() != previous_tool_call.to_dict():
-                        event_kind = "tool_call_updated"
-                    known_tool_calls[tool_call.id] = ToolCallRecord.from_dict(tool_call.to_dict())
-                    if event_kind is None:
-                        continue
-                    if current_assistant_turn.status == "pending":
-                        current_assistant_turn.status = "streaming"
-                        self._upsert_turn(current_state, current_assistant_turn)
-                        emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
+                        emitted_payloads.append(self._build_turn_event_payload(current_state, live_event))
+                elif event.kind in {"tool_call_started", "tool_call_updated", "tool_call_completed", "tool_call_failed"} and event.tool_call is not None:
                     tool_event = self._append_turn_event(
                         current_state,
                         current_assistant_turn.id,
-                        event_kind,
+                        event.kind,
                         sequence=allocate_event_sequence(),
-                        tool_call_id=tool_call.id,
-                        tool_call=tool_call,
+                        tool_call_id=event.tool_call_id or event.tool_call.id,
+                        tool_call=event.tool_call,
                     )
                     emitted_payloads.append(self._build_turn_event_payload(current_state, tool_event))
+                else:
+                    return
 
                 self._touch_conversation_state(current_state)
                 self._write_state(current_state)
                 _log_project_chat_debug(
                     "persisted progress events",
                     conversation_id=conversation_id,
-                    live_assistant_message=live_assistant_message,
-                    reasoning_summary=reasoning_summary,
-                    tool_call_count=len(progress.tool_calls),
+                    event_kind=event.kind,
                     turns=_summarize_turns_for_debug(current_state.turns),
                 )
             for payload in emitted_payloads:
@@ -2317,7 +2284,7 @@ class ProjectChatService:
             turn_result = session.turn(
                 prompt,
                 normalized_model,
-                on_progress=persist_progress,
+                on_event=persist_live_event,
                 on_dynamic_tool_call=self._handle_dynamic_tool_call,
             )
         except RuntimeError as exc:
@@ -2364,7 +2331,7 @@ class ProjectChatService:
             turn_result = session.turn(
                 prompt,
                 normalized_model,
-                on_progress=persist_progress,
+                on_event=persist_live_event,
                 on_dynamic_tool_call=self._handle_dynamic_tool_call,
             )
         assistant_message, _ = _parse_chat_response_payload(turn_result.assistant_message)

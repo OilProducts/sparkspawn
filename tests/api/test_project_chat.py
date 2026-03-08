@@ -14,16 +14,6 @@ def test_extract_command_text_handles_list_and_string_payloads() -> None:
     assert project_chat._extract_command_text({"commandLine": "npm test"}) == "npm test"
 
 
-def test_extract_live_assistant_message_handles_partial_and_complete_json() -> None:
-    assert project_chat._extract_live_assistant_message(
-        '{"assistant_message":"Hello.","spec_proposal":null}'
-    ) == "Hello."
-    assert project_chat._extract_live_assistant_message(
-        '{"assistant_message":"Hello'
-    ) == "Hello"
-    assert project_chat._extract_live_assistant_message("plain text") == "plain text"
-
-
 def test_parse_chat_response_payload_accepts_plain_text_and_json() -> None:
     assistant_message, payload = project_chat._parse_chat_response_payload("Plain text reply.")
 
@@ -425,6 +415,7 @@ def test_chat_session_handles_dynamic_tool_call(monkeypatch) -> None:
         ]
     )
     responses: list[dict[str, object]] = []
+    live_events: list[project_chat.ChatTurnLiveEvent] = []
 
     monkeypatch.setattr(session, "_ensure_process", lambda: None)
 
@@ -444,6 +435,7 @@ def test_chat_session_handles_dynamic_tool_call(monkeypatch) -> None:
     result = session.turn(
         "hello",
         None,
+        on_event=live_events.append,
         on_dynamic_tool_call=lambda tool, arguments, call_id: project_chat.DynamicToolInvocationResult(
             tool_call=project_chat.ToolCallRecord(
                 id=call_id,
@@ -462,7 +454,7 @@ def test_chat_session_handles_dynamic_tool_call(monkeypatch) -> None:
 
     assert result.assistant_message == "I drafted the spec proposal for review."
     assert result.spec_proposal_payloads[0]["summary"] == "Reduce header chrome."
-    assert result.tool_calls[0].kind == "dynamic_tool"
+    assert [event.kind for event in live_events] == ["tool_call_started", "tool_call_completed"]
     assert responses[0]["result"] == {
         "success": True,
         "contentItems": [{"type": "inputText", "text": "Drafted spec proposal."}],
@@ -504,7 +496,7 @@ def test_chat_session_surfaces_reasoning_summary_progress(monkeypatch) -> None:
             None,
         ]
     )
-    progress_updates: list[project_chat.ChatTurnResult] = []
+    progress_updates: list[project_chat.ChatTurnLiveEvent] = []
 
     monkeypatch.setattr(session, "_ensure_process", lambda: None)
 
@@ -520,14 +512,16 @@ def test_chat_session_surfaces_reasoning_summary_progress(monkeypatch) -> None:
     )
     monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
 
-    result = session.turn("hello", None, on_progress=progress_updates.append)
+    result = session.turn("hello", None, on_event=progress_updates.append)
 
-    assert result.reasoning_summary == "Scanning the repository structure."
     assert result.assistant_message == "I found the main entry points."
-    assert any(update.reasoning_summary == "Scanning the repository structure." for update in progress_updates)
+    assert any(
+        update.kind == "reasoning_summary" and update.content_delta == "Scanning the repository structure."
+        for update in progress_updates
+    )
 
 
-def test_chat_session_ignores_reasoning_summary_text_deltas(monkeypatch) -> None:
+def test_chat_session_surfaces_reasoning_summary_text_deltas(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     lines = iter(
         [
@@ -560,7 +554,7 @@ def test_chat_session_ignores_reasoning_summary_text_deltas(monkeypatch) -> None
             None,
         ]
     )
-    progress_updates: list[project_chat.ChatTurnResult] = []
+    progress_updates: list[project_chat.ChatTurnLiveEvent] = []
 
     monkeypatch.setattr(session, "_ensure_process", lambda: None)
 
@@ -576,11 +570,14 @@ def test_chat_session_ignores_reasoning_summary_text_deltas(monkeypatch) -> None
     )
     monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
 
-    result = session.turn("hello", None, on_progress=progress_updates.append)
+    result = session.turn("hello", None, on_event=progress_updates.append)
 
-    assert result.reasoning_summary == ""
     assert result.assistant_message == "I’m checking the project structure first."
-    assert all(update.reasoning_summary == "" for update in progress_updates)
+    assert any(
+        update.kind == "reasoning_summary"
+        and update.content_delta == "Draft draft that minimal proposal a best think"
+        for update in progress_updates
+    )
 
 
 def test_chat_session_initialize_enables_experimental_api(monkeypatch) -> None:
@@ -723,7 +720,7 @@ def test_send_turn_retries_when_app_server_request_times_out_before_progress(tmp
             prompt: str,
             model: str | None,
             *,
-            on_progress=None,
+            on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
             raise RuntimeError("codex app-server request timed out waiting for response")
@@ -737,12 +734,11 @@ def test_send_turn_retries_when_app_server_request_times_out_before_progress(tmp
             prompt: str,
             model: str | None,
             *,
-            on_progress=None,
+            on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"hi"}',
-                tool_calls=[],
             )
 
         def _close(self) -> None:
@@ -771,12 +767,11 @@ def test_send_turn_accepts_plain_text_final_response(tmp_path: Path, monkeypatch
             prompt: str,
             model: str | None,
             *,
-            on_progress=None,
+            on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
             return project_chat.ChatTurnResult(
                 assistant_message="This looks like a Collatz implementation project.",
-                tool_calls=[],
             )
 
         def _close(self) -> None:
@@ -800,7 +795,7 @@ def test_send_turn_persists_spec_proposal_from_dynamic_tool_call(tmp_path: Path,
             prompt: str,
             model: str | None,
             *,
-            on_progress=None,
+            on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
             assert on_dynamic_tool_call is not None
@@ -820,7 +815,6 @@ def test_send_turn_persists_spec_proposal_from_dynamic_tool_call(tmp_path: Path,
             )
             return project_chat.ChatTurnResult(
                 assistant_message="I can tighten the top bar and relocate the overflow metadata.",
-                tool_calls=[tool_result.tool_call],
                 spec_proposal_payloads=[tool_result.spec_proposal_payload] if tool_result.spec_proposal_payload else [],
             )
 
@@ -896,7 +890,7 @@ def test_chat_session_ignores_duplicate_codex_agent_delta_channel(monkeypatch) -
     result = session.turn(
         "hello",
         None,
-        on_progress=lambda progress: progress_messages.append(progress.assistant_message),
+        on_event=lambda progress: progress_messages.append(progress.content_delta or "") if progress.kind == "assistant_delta" else None,
     )
 
     assert result.assistant_message == '{"assistant_message":"Ack"}'
@@ -947,7 +941,7 @@ def test_send_turn_retries_with_fresh_session_after_timeout(tmp_path: Path, monk
             prompt: str,
             model: str | None,
             *,
-            on_progress=None,
+            on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
             raise RuntimeError("codex app-server turn timed out waiting for activity")
@@ -961,12 +955,11 @@ def test_send_turn_retries_with_fresh_session_after_timeout(tmp_path: Path, monk
             prompt: str,
             model: str | None,
             *,
-            on_progress=None,
+            on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"Recovered."}',
-                tool_calls=[],
             )
 
         def _close(self) -> None:
@@ -1057,37 +1050,27 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
             prompt: str,
             model: str | None,
             *,
-            on_progress=None,
+            on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
-            if on_progress is not None:
-                on_progress(
-                    project_chat.ChatTurnResult(
-                        assistant_message='{"assistant_message":"Working on it","spec_proposal":null}',
-                        tool_calls=[
-                            project_chat.ToolCallRecord(
-                                id="call-pwd",
-                                kind="command_execution",
-                                status="running",
-                                title="Run command",
-                                command="pwd",
-                            )
-                        ],
+            if on_event is not None:
+                on_event(project_chat.ChatTurnLiveEvent(kind="assistant_delta", content_delta="Working on it"))
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="tool_call_started",
+                        tool_call_id="call-pwd",
+                        tool_call=project_chat.ToolCallRecord(
+                            id="call-pwd",
+                            kind="command_execution",
+                            status="running",
+                            title="Run command",
+                            command="pwd",
+                        ),
                     )
                 )
                 partial_snapshots.append(service.get_snapshot("conversation-test", str(tmp_path)))
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"ACK","spec_proposal":null}',
-                tool_calls=[
-                    project_chat.ToolCallRecord(
-                        id="call-pwd",
-                        kind="command_execution",
-                        status="completed",
-                        title="Run command",
-                        command="pwd",
-                        output=str(tmp_path),
-                    )
-                ],
             )
 
     monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: FakeSession())
