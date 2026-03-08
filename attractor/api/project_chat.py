@@ -1549,21 +1549,19 @@ class CodexAppServerChatSession:
                         self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
                     continue
                 if method == "item/reasoning/summaryTextDelta":
-                    delta = _as_non_empty_string(params.get("delta") or params.get("textDelta") or params.get("text"))
-                    if delta:
-                        reasoning_chunks.append(delta)
-                        last_agent_activity_at = time.monotonic()
-                        self._emit_progress(on_progress, tool_calls, "".join(agent_chunks).strip(), "".join(reasoning_chunks).strip())
+                    # These are token-like deltas and are too unstable/noisy to render directly.
+                    # We wait for summaryPartAdded, which carries coherent reasoning summary text.
+                    last_agent_activity_at = time.monotonic()
                     continue
                 if method == "item/reasoning/summaryPartAdded":
                     part = params.get("part")
                     summary_text: Optional[str] = None
                     if isinstance(part, dict):
-                        summary_text = _as_non_empty_string(
-                            part.get("text")
-                            or part.get("summaryText")
-                            or part.get("summary_text")
-                        )
+                        for key in ("text", "summaryText", "summary_text"):
+                            value = part.get(key)
+                            if value is not None:
+                                summary_text = str(value)
+                                break
                     if summary_text:
                         reasoning_chunks.append(summary_text)
                         last_agent_activity_at = time.monotonic()
@@ -1955,6 +1953,7 @@ class ProjectChatService:
         turn_id: str,
         kind: str,
         *,
+        sequence: Optional[int] = None,
         content_delta: Optional[str] = None,
         message: Optional[str] = None,
         tool_call_id: Optional[str] = None,
@@ -1964,7 +1963,7 @@ class ProjectChatService:
         event = ConversationTurnEvent(
             id=f"event-{uuid.uuid4().hex}",
             turn_id=turn_id,
-            sequence=self._next_turn_event_sequence(state, turn_id),
+            sequence=sequence if sequence is not None else self._next_turn_event_sequence(state, turn_id),
             timestamp=timestamp or _iso_now(),
             kind=kind,
             content_delta=content_delta,
@@ -2003,13 +2002,19 @@ class ProjectChatService:
         state: ConversationState,
         turn: ConversationTurn,
     ) -> dict[str, Any]:
+        serialized_turn = turn.to_dict()
+        if (
+            turn.role == "assistant"
+            and turn.status in {"pending", "streaming"}
+        ):
+            serialized_turn["content"] = ""
         return {
             "type": "turn_upsert",
             "conversation_id": state.conversation_id,
             "project_path": state.project_path,
             "title": state.title,
             "updated_at": state.updated_at,
-            "turn": turn.to_dict(),
+            "turn": serialized_turn,
         }
 
     def _build_turn_event_payload(
@@ -2192,6 +2197,15 @@ class ProjectChatService:
         previous_live_assistant_message = ""
         previous_reasoning_summary = ""
         known_tool_calls: dict[str, ToolCallRecord] = {}
+        live_event_sequence = max(
+            (event.sequence for event in state.turn_events if event.turn_id == assistant_turn.id),
+            default=0,
+        )
+
+        def allocate_event_sequence() -> int:
+            nonlocal live_event_sequence
+            live_event_sequence += 1
+            return live_event_sequence
 
         def persist_progress(progress: ChatTurnResult) -> None:
             nonlocal previous_live_assistant_message, previous_reasoning_summary, known_tool_calls
@@ -2222,10 +2236,12 @@ class ProjectChatService:
                         self._upsert_turn(current_state, current_assistant_turn)
                         emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
                     if summary_delta:
-                        reasoning_event = self._append_turn_event(
-                            current_state,
-                            current_assistant_turn.id,
-                            "reasoning_summary",
+                        reasoning_event = ConversationTurnEvent(
+                            id=f"event-{uuid.uuid4().hex}",
+                            turn_id=current_assistant_turn.id,
+                            sequence=allocate_event_sequence(),
+                            timestamp=_iso_now(),
+                            kind="reasoning_summary",
                             content_delta=summary_delta,
                         )
                         emitted_payloads.append(self._build_turn_event_payload(current_state, reasoning_event))
@@ -2235,18 +2251,20 @@ class ProjectChatService:
                     if live_assistant_message.startswith(previous_live_assistant_message):
                         content_delta = live_assistant_message[len(previous_live_assistant_message):]
                     previous_live_assistant_message = live_assistant_message
-                    current_assistant_turn.content = live_assistant_message
-                    current_assistant_turn.status = "streaming"
-                    self._upsert_turn(current_state, current_assistant_turn)
                     if content_delta:
-                        assistant_delta_event = self._append_turn_event(
-                            current_state,
-                            current_assistant_turn.id,
-                            "assistant_delta",
+                        if current_assistant_turn.status == "pending":
+                            current_assistant_turn.status = "streaming"
+                            self._upsert_turn(current_state, current_assistant_turn)
+                            emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
+                        assistant_delta_event = ConversationTurnEvent(
+                            id=f"event-{uuid.uuid4().hex}",
+                            turn_id=current_assistant_turn.id,
+                            sequence=allocate_event_sequence(),
+                            timestamp=_iso_now(),
+                            kind="assistant_delta",
                             content_delta=content_delta,
                         )
                         emitted_payloads.append(self._build_turn_event_payload(current_state, assistant_delta_event))
-                    emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
 
                 for tool_call in progress.tool_calls:
                     previous_tool_call = known_tool_calls.get(tool_call.id)
@@ -2266,10 +2284,15 @@ class ProjectChatService:
                     known_tool_calls[tool_call.id] = ToolCallRecord.from_dict(tool_call.to_dict())
                     if event_kind is None:
                         continue
+                    if current_assistant_turn.status == "pending":
+                        current_assistant_turn.status = "streaming"
+                        self._upsert_turn(current_state, current_assistant_turn)
+                        emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
                     tool_event = self._append_turn_event(
                         current_state,
                         current_assistant_turn.id,
                         event_kind,
+                        sequence=allocate_event_sequence(),
                         tool_call_id=tool_call.id,
                         tool_call=tool_call,
                     )
@@ -2360,18 +2383,6 @@ class ProjectChatService:
                     parent_turn_id=user_turn.id,
                 )
             emitted_payloads: list[dict[str, Any]] = []
-            if assistant_message != previous_live_assistant_message:
-                content_delta = assistant_message
-                if assistant_message.startswith(previous_live_assistant_message):
-                    content_delta = assistant_message[len(previous_live_assistant_message):]
-                if content_delta:
-                    assistant_delta_event = self._append_turn_event(
-                        state,
-                        current_assistant_turn.id,
-                        "assistant_delta",
-                        content_delta=content_delta,
-                    )
-                    emitted_payloads.append(self._build_turn_event_payload(state, assistant_delta_event))
             current_assistant_turn.content = assistant_message
             current_assistant_turn.status = "complete"
             current_assistant_turn.error = None
@@ -2380,6 +2391,7 @@ class ProjectChatService:
                 state,
                 current_assistant_turn.id,
                 "assistant_completed",
+                sequence=allocate_event_sequence(),
                 message="Assistant turn completed.",
             )
             emitted_payloads.append(self._build_turn_event_payload(state, assistant_completed_event))

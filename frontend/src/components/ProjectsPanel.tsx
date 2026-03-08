@@ -451,31 +451,63 @@ const appendConversationTurnEvent = (
     }
 }
 
-const mergeConversationSnapshotPreservingTransientEvents = (
-    current: ConversationSnapshotResponse | null,
-    incoming: ConversationSnapshotResponse,
-): ConversationSnapshotResponse => {
-    if (!current) {
-        return incoming
+const isTransientConversationTurnEvent = (event: ConversationTurnEventResponse) => (
+    event.kind === 'assistant_delta' || event.kind === 'reasoning_summary'
+)
+
+const sortConversationTurnEvents = (events: ConversationTurnEventResponse[]) => (
+    [...events].sort((left, right) => {
+        if (left.turn_id === right.turn_id) {
+            const sequenceDelta = left.sequence - right.sequence
+            if (sequenceDelta !== 0) {
+                return sequenceDelta
+            }
+            const timestampDelta = left.timestamp.localeCompare(right.timestamp)
+            if (timestampDelta !== 0) {
+                return timestampDelta
+            }
+            return left.id.localeCompare(right.id)
+        }
+        return left.timestamp.localeCompare(right.timestamp)
+    })
+)
+
+const appendLiveConversationTurnEvent = (
+    events: ConversationTurnEventResponse[],
+    event: ConversationTurnEventResponse,
+): ConversationTurnEventResponse[] => {
+    if (events.some((entry) => entry.id === event.id)) {
+        return events
     }
-    const incomingTurnIds = new Set(incoming.turns.map((turn) => turn.id))
-    const incomingEventIds = new Set(incoming.turn_events.map((event) => event.id))
-    const preservedEvents = current.turn_events.filter((event) => (
-        (event.kind === "assistant_delta" || event.kind === "reasoning_summary")
-        && incomingTurnIds.has(event.turn_id)
-        && !incomingEventIds.has(event.id)
-    ))
-    if (preservedEvents.length === 0) {
-        return incoming
+    return sortConversationTurnEvents([...events, event])
+}
+
+const pruneLiveConversationTurnEvents = (
+    events: ConversationTurnEventResponse[],
+    snapshot: ConversationSnapshotResponse,
+): ConversationTurnEventResponse[] => {
+    const snapshotTurnById = new Map(snapshot.turns.map((turn) => [turn.id, turn]))
+    return events.filter((event) => {
+        if (!isTransientConversationTurnEvent(event)) {
+            return false
+        }
+        return snapshotTurnById.has(event.turn_id)
+    })
+}
+
+const sanitizeStreamingTurnUpsert = (
+    currentTurn: ConversationTurnResponse | null,
+    incomingTurn: ConversationTurnResponse,
+): ConversationTurnResponse => {
+    if (incomingTurn.role !== 'assistant') {
+        return incomingTurn
+    }
+    if (incomingTurn.status !== 'pending' && incomingTurn.status !== 'streaming') {
+        return incomingTurn
     }
     return {
-        ...incoming,
-        turn_events: [...incoming.turn_events, ...preservedEvents].sort((left, right) => {
-            if (left.turn_id === right.turn_id) {
-                return left.sequence - right.sequence
-            }
-            return left.timestamp.localeCompare(right.timestamp)
-        }),
+        ...incomingTurn,
+        content: currentTurn?.content ?? '',
     }
 }
 
@@ -507,10 +539,8 @@ const buildAssistantTimelineEntries = (
         entries.push(entry)
         if (presentation === "thinking") {
             currentThinkingIndex = entries.length - 1
-            currentAssistantMessageIndex = -1
         } else {
             currentAssistantMessageIndex = entries.length - 1
-            currentThinkingIndex = -1
         }
     }
 
@@ -624,7 +654,7 @@ const buildAssistantTimelineEntries = (
         }
     })
 
-    if (entries.length === 0 && turn.content.trim()) {
+    if (entries.length === 0 && turn.content.trim() && (turn.status === "complete" || turn.status === "failed")) {
         startAssistantEntry(turn.timestamp, turn.content, "default", turn.status)
     }
 
@@ -642,6 +672,7 @@ const buildAssistantTimelineEntries = (
 
 const buildConversationTimelineEntries = (
     snapshot: ConversationSnapshotResponse | null,
+    liveTurnEvents: ConversationTurnEventResponse[],
     optimisticSend: OptimisticSendState | null,
 ): ConversationTimelineEntry[] => {
     if (!snapshot) {
@@ -661,12 +692,7 @@ const buildConversationTimelineEntries = (
     }
 
     const eventsByTurn = new Map<string, ConversationTurnEventResponse[]>()
-    const sortedEvents = [...snapshot.turn_events].sort((left, right) => {
-        if (left.turn_id === right.turn_id) {
-            return left.sequence - right.sequence
-        }
-        return left.timestamp.localeCompare(right.timestamp)
-    })
+    const sortedEvents = sortConversationTurnEvents([...snapshot.turn_events, ...liveTurnEvents])
     sortedEvents.forEach((event) => {
         const entries = eventsByTurn.get(event.turn_id) || []
         entries.push(event)
@@ -769,6 +795,7 @@ export function HomePanel() {
 
     const [projectGitMetadata, setProjectGitMetadata] = useState<Record<string, ProjectGitMetadata>>({})
     const [projectConversationSnapshots, setProjectConversationSnapshots] = useState<Record<string, ConversationSnapshotResponse>>({})
+    const [projectConversationLiveEvents, setProjectConversationLiveEvents] = useState<Record<string, ConversationTurnEventResponse[]>>({})
     const [projectConversationSummaries, setProjectConversationSummaries] = useState<Record<string, ConversationSummaryResponse[]>>({})
     const [chatDraft, setChatDraft] = useState("")
     const [panelError, setPanelError] = useState<string | null>(null)
@@ -797,14 +824,16 @@ export function HomePanel() {
         : EMPTY_PROJECT_GIT_METADATA
     const activeConversationId = activeProjectScope?.conversationId ?? null
     const activeConversationSnapshot = activeConversationId ? projectConversationSnapshots[activeConversationId] || null : null
+    const activeConversationLiveEvents = activeConversationId ? projectConversationLiveEvents[activeConversationId] || [] : []
     const activeProjectConversationSummaries = activeProjectPath ? projectConversationSummaries[activeProjectPath] || [] : []
     const activeProjectEventLog = activeProjectScope?.projectEventLog || []
     const activeConversationHistory = useMemo(
         () => buildConversationTimelineEntries(
             activeConversationSnapshot,
+            activeConversationLiveEvents,
             optimisticSend && optimisticSend.conversationId === activeConversationId ? optimisticSend : null,
         ),
-        [activeConversationId, activeConversationSnapshot, optimisticSend],
+        [activeConversationId, activeConversationLiveEvents, activeConversationSnapshot, optimisticSend],
     )
     const activeSpecEditProposals = activeConversationSnapshot?.spec_edit_proposals || []
     const activeExecutionCards = activeConversationSnapshot?.execution_cards || []
@@ -982,11 +1011,24 @@ export function HomePanel() {
 
         setProjectConversationSnapshots((current) => ({
             ...current,
-            [snapshot.conversation_id]: mergeConversationSnapshotPreservingTransientEvents(
-                current[snapshot.conversation_id] || null,
-                snapshot,
-            ),
+            [snapshot.conversation_id]: snapshot,
         }))
+        setProjectConversationLiveEvents((current) => {
+            const existing = current[snapshot.conversation_id] || []
+            const nextEvents = pruneLiveConversationTurnEvents(existing, snapshot)
+            if (nextEvents.length === 0) {
+                if (!(snapshot.conversation_id in current)) {
+                    return current
+                }
+                const next = { ...current }
+                delete next[snapshot.conversation_id]
+                return next
+            }
+            return {
+                ...current,
+                [snapshot.conversation_id]: nextEvents,
+            }
+        })
         setProjectConversationSummaries((current) => ({
             ...current,
             [projectPath]: upsertConversationSummary(current[projectPath] || [], {
@@ -1070,25 +1112,42 @@ export function HomePanel() {
         setProjectConversationSnapshots((current) => {
             const existingSnapshot = current[event.conversation_id]
                 || ensureConversationSnapshotShell(event.conversation_id, event.project_path, event.title)
-            const mergedSnapshot = event.type === "turn_upsert"
-                ? {
-                    ...upsertConversationTurn(existingSnapshot, event.turn),
+            let mergedSnapshot = existingSnapshot
+            if (event.type === "turn_upsert") {
+                const currentTurn = existingSnapshot.turns.find((turn) => turn.id === event.turn.id) || null
+                mergedSnapshot = {
+                    ...upsertConversationTurn(existingSnapshot, sanitizeStreamingTurnUpsert(currentTurn, event.turn)),
                     project_path: event.project_path,
                     title: event.title,
                     updated_at: event.updated_at,
                 }
-                : {
+            } else if (!isTransientConversationTurnEvent(event.event)) {
+                mergedSnapshot = {
                     ...appendConversationTurnEvent(existingSnapshot, event.event),
                     project_path: event.project_path,
                     title: event.title,
                     updated_at: event.updated_at,
                 }
+            } else {
+                mergedSnapshot = {
+                    ...existingSnapshot,
+                    project_path: event.project_path,
+                    title: event.title,
+                    updated_at: event.updated_at,
+                }
+            }
             nextSnapshot = mergedSnapshot
             return {
                 ...current,
                 [event.conversation_id]: mergedSnapshot,
             }
         })
+        if (event.type === "turn_event" && isTransientConversationTurnEvent(event.event)) {
+            setProjectConversationLiveEvents((current) => ({
+                ...current,
+                [event.conversation_id]: appendLiveConversationTurnEvent(current[event.conversation_id] || [], event.event),
+            }))
+        }
         if (!nextSnapshot) {
             return
         }

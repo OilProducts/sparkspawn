@@ -475,9 +475,11 @@ def test_chat_session_surfaces_reasoning_summary_progress(monkeypatch) -> None:
         [
             json.dumps(
                 {
-                    "method": "item/reasoning/summaryTextDelta",
+                    "method": "item/reasoning/summaryPartAdded",
                     "params": {
-                        "delta": "Scanning the repository structure.",
+                        "part": {
+                            "text": "Scanning the repository structure.",
+                        },
                     },
                 }
             ),
@@ -523,6 +525,62 @@ def test_chat_session_surfaces_reasoning_summary_progress(monkeypatch) -> None:
     assert result.reasoning_summary == "Scanning the repository structure."
     assert result.assistant_message == "I found the main entry points."
     assert any(update.reasoning_summary == "Scanning the repository structure." for update in progress_updates)
+
+
+def test_chat_session_ignores_reasoning_summary_text_deltas(monkeypatch) -> None:
+    session = project_chat.CodexAppServerChatSession("/tmp/project")
+    lines = iter(
+        [
+            json.dumps(
+                {
+                    "method": "item/reasoning/summaryTextDelta",
+                    "params": {
+                        "delta": "Draft draft that minimal proposal a best think",
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {
+                        "delta": "I’m checking the project structure first.",
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "codex/event/task_complete",
+                    "params": {
+                        "msg": {
+                            "last_agent_message": "I’m checking the project structure first.",
+                        }
+                    },
+                }
+            ),
+            None,
+        ]
+    )
+    progress_updates: list[project_chat.ChatTurnResult] = []
+
+    monkeypatch.setattr(session, "_ensure_process", lambda: None)
+
+    def fake_ensure_thread(model: str | None) -> None:
+        session._thread_id = "thread-123"
+        session._thread_initialized = True
+
+    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
+    monkeypatch.setattr(
+        session,
+        "_send_request",
+        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
+    )
+    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
+
+    result = session.turn("hello", None, on_progress=progress_updates.append)
+
+    assert result.reasoning_summary == ""
+    assert result.assistant_message == "I’m checking the project structure first."
+    assert all(update.reasoning_summary == "" for update in progress_updates)
 
 
 def test_chat_session_initialize_enables_experimental_api(monkeypatch) -> None:
@@ -1055,7 +1113,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     ]
     assert partial_snapshots
     assert [turn["role"] for turn in partial_snapshots[-1]["turns"]] == ["user", "assistant"]
-    assert partial_snapshots[-1]["turns"][1]["content"] == "Working on it"
+    assert partial_snapshots[-1]["turns"][1]["content"] == ""
     assert partial_snapshots[-1]["turns"][1]["status"] == "streaming"
     assert [event["kind"] for event in partial_snapshots[-1]["turn_events"]] == [
         "tool_call_started",

@@ -7,6 +7,9 @@ It exists to keep chat behavior coherent as the UI, backend, and workflow artifa
 Source of truth for where conversation data must live:
 - `storage-boundaries.md`
 
+Source of truth for raw-event normalization, persistence, and live rendering:
+- `conversation-event-contract.md`
+
 ## Purpose
 
 Project chat is not a generic message stream. It is the primary collaborative surface for:

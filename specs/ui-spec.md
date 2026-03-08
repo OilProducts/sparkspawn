@@ -190,6 +190,7 @@ The UI MUST provide a project-scoped AI conversation surface that supports itera
 
 Source of truth for conversation lifecycle, streaming, retry semantics, and artifact placement:
 - `conversation-paradigm.md`
+- `conversation-event-contract.md`
 
 - Users MUST be able to start/continue a conversation within active project context from Home.
 - Conversation history MUST persist per project and remain discoverable.

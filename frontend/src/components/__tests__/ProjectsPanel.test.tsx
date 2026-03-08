@@ -1,6 +1,6 @@
 import { ProjectsPanel } from '@/components/ProjectsPanel'
 import { useStore } from '@/store'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -732,40 +732,36 @@ describe('ProjectsPanel', () => {
     act(() => {
       MockEventSource.instances[0]?.onmessage?.({
         data: JSON.stringify({
-          type: 'conversation_snapshot',
-          state: {
-            conversation_id: conversationId,
-            project_path: '/tmp/chat-project',
-            title: 'Stream this reply.',
-            created_at: '2026-03-07T15:30:00Z',
-            updated_at: '2026-03-07T15:30:02Z',
-            turns: [
-              {
-                id: 'turn-user-1',
-                role: 'user',
-                content: 'Stream this reply.',
-                timestamp: '2026-03-07T15:30:00Z',
-                kind: 'message',
-                artifact_id: null,
-              },
-              {
-                id: 'turn-assistant-live',
-                role: 'assistant',
-                content: 'Working on',
-                timestamp: '2026-03-07T15:30:02Z',
-                kind: 'message',
-                artifact_id: null,
-              },
-            ],
-            event_log: [],
-            spec_edit_proposals: [],
-            execution_cards: [],
-            execution_workflow: {
-              run_id: null,
-              status: 'idle',
-              error: null,
-              flow_source: null,
-            },
+          type: 'turn_upsert',
+          conversation_id: conversationId,
+          project_path: '/tmp/chat-project',
+          title: 'Stream this reply.',
+          updated_at: '2026-03-07T15:30:02Z',
+          turn: {
+            id: 'turn-assistant-live',
+            role: 'assistant',
+            content: 'Working on',
+            timestamp: '2026-03-07T15:30:02Z',
+            status: 'streaming',
+            kind: 'message',
+            artifact_id: null,
+          },
+        }),
+      } as MessageEvent)
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn_event',
+          conversation_id: conversationId,
+          project_path: '/tmp/chat-project',
+          title: 'Stream this reply.',
+          updated_at: '2026-03-07T15:30:02Z',
+          event: {
+            id: 'event-assistant-delta-live',
+            turn_id: 'turn-assistant-live',
+            sequence: 1,
+            timestamp: '2026-03-07T15:30:02Z',
+            kind: 'assistant_delta',
+            content_delta: 'Working on',
           },
         }),
       } as MessageEvent)
@@ -1082,6 +1078,338 @@ describe('ProjectsPanel', () => {
       expect(text.indexOf('Scanning the repository structure first.')).toBeLessThan(text.indexOf('/bin/zsh -lc ls'))
       expect(text.indexOf('/bin/zsh -lc ls')).toBeLessThan(text.indexOf('I found the main entry points and can summarize them.'))
     })
+  })
+
+  it('orders preserved transient assistant events ahead of compacted completion events when sequences collide', async () => {
+    class MockEventSource {
+      static instances: MockEventSource[] = []
+
+      url: string
+      onmessage: ((event: MessageEvent) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        MockEventSource.instances.push(this)
+      }
+
+      close() {}
+    }
+
+    const user = userEvent.setup()
+    let resolveTurnResponse: ((response: Response) => void) | null = null
+
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && !init?.method) {
+          return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+          return await new Promise<Response>((resolve) => {
+            resolveTurnResponse = resolve
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+
+    render(<ProjectsPanel />)
+
+    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Can you use the spec proposal too?')
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    expect(conversationId).toBeTruthy()
+
+    await waitFor(() => {
+      expect(MockEventSource.instances.length).toBeGreaterThan(0)
+    })
+
+    act(() => {
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn_upsert',
+          conversation_id: conversationId,
+          project_path: '/tmp/chat-project',
+          title: 'Can you use the spec proposal too?',
+          updated_at: '2026-03-08T19:28:40Z',
+          turn: {
+            id: 'turn-assistant-1',
+            role: 'assistant',
+            content: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+            timestamp: '2026-03-08T19:28:40Z',
+            status: 'streaming',
+            kind: 'message',
+            artifact_id: null,
+            parent_turn_id: 'turn-user-1',
+          },
+        }),
+      } as MessageEvent)
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn_event',
+          conversation_id: conversationId,
+          project_path: '/tmp/chat-project',
+          title: 'Can you use the spec proposal too?',
+          updated_at: '2026-03-08T19:28:38Z',
+          event: {
+            id: 'event-reasoning-1',
+            turn_id: 'turn-assistant-1',
+            sequence: 1,
+            timestamp: '2026-03-08T19:28:38Z',
+            kind: 'reasoning_summary',
+            content_delta: 'Considering the spec proposal.',
+          },
+        }),
+      } as MessageEvent)
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn_event',
+          conversation_id: conversationId,
+          project_path: '/tmp/chat-project',
+          title: 'Can you use the spec proposal too?',
+          updated_at: '2026-03-08T19:28:40Z',
+          event: {
+            id: 'event-assistant-delta-1',
+            turn_id: 'turn-assistant-1',
+            sequence: 1,
+            timestamp: '2026-03-08T19:28:40Z',
+            kind: 'assistant_delta',
+            content_delta: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+          },
+        }),
+      } as MessageEvent)
+    })
+
+    resolveTurnResponse?.(
+      new Response(
+        JSON.stringify({
+          conversation_id: conversationId,
+          project_path: '/tmp/chat-project',
+          title: 'Can you use the spec proposal too?',
+          created_at: '2026-03-08T19:28:30Z',
+          updated_at: '2026-03-08T19:28:43Z',
+          turns: [
+            {
+              id: 'turn-user-1',
+              role: 'user',
+              content: 'Can you use the spec proposal too?',
+              timestamp: '2026-03-08T19:28:30Z',
+              status: 'complete',
+              kind: 'message',
+              artifact_id: null,
+            },
+            {
+              id: 'turn-assistant-1',
+              role: 'assistant',
+              content: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+              timestamp: '2026-03-08T19:28:30Z',
+              status: 'complete',
+              kind: 'message',
+              artifact_id: null,
+              parent_turn_id: 'turn-user-1',
+            },
+          ],
+          turn_events: [
+            {
+              id: 'event-assistant-completed-1',
+              turn_id: 'turn-assistant-1',
+              sequence: 1,
+              timestamp: '2026-03-08T19:28:43Z',
+              kind: 'assistant_completed',
+              message: 'Assistant turn completed.',
+            },
+          ],
+          event_log: [],
+          spec_edit_proposals: [],
+          execution_cards: [],
+          execution_workflow: {
+            run_id: null,
+            status: 'idle',
+            error: null,
+            flow_source: null,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+
+    const history = await screen.findByTestId('project-ai-conversation-history-list')
+    await waitFor(() => {
+      const text = history.textContent ?? ''
+      const firstResponse = text.indexOf('Yes. Once you give me a concrete user story or spec change')
+      expect(firstResponse).toBeGreaterThan(-1)
+      expect(text.indexOf('Considering the spec proposal.')).toBeGreaterThan(-1)
+      expect(text.indexOf('Considering the spec proposal.')).toBeLessThan(firstResponse)
+      expect(text.lastIndexOf('Yes. Once you give me a concrete user story or spec change')).toBe(firstResponse)
+    })
+  })
+
+  it('coalesces interleaved reasoning and assistant deltas until a tool boundary', async () => {
+    class MockEventSource {
+      static instances: MockEventSource[] = []
+
+      url: string
+      onmessage: ((event: MessageEvent) => void) | null = null
+
+      constructor(url: string) {
+        this.url = url
+        MockEventSource.instances.push(this)
+      }
+
+      close() {}
+    }
+
+    const user = userEvent.setup()
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && !init?.method) {
+          return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+          return new Promise<Response>(() => {})
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+
+    render(<ProjectsPanel />)
+
+    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Test interleaved streaming.')
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    expect(conversationId).toBeTruthy()
+
+    await waitFor(() => {
+      expect(MockEventSource.instances.length).toBeGreaterThan(0)
+    })
+
+    act(() => {
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn_upsert',
+          conversation_id: conversationId,
+          project_path: '/tmp/chat-project',
+          title: 'Test interleaved streaming.',
+          updated_at: '2026-03-08T20:10:00Z',
+          turn: {
+            id: 'turn-assistant-interleaved',
+            role: 'assistant',
+            content: '',
+            timestamp: '2026-03-08T20:10:00Z',
+            status: 'streaming',
+            kind: 'message',
+            artifact_id: null,
+            parent_turn_id: 'turn-user-interleaved',
+          },
+        }),
+      } as MessageEvent)
+      const events = [
+        {
+          id: 'reason-1',
+          sequence: 1,
+          kind: 'reasoning_summary',
+          timestamp: '2026-03-08T20:10:00Z',
+          content_delta: 'Planning from the project context. ',
+        },
+        {
+          id: 'assistant-1',
+          sequence: 2,
+          kind: 'assistant_delta',
+          timestamp: '2026-03-08T20:10:01Z',
+          content_delta: 'I can use the spec proposal tool ',
+        },
+        {
+          id: 'reason-2',
+          sequence: 3,
+          kind: 'reasoning_summary',
+          timestamp: '2026-03-08T20:10:01Z',
+          content_delta: 'and I am checking the repository first.',
+        },
+        {
+          id: 'assistant-2',
+          sequence: 4,
+          kind: 'assistant_delta',
+          timestamp: '2026-03-08T20:10:02Z',
+          content_delta: 'once we have a concrete change.',
+        },
+      ]
+      for (const event of events) {
+        MockEventSource.instances[0]?.onmessage?.({
+          data: JSON.stringify({
+            type: 'turn_event',
+            conversation_id: conversationId,
+            project_path: '/tmp/chat-project',
+            title: 'Test interleaved streaming.',
+            updated_at: event.timestamp,
+            event: {
+              id: event.id,
+              turn_id: 'turn-assistant-interleaved',
+              sequence: event.sequence,
+              timestamp: event.timestamp,
+              kind: event.kind,
+              content_delta: event.content_delta,
+            },
+          }),
+        } as MessageEvent)
+      }
+    })
+
+    const history = await screen.findByTestId('project-ai-conversation-history-list')
+    await waitFor(() => {
+      expect(history).toHaveTextContent('Planning from the project context. and I am checking the repository first.')
+      expect(history).toHaveTextContent('I can use the spec proposal tool once we have a concrete change.')
+    })
+    expect(within(history).getAllByText('Thinking')).toHaveLength(1)
   })
 
   it('keeps the composer cleared when sending a turn fails', async () => {

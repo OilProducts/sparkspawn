@@ -28,6 +28,8 @@ Execution artifacts stay outside this folder:
   Detailed story records with rationale, acceptance criteria, non-goals, and implementation intent.
 - `conversation-paradigm.md`
   Canonical definition of project chat conversations, turns, streaming, and review artifacts.
+- `conversation-event-contract.md`
+  Canonical normalization, persistence, and rendering contract for project chat events.
 - `storage-boundaries.md`
   Canonical definition of app-owned versus project-owned data and where each must live.
 
