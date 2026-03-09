@@ -661,6 +661,121 @@ describe('ProjectsPanel', () => {
     expect(text.indexOf('/bin/zsh -lc ps')).toBeLessThan(text.indexOf('Summary after tools.'))
   })
 
+  it('renders tool calls collapsed by default and expands them on demand', async () => {
+    const user = userEvent.setup()
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && !init?.method) {
+          return new Response(
+            JSON.stringify({
+              conversation_id: 'conversation-tool-collapse-1',
+              project_path: '/tmp/chat-project',
+              title: 'Collapsed tool call thread',
+              created_at: '2026-03-07T19:45:43Z',
+              updated_at: '2026-03-07T19:46:30Z',
+              turns: [
+                {
+                  id: 'turn-user-1',
+                  role: 'user',
+                  content: 'Run ls and summarize it.',
+                  timestamp: '2026-03-07T19:46:00Z',
+                  status: 'complete',
+                  kind: 'message',
+                  artifact_id: null,
+                },
+                {
+                  id: 'turn-assistant-1',
+                  role: 'assistant',
+                  content: 'Summary after tools.',
+                  timestamp: '2026-03-07T19:46:30Z',
+                  status: 'complete',
+                  kind: 'message',
+                  artifact_id: null,
+                  parent_turn_id: 'turn-user-1',
+                },
+              ],
+              turn_events: [
+                {
+                  id: 'event-tool-completed-1',
+                  turn_id: 'turn-assistant-1',
+                  sequence: 1,
+                  timestamp: '2026-03-07T19:46:12Z',
+                  kind: 'tool_call_completed',
+                  tool_call_id: 'tool-ls',
+                  tool_call: {
+                    id: 'tool-ls',
+                    kind: 'command_execution',
+                    status: 'completed',
+                    title: 'Run command',
+                    command: '/bin/zsh -lc ls',
+                    output: 'AGENTS.md\nREADME.md',
+                    file_paths: [],
+                  },
+                },
+                {
+                  id: 'event-assistant-completed-1',
+                  turn_id: 'turn-assistant-1',
+                  sequence: 2,
+                  timestamp: '2026-03-07T19:46:30Z',
+                  kind: 'assistant_completed',
+                  message: 'Assistant turn completed.',
+                },
+              ],
+              event_log: [],
+              spec_edit_proposals: [],
+              execution_cards: [],
+              execution_workflow: {
+                run_id: null,
+                status: 'idle',
+                error: null,
+                flow_source: null,
+              },
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          )
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+    useStore.getState().setConversationId('conversation-tool-collapse-1')
+
+    render(<ProjectsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('/bin/zsh -lc ls')
+    })
+    expect(screen.queryByText(/AGENTS\.md/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('project-tool-call-toggle-tool-ls'))
+
+    expect(screen.getByText(/AGENTS\.md/)).toBeInTheDocument()
+    expect(screen.getByText(/README\.md/)).toBeInTheDocument()
+  })
+
   it('streams assistant text into the history before the turn response completes', async () => {
     class MockEventSource {
       static instances: MockEventSource[] = []

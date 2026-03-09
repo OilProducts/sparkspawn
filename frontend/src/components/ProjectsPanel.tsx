@@ -547,6 +547,22 @@ const compareConversationSnapshotFreshness = (
     return scoreConversationSnapshotFreshness(left) - scoreConversationSnapshotFreshness(right)
 }
 
+const summarizeToolCallDetail = (toolCall: ConversationTimelineToolCall): string | null => {
+    if (toolCall.command?.trim()) {
+        return toolCall.command.trim()
+    }
+    if (toolCall.filePaths.length === 1) {
+        return toolCall.filePaths[0] || null
+    }
+    if (toolCall.filePaths.length > 1) {
+        return `${toolCall.filePaths.length} files`
+    }
+    if (toolCall.output?.trim()) {
+        return toolCall.output.trim().split("\n")[0] || null
+    }
+    return null
+}
+
 const buildAssistantTimelineEntries = (
     turn: ConversationTurnResponse,
     turnEvents: ConversationTurnEventResponse[],
@@ -841,6 +857,7 @@ export function HomePanel() {
     const [pendingExecutionCardId, setPendingExecutionCardId] = useState<string | null>(null)
     const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
     const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
+    const [expandedToolCalls, setExpandedToolCalls] = useState<Record<string, boolean>>({})
     const [homeSidebarPrimaryHeight, setHomeSidebarPrimaryHeight] = useState(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT)
     const [isHomeSidebarResizing, setIsHomeSidebarResizing] = useState(false)
     const [isConversationPinnedToBottom, setIsConversationPinnedToBottom] = useState(true)
@@ -1329,6 +1346,10 @@ export function HomePanel() {
     useEffect(() => {
         setExpandedProposalChanges({})
     }, [activeProjectPath, latestSpecEditProposalId])
+
+    useEffect(() => {
+        setExpandedToolCalls({})
+    }, [activeConversationId, activeProjectPath])
 
     useEffect(() => {
         if (!projectDirectoryPickerInputRef.current) {
@@ -1964,6 +1985,13 @@ export function HomePanel() {
         }))
     }
 
+    const toggleToolCallExpanded = (toolCallId: string) => {
+        setExpandedToolCalls((current) => ({
+            ...current,
+            [toolCallId]: !current[toolCallId],
+        }))
+    }
+
     return (
         <section
             data-testid="projects-panel"
@@ -2209,36 +2237,62 @@ export function HomePanel() {
                                                         const key = `${entry.id}-${entry.timestamp}-${index}`
                                                         if (entry.kind === "tool_call") {
                                                             const statusPresentation = getToolCallStatusPresentation(entry.toolCall.status)
+                                                            const isExpanded = expandedToolCalls[entry.toolCall.id] === true
+                                                            const summaryDetail = summarizeToolCallDetail(entry.toolCall)
                                                             return (
                                                                 <li key={key} className="flex justify-start">
                                                                     <div className="w-full rounded-md border border-border bg-muted/40 px-3 py-2">
-                                                                        <div className="flex flex-wrap items-center gap-2">
-                                                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                                        <button
+                                                                            type="button"
+                                                                            data-testid={`project-tool-call-toggle-${entry.toolCall.id}`}
+                                                                            aria-expanded={isExpanded}
+                                                                            onClick={() => toggleToolCallExpanded(entry.toolCall.id)}
+                                                                            className="flex w-full items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                                        >
+                                                                            {isExpanded ? (
+                                                                                <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                                                            ) : (
+                                                                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                                                            )}
+                                                                            <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                                                                                 {entry.toolCall.kind === "file_change" ? "File change" : "Tool call"}
                                                                             </p>
                                                                             <span className={getSurfaceToneClassName(statusPresentation.tone)}>
                                                                                 {statusPresentation.label}
                                                                             </span>
-                                                                            <p className="text-xs font-medium text-foreground">{entry.toolCall.title}</p>
-                                                                        </div>
-                                                                        {entry.toolCall.command ? (
-                                                                            <p className="mt-2 whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground">
-                                                                                {entry.toolCall.command}
-                                                                            </p>
-                                                                        ) : null}
-                                                                        {entry.toolCall.filePaths.length > 0 ? (
-                                                                            <ul className="mt-2 space-y-1">
-                                                                                {entry.toolCall.filePaths.map((path) => (
-                                                                                    <li key={`${key}-${path}`} className="font-mono text-[11px] text-muted-foreground">
-                                                                                        {path}
-                                                                                    </li>
-                                                                                ))}
-                                                                            </ul>
-                                                                        ) : null}
-                                                                        {entry.toolCall.output ? (
-                                                                            <pre className="mt-2 max-h-40 overflow-auto rounded border border-border/60 bg-background/80 px-2 py-1 whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">
-                                                                                {entry.toolCall.output}
-                                                                            </pre>
+                                                                            <p className="shrink-0 text-xs font-medium text-foreground">{entry.toolCall.title}</p>
+                                                                            {summaryDetail ? (
+                                                                                <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+                                                                                    {summaryDetail}
+                                                                                </p>
+                                                                            ) : (
+                                                                                <p className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+                                                                                    {entry.toolCall.status === "running" ? "Running…" : "No additional details"}
+                                                                                </p>
+                                                                            )}
+                                                                        </button>
+                                                                        {isExpanded ? (
+                                                                            <div className="mt-2 space-y-2">
+                                                                                {entry.toolCall.command ? (
+                                                                                    <p className="whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground">
+                                                                                        {entry.toolCall.command}
+                                                                                    </p>
+                                                                                ) : null}
+                                                                                {entry.toolCall.filePaths.length > 0 ? (
+                                                                                    <ul className="space-y-1">
+                                                                                        {entry.toolCall.filePaths.map((path) => (
+                                                                                            <li key={`${key}-${path}`} className="font-mono text-[11px] text-muted-foreground">
+                                                                                                {path}
+                                                                                            </li>
+                                                                                        ))}
+                                                                                    </ul>
+                                                                                ) : null}
+                                                                                {entry.toolCall.output ? (
+                                                                                    <pre className="max-h-40 overflow-auto rounded border border-border/60 bg-background/80 px-2 py-1 whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">
+                                                                                        {entry.toolCall.output}
+                                                                                    </pre>
+                                                                                ) : null}
+                                                                            </div>
                                                                         ) : null}
                                                                     </div>
                                                                 </li>
