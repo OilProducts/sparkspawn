@@ -385,6 +385,13 @@ type ConversationTimelineEntry =
     }
     | {
         id: string
+        kind: "final_separator"
+        role: "system"
+        timestamp: string
+        label: string
+    }
+    | {
+        id: string
         kind: "spec_edit_proposal" | "execution_card"
         role: "system"
         artifactId: string
@@ -563,6 +570,54 @@ const summarizeToolCallDetail = (toolCall: ConversationTimelineToolCall): string
     return null
 }
 
+const formatWorkedDuration = (elapsedSeconds: number): string => {
+    if (elapsedSeconds < 60) {
+        return `${elapsedSeconds}s`
+    }
+    if (elapsedSeconds < 3600) {
+        const minutes = Math.floor(elapsedSeconds / 60)
+        const seconds = elapsedSeconds % 60
+        return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`
+    }
+    const hours = Math.floor(elapsedSeconds / 3600)
+    const minutes = Math.floor((elapsedSeconds % 3600) / 60)
+    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`
+}
+
+const resolveWorkedElapsedSeconds = (
+    turn: ConversationTurnResponse,
+    turnEvents: ConversationTurnEventResponse[],
+    completedTimestamp: string,
+): number | null => {
+    const completedMs = Date.parse(completedTimestamp)
+    if (Number.isNaN(completedMs)) {
+        return null
+    }
+    const candidateTimestamps = [turn.timestamp, ...turnEvents.map((event) => event.timestamp)]
+        .map((value) => Date.parse(value))
+        .filter((value) => !Number.isNaN(value) && value <= completedMs)
+    if (candidateTimestamps.length === 0) {
+        return null
+    }
+    const startedMs = Math.min(...candidateTimestamps)
+    return Math.max(0, Math.round((completedMs - startedMs) / 1000))
+}
+
+const parseThinkingSummaryContent = (content: string): { heading: string | null; details: string } => {
+    const trimmed = content.trim()
+    if (!trimmed) {
+        return { heading: null, details: "" }
+    }
+    const match = trimmed.match(/^\*\*(.+?)\*\*\s*([\s\S]*)$/)
+    if (!match) {
+        return { heading: trimmed, details: "" }
+    }
+    return {
+        heading: match[1]?.trim() || null,
+        details: match[2]?.trim() || "",
+    }
+}
+
 const buildAssistantTimelineEntries = (
     turn: ConversationTurnResponse,
     turnEvents: ConversationTurnEventResponse[],
@@ -571,6 +626,8 @@ const buildAssistantTimelineEntries = (
     let currentAssistantMessageIndex = -1
     let currentThinkingIndex = -1
     let accumulatedAssistantContent = ""
+    let needsFinalMessageSeparator = false
+    let hadWorkActivity = false
 
     const startAssistantEntry = (
         timestamp: string,
@@ -596,8 +653,28 @@ const buildAssistantTimelineEntries = (
         }
     }
 
+    const maybeInsertFinalMessageSeparator = (timestamp: string) => {
+        if (!needsFinalMessageSeparator || !hadWorkActivity) {
+            return
+        }
+        const elapsedSeconds = resolveWorkedElapsedSeconds(turn, turnEvents, timestamp)
+        const label = elapsedSeconds === null
+            ? "Worked"
+            : `Worked for ${formatWorkedDuration(elapsedSeconds)}`
+        entries.push({
+            id: `${turn.id}:final-separator:${entries.length}`,
+            kind: "final_separator",
+            role: "system",
+            timestamp,
+            label,
+        })
+        needsFinalMessageSeparator = false
+        hadWorkActivity = false
+    }
+
     const appendAssistantMessageDelta = (timestamp: string, contentDelta: string) => {
         if (currentAssistantMessageIndex < 0) {
+            maybeInsertFinalMessageSeparator(timestamp)
             startAssistantEntry(timestamp, contentDelta, "default", turn.status)
         } else {
             const entry = entries[currentAssistantMessageIndex]
@@ -658,15 +735,19 @@ const buildAssistantTimelineEntries = (
             } else {
                 entries.push(nextEntry)
             }
+            hadWorkActivity = true
+            needsFinalMessageSeparator = true
             resetAssistantSegmentPointers()
             return
         }
         if (event.kind === "assistant_completed") {
             if (!accumulatedAssistantContent && turn.content.trim()) {
+                maybeInsertFinalMessageSeparator(event.timestamp || turn.timestamp)
                 startAssistantEntry(event.timestamp || turn.timestamp, turn.content, "default", "complete")
             } else if (turn.content.startsWith(accumulatedAssistantContent)) {
                 const remainingContent = turn.content.slice(accumulatedAssistantContent.length)
                 if (remainingContent) {
+                    maybeInsertFinalMessageSeparator(event.timestamp || turn.timestamp)
                     startAssistantEntry(event.timestamp || turn.timestamp, remainingContent, "default", "complete")
                     accumulatedAssistantContent = turn.content
                 } else if (currentAssistantMessageIndex >= 0) {
@@ -682,6 +763,7 @@ const buildAssistantTimelineEntries = (
                     entry.status = "complete"
                 }
             } else if (turn.content.trim()) {
+                maybeInsertFinalMessageSeparator(event.timestamp || turn.timestamp)
                 startAssistantEntry(event.timestamp || turn.timestamp, turn.content, "default", "complete")
             }
             currentThinkingIndex = -1
@@ -858,6 +940,7 @@ export function HomePanel() {
     const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
     const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
     const [expandedToolCalls, setExpandedToolCalls] = useState<Record<string, boolean>>({})
+    const [expandedThinkingEntries, setExpandedThinkingEntries] = useState<Record<string, boolean>>({})
     const [homeSidebarPrimaryHeight, setHomeSidebarPrimaryHeight] = useState(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT)
     const [isHomeSidebarResizing, setIsHomeSidebarResizing] = useState(false)
     const [isConversationPinnedToBottom, setIsConversationPinnedToBottom] = useState(true)
@@ -1349,6 +1432,10 @@ export function HomePanel() {
 
     useEffect(() => {
         setExpandedToolCalls({})
+    }, [activeConversationId, activeProjectPath])
+
+    useEffect(() => {
+        setExpandedThinkingEntries({})
     }, [activeConversationId, activeProjectPath])
 
     useEffect(() => {
@@ -1992,6 +2079,13 @@ export function HomePanel() {
         }))
     }
 
+    const toggleThinkingEntryExpanded = (entryId: string) => {
+        setExpandedThinkingEntries((current) => ({
+            ...current,
+            [entryId]: !current[entryId],
+        }))
+    }
+
     return (
         <section
             data-testid="projects-panel"
@@ -2294,6 +2388,58 @@ export function HomePanel() {
                                                                                 ) : null}
                                                                             </div>
                                                                         ) : null}
+                                                                    </div>
+                                                                </li>
+                                                            )
+                                                        }
+
+                                                        if (entry.kind === "final_separator") {
+                                                            return (
+                                                                <li key={key} className="flex justify-center">
+                                                                    <div className="flex w-full max-w-[85%] items-center gap-3 py-1 text-[11px] text-muted-foreground">
+                                                                        <span className="h-px flex-1 bg-border" />
+                                                                        <span className="shrink-0 whitespace-nowrap">{entry.label}</span>
+                                                                        <span className="h-px flex-1 bg-border" />
+                                                                    </div>
+                                                                </li>
+                                                            )
+                                                        }
+
+                                                        if (entry.kind === "message" && entry.role === "assistant" && entry.presentation === "thinking") {
+                                                            const parsedThinking = parseThinkingSummaryContent(entry.content)
+                                                            const heading = parsedThinking.heading || "Thinking..."
+                                                            const details = parsedThinking.details
+                                                            const isExpandable = details.length > 0
+                                                            const isExpanded = expandedThinkingEntries[entry.id] === true
+                                                            return (
+                                                                <li key={key} className="flex justify-start">
+                                                                    <div className="max-w-[85%] rounded border border-border/80 bg-background px-3 py-2 text-muted-foreground">
+                                                                        {isExpandable ? (
+                                                                            <button
+                                                                                type="button"
+                                                                                data-testid={`project-thinking-toggle-${entry.id}`}
+                                                                                aria-expanded={isExpanded}
+                                                                                onClick={() => toggleThinkingEntryExpanded(entry.id)}
+                                                                                className="flex w-full items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                                            >
+                                                                                {isExpanded ? (
+                                                                                    <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                                                                ) : (
+                                                                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                                                                )}
+                                                                                <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+                                                                                    {heading}
+                                                                                </p>
+                                                                            </button>
+                                                                        ) : (
+                                                                            <p className="text-xs font-semibold text-foreground">{heading}</p>
+                                                                        )}
+                                                                        {isExpanded && details ? (
+                                                                            <p className="mt-2 whitespace-pre-wrap text-xs italic leading-5">
+                                                                                {details}
+                                                                            </p>
+                                                                        ) : null}
+                                                                        <p className="mt-1 text-[10px] opacity-70">{formatConversationTimestamp(entry.timestamp)}</p>
                                                                     </div>
                                                                 </li>
                                                             )

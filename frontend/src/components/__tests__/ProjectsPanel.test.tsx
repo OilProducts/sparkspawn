@@ -409,6 +409,7 @@ describe('ProjectsPanel', () => {
     await waitFor(() => {
       expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Visible.')
     })
+    expect(screen.getByTestId('project-ai-conversation-history-list')).not.toHaveTextContent('Worked for')
     expect(screen.getByTestId('project-ai-conversation-send-button')).toHaveTextContent('Send')
   })
 
@@ -656,9 +657,11 @@ describe('ProjectsPanel', () => {
 
     expect(text.indexOf('/bin/zsh -lc ls')).toBeGreaterThan(-1)
     expect(text.indexOf('/bin/zsh -lc ps')).toBeGreaterThan(-1)
+    expect(text.indexOf('Worked for 20s')).toBeGreaterThan(-1)
     expect(text.indexOf('Summary after tools.')).toBeGreaterThan(-1)
     expect(text.indexOf('/bin/zsh -lc ls')).toBeLessThan(text.indexOf('Summary after tools.'))
     expect(text.indexOf('/bin/zsh -lc ps')).toBeLessThan(text.indexOf('Summary after tools.'))
+    expect(text.indexOf('Worked for 20s')).toBeLessThan(text.indexOf('Summary after tools.'))
   })
 
   it('renders tool calls collapsed by default and expands them on demand', async () => {
@@ -774,6 +777,103 @@ describe('ProjectsPanel', () => {
 
     expect(screen.getByText(/AGENTS\.md/)).toBeInTheDocument()
     expect(screen.getByText(/README\.md/)).toBeInTheDocument()
+  })
+
+  it('renders thinking summaries collapsed to their bold lead-in and expands the details on demand', async () => {
+    const user = userEvent.setup()
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/api/conversations/') && !init?.method) {
+          return new Response(
+            JSON.stringify({
+              conversation_id: 'conversation-thinking-collapse-1',
+              project_path: '/tmp/chat-project',
+              title: 'Collapsed thinking thread',
+              created_at: '2026-03-07T20:10:00Z',
+              updated_at: '2026-03-07T20:10:04Z',
+              turns: [
+                {
+                  id: 'turn-user-1',
+                  role: 'user',
+                  content: 'What are you doing?',
+                  timestamp: '2026-03-07T20:10:00Z',
+                  status: 'complete',
+                  kind: 'message',
+                  artifact_id: null,
+                },
+                {
+                  id: 'turn-assistant-1',
+                  role: 'assistant',
+                  content: '',
+                  timestamp: '2026-03-07T20:10:01Z',
+                  status: 'streaming',
+                  kind: 'message',
+                  artifact_id: null,
+                  parent_turn_id: 'turn-user-1',
+                },
+              ],
+              turn_events: [
+                {
+                  id: 'event-reasoning-1',
+                  turn_id: 'turn-assistant-1',
+                  sequence: 1,
+                  timestamp: '2026-03-07T20:10:02Z',
+                  kind: 'reasoning_summary',
+                  content_delta: '**Considering proposal** Looking for the smallest safe change first.',
+                },
+              ],
+              event_log: [],
+              spec_edit_proposals: [],
+              execution_cards: [],
+              execution_workflow: {
+                run_id: null,
+                status: 'idle',
+                error: null,
+                flow_source: null,
+              },
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          )
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+    useStore.getState().setConversationId('conversation-thinking-collapse-1')
+
+    render(<ProjectsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Considering proposal')
+    })
+    expect(screen.queryByText('Looking for the smallest safe change first.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('project-thinking-toggle-turn-assistant-1:thinking:0'))
+
+    expect(screen.getByText('Looking for the smallest safe change first.')).toBeInTheDocument()
   })
 
   it('streams assistant text into the history before the turn response completes', async () => {
@@ -1881,7 +1981,7 @@ describe('ProjectsPanel', () => {
       expect(history).toHaveTextContent('Planning from the project context. and I am checking the repository first.')
       expect(history).toHaveTextContent('I can use the spec proposal tool once we have a concrete change.')
     })
-    expect(within(history).getAllByText('Thinking')).toHaveLength(1)
+    expect(within(history).getAllByText('Planning from the project context. and I am checking the repository first.')).toHaveLength(1)
   })
 
   it('keeps the composer cleared when sending a turn fails', async () => {
