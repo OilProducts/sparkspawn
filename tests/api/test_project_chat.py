@@ -389,6 +389,53 @@ def test_chat_session_turn_uses_task_complete_message_but_waits_for_turn_complet
     assert result.assistant_message == '{"assistant_message":"Ack"}'
 
 
+def test_chat_session_turn_accepts_task_complete_without_turn_completed_after_idle(monkeypatch) -> None:
+    session = project_chat.CodexAppServerChatSession("/tmp/project")
+    lines = iter(
+        [
+            json.dumps(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "Ack"},
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "codex/event/task_complete",
+                    "params": {
+                        "msg": {
+                            "type": "task_complete",
+                            "last_agent_message": "Ack",
+                        }
+                    },
+                }
+            ),
+            None,
+        ]
+    )
+    monotonic_values = iter([0.0, 0.1, 0.2, 1.3])
+
+    monkeypatch.setattr(session, "_ensure_process", lambda: None)
+
+    def fake_ensure_thread(model: str | None) -> None:
+        session._thread_id = "thread-123"
+        session._thread_initialized = True
+
+    monkeypatch.setattr(project_chat, "CHAT_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(project_chat.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
+    monkeypatch.setattr(
+        session,
+        "_send_request",
+        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
+    )
+    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
+
+    result = session.turn("hello", None)
+
+    assert result.assistant_message == "Ack"
+
+
 def test_chat_session_raw_rpc_logger_records_transport_lines(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     outgoing_lines: list[str] = []
@@ -753,6 +800,55 @@ def test_chat_session_turn_completes_on_turn_completed_after_final_answer(monkey
     result = session.turn("hello", None)
 
     assert result.assistant_message == '{"assistant_message":"Ack"}'
+
+
+def test_chat_session_turn_accepts_final_answer_without_turn_completed_after_idle(monkeypatch) -> None:
+    session = project_chat.CodexAppServerChatSession("/tmp/project")
+    lines = iter(
+        [
+            json.dumps(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "Ack"},
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "item/completed",
+                    "params": {
+                        "item": {
+                            "type": "agentMessage",
+                            "id": "msg-123",
+                            "phase": "final_answer",
+                            "text": "Ack",
+                        }
+                    },
+                }
+            ),
+            None,
+        ]
+    )
+    monotonic_values = iter([0.0, 0.1, 0.2, 1.3])
+
+    monkeypatch.setattr(session, "_ensure_process", lambda: None)
+
+    def fake_ensure_thread(model: str | None) -> None:
+        session._thread_id = "thread-123"
+        session._thread_initialized = True
+
+    monkeypatch.setattr(project_chat, "CHAT_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(project_chat.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
+    monkeypatch.setattr(
+        session,
+        "_send_request",
+        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
+    )
+    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
+
+    result = session.turn("hello", None)
+
+    assert result.assistant_message == "Ack"
 
 
 def test_chat_session_turn_times_out_after_live_assistant_quiet_period_without_terminal_event(monkeypatch) -> None:
@@ -1162,6 +1258,76 @@ def test_chat_session_emits_assistant_completed_from_item_completed(monkeypatch)
     assert result.assistant_message == "Ack"
     assert [event.kind for event in captured_events] == ["assistant_delta", "assistant_completed"]
     assert captured_events[-1].content_delta == "Ack"
+
+
+def test_chat_session_does_not_emit_assistant_completed_for_commentary_item(monkeypatch) -> None:
+    session = project_chat.CodexAppServerChatSession("/tmp/project")
+    lines = iter(
+        [
+            json.dumps(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "I’m drafting the proposal now."},
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "codex/event/item_completed",
+                    "params": {
+                        "msg": {
+                            "item": {
+                                "type": "AgentMessage",
+                                "id": "msg-1",
+                                "content": [{"type": "Text", "text": "I’m drafting the proposal now."}],
+                                "phase": "commentary",
+                            }
+                        }
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "codex/event/task_complete",
+                    "params": {
+                        "msg": {
+                            "last_agent_message": "Done.",
+                        }
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "turn/completed",
+                    "params": {
+                        "turn": {
+                            "id": "turn-123",
+                            "status": "completed",
+                        }
+                    },
+                }
+            ),
+        ]
+    )
+    captured_events: list[project_chat.ChatTurnLiveEvent] = []
+
+    monkeypatch.setattr(session, "_ensure_process", lambda: None)
+
+    def fake_ensure_thread(model: str | None) -> None:
+        session._thread_id = "thread-123"
+        session._thread_initialized = True
+
+    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
+    monkeypatch.setattr(
+        session,
+        "_send_request",
+        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
+    )
+    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
+
+    result = session.turn("hello", None, on_event=captured_events.append)
+
+    assert result.assistant_message == "Done."
+    assert [event.kind for event in captured_events] == ["assistant_delta"]
 
 
 def test_build_session_ignores_legacy_persisted_thread_without_session_version(tmp_path: Path, monkeypatch) -> None:

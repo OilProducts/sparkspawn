@@ -201,6 +201,18 @@ def _extract_agent_message_text_from_item(item: dict[str, Any]) -> Optional[str]
     return None
 
 
+def _extract_agent_message_phase(item: dict[str, Any]) -> Optional[str]:
+    phase = item.get("phase")
+    if phase is None:
+        return None
+    normalized = str(phase).strip().lower()
+    return normalized or None
+
+
+def _is_final_answer_phase(phase: Optional[str]) -> bool:
+    return phase in {None, "", "final_answer", "finalanswer"}
+
+
 def _is_project_chat_debug_enabled() -> bool:
     value = str(os.environ.get("SPARKSPAWN_DEBUG_PROJECT_CHAT", "")).strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -1344,6 +1356,8 @@ class CodexAppServerChatSession:
             agent_chunks: list[str] = []
             final_agent_message: Optional[str] = None
             last_error: Optional[str] = None
+            saw_task_complete = False
+            saw_final_answer_completion = False
             saw_item_agent_message_delta = False
             reasoning_summary_buffer = ""
             last_activity_at = time.monotonic()
@@ -1361,14 +1375,26 @@ class CodexAppServerChatSession:
             response = self._send_request("turn/start", params)
             if response.get("error"):
                 raise RuntimeError("codex app-server turn/start failed")
+
+            def has_terminal_message() -> bool:
+                response_text = final_agent_message if final_agent_message is not None else "".join(agent_chunks)
+                return bool(response_text.strip())
+
+            def can_finalize_without_turn_completed() -> bool:
+                return (saw_task_complete or saw_final_answer_completion) and has_terminal_message()
+
             while True:
                 line = self._read_line(0.1)
                 if line is None:
                     idle_for = time.monotonic() - last_activity_at
                     if idle_for >= CHAT_TURN_IDLE_TIMEOUT_SECONDS:
+                        if can_finalize_without_turn_completed():
+                            break
                         self._close()
                         raise RuntimeError("codex app-server turn timed out waiting for activity")
                     if self._proc is not None and self._proc.poll() is not None:
+                        if can_finalize_without_turn_completed():
+                            break
                         self._close()
                         raise RuntimeError("codex app-server exited before turn completion")
                     continue
@@ -1534,14 +1560,16 @@ class CodexAppServerChatSession:
                         agent_message_text = _extract_agent_message_text_from_item(item)
                         if agent_message_text:
                             final_agent_message = agent_message_text
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(
-                                    kind="assistant_completed",
-                                    content_delta=agent_message_text,
-                                    message="Assistant message completed.",
-                                ),
-                            )
+                            if _is_final_answer_phase(_extract_agent_message_phase(item)):
+                                saw_final_answer_completion = True
+                                self._emit_live_event(
+                                    on_event,
+                                    ChatTurnLiveEvent(
+                                        kind="assistant_completed",
+                                        content_delta=agent_message_text,
+                                        message="Assistant message completed.",
+                                    ),
+                                )
                             continue
                         tool_call = _tool_call_from_item(item)
                         if tool_call is not None:
@@ -1623,14 +1651,16 @@ class CodexAppServerChatSession:
                         agent_message_text = _extract_agent_message_text_from_item(item)
                         if agent_message_text:
                             final_agent_message = agent_message_text
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(
-                                    kind="assistant_completed",
-                                    content_delta=agent_message_text,
-                                    message="Assistant message completed.",
-                                ),
-                            )
+                            if _is_final_answer_phase(_extract_agent_message_phase(item)):
+                                saw_final_answer_completion = True
+                                self._emit_live_event(
+                                    on_event,
+                                    ChatTurnLiveEvent(
+                                        kind="assistant_completed",
+                                        content_delta=agent_message_text,
+                                        message="Assistant message completed.",
+                                    ),
+                                )
                             continue
                     continue
                 if method == "item/commandExecution/outputDelta":
@@ -1665,6 +1695,7 @@ class CodexAppServerChatSession:
                     msg = params.get("msg") or {}
                     last_agent_message = _as_non_empty_string(msg.get("last_agent_message"))
                     if last_agent_message:
+                        saw_task_complete = True
                         final_agent_message = last_agent_message
                     continue
             for tool_call in tool_calls_by_id.values():
