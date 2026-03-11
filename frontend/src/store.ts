@@ -253,12 +253,10 @@ interface RouteState {
     viewMode: ViewMode
     activeProjectPath: string | null
     activeFlow: string | null
-    selectedRunId: string | null
 }
 
 interface ProjectScopedWorkspace {
     activeFlow: string | null
-    selectedRunId: string | null
     workingDir: string
     conversationId: string | null
     projectEventLog: ProjectEventLogEntry[]
@@ -290,7 +288,6 @@ interface HydratedProjectRecord {
 
 const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
     activeFlow: null,
-    selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     conversationId: null,
     projectEventLog: [],
@@ -344,7 +341,6 @@ const DEFAULT_ROUTE_STATE: RouteState = {
     viewMode: 'home',
     activeProjectPath: null,
     activeFlow: null,
-    selectedRunId: null,
 }
 
 const loadRouteState = (): RouteState => {
@@ -368,9 +364,6 @@ const loadRouteState = (): RouteState => {
             viewMode: requestedViewMode,
             activeProjectPath: restoredActiveProjectPath,
             activeFlow: restoredActiveProjectPath && typeof parsed.activeFlow === "string" ? parsed.activeFlow : null,
-            selectedRunId: restoredActiveProjectPath && typeof parsed.selectedRunId === "string"
-                ? parsed.selectedRunId
-                : null,
         }
         return {
             ...parsedRouteState,
@@ -424,6 +417,7 @@ interface AppState {
     projectRegistry: Record<string, RegisteredProject>
     hydrateProjectRegistry: (projects: HydratedProjectRecord[]) => void
     upsertProjectRegistryEntry: (project: HydratedProjectRecord) => void
+    removeProject: (directoryPath: string, nextActiveProjectPath?: string | null) => void
     recentProjectPaths: string[]
     projectScopedWorkspaces: Record<string, ProjectScopedWorkspace>
     projectRegistrationError: string | null
@@ -505,7 +499,6 @@ const initialProjectScopedWorkspaces: Record<string, ProjectScopedWorkspace> = r
         [restoredRouteState.activeProjectPath]: resolveProjectScopedWorkspace(
             {
                 activeFlow: restoredRouteState.activeFlow,
-                selectedRunId: restoredRouteState.selectedRunId,
             },
             restoredRouteState.activeProjectPath
         ),
@@ -527,7 +520,6 @@ export const useStore = create<AppState>((set, get) => ({
                 viewMode: nextViewMode,
                 activeProjectPath: state.activeProjectPath,
                 activeFlow: state.activeFlow,
-                selectedRunId: state.selectedRunId,
             })
             return { viewMode: nextViewMode }
         }),
@@ -568,7 +560,6 @@ export const useStore = create<AppState>((set, get) => ({
                 viewMode: resolveViewModeForProjectScope(state.viewMode, nextActiveProjectPath),
                 activeProjectPath: nextActiveProjectPath,
                 activeFlow: nextActiveProjectPath ? nextActiveProjectScope?.activeFlow || null : null,
-                selectedRunId: nextActiveProjectPath ? nextActiveProjectScope?.selectedRunId || null : null,
             })
             return {
                 projectRegistry: nextProjectRegistry,
@@ -576,7 +567,7 @@ export const useStore = create<AppState>((set, get) => ({
                 activeProjectPath: nextActiveProjectPath,
                 viewMode: resolveViewModeForProjectScope(state.viewMode, nextActiveProjectPath),
                 activeFlow: nextActiveProjectPath ? nextActiveProjectScope?.activeFlow || null : null,
-                selectedRunId: nextActiveProjectPath ? nextActiveProjectScope?.selectedRunId || null : null,
+                selectedRunId: null,
                 workingDir: nextActiveProjectPath ? nextActiveProjectScope?.workingDir || DEFAULT_WORKING_DIRECTORY : DEFAULT_WORKING_DIRECTORY,
                 recentProjectPaths: nextActiveProjectPath ? pushRecentProjectPath(state.recentProjectPaths, nextActiveProjectPath) : state.recentProjectPaths,
             }
@@ -613,6 +604,50 @@ export const useStore = create<AppState>((set, get) => ({
                 recentProjectPaths: pushRecentProjectPath(state.recentProjectPaths, normalizedPath),
             }
         }),
+    removeProject: (directoryPath, nextActiveProjectPath = null) =>
+        set((state) => {
+            const normalizedPath = normalizeProjectPath(directoryPath)
+            if (!normalizedPath || !state.projectRegistry[normalizedPath]) {
+                return state
+            }
+
+            const nextProjectRegistry = { ...state.projectRegistry }
+            delete nextProjectRegistry[normalizedPath]
+
+            const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
+            delete nextProjectScopedWorkspaces[normalizedPath]
+
+            const normalizedFallbackPath = nextActiveProjectPath ? normalizeProjectPath(nextActiveProjectPath) : null
+            const derivedFallbackPath = normalizedFallbackPath && nextProjectRegistry[normalizedFallbackPath]
+                ? normalizedFallbackPath
+                : state.recentProjectPaths.find((path) => path !== normalizedPath && Boolean(nextProjectRegistry[path]))
+                    || Object.keys(nextProjectRegistry)[0]
+                    || null
+            const nextActiveProjectPathResolved = state.activeProjectPath === normalizedPath
+                ? derivedFallbackPath
+                : state.activeProjectPath
+            const nextActiveProjectScope = nextActiveProjectPathResolved
+                ? resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[nextActiveProjectPathResolved], nextActiveProjectPathResolved)
+                : null
+            const nextViewMode = resolveViewModeForProjectScope(state.viewMode, nextActiveProjectPathResolved)
+
+            saveRouteState({
+                viewMode: nextViewMode,
+                activeProjectPath: nextActiveProjectPathResolved,
+                activeFlow: nextActiveProjectPathResolved ? nextActiveProjectScope?.activeFlow || null : null,
+            })
+
+            return {
+                projectRegistry: nextProjectRegistry,
+                projectScopedWorkspaces: nextProjectScopedWorkspaces,
+                recentProjectPaths: state.recentProjectPaths.filter((path) => path !== normalizedPath),
+                activeProjectPath: nextActiveProjectPathResolved,
+                viewMode: nextViewMode,
+                activeFlow: nextActiveProjectPathResolved ? nextActiveProjectScope?.activeFlow || null : null,
+                selectedRunId: state.activeProjectPath === normalizedPath ? null : state.selectedRunId,
+                workingDir: nextActiveProjectPathResolved ? nextActiveProjectScope?.workingDir || DEFAULT_WORKING_DIRECTORY : DEFAULT_WORKING_DIRECTORY,
+            }
+        }),
     setActiveProjectPath: (projectPath) =>
         set((state) => {
             const normalizedProjectPath =
@@ -630,7 +665,6 @@ export const useStore = create<AppState>((set, get) => ({
                 nextProjectScopedWorkspaces[currentScope] = {
                     ...existingScope,
                     activeFlow: state.activeFlow,
-                    selectedRunId: state.selectedRunId,
                     workingDir: state.workingDir,
                 }
             }
@@ -651,7 +685,6 @@ export const useStore = create<AppState>((set, get) => ({
                 viewMode: nextViewMode,
                 activeProjectPath: nextProjectPath,
                 activeFlow: nextProjectPath ? nextProjectScope.activeFlow : null,
-                selectedRunId: nextProjectPath ? nextProjectScope.selectedRunId : null,
             })
             return {
                 activeProjectPath: nextProjectPath,
@@ -660,7 +693,7 @@ export const useStore = create<AppState>((set, get) => ({
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
                 recentProjectPaths: pushRecentProjectPath(state.recentProjectPaths, nextProjectPath),
                 activeFlow: nextProjectPath ? nextProjectScope.activeFlow : null,
-                selectedRunId: nextProjectPath ? nextProjectScope.selectedRunId : null,
+                selectedRunId: isProjectSwitch ? null : state.selectedRunId,
                 workingDir: nextProjectPath ? nextProjectScope.workingDir : DEFAULT_WORKING_DIRECTORY,
                 runtimeStatus: isProjectSwitch ? 'idle' : state.runtimeStatus,
                 nodeStatuses: isProjectSwitch ? {} : state.nodeStatuses,
@@ -738,7 +771,6 @@ export const useStore = create<AppState>((set, get) => ({
                 viewMode: state.viewMode,
                 activeProjectPath: nextActiveProjectPath,
                 activeFlow: state.activeProjectPath ? state.activeFlow : nextActiveProjectScope.activeFlow,
-                selectedRunId: state.activeProjectPath ? state.selectedRunId : nextActiveProjectScope.selectedRunId,
             })
             result = {
                 ok: true,
@@ -753,7 +785,7 @@ export const useStore = create<AppState>((set, get) => ({
                 activeProjectPath: nextActiveProjectPath,
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
                 activeFlow: state.activeProjectPath ? state.activeFlow : nextActiveProjectScope.activeFlow,
-                selectedRunId: state.activeProjectPath ? state.selectedRunId : nextActiveProjectScope.selectedRunId,
+                selectedRunId: state.activeProjectPath ? state.selectedRunId : null,
                 workingDir: state.activeProjectPath ? state.workingDir : nextActiveProjectScope.workingDir,
             }
         })
@@ -839,7 +871,6 @@ export const useStore = create<AppState>((set, get) => ({
                 viewMode: state.viewMode,
                 activeProjectPath: nextActiveProjectPath,
                 activeFlow: state.activeFlow,
-                selectedRunId: state.selectedRunId,
             })
             result = {
                 ok: true,
@@ -884,7 +915,6 @@ export const useStore = create<AppState>((set, get) => ({
                     viewMode: state.viewMode,
                     activeProjectPath: null,
                     activeFlow: null,
-                    selectedRunId: state.selectedRunId,
                 })
                 return { activeFlow: null }
             }
@@ -898,7 +928,6 @@ export const useStore = create<AppState>((set, get) => ({
                 viewMode: state.viewMode,
                 activeProjectPath: state.activeProjectPath,
                 activeFlow: flow,
-                selectedRunId: state.selectedRunId,
             })
             return {
                 activeFlow: flow,
@@ -909,29 +938,9 @@ export const useStore = create<AppState>((set, get) => ({
     setSelectedNodeId: (id) => set({ selectedNodeId: id }),
     selectedEdgeId: null,
     setSelectedEdgeId: (id) => set({ selectedEdgeId: id }),
-    selectedRunId: restoredProjectScope ? restoredProjectScope.selectedRunId : restoredRouteState.selectedRunId,
+    selectedRunId: null,
     setSelectedRunId: (id) =>
-        set((state) => {
-            const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
-            if (state.activeProjectPath) {
-                const scoped = resolveProjectScopedWorkspace(nextProjectScopedWorkspaces[state.activeProjectPath], state.activeProjectPath)
-                nextProjectScopedWorkspaces[state.activeProjectPath] = {
-                    ...scoped,
-                    selectedRunId: id,
-                    artifactRunId: id,
-                }
-            }
-            saveRouteState({
-                viewMode: state.viewMode,
-                activeProjectPath: state.activeProjectPath,
-                activeFlow: state.activeFlow,
-                selectedRunId: id,
-            })
-            return {
-                selectedRunId: id,
-                projectScopedWorkspaces: nextProjectScopedWorkspaces,
-            }
-        }),
+        set({ selectedRunId: id }),
     setConversationId: (id) =>
         set((state) => {
             if (!state.activeProjectPath) {
@@ -985,12 +994,10 @@ export const useStore = create<AppState>((set, get) => ({
                 viewMode: state.viewMode,
                 activeProjectPath: state.activeProjectPath,
                 activeFlow: nextScopedWorkspace.activeFlow,
-                selectedRunId: nextScopedWorkspace.selectedRunId,
             })
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
                 activeFlow: nextScopedWorkspace.activeFlow,
-                selectedRunId: nextScopedWorkspace.selectedRunId,
                 workingDir: nextScopedWorkspace.workingDir,
             }
         }),

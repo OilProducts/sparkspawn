@@ -200,6 +200,7 @@ export function ExecutionControls() {
             if (typeof runData?.pipeline_id === 'string') {
                 setSelectedRunId(runData.pipeline_id)
             }
+            setRuntimeStatus('running')
 
             setLastBuildWorkflowFailure(null)
         } catch (error) {

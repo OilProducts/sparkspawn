@@ -356,7 +356,11 @@ The UI MUST support workflow chaining from project specification to implementati
 
 ## 9. Run Inspector Requirements
 
-The UI MUST provide a run inspector for any selected run ID in project context.
+The UI MUST provide a run inspector for any run the user explicitly chooses to inspect.
+
+Run inspection state SHOULD be ephemeral UI state rather than durable project/conversation workspace state.
+
+Project conversations, workflow snapshots, and artifacts MAY retain run provenance, but that provenance MUST NOT implicitly select a run for inspection.
 
 ### 9.1 Summary
 

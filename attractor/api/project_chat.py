@@ -1815,6 +1815,77 @@ class ProjectChatService:
         project_paths = self._project_paths_for_conversation(conversation_id, project_path)
         return project_paths.execution_cards_dir / f"{conversation_id}.json"
 
+    def _workflow_run_root(self, run_id: str, project_path: str) -> Path:
+        project_paths = self._project_paths(project_path)
+        run_root = project_paths.runs_dir / run_id
+        run_root.mkdir(parents=True, exist_ok=True)
+        return run_root
+
+    def _workflow_run_meta_path(self, run_id: str, project_path: str) -> Path:
+        return self._workflow_run_root(run_id, project_path) / "run.json"
+
+    def _workflow_run_log_path(self, run_id: str, project_path: str) -> Path:
+        return self._workflow_run_root(run_id, project_path) / "run.log"
+
+    def _read_workflow_run_record(self, run_id: str, project_path: str) -> dict[str, Any]:
+        return self._read_json_dict(self._workflow_run_meta_path(run_id, project_path))
+
+    def _write_workflow_run_record(
+        self,
+        *,
+        run_id: str,
+        project_path: str,
+        flow_source: Optional[str],
+        model: Optional[str],
+        status: str,
+        spec_id: Optional[str] = None,
+        plan_id: Optional[str] = None,
+        result: Optional[str] = None,
+        last_error: str = "",
+        started_at: Optional[str] = None,
+        ended_at: Optional[str] = None,
+    ) -> None:
+        existing = self._read_workflow_run_record(run_id, project_path)
+        payload = {
+            "run_id": run_id,
+            "flow_name": "execution_planning",
+            "status": status,
+            "result": result,
+            "working_directory": project_path,
+            "model": model or str(existing.get("model", "")),
+            "started_at": started_at or str(existing.get("started_at", "")) or _iso_now(),
+            "ended_at": ended_at,
+            "project_path": project_path,
+            "git_branch": existing.get("git_branch"),
+            "git_commit": existing.get("git_commit"),
+            "spec_id": spec_id if spec_id is not None else existing.get("spec_id"),
+            "plan_id": plan_id if plan_id is not None else existing.get("plan_id"),
+            "last_error": last_error,
+            "token_usage": existing.get("token_usage"),
+        }
+        self._write_json(self._workflow_run_meta_path(run_id, project_path), payload)
+
+    def _append_workflow_run_log(
+        self,
+        *,
+        run_id: str,
+        project_path: str,
+        message: str,
+        timestamp: Optional[str] = None,
+    ) -> None:
+        if not message.strip():
+            return
+        iso_timestamp = timestamp or _iso_now()
+        try:
+            parsed = time.strptime(iso_timestamp, "%Y-%m-%dT%H:%M:%SZ")
+            display_timestamp = time.strftime("%Y-%m-%d %H:%M:%S", parsed)
+        except ValueError:
+            display_timestamp = iso_timestamp
+        path = self._workflow_run_log_path(run_id, project_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{display_timestamp} UTC] {message}\n")
+
     def _touch_conversation_state(self, state: ConversationState, *, title_hint: Optional[str] = None) -> None:
         if not state.created_at:
             state.created_at = _iso_now()
@@ -2820,6 +2891,8 @@ class ProjectChatService:
         conversation_id: str,
         workflow_run_id: str,
         flow_source: Optional[str],
+        model: Optional[str] = None,
+        spec_id: Optional[str] = None,
     ) -> dict[str, Any]:
         with self._lock:
             state = self._read_state(conversation_id)
@@ -2837,6 +2910,26 @@ class ProjectChatService:
                 self._append_event(state, f"Execution planning started ({workflow_run_id}).")
             self._touch_conversation_state(state)
             self._write_state(state)
+            self._write_workflow_run_record(
+                run_id=workflow_run_id,
+                project_path=state.project_path,
+                flow_source=flow_source,
+                model=model,
+                status="running",
+                spec_id=spec_id,
+            )
+            if flow_source:
+                self._append_workflow_run_log(
+                    run_id=workflow_run_id,
+                    project_path=state.project_path,
+                    message=f"Execution planning started using {flow_source}.",
+                )
+            else:
+                self._append_workflow_run_log(
+                    run_id=workflow_run_id,
+                    project_path=state.project_path,
+                    message="Execution planning started.",
+                )
         return state.to_dict()
 
     async def run_execution_workflow(
@@ -2850,7 +2943,7 @@ class ProjectChatService:
         codex_runner: Any,
     ) -> None:
         try:
-            state = self._read_state(conversation_id, normalized_project_path)
+            state = self._read_state(conversation_id)
             if state is None:
                 return
             proposal = next((entry for entry in state.spec_edit_proposals if entry.id == proposal_id), None)
@@ -2905,6 +2998,23 @@ class ProjectChatService:
                 self._append_event(state, f"Execution planning completed and produced {execution_card.id}.")
                 self._touch_conversation_state(state)
                 self._write_state(state)
+                self._write_workflow_run_record(
+                    run_id=workflow_run_id,
+                    project_path=state.project_path,
+                    flow_source=flow_source,
+                    model=model,
+                    status="success",
+                    spec_id=proposal.canonical_spec_edit_id,
+                    plan_id=execution_card.id,
+                    result="success",
+                    ended_at=now,
+                )
+                self._append_workflow_run_log(
+                    run_id=workflow_run_id,
+                    project_path=state.project_path,
+                    message=f"Execution planning completed and produced {execution_card.id}.",
+                    timestamp=now,
+                )
             await self.publish_snapshot(conversation_id)
         except Exception as exc:  # noqa: BLE001
             with self._lock:
@@ -2920,6 +3030,29 @@ class ProjectChatService:
                 self._append_event(state, f"Execution planning failed: {exc}")
                 self._touch_conversation_state(state)
                 self._write_state(state)
+                self._write_workflow_run_record(
+                    run_id=workflow_run_id,
+                    project_path=state.project_path,
+                    flow_source=flow_source,
+                    model=model,
+                    status="failed",
+                    spec_id=next(
+                        (
+                            proposal.canonical_spec_edit_id
+                            for proposal in state.spec_edit_proposals
+                            if proposal.id == proposal_id and proposal.canonical_spec_edit_id
+                        ),
+                        None,
+                    ),
+                    result="failed",
+                    last_error=str(exc),
+                    ended_at=_iso_now(),
+                )
+                self._append_workflow_run_log(
+                    run_id=workflow_run_id,
+                    project_path=state.project_path,
+                    message=f"Execution planning failed: {exc}",
+                )
             await self.publish_snapshot(conversation_id)
 
     def review_execution_card(

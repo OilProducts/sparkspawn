@@ -10,6 +10,7 @@ import {
     type ConversationTurnEventResponse,
     type ConversationTurnResponse,
     deleteConversationValidated,
+    deleteProjectValidated,
     type ExecutionCardResponse,
     type SpecEditProposalResponse,
     approveSpecEditProposalValidated,
@@ -929,6 +930,7 @@ export function HomePanel() {
     const projectScopedWorkspaces = useStore((state) => state.projectScopedWorkspaces)
     const projectRegistrationError = useStore((state) => state.projectRegistrationError)
     const registerProject = useStore((state) => state.registerProject)
+    const removeProject = useStore((state) => state.removeProject)
     const setProjectRegistrationError = useStore((state) => state.setProjectRegistrationError)
     const clearProjectRegistrationError = useStore((state) => state.clearProjectRegistrationError)
     const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
@@ -949,6 +951,7 @@ export function HomePanel() {
     const [pendingSpecProposalId, setPendingSpecProposalId] = useState<string | null>(null)
     const [pendingExecutionCardId, setPendingExecutionCardId] = useState<string | null>(null)
     const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
+    const [pendingDeleteProjectPath, setPendingDeleteProjectPath] = useState<string | null>(null)
     const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
     const [expandedToolCalls, setExpandedToolCalls] = useState<Record<string, boolean>>({})
     const [expandedThinkingEntries, setExpandedThinkingEntries] = useState<Record<string, boolean>>({})
@@ -1156,10 +1159,6 @@ export function HomePanel() {
             || latestProjectScope?.conversationId === snapshot.conversation_id
         const latestApprovedProposal = getLatestApprovedSpecEditProposal(snapshot)
         const latestExecutionCard = getLatestExecutionCard(snapshot)
-        const selectedRunId = snapshot.execution_workflow.run_id
-            || latestExecutionCard?.source_workflow_run_id
-            || latestProjectScope?.selectedRunId
-            || null
         const flowSource = snapshot.execution_workflow.flow_source
             || latestExecutionCard?.flow_source
             || latestProjectScope?.activeFlow
@@ -1240,7 +1239,6 @@ export function HomePanel() {
                     }
                     : null,
                 artifactRunId: snapshot.execution_workflow.run_id ?? latestExecutionCard?.source_workflow_run_id ?? null,
-                selectedRunId,
                 activeFlow: flowSource,
             })
             if (latestProjectScope?.conversationId !== snapshot.conversation_id) {
@@ -1902,6 +1900,64 @@ export function HomePanel() {
         }
     }
 
+    const onDeleteProject = async (projectPath: string) => {
+        const projectLabel = formatProjectListLabel(projectPath)
+        if (
+            typeof window !== "undefined"
+            && !window.confirm(
+                `Remove project "${projectLabel}" from Spark Spawn? This deletes its local threads, workflow history, and runs, but does not delete the project files.`,
+            )
+        ) {
+            return
+        }
+
+        setPanelError(null)
+        setPendingDeleteProjectPath(projectPath)
+        try {
+            await deleteProjectValidated(projectPath)
+
+            setProjectGitMetadata((current) => {
+                const next = { ...current }
+                delete next[projectPath]
+                return next
+            })
+            setProjectConversationSummaries((current) => {
+                const next = { ...current }
+                delete next[projectPath]
+                return next
+            })
+            setProjectConversationSnapshots((current) => {
+                const next: Record<string, ConversationSnapshotResponse> = {}
+                Object.entries(current).forEach(([conversationId, snapshot]) => {
+                    if (snapshot.project_path !== projectPath) {
+                        next[conversationId] = snapshot
+                    }
+                })
+                return next
+            })
+            setProjectConversationLiveEvents((current) => {
+                const next = { ...current }
+                Object.entries(projectConversationSnapshots).forEach(([conversationId, snapshot]) => {
+                    if (snapshot.project_path === projectPath) {
+                        delete next[conversationId]
+                    }
+                })
+                return next
+            })
+
+            const fallbackProjectPath = activeProjectPath === projectPath
+                ? orderedProjects.find((project) => project.directoryPath !== projectPath)?.directoryPath || null
+                : null
+            removeProject(projectPath, fallbackProjectPath)
+        } catch (error) {
+            const message = extractApiErrorMessage(error, "Unable to remove the project.")
+            setPanelError(message)
+            appendLocalProjectEvent(`Project removal failed: ${message}`)
+        } finally {
+            setPendingDeleteProjectPath(null)
+        }
+    }
+
     const ensureConversationId = () => {
         if (!activeProjectPath) {
             return null
@@ -2164,8 +2220,9 @@ export function HomePanel() {
                                                     const projectPath = project.directoryPath
                                                     const isActive = projectPath === activeProjectPath
                                                     const projectConversationSummaries = isActive ? activeProjectConversationSummaries : []
+                                                    const isDeletingProject = pendingDeleteProjectPath === projectPath
                                                     return (
-                                                        <li key={projectPath} className="space-y-1">
+                                                        <li key={projectPath} className="group/project relative space-y-1">
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
@@ -2173,7 +2230,7 @@ export function HomePanel() {
                                                                 }}
                                                                 aria-current={isActive ? "true" : undefined}
                                                                 title={projectPath}
-                                                                className={`w-full rounded-md px-2 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActive
+                                                                className={`w-full rounded-md px-2 py-2 pr-9 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActive
                                                                     ? "bg-primary/10 text-foreground"
                                                                     : "text-foreground hover:bg-muted/70"
                                                                     }`}
@@ -2188,6 +2245,19 @@ export function HomePanel() {
                                                                         {formatProjectListLabel(projectPath)}
                                                                     </span>
                                                                 </div>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                aria-label="Remove project"
+                                                                title={`Remove project ${formatProjectListLabel(projectPath)}`}
+                                                                data-testid={`project-delete-${projectPath}`}
+                                                                onClick={() => {
+                                                                    void onDeleteProject(projectPath)
+                                                                }}
+                                                                disabled={isDeletingProject}
+                                                                className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/project:opacity-100 group-focus-within/project:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
                                                             </button>
                                                             {isActive ? (
                                                                 <div className="ml-5 border-l border-border/70 pl-2">

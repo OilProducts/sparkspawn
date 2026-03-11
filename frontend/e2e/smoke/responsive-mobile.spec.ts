@@ -12,14 +12,13 @@ const MOBILE_FLOW_DOT = `digraph G {
 
 const seedRouteState = async (page: Page) => {
   await page.addInitScript(
-    ({ projectPath, flowName, runId }) => {
+    ({ projectPath, flowName }) => {
       window.localStorage.setItem(
         'sparkspawn.ui_route_state',
         JSON.stringify({
           viewMode: 'projects',
           activeProjectPath: projectPath,
           activeFlow: flowName,
-          selectedRunId: runId,
         }),
       )
       window.localStorage.setItem(
@@ -36,7 +35,6 @@ const seedRouteState = async (page: Page) => {
     {
       projectPath: MOBILE_PROJECT_PATH,
       flowName: MOBILE_FLOW_NAME,
-      runId: MOBILE_RUN_ID,
     },
   )
 }
@@ -139,6 +137,35 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
+    if (pathname === '/runs' && requestMethod === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          runs: [
+            {
+              run_id: MOBILE_RUN_ID,
+              status: 'running',
+              result: null,
+              flow_name: MOBILE_FLOW_NAME,
+              started_at: '2026-03-11T10:00:00Z',
+              ended_at: null,
+              model: 'gpt-5',
+              working_directory: MOBILE_PROJECT_PATH,
+              project_path: MOBILE_PROJECT_PATH,
+              git_branch: 'main',
+              git_commit: 'abc123def456',
+              last_error: null,
+              token_usage: 1234,
+              spec_id: null,
+              plan_id: null,
+            },
+          ],
+        }),
+      })
+      return
+    }
+
     await route.continue()
   })
 }
@@ -162,7 +189,8 @@ test('mobile and narrow viewport usability is preserved for core project and ope
   await expect(page.getByTestId('favorite-toggle-button')).toBeVisible()
   await page.screenshot({ path: screenshotPath('13a-mobile-projects-operations.png'), fullPage: true })
 
-  await page.getByTestId('nav-mode-execution').click()
+  await page.getByTestId('nav-mode-runs').click()
+  await page.getByRole('button', { name: 'Open' }).click()
   await expect(page.getByTestId('execution-footer-controls')).toHaveAttribute('data-responsive-layout', 'stacked')
   await expect(page.getByTestId('execution-footer-cancel-button')).toBeVisible()
   await expect(page.getByTestId('execution-footer-unsupported-controls-reason')).toBeVisible()
@@ -184,7 +212,8 @@ test('viewport regression baselines capture desktop shell layouts for projects a
   await expect(page.getByTestId('favorite-toggle-button')).toBeVisible()
   await page.screenshot({ path: screenshotPath('13c-desktop-projects-operations.png'), fullPage: true })
 
-  await page.getByTestId('nav-mode-execution').click()
+  await page.getByTestId('nav-mode-runs').click()
+  await page.getByRole('button', { name: 'Open' }).click()
   await expect(page.getByTestId('execution-footer-controls')).toHaveAttribute('data-responsive-layout', 'inline')
   await expect(page.getByTestId('execution-footer-cancel-button')).toBeVisible()
   await expect(page.getByTestId('execution-footer-unsupported-controls-reason')).toBeVisible()

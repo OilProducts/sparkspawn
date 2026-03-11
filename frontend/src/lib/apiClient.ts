@@ -224,6 +224,13 @@ export interface ConversationDeleteResponse {
     project_path: string
 }
 
+export interface ProjectDeleteResponse {
+    status: 'deleted'
+    project_id: string
+    project_path: string
+    display_name: string
+}
+
 export interface ProjectRecordResponse {
     project_id: string
     project_path: string
@@ -939,6 +946,19 @@ export function parseConversationDeleteResponse(
     }
 }
 
+export function parseProjectDeleteResponse(
+    payload: unknown,
+    endpoint = '/api/projects',
+): ProjectDeleteResponse {
+    const record = expectObjectRecord(payload, endpoint)
+    return {
+        status: expectString(record.status, endpoint, 'status') === 'deleted' ? 'deleted' : 'deleted',
+        project_id: expectString(record.project_id, endpoint, 'project_id'),
+        project_path: expectString(record.project_path, endpoint, 'project_path'),
+        display_name: expectString(record.display_name, endpoint, 'display_name'),
+    }
+}
+
 export function parseProjectDirectoryPickResponse(
     payload: unknown,
     endpoint = '/api/projects/pick-directory',
@@ -1178,6 +1198,20 @@ export async function deleteConversationValidated(
         },
         '/api/conversations/{id}',
         parseConversationDeleteResponse,
+    )
+}
+
+export async function deleteProjectValidated(
+    projectPath: string,
+): Promise<ProjectDeleteResponse> {
+    const url = `/api/projects?project_path=${encodeURIComponent(projectPath)}`
+    return fetchJsonWithValidation(
+        url,
+        {
+            method: 'DELETE',
+        },
+        '/api/projects',
+        parseProjectDeleteResponse,
     )
 }
 

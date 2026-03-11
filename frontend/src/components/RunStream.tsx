@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@/store'
-import { fetchPipelineStatusValidated, fetchRuntimeStatusValidated } from '@/lib/apiClient'
+import { ApiHttpError, fetchPipelineStatusValidated } from '@/lib/apiClient'
 import { resolveSaveRemediation } from '@/lib/saveRemediation'
-import { resolveSelectedRunScopePreflight, resolveStatusHydrationDecision } from '@/lib/runScope'
 
 function classifyLog(message: string): 'info' | 'success' | 'error' {
     const lower = message.toLowerCase()
@@ -19,8 +18,6 @@ const RUNTIME_STAGE_STATUS_MAP: Record<string, 'running' | 'success' | 'failed'>
     StageCompleted: 'success',
     StageFailed: 'failed',
 }
-const RUNTIME_STATUS_DEGRADED_MESSAGE =
-    'Runtime status endpoint is unavailable or incompatible. Live runtime hydration is in degraded mode.'
 const SELECTED_RUN_STATUS_DEGRADED_MESSAGE =
     'Selected run status endpoint is unavailable or incompatible. Live event streaming preflight is in degraded mode.'
 
@@ -28,42 +25,6 @@ interface RuntimeStageCursor {
     stageIndex: number
     status: 'running' | 'success' | 'failed'
     pendingRetry: boolean
-}
-
-const normalizeScopePath = (value: string) => {
-    const trimmed = value.trim()
-    if (!trimmed) return ''
-    const slashNormalized = trimmed.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
-    const prefix = slashNormalized.startsWith('/') ? '/' : ''
-    const rawBody = prefix ? slashNormalized.slice(1) : slashNormalized
-    const parts = rawBody.split('/').filter((part) => part.length > 0)
-    const segments: string[] = []
-    for (const part of parts) {
-        if (part === '.') {
-            continue
-        }
-        if (part === '..') {
-            segments.pop()
-            continue
-        }
-        segments.push(part)
-    }
-    const normalizedBody = segments.join('/')
-    if (!normalizedBody && prefix) {
-        return prefix
-    }
-    return `${prefix}${normalizedBody}`
-}
-
-const runBelongsToProjectScope = (runWorkingDirectory: string, projectPath: string | null) => {
-    if (!projectPath) return false
-    const normalizedProjectPath = normalizeScopePath(projectPath)
-    if (!normalizedProjectPath) return false
-
-    const normalizedRunWorkingDirectory = normalizeScopePath(runWorkingDirectory)
-    if (!normalizedRunWorkingDirectory) return false
-    if (normalizedRunWorkingDirectory === normalizedProjectPath) return true
-    return normalizedRunWorkingDirectory.startsWith(`${normalizedProjectPath}/`)
 }
 
 export function RunStream() {
@@ -76,7 +37,6 @@ export function RunStream() {
     const setRuntimeStatus = useStore((state) => state.setRuntimeStatus)
     const selectedRunId = useStore((state) => state.selectedRunId)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
-    const activeProjectPath = useStore((state) => state.activeProjectPath)
     const saveState = useStore((state) => state.saveState)
     const saveErrorMessage = useStore((state) => state.saveErrorMessage)
     const saveErrorKind = useStore((state) => state.saveErrorKind)
@@ -109,52 +69,9 @@ export function RunStream() {
     }, [selectedRunId, resetNodeStatuses, clearHumanGate, clearLogs, setRuntimeStatus])
 
     useEffect(() => {
-        let isCancelled = false
-        fetchRuntimeStatusValidated()
-            .then((data) => {
-                if (isCancelled) return
-                setRuntimeApiDegradedMessage((current) =>
-                    current === RUNTIME_STATUS_DEGRADED_MESSAGE ? null : current
-                )
-                const runId = typeof data?.last_run_id === 'string' ? data.last_run_id : null
-                const lastWorkingDirectory = typeof data?.last_working_directory === 'string' ? data.last_working_directory : ''
-                const statusRunInScope = runBelongsToProjectScope(lastWorkingDirectory, activeProjectPath)
-                const statusHydrationDecision = resolveStatusHydrationDecision({
-                    selectedRunId,
-                    statusRunId: runId,
-                    statusRunWorkingDirectory: lastWorkingDirectory,
-                    activeProjectPath,
-                    statusRuntimeStatus: typeof data?.status === 'string' ? data.status : null,
-                })
-                if (!selectedRunId && runId && statusRunInScope) {
-                    if (statusHydrationDecision.nextSelectedRunId) {
-                        setSelectedRunId(statusHydrationDecision.nextSelectedRunId)
-                    }
-                }
-                if (!selectedRunId && (!runId || !statusRunInScope)) {
-                    setRuntimeStatus('idle')
-                    return
-                }
-                if (data?.status && ((!selectedRunId && statusRunInScope) || runId === selectedRunId)) {
-                    if (statusHydrationDecision.nextRuntimeStatus) {
-                        setRuntimeStatus(statusHydrationDecision.nextRuntimeStatus)
-                    }
-                }
-            })
-            .catch(() => {
-                if (isCancelled) return
-                setRuntimeApiDegradedMessage(RUNTIME_STATUS_DEGRADED_MESSAGE)
-            })
-        return () => {
-            isCancelled = true
-        }
-    }, [selectedRunId, activeProjectPath, setRuntimeStatus, setSelectedRunId])
-
-    useEffect(() => {
         if (!selectedRunId) {
-            setRuntimeApiDegradedMessage((current) =>
-                current === SELECTED_RUN_STATUS_DEGRADED_MESSAGE ? null : current
-            )
+            setRuntimeApiDegradedMessage(null)
+            setRuntimeStatus('idle')
             return
         }
 
@@ -287,7 +204,13 @@ export function RunStream() {
                     setRuntimeApiDegradedMessage((current) =>
                         current === SELECTED_RUN_STATUS_DEGRADED_MESSAGE ? null : current
                     )
-                } catch {
+                } catch (error) {
+                    if (!metadataAbort.signal.aborted && error instanceof ApiHttpError && error.status === 404) {
+                        setSelectedRunId(null)
+                        setRuntimeStatus('idle')
+                        setRuntimeApiDegradedMessage(null)
+                        return
+                    }
                     if (!metadataAbort.signal.aborted) {
                         setRuntimeApiDegradedMessage(SELECTED_RUN_STATUS_DEGRADED_MESSAGE)
                     }
@@ -296,24 +219,8 @@ export function RunStream() {
             }
             if (metadataAbort.signal.aborted) return
 
-            const selectedRunWorkingDirectory = typeof data?.working_directory === 'string' ? data.working_directory : ''
-            const selectedRunInScope = runBelongsToProjectScope(selectedRunWorkingDirectory, activeProjectPath)
-            const preflightDecision = resolveSelectedRunScopePreflight({
-                selectedRunWorkingDirectory,
-                activeProjectPath,
-                selectedRunStatus: typeof data?.status === 'string' ? data.status : null,
-            })
-            if (!selectedRunInScope) {
-                if (preflightDecision.clearSelectedRun) {
-                    setSelectedRunId(null)
-                }
-                if (preflightDecision.nextRuntimeStatus) {
-                    setRuntimeStatus(preflightDecision.nextRuntimeStatus)
-                }
-                return
-            }
-            if (preflightDecision.nextRuntimeStatus) {
-                setRuntimeStatus(preflightDecision.nextRuntimeStatus)
+            if (typeof data?.status === 'string') {
+                setRuntimeStatus(data.status)
             }
             if (metadataAbort.signal.aborted) return
 
@@ -327,7 +234,7 @@ export function RunStream() {
         return () => {
             source.close()
         }
-    }, [selectedRunId, activeProjectPath, addLog, setNodeStatus, clearHumanGate, resetNodeStatuses, setHumanGate, setRuntimeStatus, setSelectedRunId])
+    }, [selectedRunId, addLog, setNodeStatus, clearHumanGate, resetNodeStatuses, setHumanGate, setRuntimeStatus, setSelectedRunId])
 
     return (
         <div data-testid="execution-runtime-stream-indicator" className="pointer-events-none fixed right-4 top-16 z-[70]">

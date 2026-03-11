@@ -215,7 +215,6 @@ const resetContractState = () => {
     projectScopedWorkspaces: {
       '/tmp/project-contract-behavior': {
         activeFlow: 'contract-behavior.dot',
-        selectedRunId: null,
         workingDir: DEFAULT_WORKING_DIRECTORY,
         conversationId: null,
         specId: null,
@@ -865,16 +864,21 @@ describe('Frontend contract behavior', () => {
   })
 
   it('[CID:12.2.01] shows degraded-state UX when runtime status endpoint responses are unavailable or incompatible', async () => {
+    const runId = 'run-contract-degraded'
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/status')) {
+        if (url.endsWith(`/pipelines/${encodeURIComponent(runId)}`)) {
           return jsonResponse({ runtime: 'idle' })
         }
         return jsonResponse({})
       }),
     )
+
+    act(() => {
+      useStore.getState().setSelectedRunId(runId)
+    })
 
     render(<RunStream />)
 
@@ -883,7 +887,7 @@ describe('Frontend contract behavior', () => {
     })
 
     expect(screen.getByTestId('runtime-api-degraded-banner')).toHaveTextContent(
-      'Runtime status endpoint is unavailable or incompatible.',
+      'Selected run status endpoint is unavailable or incompatible.',
     )
     expect(screen.getByTestId('global-save-state-indicator')).not.toHaveTextContent('Idle')
   })
@@ -975,6 +979,7 @@ describe('Frontend contract behavior', () => {
 
     act(() => {
       useStore.getState().setViewMode('runs')
+      useStore.getState().setSelectedRunId(runId)
     })
 
     render(<RunsPanel />)
@@ -1164,7 +1169,6 @@ describe('Frontend contract behavior', () => {
         '/tmp/project-a': {
           ...state.projectScopedWorkspaces['/tmp/project-a'],
           activeFlow: null,
-          selectedRunId: null,
           workingDir: '/tmp/project-a',
           conversationId: 'conversation-a',
           projectEventLog: [],
@@ -1179,7 +1183,6 @@ describe('Frontend contract behavior', () => {
         '/tmp/project-b': {
           ...state.projectScopedWorkspaces['/tmp/project-b'],
           activeFlow: null,
-          selectedRunId: null,
           workingDir: '/tmp/project-b',
           conversationId: 'conversation-b',
           projectEventLog: [],

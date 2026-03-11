@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
@@ -1151,11 +1152,88 @@ def test_mark_execution_workflow_started_loads_conversation_without_project_argu
         "conversation-test",
         "workflow-123",
         "spec_edit_approval",
+        "gpt-test",
+        "spec-edit-collatz-001",
     )
 
     assert snapshot["execution_workflow"]["run_id"] == "workflow-123"
     assert snapshot["execution_workflow"]["status"] == "running"
     assert snapshot["execution_workflow"]["flow_source"] == "spec_edit_approval"
+    run_payload = json.loads((ensure_project_paths(tmp_path, str(tmp_path)).runs_dir / "workflow-123" / "run.json").read_text())
+    assert run_payload["status"] == "running"
+    assert run_payload["project_path"] == str(tmp_path)
+    assert run_payload["model"] == "gpt-test"
+    assert run_payload["spec_id"] == "spec-edit-collatz-001"
+
+
+def test_run_execution_workflow_updates_run_record_and_execution_card(tmp_path: Path, monkeypatch) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    state = project_chat.ConversationState(
+        conversation_id="conversation-test",
+        project_path=str(tmp_path),
+        title="Workflow run test",
+        created_at="2026-03-11T02:00:00Z",
+        updated_at="2026-03-11T02:00:00Z",
+        spec_edit_proposals=[
+            project_chat.SpecEditProposal(
+                id="proposal-1",
+                created_at="2026-03-11T02:00:00Z",
+                summary="Summary",
+                changes=[project_chat.SpecEditProposalChange(path="specs/project.md", before="old", after="new")],
+                status="applied",
+                canonical_spec_edit_id="spec-edit-collatz-001",
+            )
+        ],
+    )
+    service._write_state(state)
+    service.mark_execution_workflow_started(
+        "conversation-test",
+        "workflow-123",
+        "spec_edit_approval",
+        "gpt-test",
+        "spec-edit-collatz-001",
+    )
+
+    async def fake_publish_snapshot(conversation_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(service, "publish_snapshot", fake_publish_snapshot)
+
+    asyncio.run(
+        service.run_execution_workflow(
+            "conversation-test",
+            "proposal-1",
+            "gpt-test",
+            "spec_edit_approval",
+            None,
+            "workflow-123",
+            lambda prompt, model: json.dumps(
+                {
+                    "title": "Execution plan",
+                    "summary": "Plan summary",
+                    "objective": "Implement the approved spec edit.",
+                    "work_items": [
+                        {
+                            "id": "work-1",
+                            "title": "Update spec",
+                            "description": "Apply the approved change.",
+                            "acceptance_criteria": ["Spec updated"],
+                            "depends_on": [],
+                        }
+                    ],
+                }
+            ),
+        )
+    )
+
+    run_payload = json.loads((ensure_project_paths(tmp_path, str(tmp_path)).runs_dir / "workflow-123" / "run.json").read_text())
+    assert run_payload["status"] == "success"
+    assert run_payload["result"] == "success"
+    assert run_payload["spec_id"] == "spec-edit-collatz-001"
+    assert run_payload["plan_id"].startswith("execution-card-")
+    snapshot = service.get_snapshot("conversation-test", str(tmp_path))
+    assert snapshot["execution_workflow"]["status"] == "idle"
+    assert len(snapshot["execution_cards"]) == 1
 
 
 def test_chat_session_ignores_duplicate_codex_agent_delta_channel(monkeypatch) -> None:

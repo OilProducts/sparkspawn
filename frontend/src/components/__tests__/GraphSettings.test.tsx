@@ -28,7 +28,6 @@ const resetGraphSettingsState = () => {
     projectScopedWorkspaces: {
       '/tmp/project-graph-settings': {
         activeFlow: 'implement-spec.dot',
-        selectedRunId: null,
         workingDir: DEFAULT_WORKING_DIRECTORY,
         conversationId: null,
         specId: null,

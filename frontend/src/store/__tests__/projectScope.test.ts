@@ -62,6 +62,7 @@ describe('project scope store behavior', () => {
     store.registerProject('/tmp/project-b')
 
     store.setRuntimeStatus('running')
+    store.setSelectedRunId('run-a')
     store.addLog({ time: '12:00', msg: 'running', type: 'info' })
     store.setSelectedNodeId('node-a')
     store.setDiagnostics([
@@ -77,10 +78,34 @@ describe('project scope store behavior', () => {
 
     const next = useStore.getState()
     expect(next.runtimeStatus).toBe('idle')
+    expect(next.selectedRunId).toBeNull()
     expect(next.logs).toEqual([])
     expect(next.selectedNodeId).toBeNull()
     expect(next.diagnostics).toEqual([])
     expect(next.graphAttrs).toEqual({})
     expect(next.saveState).toBe('idle')
+  })
+
+  it('does not persist run selection into project-scoped workspace state', () => {
+    const store = useStore.getState()
+    store.registerProject('/tmp/project-a')
+
+    store.setSelectedRunId('run-a')
+
+    expect(useStore.getState().selectedRunId).toBe('run-a')
+    expect(useStore.getState().projectScopedWorkspaces['/tmp/project-a']?.artifactRunId).toBeNull()
+  })
+
+  it('falls back to another registered project when removing the active project', () => {
+    const store = useStore.getState()
+    store.registerProject('/tmp/project-a')
+    store.registerProject('/tmp/project-b')
+    store.setActiveProjectPath('/tmp/project-a')
+
+    store.removeProject('/tmp/project-a', '/tmp/project-b')
+
+    const next = useStore.getState()
+    expect(next.projectRegistry['/tmp/project-a']).toBeUndefined()
+    expect(next.activeProjectPath).toBe('/tmp/project-b')
   })
 })

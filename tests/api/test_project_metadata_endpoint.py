@@ -182,3 +182,41 @@ def test_project_state_endpoint_updates_favorite_and_active_conversation(
     assert payload["is_favorite"] is True
     assert payload["last_accessed_at"] == "2026-03-08T12:00:00Z"
     assert payload["active_conversation_id"] == "conversation-tracked-project"
+
+
+def test_project_delete_endpoint_removes_registered_project_storage(
+    api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    project_dir = (tmp_path / "delete-project").resolve()
+    project_dir.mkdir()
+
+    register_response = api_client.post(
+        "/api/projects/register",
+        json={"project_path": str(project_dir)},
+    )
+    assert register_response.status_code == 200
+    register_payload = register_response.json()
+
+    project_root = server.get_settings().projects_dir / register_payload["project_id"]
+    (project_root / "conversations" / "conversation-a").mkdir(parents=True)
+    (project_root / "workflow").mkdir(parents=True, exist_ok=True)
+    (project_root / "workflow" / "conversation-a.json").write_text("{}", encoding="utf-8")
+
+    response = api_client.delete(
+        "/api/projects",
+        params={"project_path": str(project_dir)},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "deleted",
+        "project_id": register_payload["project_id"],
+        "project_path": str(project_dir),
+        "display_name": "delete-project",
+    }
+    assert not project_root.exists()
+
+    list_response = api_client.get("/api/projects")
+    assert list_response.status_code == 200
+    assert list_response.json() == []

@@ -957,8 +957,8 @@ export function RunsPanel() {
     }, [scopedRuns])
 
     const selectedRunSummary = useMemo(() => {
-        if (scopedRuns.length === 0) return null
-        return scopedRuns.find((run) => run.run_id === selectedRunId) || scopedRuns[0]
+        if (!selectedRunId) return null
+        return scopedRuns.find((run) => run.run_id === selectedRunId) || null
     }, [scopedRuns, selectedRunId])
     const degradedDetailPanels = useMemo(() => {
         const panels: string[] = []
@@ -1728,6 +1728,11 @@ export function RunsPanel() {
                 {!activeProjectPath && (
                     <div className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
                         Select an active project to view run history for that project.
+                    </div>
+                )}
+                {activeProjectPath && scopedRuns.length > 0 && !selectedRunSummary && (
+                    <div data-testid="run-selection-empty-state" className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+                        Select a run from the history table to inspect its details.
                     </div>
                 )}
                 {selectedRunSummary && (

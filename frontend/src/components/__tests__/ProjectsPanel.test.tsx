@@ -173,9 +173,9 @@ describe('ProjectsPanel', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.endsWith('/api/projects')) {
-          return new Response(JSON.stringify([]), {
-            status: 200,
+        if (url.includes('/api/projects') && !url.includes('/api/projects/conversations') && !url.includes('/api/projects/metadata') && !url.includes('/api/projects/register') && !url.includes('/api/projects/pick-directory')) {
+          return new Response(JSON.stringify({ detail: 'skip registry sync for preloaded test state' }), {
+            status: 503,
             headers: { 'Content-Type': 'application/json' },
           })
         }
@@ -2842,4 +2842,5 @@ describe('ProjectsPanel', () => {
       expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('This is the planning thread history.')
     })
   })
+
 })

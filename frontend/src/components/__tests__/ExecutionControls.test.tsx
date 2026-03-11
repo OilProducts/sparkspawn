@@ -88,7 +88,6 @@ describe('Execution controls behavior', () => {
       projectScopedWorkspaces: {
         '/tmp/project': {
           activeFlow: 'implement-spec.dot',
-          selectedRunId: null,
           workingDir: '/tmp/project',
           conversationId: null,
           projectEventLog: [],

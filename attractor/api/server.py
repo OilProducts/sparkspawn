@@ -49,6 +49,7 @@ from attractor.api.project_chat import (
 )
 from attractor.storage import (
     build_project_id,
+    delete_project_record,
     ensure_project_paths,
     list_project_records,
     normalize_project_path,
@@ -2216,6 +2217,15 @@ def _serialize_project_record(project) -> dict[str, object]:
     }
 
 
+def _serialize_deleted_project_record(project) -> dict[str, object]:
+    return {
+        "status": "deleted",
+        "project_id": project.project_id,
+        "project_path": project.project_path,
+        "display_name": project.display_name,
+    }
+
+
 @app.get("/api/projects")
 async def list_projects():
     projects = await asyncio.to_thread(list_project_records, get_settings().data_dir)
@@ -2253,6 +2263,22 @@ async def update_project_state(req: ProjectStateUpdateRequest):
         return _serialize_project_record(project)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/projects")
+async def delete_project(project_path: str):
+    normalized_project_path = normalize_project_path(project_path)
+    if not normalized_project_path:
+        raise HTTPException(status_code=400, detail="Project path is required.")
+    try:
+        deleted = await asyncio.to_thread(
+            delete_project_record,
+            get_settings().data_dir,
+            normalized_project_path,
+        )
+        return _serialize_deleted_project_record(deleted)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/projects/conversations")
@@ -2346,6 +2372,8 @@ async def approve_project_spec_edit_proposal(
             conversation_id,
             workflow_run_id,
             req.flow_source,
+            req.model,
+            proposal.canonical_spec_edit_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

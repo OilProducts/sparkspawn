@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import attractor.api.project_chat as project_chat
 import attractor.api.server as server
 
 
@@ -220,3 +221,35 @@ def test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04(
     run_ids = [run["run_id"] for run in payload["runs"]]
 
     assert run_ids == [newer_id, older_id]
+
+
+def test_execution_planning_workflow_runs_are_discoverable_by_run_listing_helpers(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = server.PROJECT_CHAT
+    project_path = "/tmp/project"
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-test",
+            project_path=project_path,
+            title="Workflow state test",
+            created_at="2026-03-11T02:00:00Z",
+            updated_at="2026-03-11T02:00:00Z",
+        )
+    )
+    service.mark_execution_workflow_started(
+        "conversation-test",
+        "workflow-123",
+        "spec_edit_approval",
+        "gpt-test",
+        "spec-edit-project-001",
+    )
+
+    run_roots = server._iter_run_roots(project_path=project_path)
+
+    assert any(run_root.name == "workflow-123" for run_root in run_roots)
+    record = server._read_run_meta(server._run_meta_path("workflow-123"))
+    assert record is not None
+    assert record.project_path == project_chat._normalize_project_path(project_path)
+    assert record.status == "running"

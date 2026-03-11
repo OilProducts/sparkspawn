@@ -597,7 +597,7 @@ describe('Project-scoped workflow behavior', () => {
         runId: 'workflow-plan-101',
       }),
     )
-    expect(state.selectedRunId).toBe('workflow-plan-101')
+    expect(scope.artifactRunId).toBe('workflow-plan-101')
     expect(screen.getByTestId('project-plan-gate-surface')).toBeVisible()
     expect(screen.getByTestId('project-plan-generation-surface')).toHaveTextContent('WORK-1')
   })

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 import re
+import shutil
 import tomllib
 from typing import Any
 
@@ -62,6 +63,13 @@ class ProjectRecord:
     last_accessed_at: str | None
     is_favorite: bool
     active_conversation_id: str | None
+
+
+@dataclass(frozen=True)
+class DeletedProjectRecord:
+    project_id: str
+    project_path: str
+    display_name: str
 
 
 def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
@@ -201,6 +209,25 @@ def update_project_record(
         next_payload["active_conversation_id"] = _normalize_optional_string(active_conversation_id)
     _write_project_record(project_paths.project_file, next_payload)
     return _build_project_record(project_paths)
+
+
+def delete_project_record(home_dir: Path, project_path: str) -> DeletedProjectRecord:
+    normalized_project_path = normalize_project_path(project_path)
+    if not normalized_project_path:
+        raise ValueError("Project path is required.")
+
+    project_id = build_project_id(normalized_project_path)
+    project_paths = read_project_paths_by_id(home_dir, project_id)
+    if project_paths is None or project_paths.project_path != normalized_project_path:
+        raise ValueError("Unknown project.")
+
+    deleted = DeletedProjectRecord(
+        project_id=project_paths.project_id,
+        project_path=project_paths.project_path,
+        display_name=project_paths.display_name,
+    )
+    shutil.rmtree(project_paths.root, ignore_errors=False)
+    return deleted
 
 
 def _read_project_record(path: Path) -> dict[str, object]:
