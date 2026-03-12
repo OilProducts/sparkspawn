@@ -61,6 +61,18 @@ describe('App shell behavior', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
+        if (url.includes('/api/projects')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/runs')) {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
         return new Response(JSON.stringify({}), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },

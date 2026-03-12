@@ -9,7 +9,8 @@ import { getToolHookCommandWarning } from "@/lib/graphAttrValidation"
 import { resolveEdgeFieldDiagnostics, resolveNodeFieldDiagnostics } from "@/lib/inspectorFieldDiagnostics"
 import { toExtensionAttrEntries } from "@/lib/extensionAttrs"
 import { retryLastSaveContent, saveFlowContent } from "@/lib/flowPersistence"
-import { fetchFlowListValidated } from '@/lib/apiClient'
+import { fetchFlowListValidated } from '@/lib/attractorClient'
+import { updateProjectStateValidated } from '@/lib/workspaceClient'
 import { resolveSaveRemediation } from "@/lib/saveRemediation"
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
@@ -77,7 +78,16 @@ function resolveInspectorScope({
 }
 
 export function Sidebar() {
-    const { viewMode, activeFlow, setActiveFlow, selectedNodeId, selectedEdgeId, setSelectedNodeId, setSelectedEdgeId } = useStore()
+    const {
+        viewMode,
+        activeFlow,
+        setActiveFlow,
+        selectedNodeId,
+        selectedEdgeId,
+        setSelectedNodeId,
+        setSelectedEdgeId,
+        upsertProjectRegistryEntry,
+    } = useStore()
     const isNarrowViewport = useNarrowViewport()
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const diagnostics = useStore((state) => state.diagnostics)
@@ -109,6 +119,25 @@ export function Sidebar() {
         void loadFlows()
     }, [])
 
+    const persistProjectFlowSelection = useCallback(async (flowName: string | null) => {
+        if (!activeProjectPath) return
+        try {
+            const project = await updateProjectStateValidated({
+                project_path: activeProjectPath,
+                active_flow_name: flowName,
+            })
+            upsertProjectRegistryEntry({
+                directoryPath: project.project_path,
+                isFavorite: project.is_favorite,
+                lastAccessedAt: project.last_accessed_at ?? null,
+                activeConversationId: project.active_conversation_id ?? null,
+                activeFlowName: project.active_flow_name ?? null,
+            })
+        } catch (error) {
+            console.error(error)
+        }
+    }, [activeProjectPath, upsertProjectRegistryEntry])
+
     const createNewFlow = async () => {
         if (!activeProjectPath) return
         const name = prompt("Enter flow name (e.g., demo.dot)");
@@ -133,6 +162,7 @@ export function Sidebar() {
 
         await loadFlows();
         setActiveFlow(fileName);
+        void persistProjectFlowSelection(fileName)
     }
 
     const handleDeleteFlow = async (e: React.MouseEvent, fileName: string) => {
@@ -146,6 +176,7 @@ export function Sidebar() {
 
         if (activeFlow === fileName) {
             setActiveFlow(null);
+            void persistProjectFlowSelection(null)
             setNodes([]);
             setEdges([]);
         }
@@ -491,7 +522,11 @@ export function Sidebar() {
                             {flows.map(f => (
                                 <div key={f} className="relative group">
                                     <button
-                                        onClick={() => activeProjectPath && setActiveFlow(f)}
+                                        onClick={() => {
+                                            if (!activeProjectPath) return
+                                            setActiveFlow(f)
+                                            void persistProjectFlowSelection(f)
+                                        }}
                                         className={`w-full text-left px-3 py-2 pr-8 rounded-md text-sm transition-colors ${activeFlow === f
                                             ? 'bg-secondary text-secondary-foreground font-medium'
                                             : 'text-muted-foreground hover:bg-muted hover:text-foreground'

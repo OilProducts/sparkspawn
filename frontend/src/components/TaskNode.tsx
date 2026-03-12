@@ -6,7 +6,7 @@ import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions'
 import { getHandlerType, getNodeFieldVisibility } from '@/lib/nodeVisibility';
 import { getToolHookCommandWarning } from '@/lib/graphAttrValidation';
 import { saveFlowContent } from '@/lib/flowPersistence';
-import { fetchPipelineAnswerValidated } from '@/lib/apiClient';
+import { fetchPipelineAnswerValidated } from '@/lib/attractorClient';
 
 export function TaskNode({ id, data, selected }: NodeProps) {
     const { activeFlow, viewMode } = useStore();

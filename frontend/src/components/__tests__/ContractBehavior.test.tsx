@@ -221,7 +221,6 @@ const resetContractState = () => {
         specStatus: 'draft',
         planId: null,
         planStatus: 'draft',
-        artifactRunId: null,
       },
     },
     projectRegistrationError: null,
@@ -1109,7 +1108,6 @@ describe('Frontend contract behavior', () => {
       JSON.stringify({
         viewMode: 'projects',
         activeProjectPath: '/tmp/project-contract-behavior',
-        activeFlow: null,
         selectedRunId: null,
       }),
     )
@@ -1124,8 +1122,9 @@ describe('Frontend contract behavior', () => {
 
     const persistedRouteStateRaw = localStorageMock.getItem('sparkspawn.ui_route_state')
     expect(persistedRouteStateRaw).toBeTruthy()
-    const persistedRouteState = JSON.parse(String(persistedRouteStateRaw)) as { activeProjectPath: string | null }
+    const persistedRouteState = JSON.parse(String(persistedRouteStateRaw)) as { activeProjectPath: string | null; activeFlow?: string | null }
     expect(persistedRouteState.activeProjectPath).toBe('/tmp/project-contract-behavior')
+    expect(persistedRouteState.activeFlow).toBeUndefined()
   })
 
   it('[CID:12.3.02] resolves execution payload working directory to concrete project-scoped path', () => {
@@ -1178,7 +1177,6 @@ describe('Frontend contract behavior', () => {
           planId: 'plan-a',
           planStatus: 'rejected',
           planProvenance: null,
-          artifactRunId: null,
         },
         '/tmp/project-b': {
           ...state.projectScopedWorkspaces['/tmp/project-b'],
@@ -1192,7 +1190,6 @@ describe('Frontend contract behavior', () => {
           planId: 'plan-b',
           planStatus: 'revision-requested',
           planProvenance: null,
-          artifactRunId: null,
         },
       },
     }))
@@ -5151,7 +5148,6 @@ digraph contract_behavior {
     localStorageMock.setItem('sparkspawn.ui_route_state', JSON.stringify({
       viewMode: 'projects',
       activeProjectPath: '/tmp/persisted-project',
-      activeFlow: null,
       selectedRunId: null,
     }))
 
@@ -5182,6 +5178,7 @@ digraph contract_behavior {
       directoryPath: '/tmp/persisted-project',
       isFavorite: true,
       lastAccessedAt: '2026-03-04T00:00:00.000Z',
+      activeFlowName: null,
     })
     expect(restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']?.conversationId).toBe(
       'conversation-persisted-project',

@@ -16,7 +16,7 @@ import {
     fetchPipelineGraphValidated,
     fetchPipelineQuestionsValidated,
     fetchRunsListValidated,
-} from '@/lib/apiClient'
+} from '@/lib/attractorClient'
 import { TIMELINE_UPDATE_BUDGET_MS } from '@/lib/performanceBudgets'
 
 interface RunRecord {

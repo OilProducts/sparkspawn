@@ -97,7 +97,6 @@ describe('Execution controls behavior', () => {
           planId: 'plan-456',
           planStatus: 'approved',
           planProvenance: null,
-          artifactRunId: null,
         },
       },
     }))

@@ -61,6 +61,7 @@ export interface RegisteredProject {
     directoryPath: string
     isFavorite: boolean
     lastAccessedAt: string | null
+    activeFlowName?: string | null
 }
 
 export interface ProjectRegistrationResult {
@@ -252,7 +253,6 @@ const deriveGraphAttrErrors = (attrs: GraphAttrs): GraphAttrErrors => {
 interface RouteState {
     viewMode: ViewMode
     activeProjectPath: string | null
-    activeFlow: string | null
 }
 
 interface ProjectScopedWorkspace {
@@ -266,7 +266,6 @@ interface ProjectScopedWorkspace {
     planId: string | null
     planStatus: PlanStatus
     planProvenance?: ArtifactProvenanceReference | null
-    artifactRunId: string | null
 }
 
 type ProjectScopedWorkspacePatch = Partial<ProjectScopedWorkspace>
@@ -284,6 +283,7 @@ interface HydratedProjectRecord {
     isFavorite: boolean
     lastAccessedAt: string | null
     activeConversationId?: string | null
+    activeFlowName?: string | null
 }
 
 const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
@@ -297,7 +297,6 @@ const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
     planId: null,
     planStatus: 'draft',
     planProvenance: null,
-    artifactRunId: null,
 }
 
 const resolveProjectScopedWorkspace = (
@@ -340,7 +339,6 @@ const selectProjectScopedArtifactState = (
 const DEFAULT_ROUTE_STATE: RouteState = {
     viewMode: 'home',
     activeProjectPath: null,
-    activeFlow: null,
 }
 
 const loadRouteState = (): RouteState => {
@@ -363,7 +361,6 @@ const loadRouteState = (): RouteState => {
         const parsedRouteState: RouteState = {
             viewMode: requestedViewMode,
             activeProjectPath: restoredActiveProjectPath,
-            activeFlow: restoredActiveProjectPath && typeof parsed.activeFlow === "string" ? parsed.activeFlow : null,
         }
         return {
             ...parsedRouteState,
@@ -497,9 +494,7 @@ const initialProjectRegistry: Record<string, RegisteredProject> = {}
 const initialProjectScopedWorkspaces: Record<string, ProjectScopedWorkspace> = restoredRouteState.activeProjectPath
     ? {
         [restoredRouteState.activeProjectPath]: resolveProjectScopedWorkspace(
-            {
-                activeFlow: restoredRouteState.activeFlow,
-            },
+            {},
             restoredRouteState.activeProjectPath
         ),
     }
@@ -519,7 +514,6 @@ export const useStore = create<AppState>((set, get) => ({
             saveRouteState({
                 viewMode: nextViewMode,
                 activeProjectPath: state.activeProjectPath,
-                activeFlow: state.activeFlow,
             })
             return { viewMode: nextViewMode }
         }),
@@ -539,10 +533,12 @@ export const useStore = create<AppState>((set, get) => ({
                     directoryPath: normalizedPath,
                     isFavorite: project.isFavorite === true,
                     lastAccessedAt: typeof project.lastAccessedAt === 'string' ? project.lastAccessedAt : null,
+                    activeFlowName: project.activeFlowName ?? null,
                 }
                 nextProjectScopedWorkspaces[normalizedPath] = resolveProjectScopedWorkspace(
                     {
                         ...nextProjectScopedWorkspaces[normalizedPath],
+                        activeFlow: project.activeFlowName ?? null,
                         conversationId: typeof project.activeConversationId === 'string'
                             ? project.activeConversationId
                             : nextProjectScopedWorkspaces[normalizedPath]?.conversationId ?? null,
@@ -559,7 +555,6 @@ export const useStore = create<AppState>((set, get) => ({
             saveRouteState({
                 viewMode: resolveViewModeForProjectScope(state.viewMode, nextActiveProjectPath),
                 activeProjectPath: nextActiveProjectPath,
-                activeFlow: nextActiveProjectPath ? nextActiveProjectScope?.activeFlow || null : null,
             })
             return {
                 projectRegistry: nextProjectRegistry,
@@ -584,6 +579,7 @@ export const useStore = create<AppState>((set, get) => ({
                     directoryPath: normalizedPath,
                     isFavorite: project.isFavorite === true,
                     lastAccessedAt: typeof project.lastAccessedAt === 'string' ? project.lastAccessedAt : null,
+                    activeFlowName: project.activeFlowName ?? null,
                 },
             }
             const nextProjectScopedWorkspaces = {
@@ -591,6 +587,7 @@ export const useStore = create<AppState>((set, get) => ({
                 [normalizedPath]: resolveProjectScopedWorkspace(
                     {
                         ...state.projectScopedWorkspaces[normalizedPath],
+                        activeFlow: project.activeFlowName ?? null,
                         conversationId: typeof project.activeConversationId === 'string'
                             ? project.activeConversationId
                             : state.projectScopedWorkspaces[normalizedPath]?.conversationId ?? null,
@@ -634,7 +631,6 @@ export const useStore = create<AppState>((set, get) => ({
             saveRouteState({
                 viewMode: nextViewMode,
                 activeProjectPath: nextActiveProjectPathResolved,
-                activeFlow: nextActiveProjectPathResolved ? nextActiveProjectScope?.activeFlow || null : null,
             })
 
             return {
@@ -684,7 +680,6 @@ export const useStore = create<AppState>((set, get) => ({
             saveRouteState({
                 viewMode: nextViewMode,
                 activeProjectPath: nextProjectPath,
-                activeFlow: nextProjectPath ? nextProjectScope.activeFlow : null,
             })
             return {
                 activeProjectPath: nextProjectPath,
@@ -757,6 +752,7 @@ export const useStore = create<AppState>((set, get) => ({
                     directoryPath: normalizedPath,
                     isFavorite: false,
                     lastAccessedAt: nowIso,
+                    activeFlowName: null,
                 },
             }
             nextProjectScopedWorkspaces[normalizedPath] = resolveProjectScopedWorkspace(
@@ -770,7 +766,6 @@ export const useStore = create<AppState>((set, get) => ({
             saveRouteState({
                 viewMode: state.viewMode,
                 activeProjectPath: nextActiveProjectPath,
-                activeFlow: state.activeProjectPath ? state.activeFlow : nextActiveProjectScope.activeFlow,
             })
             result = {
                 ok: true,
@@ -870,7 +865,6 @@ export const useStore = create<AppState>((set, get) => ({
             saveRouteState({
                 viewMode: state.viewMode,
                 activeProjectPath: nextActiveProjectPath,
-                activeFlow: state.activeFlow,
             })
             result = {
                 ok: true,
@@ -907,15 +901,10 @@ export const useStore = create<AppState>((set, get) => ({
         }),
     setProjectRegistrationError: (error) => set({ projectRegistrationError: error }),
     clearProjectRegistrationError: () => set({ projectRegistrationError: null }),
-    activeFlow: restoredProjectScope ? restoredProjectScope.activeFlow : restoredRouteState.activeFlow,
+    activeFlow: restoredProjectScope ? restoredProjectScope.activeFlow : null,
     setActiveFlow: (flow) =>
         set((state) => {
             if (!state.activeProjectPath) {
-                saveRouteState({
-                    viewMode: state.viewMode,
-                    activeProjectPath: null,
-                    activeFlow: null,
-                })
                 return { activeFlow: null }
             }
             const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
@@ -924,11 +913,6 @@ export const useStore = create<AppState>((set, get) => ({
                 ...scoped,
                 activeFlow: flow,
             }
-            saveRouteState({
-                viewMode: state.viewMode,
-                activeProjectPath: state.activeProjectPath,
-                activeFlow: flow,
-            })
             return {
                 activeFlow: flow,
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
@@ -993,7 +977,6 @@ export const useStore = create<AppState>((set, get) => ({
             saveRouteState({
                 viewMode: state.viewMode,
                 activeProjectPath: state.activeProjectPath,
-                activeFlow: nextScopedWorkspace.activeFlow,
             })
             return {
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,

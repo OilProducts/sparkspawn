@@ -93,7 +93,25 @@ describe('project scope store behavior', () => {
     store.setSelectedRunId('run-a')
 
     expect(useStore.getState().selectedRunId).toBe('run-a')
-    expect(useStore.getState().projectScopedWorkspaces['/tmp/project-a']?.artifactRunId).toBeNull()
+    expect(useStore.getState().projectScopedWorkspaces['/tmp/project-a']).toBeDefined()
+  })
+
+  it('hydrates the project flow reference from backend project metadata', () => {
+    const store = useStore.getState()
+    store.hydrateProjectRegistry([
+      {
+        directoryPath: '/tmp/project-a',
+        isFavorite: false,
+        lastAccessedAt: null,
+        activeConversationId: null,
+        activeFlowName: 'implement-spec.dot',
+      },
+    ])
+
+    const next = useStore.getState()
+    expect(next.projectRegistry['/tmp/project-a']?.activeFlowName).toBe('implement-spec.dot')
+    expect(next.projectScopedWorkspaces['/tmp/project-a']?.activeFlow).toBe('implement-spec.dot')
+    expect(next.activeFlow).toBeNull()
   })
 
   it('falls back to another registered project when removing the active project', () => {

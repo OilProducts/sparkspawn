@@ -1,5 +1,5 @@
 import { useStore } from "@/store"
-import { ApiHttpError, fetchPipelineGraphValidated } from '@/lib/apiClient'
+import { ApiHttpError, fetchPipelineGraphValidated } from '@/lib/attractorClient'
 import { TerminalSquare } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ExplainabilityPanel } from "./ExplainabilityPanel"

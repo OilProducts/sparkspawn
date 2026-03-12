@@ -25,7 +25,7 @@ import {
     fetchFlowPayloadValidated,
     fetchPreviewValidated,
     type PreviewResponsePayload,
-} from '@/lib/apiClient';
+} from '@/lib/attractorClient';
 import {
     EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS,
     saveFlowContent,

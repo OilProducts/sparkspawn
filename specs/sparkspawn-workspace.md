@@ -50,6 +50,8 @@ Spark Spawn owns:
 - execution cards
 - human review decisions for Spark Spawn artifacts
 - provenance links from workspace artifacts to Attractor flows and runs
+- project-to-flow associations
+- trigger-to-flow bindings
 
 These concepts are outside the scope of the base Attractor spec.
 
@@ -134,6 +136,20 @@ Spark Spawn MUST retain explicit provenance links:
 
 These links MUST be durable and queryable without reconstructing them from rendered UI history.
 
+### 4.6 Flow Association
+
+Flow documents remain Attractor resources.
+
+Spark Spawn does not own the flow definition itself, even when Spark Spawn created or edited that flow through Attractor APIs.
+
+Spark Spawn does own:
+- which flows are associated with a project
+- which flow is currently recorded as the project's preferred workspace flow reference
+- which flow a workspace artifact references
+- which triggers are bound to which flows for a project
+
+This means Spark Spawn stores flow usage metadata, while Attractor remains the source of truth for the flow document and execution semantics.
+
 ---
 
 ## 5. Workflow Model
@@ -191,6 +207,8 @@ Spark Spawn owns:
 - spec edit proposals
 - execution cards
 - artifact review decisions
+- project-to-flow associations
+- trigger-to-flow bindings
 - provenance metadata linking workspace artifacts to Attractor runs and flows
 
 ### 6.3 Frontend-Owned State

@@ -34,7 +34,6 @@ const resetGraphSettingsState = () => {
         specStatus: 'draft',
         planId: null,
         planStatus: 'draft',
-        artifactRunId: null,
       },
     },
     projectRegistrationError: null,

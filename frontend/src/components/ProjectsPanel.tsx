@@ -25,7 +25,7 @@ import {
     reviewExecutionCardValidated,
     sendConversationTurnValidated,
     updateProjectStateValidated,
-} from "@/lib/apiClient"
+} from "@/lib/workspaceClient"
 import { useNarrowViewport } from "@/lib/useNarrowViewport"
 import { isAbsoluteProjectPath, normalizeProjectPath } from "@/lib/projectPaths"
 import { HomeProjectSidebar } from "@/components/HomeProjectSidebar"
@@ -247,11 +247,13 @@ const toHydratedProjectRecord = (project: {
     is_favorite: boolean
     last_accessed_at?: string | null
     active_conversation_id?: string | null
+    active_flow_name?: string | null
 }) => ({
     directoryPath: project.project_path,
     isFavorite: project.is_favorite === true,
     lastAccessedAt: typeof project.last_accessed_at === "string" ? project.last_accessed_at : null,
     activeConversationId: typeof project.active_conversation_id === "string" ? project.active_conversation_id : null,
+    activeFlowName: typeof project.active_flow_name === "string" ? project.active_flow_name : null,
 })
 
 const formatConversationAgeShort = (value: string) => {
@@ -1059,6 +1061,7 @@ export function HomePanel() {
             last_accessed_at?: string | null
             active_conversation_id?: string | null
             is_favorite?: boolean | null
+            active_flow_name?: string | null
         },
     ) => {
         try {
@@ -1088,7 +1091,6 @@ export function HomePanel() {
             planId: null,
             planStatus: "draft",
             planProvenance: null,
-            artifactRunId: null,
         })
         void persistProjectState(projectPath, {
             active_conversation_id: conversationId,
@@ -1159,10 +1161,6 @@ export function HomePanel() {
             || latestProjectScope?.conversationId === snapshot.conversation_id
         const latestApprovedProposal = getLatestApprovedSpecEditProposal(snapshot)
         const latestExecutionCard = getLatestExecutionCard(snapshot)
-        const flowSource = snapshot.execution_workflow.flow_source
-            || latestExecutionCard?.flow_source
-            || latestProjectScope?.activeFlow
-            || null
         debugProjectChat("apply conversation snapshot", {
             source,
             projectPath,
@@ -1238,8 +1236,6 @@ export function HomePanel() {
                         gitCommit: latestApprovedProposal?.git_commit ?? null,
                     }
                     : null,
-                artifactRunId: snapshot.execution_workflow.run_id ?? latestExecutionCard?.source_workflow_run_id ?? null,
-                activeFlow: flowSource,
             })
             if (latestProjectScope?.conversationId !== snapshot.conversation_id) {
                 void persistProjectState(projectPath, {

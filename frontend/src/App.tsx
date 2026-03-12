@@ -9,13 +9,44 @@ import { HomePanel } from "./components/ProjectsPanel"
 import { ReactFlowProvider } from "@xyflow/react"
 import { useStore } from "@/store"
 import { useNarrowViewport } from "@/lib/useNarrowViewport"
+import { fetchProjectRegistryValidated } from "@/lib/workspaceClient"
+import { useEffect } from "react"
 
 function App() {
   const viewMode = useStore((state) => state.viewMode)
+  const hydrateProjectRegistry = useStore((state) => state.hydrateProjectRegistry)
   const isHomeMode = viewMode === 'home' || viewMode === 'projects'
   const isCanvasMode = viewMode === 'editor' || viewMode === 'execution'
   const showSidebar = isCanvasMode
   const isNarrowViewport = useNarrowViewport()
+
+  useEffect(() => {
+    let canceled = false
+
+    const loadProjectRegistry = async () => {
+      try {
+        const projects = await fetchProjectRegistryValidated()
+        if (!canceled) {
+          hydrateProjectRegistry(
+            projects.map((project) => ({
+              directoryPath: project.project_path,
+              isFavorite: project.is_favorite,
+              lastAccessedAt: project.last_accessed_at ?? null,
+              activeConversationId: project.active_conversation_id ?? null,
+              activeFlowName: project.active_flow_name ?? null,
+            })),
+          )
+        }
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+    void loadProjectRegistry()
+    return () => {
+      canceled = true
+    }
+  }, [hydrateProjectRegistry])
 
   return (
     <ReactFlowProvider>

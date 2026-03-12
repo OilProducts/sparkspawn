@@ -70,6 +70,8 @@ The frontend consumes Spark Spawn workspace data for:
 - project conversations
 - inline conversation artifacts
 - proposal and execution-card review state
+- project-to-flow associations
+- trigger-to-flow bindings
 - provenance references to flows and runs
 
 ### 3.2 Attractor Data
@@ -125,6 +127,8 @@ Bridge surfaces show how workspace artifacts connect to Attractor execution.
 
 Examples:
 - an approved execution card references the flow it will launch
+- a project surface can show which flows are associated with the project or bound to triggers
+- a project can restore its preferred workspace flow reference from workspace metadata
 - a launched execution card shows the resulting Attractor run id
 - a proposal or execution card may link to downstream run outcomes
 

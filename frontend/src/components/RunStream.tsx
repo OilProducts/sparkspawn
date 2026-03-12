@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@/store'
-import { ApiHttpError, fetchPipelineStatusValidated } from '@/lib/apiClient'
+import { ApiHttpError, fetchPipelineStatusValidated } from '@/lib/attractorClient'
 import { resolveSaveRemediation } from '@/lib/saveRemediation'
 
 function classifyLog(message: string): 'info' | 'success' | 'error' {

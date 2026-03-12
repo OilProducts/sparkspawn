@@ -7,7 +7,7 @@ import {
     fetchFlowPayloadValidated,
     fetchPipelineCancelValidated,
     fetchPipelineStartValidated,
-} from '@/lib/apiClient'
+} from '@/lib/attractorClient'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 
 type WorkflowFailureDiagnostics = {
