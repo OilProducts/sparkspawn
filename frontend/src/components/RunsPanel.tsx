@@ -858,7 +858,7 @@ export function RunsPanel() {
     const selectedRunId = useStore((state) => state.selectedRunId)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const setViewMode = useStore((state) => state.setViewMode)
-    const setActiveFlow = useStore((state) => state.setActiveFlow)
+    const setExecutionFlow = useStore((state) => state.setExecutionFlow)
     const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
     const setSpecId = useStore((state) => state.setSpecId)
     const setPlanId = useStore((state) => state.setPlanId)
@@ -1633,9 +1633,7 @@ export function RunsPanel() {
 
     const openRun = (run: RunRecord) => {
         setSelectedRunId(run.run_id)
-        if (run.flow_name) {
-            setActiveFlow(run.flow_name)
-        }
+        setExecutionFlow(run.flow_name || null)
         setViewMode('execution')
     }
 

@@ -28,6 +28,7 @@ const resetProjectScopeState = () => {
     viewMode: 'projects',
     activeProjectPath: null,
     activeFlow: null,
+    executionFlow: null,
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     projectRegistry: {},

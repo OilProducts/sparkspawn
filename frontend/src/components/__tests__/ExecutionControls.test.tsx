@@ -13,6 +13,7 @@ const resetExecutionState = () => {
     viewMode: 'projects',
     activeProjectPath: null,
     activeFlow: null,
+    executionFlow: null,
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     runtimeStatus: 'idle',
@@ -106,6 +107,78 @@ describe('Execution controls behavior', () => {
     expect(screen.getByTestId('execution-footer-controls')).toBeVisible()
     expect(screen.getByTestId('execute-button')).toBeVisible()
     expect(screen.queryByTestId('execution-footer-run-status')).not.toBeInTheDocument()
+  })
+
+  it('launches from the inspected execution flow without overwriting project flow preference', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.includes('/api/projects/metadata')) {
+        return new Response(JSON.stringify({ branch: 'main' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.endsWith('/api/flows/run-opened.dot')) {
+        return new Response(JSON.stringify({
+          name: 'run-opened.dot',
+          content: 'digraph run_opened { start -> done }',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.endsWith('/pipelines') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ status: 'started', pipeline_id: 'run-123' }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    useStore.setState((state) => ({
+      ...state,
+      viewMode: 'execution',
+      activeProjectPath: '/tmp/project',
+      activeFlow: 'preferred.dot',
+      executionFlow: 'run-opened.dot',
+      projectScopedWorkspaces: {
+        '/tmp/project': {
+          activeFlow: 'preferred.dot',
+          workingDir: '/tmp/project',
+          conversationId: null,
+          projectEventLog: [],
+          specId: null,
+          specStatus: null,
+          specProvenance: null,
+          planId: 'plan-123',
+          planStatus: 'approved',
+          planProvenance: null,
+        },
+      },
+    }))
+
+    render(<ExecutionControls />)
+
+    await user.click(screen.getByTestId('execute-button'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/pipelines',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"flow_name":"run-opened.dot"'),
+        }),
+      )
+    })
+    expect(useStore.getState().activeFlow).toBe('preferred.dot')
+    expect(useStore.getState().executionFlow).toBe('run-opened.dot')
   })
 
   it('renders runtime state and disables unsupported pause/resume controls', () => {

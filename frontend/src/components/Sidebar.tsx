@@ -81,7 +81,9 @@ export function Sidebar() {
     const {
         viewMode,
         activeFlow,
+        executionFlow,
         setActiveFlow,
+        setExecutionFlow,
         selectedNodeId,
         selectedEdgeId,
         setSelectedNodeId,
@@ -105,6 +107,7 @@ export function Sidebar() {
     const edges = useReactFlowStore((state) => state.edges)
     const saveTimer = useRef<number | null>(null)
     const pendingSaveRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
+    const displayedFlow = viewMode === 'execution' ? executionFlow || activeFlow : activeFlow
 
     const loadFlows = async () => {
         try {
@@ -162,6 +165,7 @@ export function Sidebar() {
 
         await loadFlows();
         setActiveFlow(fileName);
+        setExecutionFlow(fileName);
         void persistProjectFlowSelection(fileName)
     }
 
@@ -177,6 +181,9 @@ export function Sidebar() {
         if (activeFlow === fileName) {
             setActiveFlow(null);
             void persistProjectFlowSelection(null)
+        }
+        if (executionFlow === fileName) {
+            setExecutionFlow(null)
             setNodes([]);
             setEdges([]);
         }
@@ -184,7 +191,7 @@ export function Sidebar() {
     };
 
     const scheduleSave = (nextNodes: Node[], nextEdges: Edge[]) => {
-        if (!activeProjectPath || !activeFlow) return
+        if (!activeProjectPath || !displayedFlow) return
 
         pendingSaveRef.current = { nodes: nextNodes, edges: nextEdges }
         if (saveTimer.current) {
@@ -193,25 +200,25 @@ export function Sidebar() {
 
         saveTimer.current = window.setTimeout(() => {
             pendingSaveRef.current = null
-            const dot = generateDot(activeFlow, nextNodes, nextEdges, graphAttrs)
-            void saveFlowContent(activeFlow, dot)
+            const dot = generateDot(displayedFlow, nextNodes, nextEdges, graphAttrs)
+            void saveFlowContent(displayedFlow, dot)
         }, INSPECTOR_SAVE_DEBOUNCE_MS)
     }
 
     const flushPendingSave = useCallback(() => {
-        if (!activeProjectPath || !activeFlow || !pendingSaveRef.current) return
+        if (!activeProjectPath || !displayedFlow || !pendingSaveRef.current) return
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current)
             saveTimer.current = null
         }
         const pending = pendingSaveRef.current
         pendingSaveRef.current = null
-        const dot = generateDot(activeFlow, pending.nodes, pending.edges, graphAttrs)
-        void saveFlowContent(activeFlow, dot)
-    }, [activeProjectPath, activeFlow, graphAttrs])
+        const dot = generateDot(displayedFlow, pending.nodes, pending.edges, graphAttrs)
+        void saveFlowContent(displayedFlow, dot)
+    }, [activeProjectPath, displayedFlow, graphAttrs])
 
     const updateNodeProperty = (nodeId: string, key: string, value: string | boolean) => {
-        if (!activeProjectPath || !activeFlow) return;
+        if (!activeProjectPath || !displayedFlow) return;
 
         let newNodes: Node[] = [];
         setNodes(nds => {
@@ -284,7 +291,7 @@ export function Sidebar() {
     }, [diagnostics, selectedEdge])
     const activeInspectorScope = resolveInspectorScope({
         viewMode,
-        activeFlow,
+        activeFlow: displayedFlow,
         selectedNodeId,
         selectedEdgeId,
     })
@@ -308,7 +315,7 @@ export function Sidebar() {
     }
 
     const handleEdgePropertyChange = (key: string, value: string | boolean) => {
-        if (!activeProjectPath || !selectedEdgeId || !activeFlow) return;
+        if (!activeProjectPath || !selectedEdgeId || !displayedFlow) return;
 
         let newEdges: Edge[] = [];
         setEdges((eds) => {
@@ -330,7 +337,7 @@ export function Sidebar() {
     };
 
     const updateSelectedNodeAttrs = (transform: (attrs: Record<string, unknown>) => Record<string, unknown>) => {
-        if (!activeProjectPath || !activeFlow || !selectedNodeId) {
+        if (!activeProjectPath || !displayedFlow || !selectedNodeId) {
             return
         }
         let newNodes: Node[] = []
@@ -374,7 +381,7 @@ export function Sidebar() {
     }
 
     const updateSelectedEdgeAttrs = (transform: (attrs: Record<string, unknown>) => Record<string, unknown>) => {
-        if (!activeProjectPath || !activeFlow || !selectedEdgeId) {
+        if (!activeProjectPath || !displayedFlow || !selectedEdgeId) {
             return
         }
         let newEdges: Edge[] = []
@@ -524,10 +531,14 @@ export function Sidebar() {
                                     <button
                                         onClick={() => {
                                             if (!activeProjectPath) return
+                                            if (viewMode === 'execution') {
+                                                setExecutionFlow(f)
+                                                return
+                                            }
                                             setActiveFlow(f)
                                             void persistProjectFlowSelection(f)
                                         }}
-                                        className={`w-full text-left px-3 py-2 pr-8 rounded-md text-sm transition-colors ${activeFlow === f
+                                        className={`w-full text-left px-3 py-2 pr-8 rounded-md text-sm transition-colors ${displayedFlow === f
                                             ? 'bg-secondary text-secondary-foreground font-medium'
                                             : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                                             }`}

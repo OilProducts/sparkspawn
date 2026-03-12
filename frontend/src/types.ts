@@ -5,6 +5,8 @@ export interface SparkspawnState {
     setViewMode: (mode: ViewMode) => void;
     activeFlow: string | null;
     setActiveFlow: (flow: string | null) => void;
+    executionFlow: string | null;
+    setExecutionFlow: (flow: string | null) => void;
     selectedNodeId: string | null;
     setSelectedNodeId: (id: string | null) => void;
 }

@@ -425,6 +425,8 @@ interface AppState {
     clearProjectRegistrationError: () => void
     activeFlow: string | null
     setActiveFlow: (flow: string | null) => void
+    executionFlow: string | null
+    setExecutionFlow: (flow: string | null) => void
     selectedNodeId: string | null
     setSelectedNodeId: (id: string | null) => void
     selectedEdgeId: string | null
@@ -562,6 +564,7 @@ export const useStore = create<AppState>((set, get) => ({
                 activeProjectPath: nextActiveProjectPath,
                 viewMode: resolveViewModeForProjectScope(state.viewMode, nextActiveProjectPath),
                 activeFlow: nextActiveProjectPath ? nextActiveProjectScope?.activeFlow || null : null,
+                executionFlow: null,
                 selectedRunId: null,
                 workingDir: nextActiveProjectPath ? nextActiveProjectScope?.workingDir || DEFAULT_WORKING_DIRECTORY : DEFAULT_WORKING_DIRECTORY,
                 recentProjectPaths: nextActiveProjectPath ? pushRecentProjectPath(state.recentProjectPaths, nextActiveProjectPath) : state.recentProjectPaths,
@@ -640,6 +643,7 @@ export const useStore = create<AppState>((set, get) => ({
                 activeProjectPath: nextActiveProjectPathResolved,
                 viewMode: nextViewMode,
                 activeFlow: nextActiveProjectPathResolved ? nextActiveProjectScope?.activeFlow || null : null,
+                executionFlow: state.activeProjectPath === normalizedPath ? null : state.executionFlow,
                 selectedRunId: state.activeProjectPath === normalizedPath ? null : state.selectedRunId,
                 workingDir: nextActiveProjectPathResolved ? nextActiveProjectScope?.workingDir || DEFAULT_WORKING_DIRECTORY : DEFAULT_WORKING_DIRECTORY,
             }
@@ -688,6 +692,7 @@ export const useStore = create<AppState>((set, get) => ({
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
                 recentProjectPaths: pushRecentProjectPath(state.recentProjectPaths, nextProjectPath),
                 activeFlow: nextProjectPath ? nextProjectScope.activeFlow : null,
+                executionFlow: isProjectSwitch ? null : state.executionFlow,
                 selectedRunId: isProjectSwitch ? null : state.selectedRunId,
                 workingDir: nextProjectPath ? nextProjectScope.workingDir : DEFAULT_WORKING_DIRECTORY,
                 runtimeStatus: isProjectSwitch ? 'idle' : state.runtimeStatus,
@@ -780,6 +785,7 @@ export const useStore = create<AppState>((set, get) => ({
                 activeProjectPath: nextActiveProjectPath,
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
                 activeFlow: state.activeProjectPath ? state.activeFlow : nextActiveProjectScope.activeFlow,
+                executionFlow: state.activeProjectPath ? state.executionFlow : null,
                 selectedRunId: state.activeProjectPath ? state.selectedRunId : null,
                 workingDir: state.activeProjectPath ? state.workingDir : nextActiveProjectScope.workingDir,
             }
@@ -918,6 +924,8 @@ export const useStore = create<AppState>((set, get) => ({
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
             }
         }),
+    executionFlow: null,
+    setExecutionFlow: (flow) => set({ executionFlow: flow }),
     selectedNodeId: null,
     setSelectedNodeId: (id) => set({ selectedNodeId: id }),
     selectedEdgeId: null,

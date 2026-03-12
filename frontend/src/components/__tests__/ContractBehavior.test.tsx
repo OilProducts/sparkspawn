@@ -203,6 +203,7 @@ const resetContractState = () => {
     viewMode: 'editor',
     activeProjectPath: '/tmp/project-contract-behavior',
     activeFlow: 'contract-behavior.dot',
+    executionFlow: null,
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     projectRegistry: {

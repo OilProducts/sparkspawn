@@ -16,6 +16,7 @@ const resetGraphSettingsState = () => {
     viewMode: 'editor',
     activeProjectPath: '/tmp/project-graph-settings',
     activeFlow: 'implement-spec.dot',
+    executionFlow: null,
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     projectRegistry: {

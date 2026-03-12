@@ -9,6 +9,7 @@ const resetStore = () => {
     viewMode: 'projects',
     activeProjectPath: null,
     activeFlow: null,
+    executionFlow: null,
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     projectRegistry: {},
@@ -63,6 +64,7 @@ describe('project scope store behavior', () => {
 
     store.setRuntimeStatus('running')
     store.setSelectedRunId('run-a')
+    store.setExecutionFlow('run-flow-a.dot')
     store.addLog({ time: '12:00', msg: 'running', type: 'info' })
     store.setSelectedNodeId('node-a')
     store.setDiagnostics([
@@ -79,6 +81,7 @@ describe('project scope store behavior', () => {
     const next = useStore.getState()
     expect(next.runtimeStatus).toBe('idle')
     expect(next.selectedRunId).toBeNull()
+    expect(next.executionFlow).toBeNull()
     expect(next.logs).toEqual([])
     expect(next.selectedNodeId).toBeNull()
     expect(next.diagnostics).toEqual([])
@@ -94,6 +97,19 @@ describe('project scope store behavior', () => {
 
     expect(useStore.getState().selectedRunId).toBe('run-a')
     expect(useStore.getState().projectScopedWorkspaces['/tmp/project-a']).toBeDefined()
+  })
+
+  it('keeps the inspected execution flow separate from the project preferred flow', () => {
+    const store = useStore.getState()
+    store.registerProject('/tmp/project-a')
+
+    store.setActiveFlow('preferred.dot')
+    store.setExecutionFlow('run-opened.dot')
+
+    const next = useStore.getState()
+    expect(next.activeFlow).toBe('preferred.dot')
+    expect(next.executionFlow).toBe('run-opened.dot')
+    expect(next.projectScopedWorkspaces['/tmp/project-a']?.activeFlow).toBe('preferred.dot')
   })
 
   it('hydrates the project flow reference from backend project metadata', () => {

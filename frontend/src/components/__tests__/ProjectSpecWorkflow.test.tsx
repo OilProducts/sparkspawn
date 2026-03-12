@@ -13,6 +13,7 @@ const resetProjectWorkflowState = () => {
     viewMode: 'home',
     activeProjectPath: null,
     activeFlow: null,
+    executionFlow: null,
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     model: 'gpt-5.3',

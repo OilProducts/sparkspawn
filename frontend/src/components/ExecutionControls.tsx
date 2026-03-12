@@ -77,6 +77,7 @@ export function ExecutionControls() {
         state.activeProjectPath ? state.projectScopedWorkspaces[state.activeProjectPath] : null
     )
     const activeFlow = useStore((state) => state.activeFlow)
+    const executionFlow = useStore((state) => state.executionFlow)
     const workingDir = useStore((state) => state.workingDir)
     const model = useStore((state) => state.model)
     const diagnostics = useStore((state) => state.diagnostics)
@@ -92,9 +93,10 @@ export function ExecutionControls() {
     const [runStartError, setRunStartError] = useState<string | null>(null)
     const [lastBuildWorkflowFailure, setLastBuildWorkflowFailure] = useState<WorkflowFailureDiagnostics | null>(null)
     const [runStartGitPolicyWarning, setRunStartGitPolicyWarning] = useState<string | null>(null)
+    const executionFlowName = executionFlow || activeFlow
     const runInitiationForm = {
         projectPath: activeProjectPath || '',
-        flowSource: activeFlow || '',
+        flowSource: executionFlowName || '',
         workingDirectory: workingDir,
         backend: 'codex',
         model: model.trim() || null,
@@ -103,7 +105,7 @@ export function ExecutionControls() {
     }
     const buildWorkflowLaunchReady = Boolean(activeProjectScope?.planId) && activeProjectScope?.planStatus === 'approved'
     const canRerunBuildWorkflow =
-        Boolean(activeProjectPath) && Boolean(activeFlow) && !hasValidationErrors && buildWorkflowLaunchReady
+        Boolean(activeProjectPath) && Boolean(executionFlowName) && !hasValidationErrors && buildWorkflowLaunchReady
 
     const runIsActive = ACTIVE_RUNTIME_STATUSES.has(runtimeStatus)
     const shouldShowFooter = viewMode === 'execution'
@@ -123,7 +125,7 @@ export function ExecutionControls() {
     const showRunStatusRow = runIsActive || Boolean(selectedRunId) || Boolean(humanGate)
     const executeDisabledReason = !activeProjectPath
         ? 'Select an active project before running.'
-        : !activeFlow
+        : !executionFlowName
             ? 'Select an active flow before running.'
             : hasValidationErrors
                 ? 'Fix validation errors before running.'
@@ -164,7 +166,7 @@ export function ExecutionControls() {
     }
 
     const requestStart = async () => {
-        if (!activeProjectPath || !activeFlow || hasValidationErrors) return
+        if (!activeProjectPath || !executionFlowName || hasValidationErrors) return
 
         setRunStartError(null)
         if (!buildWorkflowLaunchReady) {
@@ -306,7 +308,7 @@ export function ExecutionControls() {
                     onClick={() => {
                         void requestStart()
                     }}
-                    disabled={!activeProjectPath || !activeFlow || hasValidationErrors}
+                    disabled={!activeProjectPath || !executionFlowName || hasValidationErrors}
                     title={executeDisabledReason}
                     className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                 >

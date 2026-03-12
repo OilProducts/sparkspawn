@@ -108,7 +108,9 @@ function nowMs(): number {
 }
 
 export function Editor() {
-    const { activeFlow, viewMode, selectedNodeId, selectedEdgeId, setSelectedNodeId, setSelectedEdgeId } = useStore();
+    const { viewMode, selectedNodeId, selectedEdgeId, setSelectedNodeId, setSelectedEdgeId } = useStore();
+    const activeFlow = useStore((state) => state.activeFlow);
+    const executionFlow = useStore((state) => state.executionFlow);
     const activeProjectPath = useStore((state) => state.activeProjectPath);
     const nodeStatuses = useStore((state) => state.nodeStatuses);
     const graphAttrs = useStore((state) => state.graphAttrs);
@@ -143,6 +145,7 @@ export function Editor() {
         ...(previewDebounceMs > DEFAULT_PREVIEW_DEBOUNCE_MS ? ['debounced-preview'] : []),
     ];
     const optimizationLabel = activeOptimizations.length ? activeOptimizations.join(', ') : 'none';
+    const flowName = viewMode === 'execution' ? executionFlow || activeFlow : activeFlow;
 
     const enforceSingleSelectedNode = useCallback((nextNodes: Node[], selectedNodeId: string) => {
         setEdges((currentEdges) =>
@@ -169,17 +172,17 @@ export function Editor() {
     }, [setNodes, setSelectedEdgeId, setSelectedNodeId]);
 
     const saveFlow = useCallback((nextNodes: Node[], nextEdges: Edge[], options?: SaveFlowOptions) => {
-        if (!activeProjectPath || !activeFlow) return;
-        const dot = generateDot(activeFlow, nextNodes, nextEdges, graphAttrs);
+        if (!activeProjectPath || !flowName) return;
+        const dot = generateDot(flowName, nextNodes, nextEdges, graphAttrs);
         if (options) {
-            void saveFlowContent(activeFlow, dot, options);
+            void saveFlowContent(flowName, dot, options);
             return;
         }
-        void saveFlowContent(activeFlow, dot);
-    }, [activeProjectPath, activeFlow, graphAttrs]);
+        void saveFlowContent(flowName, dot);
+    }, [activeProjectPath, flowName, graphAttrs]);
 
     const scheduleSave = useCallback((nextNodes: Node[], nextEdges: Edge[], options?: SaveFlowOptions) => {
-        if (!activeProjectPath || !activeFlow) return;
+        if (!activeProjectPath || !flowName) return;
         pendingSaveRef.current = { nodes: nextNodes, edges: nextEdges, options };
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current);
@@ -188,10 +191,10 @@ export function Editor() {
             pendingSaveRef.current = null;
             saveFlow(nextNodes, nextEdges, options);
         }, 250);
-    }, [activeProjectPath, activeFlow, saveFlow]);
+    }, [activeProjectPath, flowName, saveFlow]);
 
     const flushPendingSave = useCallback(() => {
-        if (!activeProjectPath || !activeFlow || !pendingSaveRef.current) return;
+        if (!activeProjectPath || !flowName || !pendingSaveRef.current) return;
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current);
             saveTimer.current = null;
@@ -199,12 +202,12 @@ export function Editor() {
         const pending = pendingSaveRef.current;
         pendingSaveRef.current = null;
         saveFlow(pending.nodes, pending.edges, pending.options);
-    }, [activeProjectPath, activeFlow, saveFlow]);
+    }, [activeProjectPath, flowName, saveFlow]);
 
     const hydrateFromPreview = useCallback(async (preview: PreviewResponse, sourceDot?: string) => {
         if (!preview.graph) return false;
         const canonicalModel = buildCanonicalFlowModelFromPreviewGraph(
-            activeFlow ?? 'flow',
+            flowName ?? 'flow',
             preview.graph,
             sourceDot !== undefined ? { rawDot: sourceDot } : undefined,
         )
@@ -314,7 +317,7 @@ export function Editor() {
         hydratedRef.current = true;
         return true;
     }, [
-        activeFlow,
+        flowName,
         setEdges,
         setGraphAttrs,
         setNodes,
@@ -339,7 +342,7 @@ export function Editor() {
     // Auto-load and sync with Backend Preview
     useEffect(() => {
         hydratedRef.current = false;
-        if (!activeFlow) {
+        if (!flowName) {
             clearDotSerializationContext();
             setNodes([]);
             setEdges([]);
@@ -362,12 +365,12 @@ export function Editor() {
         setEditorMode('structured');
         rawDotEntryDraftRef.current = '';
 
-        fetchFlowPayloadValidated(activeFlow)
+        fetchFlowPayloadValidated(flowName)
             .then((data) => {
                 const normalizedContent = normalizeLegacyDot(data.content);
                 setRawDotDraft(normalizedContent);
                 if (activeProjectPath && normalizedContent !== data.content) {
-                    void saveFlowContentExpectingSemanticEquivalence(activeFlow, normalizedContent);
+                    void saveFlowContentExpectingSemanticEquivalence(flowName, normalizedContent);
                 }
                 return requestPreview(normalizedContent).then((preview) => ({
                     normalizedContent,
@@ -377,7 +380,7 @@ export function Editor() {
             .then(({ normalizedContent, preview }) => hydrateFromPreview(preview, normalizedContent))
             .catch(console.error);
     }, [
-        activeFlow,
+        flowName,
         activeProjectPath,
         clearDiagnostics,
         hydrateFromPreview,
@@ -388,14 +391,14 @@ export function Editor() {
 
     useEffect(() => {
         if (
-            !activeFlow
+            !flowName
             || !hydratedRef.current
             || viewMode === 'execution'
             || suppressPreview
             || isDragging
             || editorMode === 'raw'
         ) return;
-        const dot = generateDot(activeFlow, nodes, edges, graphAttrs);
+        const dot = generateDot(flowName, nodes, edges, graphAttrs);
         if (previewTimer.current) {
             window.clearTimeout(previewTimer.current);
         }
@@ -409,7 +412,7 @@ export function Editor() {
             }
         };
     }, [
-        activeFlow,
+        flowName,
         nodes,
         edges,
         graphAttrs,
@@ -515,7 +518,7 @@ export function Editor() {
     );
 
     const onAddNode = useCallback(() => {
-        if (!activeProjectPath || !activeFlow) return;
+        if (!activeProjectPath || !flowName) return;
         const defaultModel = graphAttrs.ui_default_llm_model || uiDefaults.llm_model || '';
         const defaultProvider = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || '';
         const defaultReasoning = graphAttrs.ui_default_reasoning_effort || uiDefaults.reasoning_effort || '';
@@ -539,21 +542,21 @@ export function Editor() {
             scheduleSave(newNodes, edges);
             return newNodes;
         });
-    }, [activeProjectPath, activeFlow, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
+    }, [activeProjectPath, flowName, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
 
     const enterRawDotMode = useCallback(() => {
-        if (!activeProjectPath || !activeFlow) return;
+        if (!activeProjectPath || !flowName) return;
         if (editorMode === 'raw') return;
         flushPendingSave();
-        const dot = generateDot(activeFlow, nodes, edges, graphAttrs);
+        const dot = generateDot(flowName, nodes, edges, graphAttrs);
         rawDotEntryDraftRef.current = dot;
         setRawDotDraft(dot);
         setRawHandoffError(null);
         setEditorMode('raw');
-    }, [activeProjectPath, activeFlow, editorMode, edges, flushPendingSave, graphAttrs, nodes]);
+    }, [activeProjectPath, flowName, editorMode, edges, flushPendingSave, graphAttrs, nodes]);
 
     const returnToStructuredMode = useCallback(async () => {
-        if (!activeProjectPath || !activeFlow) return;
+        if (!activeProjectPath || !flowName) return;
         if (rawHandoffInFlightRef.current) {
             return;
         }
@@ -562,7 +565,7 @@ export function Editor() {
         try {
             const expectSemanticEquivalence = rawDotEntryDraftRef.current === rawDotDraft;
             const save = expectSemanticEquivalence ? saveFlowContentExpectingSemanticEquivalence : saveFlowContent;
-            const saved = await save(activeFlow, rawDotDraft);
+            const saved = await save(flowName, rawDotDraft);
             if (!saved) {
                 const latestSaveErrorMessage = useStore.getState().saveErrorMessage;
                 setRawHandoffError(
@@ -594,7 +597,7 @@ export function Editor() {
             rawHandoffInFlightRef.current = false;
             setIsRawHandoffInFlight(false);
         }
-    }, [activeProjectPath, activeFlow, hydrateFromPreview, rawDotDraft, requestPreview]);
+    }, [activeProjectPath, flowName, hydrateFromPreview, rawDotDraft, requestPreview]);
 
     const onSelectionChange = useCallback(({ nodes, edges }: OnSelectionChangeParams) => {
         const selectedNode = nodes.find(n => n.selected);
@@ -684,7 +687,7 @@ export function Editor() {
                 </ReactFlow>
             )}
 
-            {viewMode === 'editor' && activeFlow && (
+            {viewMode === 'editor' && flowName && (
                 <div className="absolute left-4 top-4 z-10 flex gap-2">
                     <div data-testid="editor-mode-toggle" className="flex rounded-md border border-border bg-background/90 p-1 shadow-sm">
                         <button
@@ -748,7 +751,7 @@ export function Editor() {
                 </div>
             )}
 
-            {activeFlow && editorMode === 'structured' && <ValidationPanel />}
+            {flowName && editorMode === 'structured' && <ValidationPanel />}
             <ExecutionControls />
         </div>
     );
