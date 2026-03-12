@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -223,33 +224,277 @@ def test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04(
     assert run_ids == [newer_id, older_id]
 
 
-def test_execution_planning_workflow_runs_are_discoverable_by_run_listing_helpers(
+def test_execution_planning_approval_launches_real_pipeline_backed_run(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    service = server.PROJECT_CHAT
-    project_path = "/tmp/project"
-    service._write_state(
+    project_path = str(tmp_path / "project")
+    Path(project_path).mkdir(parents=True, exist_ok=True)
+    flows_dir = server.get_settings().flows_dir
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    (flows_dir / "plan-generation.dot").write_text(
+        "\n".join(
+            [
+                "digraph plan_generation {",
+                '  graph [goal=\"Generate a tracker-ready execution card JSON.\", label=\"Plan Generation\"];',
+                '  start [label=\"Start\", shape=Mdiamond];',
+                '  generate_execution_card [label=\"Generate Execution Card\", prompt=\"$goal\", shape=box];',
+                '  done [label=\"Done\", shape=Msquare];',
+                "  start -> generate_execution_card;",
+                "  generate_execution_card -> done;",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class _Backend:
+        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
+            del node_id, prompt, context, timeout
+            return json.dumps(
+                {
+                    "title": "Execution plan",
+                    "summary": "Plan summary",
+                    "objective": "Implement the approved spec edit.",
+                    "work_items": [
+                        {
+                            "id": "work-1",
+                            "title": "Update spec",
+                            "description": "Apply the approved change.",
+                            "acceptance_criteria": ["Spec updated"],
+                            "depends_on": [],
+                        }
+                    ],
+                }
+            )
+
+    monkeypatch.setattr(
+        server,
+        "_build_codergen_backend",
+        lambda backend_name, working_dir, emit, model=None: _Backend(),
+    )
+
+    server.PROJECT_CHAT._write_state(
         project_chat.ConversationState(
             conversation_id="conversation-test",
             project_path=project_path,
             title="Workflow state test",
             created_at="2026-03-11T02:00:00Z",
             updated_at="2026-03-11T02:00:00Z",
+            spec_edit_proposals=[
+                project_chat.SpecEditProposal(
+                    id="proposal-1",
+                    created_at="2026-03-11T02:00:00Z",
+                    summary="Summary",
+                    changes=[project_chat.SpecEditProposalChange(path="specs/project.md", before="old", after="new")],
+                    status="pending",
+                )
+            ],
         )
     )
-    service.mark_execution_workflow_started(
-        "conversation-test",
-        "workflow-123",
-        "spec_edit_approval",
-        "gpt-test",
-        "spec-edit-project-001",
+
+    response = api_client.post(
+        "/api/conversations/conversation-test/spec-edit-proposals/proposal-1/approve",
+        json={
+            "project_path": project_path,
+            "flow_source": "plan-generation.dot",
+        },
     )
 
-    run_roots = server._iter_run_roots(project_path=project_path)
+    assert response.status_code == 200
+    workflow_run_id = response.json()["execution_workflow"]["run_id"]
 
-    assert any(run_root.name == "workflow-123" for run_root in run_roots)
-    record = server._read_run_meta(server._run_meta_path("workflow-123"))
+    terminal_status = "running"
+    for _ in range(200):
+        pipeline_response = api_client.get(f"/pipelines/{workflow_run_id}")
+        assert pipeline_response.status_code == 200
+        terminal_status = pipeline_response.json()["status"]
+        if terminal_status != "running":
+            break
+        time.sleep(0.01)
+    assert terminal_status == "success"
+
+    snapshot = {}
+    for _ in range(200):
+        conversation_response = api_client.get(
+            "/api/conversations/conversation-test",
+            params={"project_path": project_path},
+        )
+        assert conversation_response.status_code == 200
+        snapshot = conversation_response.json()
+        if snapshot["execution_workflow"]["status"] == "idle" and snapshot["execution_cards"]:
+            break
+        time.sleep(0.01)
+
+    assert snapshot["execution_workflow"]["status"] == "idle"
+    assert snapshot["execution_cards"][0]["source_workflow_run_id"] == workflow_run_id
+
+    record = server._read_run_meta(server._run_meta_path(workflow_run_id))
     assert record is not None
+    assert record.flow_name == "plan-generation.dot"
     assert record.project_path == project_chat._normalize_project_path(project_path)
-    assert record.status == "running"
+    assert record.status == "success"
+    assert record.plan_id == snapshot["execution_cards"][0]["id"]
+
+    checkpoint_response = api_client.get(f"/pipelines/{workflow_run_id}/checkpoint")
+    assert checkpoint_response.status_code == 200
+    context_response = api_client.get(f"/pipelines/{workflow_run_id}/context")
+    assert context_response.status_code == 200
+    artifacts_response = api_client.get(f"/pipelines/{workflow_run_id}/artifacts")
+    assert artifacts_response.status_code == 200
+    artifact_paths = [entry["path"] for entry in artifacts_response.json()["artifacts"]]
+    assert "artifacts/graphviz/pipeline.dot" in artifact_paths
+    assert f"logs/{server.EXECUTION_PLANNING_STAGE_ID}/response.md" in artifact_paths
+
+
+def test_approved_execution_card_launches_selected_flow_run(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project_path = str(tmp_path / "project")
+    Path(project_path).mkdir(parents=True, exist_ok=True)
+    flows_dir = server.get_settings().flows_dir
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    (flows_dir / "implement-spec.dot").write_text(
+        "\n".join(
+            [
+                "digraph implement_spec {",
+                '  graph [goal="Implement the approved execution card."];',
+                '  start [shape="Mdiamond"];',
+                '  implement [prompt="Implement card", shape="box"];',
+                '  done [shape="Msquare"];',
+                "  start -> implement;",
+                "  implement -> done;",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class _Backend:
+        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
+            del node_id, prompt, context, timeout
+            return "implemented"
+
+    monkeypatch.setattr(
+        server,
+        "_build_codergen_backend",
+        lambda backend_name, working_dir, emit, model=None: _Backend(),
+    )
+
+    server.PROJECT_CHAT._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-test",
+            project_path=project_path,
+            title="Execution approval test",
+            created_at="2026-03-11T02:00:00Z",
+            updated_at="2026-03-11T02:00:00Z",
+            execution_cards=[
+                project_chat.ExecutionCard(
+                    id="execution-card-1",
+                    title="Execution plan",
+                    summary="Plan summary",
+                    objective="Implement the approved spec edit.",
+                    source_spec_edit_id="spec-edit-1",
+                    source_workflow_run_id="workflow-plan-1",
+                    created_at="2026-03-11T02:00:00Z",
+                    updated_at="2026-03-11T02:00:00Z",
+                    status="draft",
+                    flow_source="plan-generation.dot",
+                    work_items=[],
+                    review_feedback=[],
+                )
+            ],
+        )
+    )
+
+    response = api_client.post(
+        "/api/conversations/conversation-test/execution-cards/execution-card-1/review",
+        json={
+            "project_path": project_path,
+            "disposition": "approved",
+            "message": "Approved for dispatch.",
+            "flow_source": "implement-spec.dot",
+        },
+    )
+
+    assert response.status_code == 200
+
+    runs_response = api_client.get("/runs", params={"project_path": project_path})
+    assert runs_response.status_code == 200
+    runs_payload = runs_response.json()["runs"]
+    matching_runs = [run for run in runs_payload if run["plan_id"] == "execution-card-1"]
+    assert len(matching_runs) == 1
+    launched_run = matching_runs[0]
+    assert launched_run["flow_name"] == "implement-spec.dot"
+    assert launched_run["spec_id"] == "spec-edit-1"
+
+    terminal_status = "running"
+    for _ in range(200):
+        pipeline_response = api_client.get(f"/pipelines/{launched_run['run_id']}")
+        assert pipeline_response.status_code == 200
+        terminal_status = pipeline_response.json()["status"]
+        if terminal_status != "running":
+            break
+        time.sleep(0.01)
+    assert terminal_status == "success"
+
+    snapshot_response = api_client.get(
+        "/api/conversations/conversation-test",
+        params={"project_path": project_path},
+    )
+    assert snapshot_response.status_code == 200
+    snapshot = snapshot_response.json()
+    assert snapshot["execution_cards"][0]["status"] == "approved"
+    assert snapshot["event_log"][-1]["message"] == (
+        f"Dispatched execution card execution-card-1 as run {launched_run['run_id']} using implement-spec.dot."
+    )
+
+
+def test_approved_execution_card_requires_explicit_execution_flow(
+    api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    project_path = str(tmp_path / "project")
+    Path(project_path).mkdir(parents=True, exist_ok=True)
+    server.PROJECT_CHAT._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-test",
+            project_path=project_path,
+            title="Execution approval test",
+            created_at="2026-03-11T02:00:00Z",
+            updated_at="2026-03-11T02:00:00Z",
+            execution_cards=[
+                project_chat.ExecutionCard(
+                    id="execution-card-1",
+                    title="Execution plan",
+                    summary="Plan summary",
+                    objective="Implement the approved spec edit.",
+                    source_spec_edit_id="spec-edit-1",
+                    source_workflow_run_id="workflow-plan-1",
+                    created_at="2026-03-11T02:00:00Z",
+                    updated_at="2026-03-11T02:00:00Z",
+                    status="draft",
+                    flow_source="plan-generation.dot",
+                    work_items=[],
+                    review_feedback=[],
+                )
+            ],
+        )
+    )
+
+    response = api_client.post(
+        "/api/conversations/conversation-test/execution-cards/execution-card-1/review",
+        json={
+            "project_path": project_path,
+            "disposition": "approved",
+            "message": "Approved for dispatch.",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "An execution flow must be selected before approving an execution card."

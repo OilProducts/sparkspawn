@@ -365,3 +365,75 @@ def test_local_codex_app_server_backend_does_not_cache_empty_thread_key(tmp_path
     assert first == "thread-1"
     assert second == "thread-2"
     assert created == ["thread-1", "thread-2"]
+
+
+def test_local_codex_app_server_backend_accepts_task_complete_without_turn_completed_after_idle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.LocalCodexAppServerBackend(str(tmp_path), events.append, model=None)
+
+    class FakeStdout:
+        def __init__(self, lines: list[str]) -> None:
+            self._lines = list(lines)
+
+        def readline(self) -> str:
+            if not self._lines:
+                return ""
+            return f"{self._lines.pop(0)}\n"
+
+    class FakeStdin:
+        def write(self, text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self, lines: list[str]) -> None:
+            self.stdout = FakeStdout(lines)
+            self.stdin = FakeStdin()
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> None:
+            return None
+
+        def kill(self) -> None:
+            return None
+
+    class FakeSelector:
+        def __init__(self) -> None:
+            self._stdout = None
+
+        def register(self, stdout, events) -> None:
+            self._stdout = stdout
+
+        def select(self, timeout: float | None = None):
+            if self._stdout is not None and getattr(self._stdout, "_lines", None):
+                return [(object(), object())]
+            return []
+
+    lines = [
+        '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"experimentalApi":true}}}',
+        '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-123"}}}',
+        '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-123","status":"inProgress","items":[]}}}',
+        '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Ack"}}',
+        '{"jsonrpc":"2.0","method":"codex/event/task_complete","params":{"msg":{"last_agent_message":"Ack"}}}',
+    ]
+    monotonic_values = iter([0.0, 0.1, 0.2, 0.3, 0.4, 1.6])
+
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: FakeProcess(lines))
+    monkeypatch.setattr(server.selectors, "DefaultSelector", FakeSelector)
+    monkeypatch.setattr(server.codex_app_server, "APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(server.time, "monotonic", lambda: next(monotonic_values))
+
+    result = backend.run("plan", "hello", Context())
+
+    assert result == "Ack"
+    assert {"type": "log", "msg": "[plan] Ack"} in events

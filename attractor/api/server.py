@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 from dataclasses import dataclass, field
 import threading
@@ -31,6 +32,7 @@ from attractor.dsl import (
     parse_dot,
     validate_graph,
 )
+from attractor.dsl.models import DotAttribute, DotValueType
 from attractor.engine import (
     Checkpoint,
     Context,
@@ -42,6 +44,7 @@ from attractor.engine import (
 )
 from attractor.graphviz_export import export_graphviz_artifact
 from attractor.config import Settings, resolve_settings, validate_settings
+from attractor.api import codex_app_server
 from attractor.api.project_chat import (
     ProjectChatService,
     build_codex_runtime_environment,
@@ -69,6 +72,7 @@ from attractor.transforms import (
 
 
 app = FastAPI()
+LOGGER = logging.getLogger(__name__)
 SETTINGS_LOCK = threading.Lock()
 SETTINGS = resolve_settings()
 PROJECT_CHAT = ProjectChatService(SETTINGS.data_dir)
@@ -760,9 +764,13 @@ def _list_run_output_artifacts(run_root: Path) -> List[Dict[str, object]]:
     _add_file(run_root / "manifest.json")
     _add_file(run_root / "checkpoint.json")
 
+    logs_root = run_root / "logs"
+    if logs_root.exists():
+        for file_path in logs_root.rglob("*"):
+            _add_file(file_path)
     if run_root.exists():
         for child in run_root.iterdir():
-            if not child.is_dir() or child.name == "artifacts":
+            if not child.is_dir() or child.name in {"artifacts", "logs"}:
                 continue
             _add_file(child / "prompt.md")
             _add_file(child / "response.md")
@@ -968,6 +976,9 @@ DEFAULT_FLOW = """digraph SoftwareFactory {
     start -> setup -> build -> done;
 }"""
 
+DEFAULT_EXECUTION_PLANNING_FLOW = "plan-generation.dot"
+EXECUTION_PLANNING_STAGE_ID = "generate_execution_card"
+
 
 class LocalCodexCliBackend(CodergenBackend):
     def __init__(self, working_dir: str, emit, model: Optional[str] = None):
@@ -1075,12 +1086,9 @@ class LocalCodexAppServerBackend(CodergenBackend):
         timeout: Optional[float] = None,
     ) -> str | Outcome:
         cmd = ["codex", "app-server"]
-        deadline = time.time() + timeout if timeout else None
-        agent_chunks: list[str] = []
-        command_chunks: list[str] = []
-        last_token_total: Optional[int] = None
-        turn_status: Optional[str] = None
-        turn_error: Optional[str] = None
+        deadline = time.monotonic() + timeout if timeout else None
+        last_activity_at = time.monotonic()
+        stream_state = codex_app_server.CodexAppServerTurnState()
 
         def log_line(message: str) -> None:
             if message:
@@ -1163,74 +1171,17 @@ class LocalCodexAppServerBackend(CodergenBackend):
                 return
             send_response(req_id, error={"code": -32000, "message": f"Unsupported request: {method}"})
 
-        saw_item_agent_message_delta = False
-
-        def handle_notification(message: dict) -> None:
-            nonlocal last_token_total, turn_status, turn_error, saw_item_agent_message_delta
-            method = message.get("method")
-            params = message.get("params") or {}
-            if method == "item/agentMessage/delta":
-                delta = params.get("delta") or ""
-                if delta:
-                    saw_item_agent_message_delta = True
-                    agent_chunks.append(delta)
-                return
-            if method == "codex/event/agent_message_delta":
-                if saw_item_agent_message_delta:
-                    return
-                delta = (params.get("msg") or {}).get("delta") or ""
-                if delta:
-                    agent_chunks.append(delta)
-                return
-            if method == "codex/event/agent_message":
-                msg = (params.get("msg") or {}).get("message")
-                if msg:
-                    agent_chunks.clear()
-                    agent_chunks.append(msg)
-                return
-            if method == "item/commandExecution/outputDelta":
-                delta = params.get("delta") or ""
-                if delta:
-                    command_chunks.append(delta)
-                return
-            if method == "thread/tokenUsage/updated":
-                token_usage = params.get("tokenUsage") or {}
-                total_tokens = (token_usage.get("total") or {}).get("totalTokens")
-                if isinstance(total_tokens, int):
-                    last_token_total = total_tokens
-                return
-            if method == "codex/event/token_count":
-                info = (params.get("msg") or {}).get("info") or {}
-                total_tokens = (info.get("total_token_usage") or {}).get("total_tokens")
-                if isinstance(total_tokens, int):
-                    last_token_total = total_tokens
-                return
-            if method == "error":
-                turn_status = "failed"
-                turn_error = (params.get("message") or "App server error")
-                return
-            if method == "turn/completed":
-                turn = params.get("turn") or {}
-                turn_status = turn.get("status")
-                if turn_status == "failed":
-                    err = turn.get("error") or {}
-                    turn_error = err.get("message") or turn_error
-                return
-            if method == "codex/event/task_complete":
-                return
-
         def wait_for_response(target_id: int) -> Optional[dict]:
             while True:
-                if deadline is not None and time.time() > deadline:
+                if deadline is not None and time.monotonic() > deadline:
                     return None
                 line = read_line(0.1)
                 if line is None:
                     if proc.poll() is not None:
                         return None
                     continue
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
+                message = codex_app_server.parse_jsonrpc_line(line)
+                if message is None:
                     log_line(line)
                     continue
                 if "id" in message and "method" in message:
@@ -1239,29 +1190,7 @@ class LocalCodexAppServerBackend(CodergenBackend):
                 if message.get("id") == target_id:
                     return message
                 if "method" in message:
-                    handle_notification(message)
-
-        def wait_for_turn_completion() -> bool:
-            while True:
-                if deadline is not None and time.time() > deadline:
-                    return False
-                line = read_line(0.1)
-                if line is None:
-                    if proc.poll() is not None:
-                        return False
-                    continue
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
-                    log_line(line)
-                    continue
-                if "id" in message and "method" in message:
-                    handle_server_request(message)
-                    continue
-                if "method" in message:
-                    handle_notification(message)
-                    if message.get("method") == "turn/completed":
-                        return True
+                    codex_app_server.process_turn_message(message, stream_state)
 
         try:
             init_id = send_request(
@@ -1309,21 +1238,48 @@ class LocalCodexAppServerBackend(CodergenBackend):
             if not turn_response or turn_response.get("error"):
                 return fail("app-server turn/start failed")
 
-            completed = wait_for_turn_completion()
-            if not completed:
-                return fail("app-server turn timed out or exited early")
+            while True:
+                if deadline is not None and time.monotonic() > deadline:
+                    return fail(f"app-server turn timed out after {timeout:g}s")
+                line = read_line(0.1)
+                if line is None:
+                    idle_for = time.monotonic() - last_activity_at
+                    if idle_for >= codex_app_server.APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS:
+                        if stream_state.can_finalize_without_turn_completed():
+                            break
+                        return fail("app-server turn timed out waiting for activity")
+                    if proc.poll() is not None:
+                        if stream_state.can_finalize_without_turn_completed():
+                            break
+                        return fail("app-server turn exited before completion")
+                    continue
+                last_activity_at = time.monotonic()
+                message = codex_app_server.parse_jsonrpc_line(line)
+                if message is None:
+                    log_line(line)
+                    continue
+                if "id" in message and "method" in message:
+                    handle_server_request(message)
+                    continue
+                if "method" not in message:
+                    continue
+                normalized_events = codex_app_server.process_turn_message(message, stream_state)
+                if any(event.kind == "turn_completed" for event in normalized_events):
+                    break
 
-            if turn_status and turn_status != "completed":
-                return fail(turn_error or f"app-server turn ended with status '{turn_status}'")
+            if stream_state.turn_status and stream_state.turn_status != "completed":
+                return fail(stream_state.turn_error or f"app-server turn ended with status '{stream_state.turn_status}'")
+            if stream_state.last_error:
+                return fail(stream_state.last_error)
 
-            agent_text = "".join(agent_chunks).strip()
+            agent_text = stream_state.resolved_agent_text()
             if agent_text:
                 log_line(agent_text)
-            command_text = "".join(command_chunks).strip()
+            command_text = stream_state.resolved_command_text()
             if command_text:
                 log_line(command_text)
-            if last_token_total is not None:
-                log_line(f"tokens used: {last_token_total}")
+            if stream_state.last_token_total is not None:
+                log_line(f"tokens used: {stream_state.last_token_total}")
             if agent_text:
                 return agent_text
             if command_text:
@@ -1633,8 +1589,20 @@ async def preview_pipeline(req: PreviewRequest):
     return payload
 
 
-async def _start_pipeline(req: PipelineStartRequest) -> dict:
-    run_id = uuid.uuid4().hex
+async def _start_pipeline(
+    req: PipelineStartRequest,
+    *,
+    run_id: Optional[str] = None,
+    on_complete: Optional[Callable[[str, str], Any]] = None,
+) -> dict:
+    run_id = (run_id or uuid.uuid4().hex).strip()
+    if not run_id:
+        run_id = uuid.uuid4().hex
+    if _get_active_run(run_id) is not None or _read_run_meta(_run_meta_path(run_id)) is not None:
+        return {
+            "status": "validation_error",
+            "error": f"Run id already exists: {run_id}",
+        }
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[0])
     try:
         graph = parse_dot(req.flow_content)
@@ -1793,6 +1761,7 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
     )
 
     async def _run():
+        final_status = "failed"
         try:
             await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[3])
             active = _get_active_run(run_id)
@@ -1830,6 +1799,13 @@ async def _start_pipeline(req: PipelineStartRequest) -> dict:
         finally:
             await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[4])
             _pop_active_run(run_id)
+            if on_complete is not None:
+                try:
+                    completion_result = on_complete(run_id, final_status)
+                    if asyncio.iscoroutine(completion_result):
+                        await completion_result
+                except Exception:  # noqa: BLE001
+                    LOGGER.exception("pipeline completion callback failed for run %s", run_id)
 
     asyncio.create_task(_run())
     return {
@@ -2167,21 +2143,193 @@ def _pick_project_directory(prompt: str = "Select Spark Spawn project directory"
     raise RuntimeError(picker_errors[-1] if picker_errors else "No native directory picker is available in this runtime.")
 
 
-def _run_project_chat_codex_prompt(project_path: str, prompt: str, model: Optional[str]) -> str:
-    backend = LocalCodexAppServerBackend(
-        project_path,
-        lambda _message: None,
-        model=(model or "").strip() or None,
+def _inject_pipeline_goal(flow_content: str, goal: str) -> str:
+    graph = parse_dot(flow_content)
+    existing = graph.graph_attrs.get("goal")
+    graph.graph_attrs["goal"] = DotAttribute(
+        key="goal",
+        value=goal,
+        value_type=DotValueType.STRING,
+        line=existing.line if existing is not None else 0,
     )
-    result = backend.run(
-        "project_chat",
-        prompt,
-        Context(values={}),
-        timeout=300,
+    return format_dot(graph)
+
+
+def _load_flow_content(flow_source: str) -> str:
+    flow_path = _resolve_flow_path(flow_source)
+    if not flow_path.exists():
+        raise HTTPException(status_code=404, detail=f"Flow not found: {flow_path.name}")
+    return flow_path.read_text(encoding="utf-8")
+
+
+def _load_execution_planning_flow_content(flow_source: str, prompt: str) -> str:
+    return _inject_pipeline_goal(_load_flow_content(flow_source), prompt)
+
+
+def _read_pipeline_stage_response(run_id: str, stage_id: str) -> str:
+    candidate_paths = [
+        _run_root(run_id) / "logs" / stage_id / "response.md",
+        _run_root(run_id) / stage_id / "response.md",
+    ]
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if text.strip():
+            return text
+    raise RuntimeError(f"Run {run_id} completed without a response artifact for stage {stage_id}.")
+
+
+def _record_run_plan_id(run_id: str, plan_id: str) -> None:
+    with RUN_HISTORY_LOCK:
+        record = _read_run_meta(_run_meta_path(run_id))
+        if record is None:
+            return
+        record.plan_id = plan_id
+        _write_run_meta(record)
+
+
+async def _launch_execution_planning_pipeline(
+    *,
+    conversation_id: str,
+    proposal_id: str,
+    workflow_run_id: str,
+    flow_source: str,
+    model: Optional[str],
+    review_feedback: Optional[str],
+) -> None:
+    launch_spec = await asyncio.to_thread(
+        PROJECT_CHAT.prepare_execution_workflow_launch,
+        conversation_id,
+        proposal_id,
+        review_feedback,
     )
-    if isinstance(result, Outcome):
-        raise RuntimeError(result.failure_reason or "Codex app-server chat run failed")
-    return str(result)
+
+    async def handle_completion(completed_run_id: str, completed_status: str) -> None:
+        try:
+            if completed_status != "success":
+                record = _read_run_meta(_run_meta_path(completed_run_id))
+                error = (
+                    record.last_error
+                    if record is not None and record.last_error.strip()
+                    else f"Execution planning pipeline ended with status '{completed_status}'."
+                )
+                await asyncio.to_thread(
+                    PROJECT_CHAT.fail_execution_workflow,
+                    conversation_id,
+                    completed_run_id,
+                    flow_source,
+                    error,
+                )
+                await PROJECT_CHAT.publish_snapshot(conversation_id)
+                return
+
+            raw_response = await asyncio.to_thread(
+                _read_pipeline_stage_response,
+                completed_run_id,
+                EXECUTION_PLANNING_STAGE_ID,
+            )
+            execution_card = await asyncio.to_thread(
+                PROJECT_CHAT.complete_execution_workflow,
+                conversation_id,
+                proposal_id,
+                flow_source,
+                completed_run_id,
+                raw_response,
+            )
+            await asyncio.to_thread(_record_run_plan_id, completed_run_id, execution_card.id)
+            await PROJECT_CHAT.publish_snapshot(conversation_id)
+        except Exception as exc:  # noqa: BLE001
+            await asyncio.to_thread(
+                PROJECT_CHAT.fail_execution_workflow,
+                conversation_id,
+                completed_run_id,
+                flow_source,
+                str(exc),
+            )
+            await PROJECT_CHAT.publish_snapshot(conversation_id)
+
+    try:
+        flow_content = _load_execution_planning_flow_content(flow_source, launch_spec.prompt)
+        launch_payload = await _start_pipeline(
+            PipelineStartRequest(
+                flow_content=flow_content,
+                working_directory=launch_spec.project_path,
+                backend="codex",
+                model=model,
+                flow_name=flow_source,
+                spec_id=launch_spec.spec_id,
+            ),
+            run_id=workflow_run_id,
+            on_complete=handle_completion,
+        )
+    except HTTPException as exc:
+        await asyncio.to_thread(
+            PROJECT_CHAT.fail_execution_workflow,
+            conversation_id,
+            workflow_run_id,
+            flow_source,
+            str(exc.detail),
+        )
+        await PROJECT_CHAT.publish_snapshot(conversation_id)
+        raise
+
+    if launch_payload.get("status") != "started":
+        error = str(
+            launch_payload.get("error")
+            or "Execution planning flow could not be started."
+        )
+        await asyncio.to_thread(
+            PROJECT_CHAT.fail_execution_workflow,
+            conversation_id,
+            workflow_run_id,
+            flow_source,
+            error,
+        )
+        await PROJECT_CHAT.publish_snapshot(conversation_id)
+        raise HTTPException(status_code=500, detail=error)
+
+
+async def _launch_execution_card_pipeline(
+    *,
+    conversation_id: str,
+    execution_card_id: str,
+    project_path: str,
+    flow_source: str,
+    model: Optional[str],
+    spec_id: str,
+    plan_id: str,
+) -> str:
+    flow_content = _load_flow_content(flow_source)
+    launch_payload = await _start_pipeline(
+        PipelineStartRequest(
+            flow_content=flow_content,
+            working_directory=project_path,
+            backend="codex",
+            model=model,
+            flow_name=flow_source,
+            spec_id=spec_id,
+            plan_id=plan_id,
+        ),
+    )
+    if launch_payload.get("status") != "started":
+        error = str(
+            launch_payload.get("error")
+            or "Execution flow could not be started."
+        )
+        raise HTTPException(status_code=500, detail=error)
+    run_id = str(launch_payload.get("run_id") or "")
+    if not run_id:
+        raise HTTPException(status_code=500, detail="Execution flow did not return a run id.")
+    snapshot = await asyncio.to_thread(
+        PROJECT_CHAT.note_execution_card_dispatched,
+        conversation_id,
+        execution_card_id,
+        run_id,
+        flow_source,
+    )
+    await PROJECT_CHAT.publish_snapshot(conversation_id)
+    return run_id
 
 
 @app.get("/api/conversations/{conversation_id}")
@@ -2359,6 +2507,7 @@ async def approve_project_spec_edit_proposal(
     proposal_id: str,
     req: SpecEditApprovalRequest,
 ):
+    effective_flow_source = (req.flow_source or DEFAULT_EXECUTION_PLANNING_FLOW).strip() or DEFAULT_EXECUTION_PLANNING_FLOW
     try:
         snapshot, proposal = await asyncio.to_thread(
             PROJECT_CHAT.approve_spec_edit,
@@ -2371,9 +2520,7 @@ async def approve_project_spec_edit_proposal(
             PROJECT_CHAT.mark_execution_workflow_started,
             conversation_id,
             workflow_run_id,
-            req.flow_source,
-            req.model,
-            proposal.canonical_spec_edit_id,
+            effective_flow_source,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2381,18 +2528,15 @@ async def approve_project_spec_edit_proposal(
         detail = exc.stderr.strip() if exc.stderr else str(exc)
         raise HTTPException(status_code=500, detail=f"Failed to commit approved spec edit: {detail}") from exc
 
-    await PROJECT_CHAT.publish_snapshot(conversation_id)
-    asyncio.create_task(
-        PROJECT_CHAT.run_execution_workflow(
-            conversation_id,
-            proposal.id,
-            req.model,
-            req.flow_source,
-            None,
-            workflow_run_id,
-            lambda prompt, model: _run_project_chat_codex_prompt(req.project_path, prompt, model),
-        )
+    await _launch_execution_planning_pipeline(
+        conversation_id=conversation_id,
+        proposal_id=proposal.id,
+        workflow_run_id=workflow_run_id,
+        flow_source=effective_flow_source,
+        model=req.model,
+        review_feedback=None,
     )
+    await PROJECT_CHAT.publish_snapshot(conversation_id)
     return snapshot
 
 
@@ -2423,6 +2567,7 @@ async def review_project_execution_card(
 ):
     if req.disposition not in {"approved", "rejected", "revision_requested"}:
         raise HTTPException(status_code=400, detail="Execution card disposition must be approved, rejected, or revision_requested.")
+    effective_flow_source = (req.flow_source or "").strip()
     try:
         snapshot, execution_card, proposal_id, workflow_run_id = await asyncio.to_thread(
             PROJECT_CHAT.review_execution_card,
@@ -2431,22 +2576,31 @@ async def review_project_execution_card(
             execution_card_id,
             req.disposition,
             req.message,
-            req.flow_source,
+            effective_flow_source or None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await PROJECT_CHAT.publish_snapshot(conversation_id)
-    if req.disposition != "approved" and proposal_id and workflow_run_id:
-        asyncio.create_task(
-            PROJECT_CHAT.run_execution_workflow(
-                conversation_id,
-                proposal_id,
-                req.model,
-                req.flow_source or execution_card.flow_source,
-                req.message,
-                workflow_run_id,
-                lambda prompt, model: _run_project_chat_codex_prompt(req.project_path, prompt, model),
-            )
+    if req.disposition == "approved":
+        if not effective_flow_source:
+            raise HTTPException(status_code=400, detail="An execution flow must be selected before approving an execution card.")
+        await _launch_execution_card_pipeline(
+            conversation_id=conversation_id,
+            execution_card_id=execution_card.id,
+            project_path=req.project_path,
+            flow_source=effective_flow_source,
+            model=req.model,
+            spec_id=execution_card.source_spec_edit_id,
+            plan_id=execution_card.id,
+        )
+    elif proposal_id and workflow_run_id:
+        await _launch_execution_planning_pipeline(
+            conversation_id=conversation_id,
+            proposal_id=proposal_id,
+            workflow_run_id=workflow_run_id,
+            flow_source=effective_flow_source or execution_card.flow_source or DEFAULT_EXECUTION_PLANNING_FLOW,
+            model=req.model,
+            review_feedback=req.message,
         )
     return snapshot
 

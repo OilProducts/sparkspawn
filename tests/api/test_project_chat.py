@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import threading
 import time
@@ -8,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import attractor.api.codex_app_server as codex_app_server
 import attractor.api.server as server
 import attractor.api.project_chat as project_chat
 from attractor.prompt_templates import PROMPTS_FILE_NAME
@@ -15,8 +15,8 @@ from attractor.storage import ensure_project_paths
 
 
 def test_extract_command_text_handles_list_and_string_payloads() -> None:
-    assert project_chat._extract_command_text({"command": ["git", "status", "--short"]}) == "git status --short"
-    assert project_chat._extract_command_text({"commandLine": "npm test"}) == "npm test"
+    assert codex_app_server.extract_command_text({"command": ["git", "status", "--short"]}) == "git status --short"
+    assert codex_app_server.extract_command_text({"commandLine": "npm test"}) == "npm test"
 
 
 def test_parse_chat_response_payload_accepts_plain_text_and_json() -> None:
@@ -141,7 +141,7 @@ def test_extract_file_paths_deduplicates_nested_entries() -> None:
         ],
     }
 
-    assert project_chat._extract_file_paths(payload) == [
+    assert codex_app_server.extract_file_paths(payload) == [
         "frontend/src/components/ProjectsPanel.tsx",
         "frontend/src/lib/apiClient.ts",
         "frontend/src/store.ts",
@@ -149,7 +149,7 @@ def test_extract_file_paths_deduplicates_nested_entries() -> None:
 
 
 def test_append_tool_output_keeps_latest_tail() -> None:
-    output = project_chat._append_tool_output("abc", "def", limit=4)
+    output = codex_app_server.append_tool_output("abc", "def", limit=4)
 
     assert output == "cdef"
 
@@ -1152,21 +1152,14 @@ def test_mark_execution_workflow_started_loads_conversation_without_project_argu
         "conversation-test",
         "workflow-123",
         "spec_edit_approval",
-        "gpt-test",
-        "spec-edit-collatz-001",
     )
 
     assert snapshot["execution_workflow"]["run_id"] == "workflow-123"
     assert snapshot["execution_workflow"]["status"] == "running"
     assert snapshot["execution_workflow"]["flow_source"] == "spec_edit_approval"
-    run_payload = json.loads((ensure_project_paths(tmp_path, str(tmp_path)).runs_dir / "workflow-123" / "run.json").read_text())
-    assert run_payload["status"] == "running"
-    assert run_payload["project_path"] == str(tmp_path)
-    assert run_payload["model"] == "gpt-test"
-    assert run_payload["spec_id"] == "spec-edit-collatz-001"
 
 
-def test_run_execution_workflow_updates_run_record_and_execution_card(tmp_path: Path, monkeypatch) -> None:
+def test_prepare_execution_workflow_launch_builds_prompt_from_approved_proposal(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     state = project_chat.ConversationState(
         conversation_id="conversation-test",
@@ -1186,54 +1179,137 @@ def test_run_execution_workflow_updates_run_record_and_execution_card(tmp_path: 
         ],
     )
     service._write_state(state)
-    service.mark_execution_workflow_started(
+
+    launch_spec = service.prepare_execution_workflow_launch(
         "conversation-test",
+        "proposal-1",
+        "Focus the first step on validating the CLI contract.",
+    )
+
+    assert launch_spec.conversation_id == "conversation-test"
+    assert launch_spec.project_path == str(tmp_path)
+    assert launch_spec.proposal_id == "proposal-1"
+    assert launch_spec.spec_id == "spec-edit-collatz-001"
+    assert '"id": "proposal-1"' in launch_spec.prompt
+    assert launch_spec.prompt.endswith("Focus the first step on validating the CLI contract.")
+
+
+def test_complete_execution_workflow_creates_execution_card_and_clears_matching_run(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    state = project_chat.ConversationState(
+        conversation_id="conversation-test",
+        project_path=str(tmp_path),
+        title="Workflow run test",
+        created_at="2026-03-11T02:00:00Z",
+        updated_at="2026-03-11T02:00:00Z",
+        spec_edit_proposals=[
+            project_chat.SpecEditProposal(
+                id="proposal-1",
+                created_at="2026-03-11T02:00:00Z",
+                summary="Summary",
+                changes=[project_chat.SpecEditProposalChange(path="specs/project.md", before="old", after="new")],
+                status="applied",
+                canonical_spec_edit_id="spec-edit-collatz-001",
+            )
+        ],
+        execution_workflow=project_chat.ExecutionWorkflowState(
+            run_id="workflow-123",
+            status="running",
+            flow_source="plan-generation.dot",
+        ),
+    )
+
+    service._write_state(state)
+
+    execution_card = service.complete_execution_workflow(
+        "conversation-test",
+        "proposal-1",
+        "plan-generation.dot",
         "workflow-123",
-        "spec_edit_approval",
-        "gpt-test",
-        "spec-edit-collatz-001",
+        json.dumps(
+            {
+                "title": "Execution plan",
+                "summary": "Plan summary",
+                "objective": "Implement the approved spec edit.",
+                "work_items": [
+                    {
+                        "id": "work-1",
+                        "title": "Update spec",
+                        "description": "Apply the approved change.",
+                        "acceptance_criteria": ["Spec updated"],
+                        "depends_on": [],
+                    }
+                ],
+            }
+        ),
     )
 
-    async def fake_publish_snapshot(conversation_id: str) -> None:
-        return None
-
-    monkeypatch.setattr(service, "publish_snapshot", fake_publish_snapshot)
-
-    asyncio.run(
-        service.run_execution_workflow(
-            "conversation-test",
-            "proposal-1",
-            "gpt-test",
-            "spec_edit_approval",
-            None,
-            "workflow-123",
-            lambda prompt, model: json.dumps(
-                {
-                    "title": "Execution plan",
-                    "summary": "Plan summary",
-                    "objective": "Implement the approved spec edit.",
-                    "work_items": [
-                        {
-                            "id": "work-1",
-                            "title": "Update spec",
-                            "description": "Apply the approved change.",
-                            "acceptance_criteria": ["Spec updated"],
-                            "depends_on": [],
-                        }
-                    ],
-                }
-            ),
-        )
-    )
-
-    run_payload = json.loads((ensure_project_paths(tmp_path, str(tmp_path)).runs_dir / "workflow-123" / "run.json").read_text())
-    assert run_payload["status"] == "success"
-    assert run_payload["result"] == "success"
-    assert run_payload["spec_id"] == "spec-edit-collatz-001"
-    assert run_payload["plan_id"].startswith("execution-card-")
+    assert execution_card.source_workflow_run_id == "workflow-123"
     snapshot = service.get_snapshot("conversation-test", str(tmp_path))
     assert snapshot["execution_workflow"]["status"] == "idle"
-    assert len(snapshot["execution_cards"]) == 1
+    assert snapshot["execution_cards"][0]["id"] == execution_card.id
+    assert snapshot["turns"][-1]["artifact_id"] == execution_card.id
+
+
+def test_fail_execution_workflow_marks_matching_run_failed(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    state = project_chat.ConversationState(
+        conversation_id="conversation-test",
+        project_path=str(tmp_path),
+        title="Workflow run test",
+        created_at="2026-03-11T02:00:00Z",
+        updated_at="2026-03-11T02:00:00Z",
+        execution_workflow=project_chat.ExecutionWorkflowState(
+            run_id="workflow-123",
+            status="running",
+            flow_source="plan-generation.dot",
+        ),
+    )
+    service._write_state(state)
+
+    snapshot = service.fail_execution_workflow(
+        "conversation-test",
+        "workflow-123",
+        "plan-generation.dot",
+        "boom",
+    )
+
+    assert snapshot["execution_workflow"]["status"] == "failed"
+    assert snapshot["execution_workflow"]["error"] == "boom"
+
+
+def test_note_execution_card_dispatched_records_event(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    state = project_chat.ConversationState(
+        conversation_id="conversation-test",
+        project_path=str(tmp_path),
+        title="Workflow run test",
+        created_at="2026-03-11T02:00:00Z",
+        updated_at="2026-03-11T02:00:00Z",
+        execution_cards=[
+            project_chat.ExecutionCard(
+                id="execution-card-1",
+                title="Execution plan",
+                summary="Plan summary",
+                objective="Do the thing.",
+                source_spec_edit_id="spec-edit-1",
+                source_workflow_run_id="workflow-plan-1",
+                created_at="2026-03-11T02:00:00Z",
+                updated_at="2026-03-11T02:00:00Z",
+                status="approved",
+            )
+        ],
+    )
+    service._write_state(state)
+
+    snapshot = service.note_execution_card_dispatched(
+        "conversation-test",
+        "execution-card-1",
+        "run-123",
+        "implement-spec.dot",
+    )
+
+    assert snapshot["event_log"][-1]["message"] == "Dispatched execution card execution-card-1 as run run-123 using implement-spec.dot."
 
 
 def test_chat_session_ignores_duplicate_codex_agent_delta_channel(monkeypatch) -> None:

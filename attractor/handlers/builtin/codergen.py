@@ -50,7 +50,7 @@ class CodergenHandler:
             response_text = outcome.notes or outcome.failure_reason or ""
         elif isinstance(result, str):
             response_text = result
-            outcome = Outcome(status=OutcomeStatus.SUCCESS, notes="codergen backend success")
+            outcome = Outcome(status=OutcomeStatus.SUCCESS, notes=response_text)
         elif result:
             outcome = Outcome(status=OutcomeStatus.SUCCESS, notes="codergen backend success")
             response_text = outcome.notes

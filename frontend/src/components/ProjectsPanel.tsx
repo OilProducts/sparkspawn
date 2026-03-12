@@ -2094,6 +2094,17 @@ export function HomePanel() {
             return
         }
 
+        const reviewFlowSource = disposition === "approved"
+            ? activeFlow || null
+            : activeFlow || executionCard.flow_source || null
+
+        if (disposition === "approved" && !reviewFlowSource) {
+            const message = "Select an execution flow before approving the execution card."
+            setPanelError(message)
+            appendLocalProjectEvent(`Execution card review failed: ${message}`)
+            return
+        }
+
         setPendingExecutionCardId(executionCard.id)
         setPanelError(null)
         try {
@@ -2102,7 +2113,7 @@ export function HomePanel() {
                 disposition,
                 message: reviewMessage,
                 model: model.trim() || null,
-                flow_source: activeFlow || executionCard.flow_source || null,
+                flow_source: reviewFlowSource,
             })
             applyConversationSnapshot(activeProjectPath, snapshot, "execution-review")
         } catch (error) {

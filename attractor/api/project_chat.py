@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from attractor.api import codex_app_server
 from attractor.prompt_templates import load_prompt_templates, render_prompt_template
 from attractor.storage import (
     ProjectPaths,
@@ -28,7 +29,7 @@ from attractor.storage import (
 CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
 CHAT_SESSION_VERSION = 2
 RUNTIME_REPO_ROOT = Path(__file__).resolve().parents[2]
-CHAT_TURN_IDLE_TIMEOUT_SECONDS = 60.0
+CHAT_TURN_IDLE_TIMEOUT_SECONDS = codex_app_server.APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS
 APP_SERVER_REQUEST_TIMEOUT_SECONDS = 15.0
 LOGGER = logging.getLogger(__name__)
 
@@ -116,103 +117,6 @@ def _build_conversation_preview(turns: list["ConversationTurn"]) -> Optional[str
     return None
 
 
-def _extract_command_text(payload: dict[str, Any]) -> Optional[str]:
-    for key in ("command", "commandLine", "command_line", "cmd", "commandText"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            pieces = [_as_non_empty_string(entry) for entry in value]
-            command = " ".join(piece for piece in pieces if piece)
-            if command:
-                return command
-        text = _as_non_empty_string(value)
-        if text:
-            return text
-    nested = payload.get("command")
-    if isinstance(nested, dict):
-        return _extract_command_text(nested)
-    return None
-
-
-def _extract_file_paths(payload: dict[str, Any]) -> list[str]:
-    paths: list[str] = []
-    for key in ("path", "filePath", "file_path"):
-        text = _as_non_empty_string(payload.get(key))
-        if text:
-            paths.append(text)
-    for key in ("paths", "files"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            for entry in value:
-                if isinstance(entry, dict):
-                    nested_path = _as_non_empty_string(entry.get("path") or entry.get("filePath") or entry.get("file_path"))
-                    if nested_path:
-                        paths.append(nested_path)
-                        continue
-                text = _as_non_empty_string(entry)
-                if text:
-                    paths.append(text)
-    changes = payload.get("changes")
-    if isinstance(changes, list):
-        for change in changes:
-            if not isinstance(change, dict):
-                continue
-            nested_path = _as_non_empty_string(change.get("path") or change.get("filePath") or change.get("file_path"))
-            if nested_path:
-                paths.append(nested_path)
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for path in paths:
-        if path in seen:
-            continue
-        seen.add(path)
-        deduped.append(path)
-    return deduped
-
-
-def _append_tool_output(existing: Optional[str], delta: str, *, limit: int = 2400) -> str:
-    combined = f"{existing or ''}{delta}"
-    if len(combined) <= limit:
-        return combined
-    return combined[-limit:]
-
-
-def _extract_agent_message_text_from_item(item: dict[str, Any]) -> Optional[str]:
-    item_type = str(item.get("type") or "").strip().lower()
-    if item_type not in {"agentmessage", "agent_message"}:
-        return None
-    content = item.get("content")
-    if isinstance(content, list):
-        parts: list[str] = []
-        for entry in content:
-            if not isinstance(entry, dict):
-                continue
-            entry_type = str(entry.get("type") or "").strip().lower()
-            if entry_type == "text":
-                text = entry.get("text")
-                if text is not None:
-                    parts.append(str(text))
-        joined = "".join(parts).strip()
-        if joined:
-            return joined
-    for key in ("text", "message", "contentText", "content_text"):
-        value = item.get(key)
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    return None
-
-
-def _extract_agent_message_phase(item: dict[str, Any]) -> Optional[str]:
-    phase = item.get("phase")
-    if phase is None:
-        return None
-    normalized = str(phase).strip().lower()
-    return normalized or None
-
-
-def _is_final_answer_phase(phase: Optional[str]) -> bool:
-    return phase in {None, "", "final_answer", "finalanswer"}
-
-
 def _is_project_chat_debug_enabled() -> bool:
     value = str(os.environ.get("SPARKSPAWN_DEBUG_PROJECT_CHAT", "")).strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -249,32 +153,11 @@ def _normalize_tool_call_status(value: Any) -> str:
     return "completed"
 
 
-def _extract_file_paths_from_item(item: dict[str, Any]) -> list[str]:
-    changes = item.get("changes")
-    if not isinstance(changes, list):
-        return []
-    file_paths: list[str] = []
-    for change in changes:
-        if not isinstance(change, dict):
-            continue
-        path = _as_non_empty_string(change.get("path") or change.get("filePath") or change.get("file_path"))
-        if path:
-            file_paths.append(path)
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for path in file_paths:
-        if path in seen:
-            continue
-        seen.add(path)
-        deduped.append(path)
-    return deduped
-
-
 def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
     item_type = str(item.get("type") or "").strip()
     item_id = _as_non_empty_string(item.get("id")) or f"tool-{uuid.uuid4().hex}"
     if item_type == "commandExecution":
-        command = _extract_command_text(item)
+        command = codex_app_server.extract_command_text(item)
         raw_output = item.get("aggregatedOutput")
         if raw_output is None:
             raw_output = item.get("aggregated_output")
@@ -293,7 +176,7 @@ def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
             kind="file_change",
             status=_normalize_tool_call_status(item.get("status")),
             title="Apply file changes",
-            file_paths=_extract_file_paths_from_item(item),
+            file_paths=codex_app_server.extract_file_paths(item),
         )
     return None
 
@@ -895,6 +778,15 @@ class ExecutionWorkflowState:
         )
 
 
+@dataclass(frozen=True)
+class ExecutionWorkflowLaunchSpec:
+    conversation_id: str
+    project_path: str
+    proposal_id: str
+    spec_id: str
+    prompt: str
+
+
 @dataclass
 class ConversationState:
     conversation_id: str
@@ -1378,13 +1270,7 @@ class CodexAppServerChatSession:
         with self._lock:
             self._ensure_process()
             self._ensure_thread(model)
-            agent_chunks: list[str] = []
-            final_agent_message: Optional[str] = None
-            last_error: Optional[str] = None
-            saw_task_complete = False
-            saw_final_answer_completion = False
-            saw_item_agent_message_delta = False
-            reasoning_summary_buffer = ""
+            stream_state = codex_app_server.CodexAppServerTurnState()
             last_activity_at = time.monotonic()
             spec_proposal_payloads: list[dict[str, Any]] = []
             tool_calls_by_id: dict[str, ToolCallRecord] = {}
@@ -1401,24 +1287,17 @@ class CodexAppServerChatSession:
             if response.get("error"):
                 raise RuntimeError("codex app-server turn/start failed")
 
-            def has_terminal_message() -> bool:
-                response_text = final_agent_message if final_agent_message is not None else "".join(agent_chunks)
-                return bool(response_text.strip())
-
-            def can_finalize_without_turn_completed() -> bool:
-                return (saw_task_complete or saw_final_answer_completion) and has_terminal_message()
-
             while True:
                 line = self._read_line(0.1)
                 if line is None:
                     idle_for = time.monotonic() - last_activity_at
                     if idle_for >= CHAT_TURN_IDLE_TIMEOUT_SECONDS:
-                        if can_finalize_without_turn_completed():
+                        if stream_state.can_finalize_without_turn_completed():
                             break
                         self._close()
                         raise RuntimeError("codex app-server turn timed out waiting for activity")
                     if self._proc is not None and self._proc.poll() is not None:
-                        if can_finalize_without_turn_completed():
+                        if stream_state.can_finalize_without_turn_completed():
                             break
                         self._close()
                         raise RuntimeError("codex app-server exited before turn completion")
@@ -1426,15 +1305,14 @@ class CodexAppServerChatSession:
                 last_activity_at = time.monotonic()
                 if self._raw_rpc_logger is not None:
                     self._raw_rpc_logger("incoming", line)
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
+                message = codex_app_server.parse_jsonrpc_line(line)
+                if message is None:
                     continue
                 if "id" in message and "method" in message:
                     request_method = message.get("method")
                     request_params = message.get("params") or {}
                     if request_method == "item/commandExecution/requestApproval":
-                        command = _extract_command_text(request_params)
+                        command = codex_app_server.extract_command_text(request_params)
                         item_id = _as_non_empty_string(request_params.get("itemId")) or f"tool-{uuid.uuid4().hex}"
                         tool_call = ToolCallRecord(
                             id=item_id,
@@ -1453,7 +1331,7 @@ class CodexAppServerChatSession:
                             ),
                         )
                     elif request_method == "item/fileChange/requestApproval":
-                        file_paths = _extract_file_paths(request_params)
+                        file_paths = codex_app_server.extract_file_paths(request_params)
                         item_id = _as_non_empty_string(request_params.get("itemId")) or f"tool-{uuid.uuid4().hex}"
                         tool_call = ToolCallRecord(
                             id=item_id,
@@ -1559,144 +1437,66 @@ class CodexAppServerChatSession:
                         continue
                     self._handle_server_request(message)
                     continue
-                method = message.get("method")
-                params = message.get("params") or {}
-                if method == "item/started":
-                    item = params.get("item")
-                    if isinstance(item, dict):
-                        item_id = _as_non_empty_string(item.get("id"))
-                        tool_call = _tool_call_from_item(item)
-                        if tool_call is not None:
-                            if item_id:
-                                tool_calls_by_id[item_id] = tool_call
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(
-                                    kind="tool_call_started",
-                                    tool_call_id=item_id or tool_call.id,
-                                    tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
-                                ),
-                            )
-                    continue
-                if method == "item/completed":
-                    item = params.get("item")
-                    if isinstance(item, dict):
-                        item_id = _as_non_empty_string(item.get("id"))
-                        agent_message_text = _extract_agent_message_text_from_item(item)
-                        if agent_message_text:
-                            final_agent_message = agent_message_text
-                            if _is_final_answer_phase(_extract_agent_message_phase(item)):
-                                saw_final_answer_completion = True
-                                self._emit_live_event(
-                                    on_event,
-                                    ChatTurnLiveEvent(
-                                        kind="assistant_completed",
-                                        content_delta=agent_message_text,
-                                        message="Assistant message completed.",
-                                    ),
-                                )
-                            continue
-                        tool_call = _tool_call_from_item(item)
-                        if tool_call is not None:
-                            if item_id:
-                                tool_calls_by_id[item_id] = tool_call
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(
-                                    kind="tool_call_failed" if tool_call.status == "failed" else "tool_call_completed",
-                                    tool_call_id=item_id or tool_call.id,
-                                    tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
-                                ),
-                            )
-                    continue
-                if method == "item/agentMessage/delta":
-                    delta = params.get("delta") or ""
-                    if delta:
-                        saw_item_agent_message_delta = True
-                        agent_chunks.append(str(delta))
+                normalized_events = codex_app_server.process_turn_message(message, stream_state)
+                for normalized_event in normalized_events:
+                    if normalized_event.kind == "assistant_delta" and normalized_event.text:
                         self._emit_live_event(
                             on_event,
-                            ChatTurnLiveEvent(kind="assistant_delta", content_delta=str(delta)),
+                            ChatTurnLiveEvent(kind="assistant_delta", content_delta=normalized_event.text),
                         )
-                    continue
-                if method == "item/reasoning/summaryTextDelta":
-                    delta = params.get("delta") or ""
-                    if delta:
-                        reasoning_summary_buffer = f"{reasoning_summary_buffer}{delta}"
-                        self._emit_live_event(
-                            on_event,
-                            ChatTurnLiveEvent(kind="reasoning_summary", content_delta=str(delta)),
-                        )
-                    continue
-                if method == "item/reasoning/summaryPartAdded":
-                    part = params.get("part")
-                    summary_text: Optional[str] = None
-                    if isinstance(part, dict):
-                        for key in ("text", "summaryText", "summary_text"):
-                            value = part.get(key)
-                            if value is not None:
-                                summary_text = str(value)
-                                break
-                    if summary_text:
-                        if reasoning_summary_buffer and summary_text.startswith(reasoning_summary_buffer):
-                            remaining_summary_text = summary_text[len(reasoning_summary_buffer):]
-                            reasoning_summary_buffer = ""
-                            if remaining_summary_text:
-                                self._emit_live_event(
-                                    on_event,
-                                    ChatTurnLiveEvent(kind="reasoning_summary", content_delta=remaining_summary_text),
-                                )
-                        else:
-                            reasoning_summary_buffer = ""
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(kind="reasoning_summary", content_delta=summary_text),
-                            )
-                    continue
-                if method == "codex/event/agent_message_delta":
-                    if saw_item_agent_message_delta:
                         continue
-                    delta = (params.get("msg") or {}).get("delta") or ""
-                    if delta:
-                        agent_chunks.append(str(delta))
+                    if normalized_event.kind == "reasoning_delta" and normalized_event.text:
                         self._emit_live_event(
                             on_event,
-                            ChatTurnLiveEvent(kind="assistant_delta", content_delta=str(delta)),
+                            ChatTurnLiveEvent(kind="reasoning_summary", content_delta=normalized_event.text),
                         )
-                    continue
-                if method == "codex/event/agent_message":
-                    msg = (params.get("msg") or {}).get("message")
-                    if msg:
-                        final_agent_message = str(msg)
-                    continue
-                if method == "codex/event/item_completed":
-                    msg = params.get("msg") or {}
-                    item = msg.get("item")
-                    if isinstance(item, dict):
-                        agent_message_text = _extract_agent_message_text_from_item(item)
-                        if agent_message_text:
-                            final_agent_message = agent_message_text
-                            if _is_final_answer_phase(_extract_agent_message_phase(item)):
-                                saw_final_answer_completion = True
-                                self._emit_live_event(
-                                    on_event,
-                                    ChatTurnLiveEvent(
-                                        kind="assistant_completed",
-                                        content_delta=agent_message_text,
-                                        message="Assistant message completed.",
-                                    ),
-                                )
+                        continue
+                    if normalized_event.kind == "assistant_message_completed" and normalized_event.text:
+                        if codex_app_server.is_final_answer_phase(normalized_event.phase):
+                            self._emit_live_event(
+                                on_event,
+                                ChatTurnLiveEvent(
+                                    kind="assistant_completed",
+                                    content_delta=normalized_event.text,
+                                    message="Assistant message completed.",
+                                ),
+                            )
+                        continue
+                    if normalized_event.kind == "tool_item_started" and isinstance(normalized_event.item, dict):
+                        tool_call = _tool_call_from_item(normalized_event.item)
+                        if tool_call is None:
                             continue
-                    continue
-                if method == "item/commandExecution/outputDelta":
-                    delta = _as_non_empty_string(params.get("delta"))
-                    item_id = _as_non_empty_string(params.get("itemId"))
-                    tool_call = tool_calls_by_id.get(item_id or "")
-                    if delta and tool_call is not None:
-                        tool_call.output = _append_tool_output(
-                            tool_call.output,
-                            delta,
+                        if normalized_event.item_id:
+                            tool_calls_by_id[normalized_event.item_id] = tool_call
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(
+                                kind="tool_call_started",
+                                tool_call_id=normalized_event.item_id or tool_call.id,
+                                tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                            ),
                         )
+                        continue
+                    if normalized_event.kind == "tool_item_completed" and isinstance(normalized_event.item, dict):
+                        tool_call = _tool_call_from_item(normalized_event.item)
+                        if tool_call is None:
+                            continue
+                        if normalized_event.item_id:
+                            tool_calls_by_id[normalized_event.item_id] = tool_call
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(
+                                kind="tool_call_failed" if tool_call.status == "failed" else "tool_call_completed",
+                                tool_call_id=normalized_event.item_id or tool_call.id,
+                                tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                            ),
+                        )
+                        continue
+                    if normalized_event.kind == "command_output_delta" and normalized_event.text:
+                        tool_call = tool_calls_by_id.get(normalized_event.item_id or "")
+                        if tool_call is None:
+                            continue
+                        tool_call.output = codex_app_server.append_tool_output(tool_call.output, normalized_event.text)
                         self._emit_live_event(
                             on_event,
                             ChatTurnLiveEvent(
@@ -1705,39 +1505,25 @@ class CodexAppServerChatSession:
                                 tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
                             ),
                         )
-                    continue
-                if method == "error":
-                    last_error = str(params.get("message") or "codex app-server error")
-                    continue
-                if method == "turn/completed":
-                    turn = params.get("turn") or {}
-                    status = str(turn.get("status") or "")
-                    if status and status != "completed":
-                        error = turn.get("error") or {}
-                        last_error = str(error.get("message") or last_error or f"turn ended with status '{status}'")
+                        continue
+                    if normalized_event.kind == "turn_completed":
+                        break
+                if any(event.kind == "turn_completed" for event in normalized_events):
                     break
-                if method == "codex/event/task_complete":
-                    msg = params.get("msg") or {}
-                    last_agent_message = _as_non_empty_string(msg.get("last_agent_message"))
-                    if last_agent_message:
-                        saw_task_complete = True
-                        final_agent_message = last_agent_message
-                    continue
             for tool_call in tool_calls_by_id.values():
                 if tool_call.status == "running":
-                    tool_call.status = "failed" if last_error else "completed"
+                    tool_call.status = "failed" if stream_state.last_error else "completed"
                     self._emit_live_event(
                         on_event,
                         ChatTurnLiveEvent(
-                            kind="tool_call_failed" if last_error else "tool_call_completed",
+                            kind="tool_call_failed" if stream_state.last_error else "tool_call_completed",
                             tool_call_id=tool_call.id,
                             tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
                         ),
                     )
-            if last_error:
-                raise RuntimeError(last_error)
-            response_text = final_agent_message if final_agent_message is not None else "".join(agent_chunks)
-            response_text = response_text.strip()
+            if stream_state.last_error:
+                raise RuntimeError(stream_state.last_error)
+            response_text = stream_state.resolved_agent_text()
             if not response_text:
                 raise RuntimeError("codex app-server returned an empty chat response")
             return ChatTurnResult(
@@ -1814,77 +1600,6 @@ class ProjectChatService:
     def _execution_cards_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         project_paths = self._project_paths_for_conversation(conversation_id, project_path)
         return project_paths.execution_cards_dir / f"{conversation_id}.json"
-
-    def _workflow_run_root(self, run_id: str, project_path: str) -> Path:
-        project_paths = self._project_paths(project_path)
-        run_root = project_paths.runs_dir / run_id
-        run_root.mkdir(parents=True, exist_ok=True)
-        return run_root
-
-    def _workflow_run_meta_path(self, run_id: str, project_path: str) -> Path:
-        return self._workflow_run_root(run_id, project_path) / "run.json"
-
-    def _workflow_run_log_path(self, run_id: str, project_path: str) -> Path:
-        return self._workflow_run_root(run_id, project_path) / "run.log"
-
-    def _read_workflow_run_record(self, run_id: str, project_path: str) -> dict[str, Any]:
-        return self._read_json_dict(self._workflow_run_meta_path(run_id, project_path))
-
-    def _write_workflow_run_record(
-        self,
-        *,
-        run_id: str,
-        project_path: str,
-        flow_source: Optional[str],
-        model: Optional[str],
-        status: str,
-        spec_id: Optional[str] = None,
-        plan_id: Optional[str] = None,
-        result: Optional[str] = None,
-        last_error: str = "",
-        started_at: Optional[str] = None,
-        ended_at: Optional[str] = None,
-    ) -> None:
-        existing = self._read_workflow_run_record(run_id, project_path)
-        payload = {
-            "run_id": run_id,
-            "flow_name": "execution_planning",
-            "status": status,
-            "result": result,
-            "working_directory": project_path,
-            "model": model or str(existing.get("model", "")),
-            "started_at": started_at or str(existing.get("started_at", "")) or _iso_now(),
-            "ended_at": ended_at,
-            "project_path": project_path,
-            "git_branch": existing.get("git_branch"),
-            "git_commit": existing.get("git_commit"),
-            "spec_id": spec_id if spec_id is not None else existing.get("spec_id"),
-            "plan_id": plan_id if plan_id is not None else existing.get("plan_id"),
-            "last_error": last_error,
-            "token_usage": existing.get("token_usage"),
-        }
-        self._write_json(self._workflow_run_meta_path(run_id, project_path), payload)
-
-    def _append_workflow_run_log(
-        self,
-        *,
-        run_id: str,
-        project_path: str,
-        message: str,
-        timestamp: Optional[str] = None,
-    ) -> None:
-        if not message.strip():
-            return
-        iso_timestamp = timestamp or _iso_now()
-        try:
-            parsed = time.strptime(iso_timestamp, "%Y-%m-%dT%H:%M:%SZ")
-            display_timestamp = time.strftime("%Y-%m-%d %H:%M:%S", parsed)
-        except ValueError:
-            display_timestamp = iso_timestamp
-        path = self._workflow_run_log_path(run_id, project_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(f"[{display_timestamp} UTC] {message}\n")
 
     def _touch_conversation_state(self, state: ConversationState, *, title_hint: Optional[str] = None) -> None:
         if not state.created_at:
@@ -2891,8 +2606,6 @@ class ProjectChatService:
         conversation_id: str,
         workflow_run_id: str,
         flow_source: Optional[str],
-        model: Optional[str] = None,
-        spec_id: Optional[str] = None,
     ) -> dict[str, Any]:
         with self._lock:
             state = self._read_state(conversation_id)
@@ -2910,47 +2623,45 @@ class ProjectChatService:
                 self._append_event(state, f"Execution planning started ({workflow_run_id}).")
             self._touch_conversation_state(state)
             self._write_state(state)
-            self._write_workflow_run_record(
-                run_id=workflow_run_id,
-                project_path=state.project_path,
-                flow_source=flow_source,
-                model=model,
-                status="running",
-                spec_id=spec_id,
-            )
-            if flow_source:
-                self._append_workflow_run_log(
-                    run_id=workflow_run_id,
-                    project_path=state.project_path,
-                    message=f"Execution planning started using {flow_source}.",
-                )
-            else:
-                self._append_workflow_run_log(
-                    run_id=workflow_run_id,
-                    project_path=state.project_path,
-                    message="Execution planning started.",
-                )
         return state.to_dict()
 
-    async def run_execution_workflow(
+    def prepare_execution_workflow_launch(
         self,
         conversation_id: str,
         proposal_id: str,
-        model: Optional[str],
-        flow_source: Optional[str],
         review_feedback: Optional[str],
-        workflow_run_id: str,
-        codex_runner: Any,
-    ) -> None:
-        try:
+    ) -> ExecutionWorkflowLaunchSpec:
+        with self._lock:
             state = self._read_state(conversation_id)
             if state is None:
-                return
+                raise ValueError("Unknown conversation.")
             proposal = next((entry for entry in state.spec_edit_proposals if entry.id == proposal_id), None)
             if proposal is None or not proposal.canonical_spec_edit_id:
-                raise RuntimeError("Approved spec edit proposal was not found.")
+                raise ValueError("Approved spec edit proposal was not found.")
             prompt = self._build_execution_planning_prompt(state, proposal, review_feedback)
-            raw_response = await asyncio.to_thread(codex_runner, prompt, model)
+            return ExecutionWorkflowLaunchSpec(
+                conversation_id=conversation_id,
+                project_path=state.project_path,
+                proposal_id=proposal.id,
+                spec_id=proposal.canonical_spec_edit_id,
+                prompt=prompt,
+            )
+
+    def complete_execution_workflow(
+        self,
+        conversation_id: str,
+        proposal_id: str,
+        flow_source: Optional[str],
+        workflow_run_id: str,
+        raw_response: str,
+    ) -> ExecutionCard:
+        with self._lock:
+            state = self._read_state(conversation_id)
+            if state is None:
+                raise ValueError("Unknown conversation.")
+            proposal = next((entry for entry in state.spec_edit_proposals if entry.id == proposal_id), None)
+            if proposal is None or not proposal.canonical_spec_edit_id:
+                raise ValueError("Approved spec edit proposal was not found.")
             parsed = _extract_json_object(raw_response)
             raw_items = parsed.get("work_items")
             work_items = [
@@ -2974,86 +2685,80 @@ class ProjectChatService:
                 flow_source=flow_source,
                 work_items=work_items,
             )
-            with self._lock:
-                state = self._read_state(conversation_id)
-                if state is None:
-                    return
-                state.execution_cards.append(execution_card)
-                state.turns.append(
-                    ConversationTurn(
-                        id=f"turn-{uuid.uuid4().hex}",
-                        role="system",
-                        content="",
-                        timestamp=now,
-                        kind="execution_card",
-                        artifact_id=execution_card.id,
-                    )
+            state.execution_cards.append(execution_card)
+            state.turns.append(
+                ConversationTurn(
+                    id=f"turn-{uuid.uuid4().hex}",
+                    role="system",
+                    content="",
+                    timestamp=now,
+                    kind="execution_card",
+                    artifact_id=execution_card.id,
                 )
+            )
+            if state.execution_workflow.run_id == workflow_run_id:
                 state.execution_workflow = ExecutionWorkflowState(
                     run_id=workflow_run_id,
                     status="idle",
                     error=None,
                     flow_source=flow_source,
                 )
-                self._append_event(state, f"Execution planning completed and produced {execution_card.id}.")
-                self._touch_conversation_state(state)
-                self._write_state(state)
-                self._write_workflow_run_record(
-                    run_id=workflow_run_id,
-                    project_path=state.project_path,
-                    flow_source=flow_source,
-                    model=model,
-                    status="success",
-                    spec_id=proposal.canonical_spec_edit_id,
-                    plan_id=execution_card.id,
-                    result="success",
-                    ended_at=now,
-                )
-                self._append_workflow_run_log(
-                    run_id=workflow_run_id,
-                    project_path=state.project_path,
-                    message=f"Execution planning completed and produced {execution_card.id}.",
-                    timestamp=now,
-                )
-            await self.publish_snapshot(conversation_id)
-        except Exception as exc:  # noqa: BLE001
-            with self._lock:
-                state = self._read_state(conversation_id)
-                if state is None:
-                    return
+            self._append_event(state, f"Execution planning completed and produced {execution_card.id}.")
+            self._touch_conversation_state(state)
+            self._write_state(state)
+            return execution_card
+
+    def fail_execution_workflow(
+        self,
+        conversation_id: str,
+        workflow_run_id: str,
+        flow_source: Optional[str],
+        error: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            state = self._read_state(conversation_id)
+            if state is None:
+                raise ValueError("Unknown conversation.")
+            if state.execution_workflow.run_id == workflow_run_id:
                 state.execution_workflow = ExecutionWorkflowState(
                     run_id=workflow_run_id,
                     status="failed",
-                    error=str(exc),
+                    error=error,
                     flow_source=flow_source,
                 )
-                self._append_event(state, f"Execution planning failed: {exc}")
-                self._touch_conversation_state(state)
-                self._write_state(state)
-                self._write_workflow_run_record(
-                    run_id=workflow_run_id,
-                    project_path=state.project_path,
-                    flow_source=flow_source,
-                    model=model,
-                    status="failed",
-                    spec_id=next(
-                        (
-                            proposal.canonical_spec_edit_id
-                            for proposal in state.spec_edit_proposals
-                            if proposal.id == proposal_id and proposal.canonical_spec_edit_id
-                        ),
-                        None,
-                    ),
-                    result="failed",
-                    last_error=str(exc),
-                    ended_at=_iso_now(),
+            self._append_event(state, f"Execution planning failed: {error}")
+            self._touch_conversation_state(state)
+            self._write_state(state)
+            return state.to_dict()
+
+    def note_execution_card_dispatched(
+        self,
+        conversation_id: str,
+        execution_card_id: str,
+        run_id: str,
+        flow_source: Optional[str],
+    ) -> dict[str, Any]:
+        with self._lock:
+            state = self._read_state(conversation_id)
+            if state is None:
+                raise ValueError("Unknown conversation.")
+            execution_card = next((entry for entry in state.execution_cards if entry.id == execution_card_id), None)
+            if execution_card is None:
+                raise ValueError("Unknown execution card.")
+            execution_card.updated_at = _iso_now()
+            if flow_source:
+                self._append_event(
+                    state,
+                    f"Dispatched execution card {execution_card.id} as run {run_id} using {flow_source}.",
                 )
-                self._append_workflow_run_log(
-                    run_id=workflow_run_id,
-                    project_path=state.project_path,
-                    message=f"Execution planning failed: {exc}",
+            else:
+                self._append_event(
+                    state,
+                    f"Dispatched execution card {execution_card.id} as run {run_id}.",
                 )
-            await self.publish_snapshot(conversation_id)
+            self._touch_conversation_state(state)
+            self._write_state(state)
+            return state.to_dict()
 
     def review_execution_card(
         self,
