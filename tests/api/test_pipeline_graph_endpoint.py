@@ -27,7 +27,7 @@ def test_get_pipeline_graph_returns_svg_for_known_pipeline(
     svg_path.parent.mkdir(parents=True, exist_ok=True)
     svg_path.write_text("<svg/>", encoding="utf-8")
 
-    response = api_client.get(f"/pipelines/{run_id}/graph")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/graph")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
@@ -41,7 +41,7 @@ def test_get_pipeline_graph_returns_404_for_unknown_pipeline(
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
-    response = api_client.get("/pipelines/missing-run/graph")
+    response = api_client.get("/attractor/pipelines/missing-run/graph")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Unknown pipeline"
@@ -57,7 +57,7 @@ def test_get_pipeline_graph_returns_404_when_svg_is_unavailable(
     start_payload = _start_pipeline(api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])
 
-    response = api_client.get(f"/pipelines/{run_id}/graph")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/graph")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Graph visualization unavailable"

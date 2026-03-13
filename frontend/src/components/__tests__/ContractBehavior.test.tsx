@@ -380,28 +380,28 @@ describe('Frontend contract behavior', () => {
   it('[CID:12.1.01] verifies runtime UI code covers every required API endpoint from ui-spec section 12.1', () => {
     const runtimeSource = readRuntimeUiSource()
     const requiredEndpointPatterns: Array<{ endpoint: string; pattern: RegExp }> = [
-      { endpoint: '/api/flows', pattern: /fetch\(\s*['"]\/api\/flows['"]|fetchFlowListValidated\(/ },
-      { endpoint: '/api/flows/{name}', pattern: /fetch\(\s*`\/api\/flows\/\$\{encodeURIComponent\([^)]+\)\}`|fetchFlowPayloadValidated\(/ },
-      { endpoint: '/api/conversations/{id}', pattern: /fetchConversationSnapshotValidated\(/ },
-      { endpoint: '/api/conversations/{id} \(DELETE\)', pattern: /deleteConversationValidated\(/ },
-      { endpoint: '/api/projects/pick-directory', pattern: /pickProjectDirectoryValidated\(/ },
-      { endpoint: '/api/conversations/{id}\/events', pattern: /new EventSource\(\s*eventStreamUrl\s*\)|\/api\/conversations\/\$\{encodeURIComponent\([^)]+\)\}\/events\?project_path=/ },
-      { endpoint: '/api/conversations/{id}\/turns', pattern: /sendConversationTurnValidated\(/ },
-      { endpoint: '/api/conversations/{id}\/spec-edit-proposals\/{proposalId}\/approve', pattern: /approveSpecEditProposalValidated\(/ },
-      { endpoint: '/api/conversations/{id}\/spec-edit-proposals\/{proposalId}\/reject', pattern: /rejectSpecEditProposalValidated\(/ },
-      { endpoint: '/api/conversations/{id}\/execution-cards\/{executionCardId}\/review', pattern: /reviewExecutionCardValidated\(/ },
-      { endpoint: '/preview', pattern: /fetch\(\s*['"]\/preview['"]|fetchPreviewValidated\(/ },
-      { endpoint: '/pipelines', pattern: /fetch\(\s*['"]\/pipelines['"]|fetchPipelineStartValidated\(/ },
-      { endpoint: '/pipelines/{id}', pattern: /fetch\(\s*`\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}`\s*(?:,|\))|fetchPipelineStatusValidated\(/ },
-      { endpoint: '/pipelines/{id}/events', pattern: /new EventSource\(\s*`\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/events`/ },
-      { endpoint: '/pipelines/{id}/cancel', pattern: /fetch\(\s*`\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/cancel`\s*,\s*\{\s*method:\s*['"]POST['"]|fetchPipelineCancelValidated\(/ },
-      { endpoint: '/pipelines/{id}/graph', pattern: /fetch\(\s*`\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/graph`|fetchPipelineGraphValidated\(/ },
-      { endpoint: '/pipelines/{id}/questions', pattern: /fetch\(\s*`\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/questions`\s*(?:,|\))|fetchPipelineQuestionsValidated\(/ },
-      { endpoint: '/pipelines/{id}/questions/{qid}/answer', pattern: /fetch\(\s*`\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/questions\/\$\{encodeURIComponent\([^)]+\)\}\/answer`|fetchPipelineAnswerValidated\(/ },
-      { endpoint: '/pipelines/{id}/checkpoint', pattern: /fetch\(\s*`\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/checkpoint`|fetchPipelineCheckpointValidated\(/ },
-      { endpoint: '/pipelines/{id}/context', pattern: /fetch\(\s*`\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/context`|fetchPipelineContextValidated\(/ },
-      { endpoint: '/runs', pattern: /fetch\(\s*['"]\/runs['"]|fetchRunsListValidated\(/ },
-      { endpoint: '/status', pattern: /fetch\(\s*['"]\/status['"]|fetchRuntimeStatusValidated\(/ },
+      { endpoint: '/attractor/api/flows', pattern: /fetch\(\s*['"]\/attractor\/api\/flows['"]|fetchFlowListValidated\(/ },
+      { endpoint: '/attractor/api/flows/{name}', pattern: /fetch\(\s*`\/attractor\/api\/flows\/\$\{encodeURIComponent\([^)]+\)\}`|fetchFlowPayloadValidated\(/ },
+      { endpoint: '/workspace/api/conversations/{id}', pattern: /fetchConversationSnapshotValidated\(/ },
+      { endpoint: '/workspace/api/conversations/{id} (DELETE)', pattern: /deleteConversationValidated\(/ },
+      { endpoint: '/workspace/api/projects/pick-directory', pattern: /pickProjectDirectoryValidated\(/ },
+      { endpoint: '/workspace/api/conversations/{id}\/events', pattern: /new EventSource\(\s*eventStreamUrl\s*\)|\/workspace\/api\/conversations\/\$\{encodeURIComponent\([^)]+\)\}\/events\?project_path=/ },
+      { endpoint: '/workspace/api/conversations/{id}\/turns', pattern: /sendConversationTurnValidated\(/ },
+      { endpoint: '/workspace/api/conversations/{id}\/spec-edit-proposals\/{proposalId}\/approve', pattern: /approveSpecEditProposalValidated\(/ },
+      { endpoint: '/workspace/api/conversations/{id}\/spec-edit-proposals\/{proposalId}\/reject', pattern: /rejectSpecEditProposalValidated\(/ },
+      { endpoint: '/workspace/api/conversations/{id}\/execution-cards\/{executionCardId}\/review', pattern: /reviewExecutionCardValidated\(/ },
+      { endpoint: '/attractor/preview', pattern: /fetch\(\s*['"]\/attractor\/preview['"]|fetchPreviewValidated\(/ },
+      { endpoint: '/attractor/pipelines', pattern: /fetch\(\s*['"]\/attractor\/pipelines['"]|fetchPipelineStartValidated\(/ },
+      { endpoint: '/attractor/pipelines/{id}', pattern: /fetch\(\s*`\/attractor\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}`\s*(?:,|\))|fetchPipelineStatusValidated\(/ },
+      { endpoint: '/attractor/pipelines/{id}/events', pattern: /pipelineEventsUrl\(|new EventSource\(\s*`\/attractor\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/events`/ },
+      { endpoint: '/attractor/pipelines/{id}/cancel', pattern: /fetch\(\s*`\/attractor\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/cancel`\s*,\s*\{\s*method:\s*['"]POST['"]|fetchPipelineCancelValidated\(/ },
+      { endpoint: '/attractor/pipelines/{id}/graph', pattern: /fetch\(\s*`\/attractor\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/graph`|fetchPipelineGraphValidated\(/ },
+      { endpoint: '/attractor/pipelines/{id}/questions', pattern: /fetch\(\s*`\/attractor\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/questions`\s*(?:,|\))|fetchPipelineQuestionsValidated\(/ },
+      { endpoint: '/attractor/pipelines/{id}/questions/{qid}/answer', pattern: /fetch\(\s*`\/attractor\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/questions\/\$\{encodeURIComponent\([^)]+\)\}\/answer`|fetchPipelineAnswerValidated\(/ },
+      { endpoint: '/attractor/pipelines/{id}/checkpoint', pattern: /fetch\(\s*`\/attractor\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/checkpoint`|fetchPipelineCheckpointValidated\(/ },
+      { endpoint: '/attractor/pipelines/{id}/context', pattern: /fetch\(\s*`\/attractor\/pipelines\/\$\{encodeURIComponent\([^)]+\)\}\/context`|fetchPipelineContextValidated\(/ },
+      { endpoint: '/attractor/runs', pattern: /fetch\(\s*['"]\/attractor\/runs['"]|fetchRunsListValidated\(/ },
+      { endpoint: '/attractor/status', pattern: /fetch\(\s*['"]\/attractor\/status['"]|fetchRuntimeStatusValidated\(/ },
     ]
 
     const missingEndpoints = requiredEndpointPatterns
@@ -520,7 +520,7 @@ describe('Frontend contract behavior', () => {
       {
         name: 'project directory picker',
         invoke: () => pickProjectDirectoryValidated(),
-        expectedUrl: '/api/projects/pick-directory',
+        expectedUrl: '/workspace/api/projects/pick-directory',
         expectedMethod: 'POST',
         response: jsonResponse({
           status: 'selected',
@@ -535,14 +535,14 @@ describe('Frontend contract behavior', () => {
       {
         name: 'flow list',
         invoke: () => fetchFlowListValidated(),
-        expectedUrl: '/api/flows',
+        expectedUrl: '/attractor/api/flows',
         response: jsonResponse(['alpha.dot']),
         assertResult: (result) => expect(result).toEqual(['alpha.dot']),
       },
       {
         name: 'flow payload',
         invoke: () => fetchFlowPayloadValidated('alpha flow.dot'),
-        expectedUrl: '/api/flows/alpha%20flow.dot',
+        expectedUrl: '/attractor/api/flows/alpha%20flow.dot',
         response: jsonResponse({ name: 'alpha flow.dot', content: 'digraph G {}' }),
         assertResult: (result) =>
           expect(result).toEqual({
@@ -553,7 +553,7 @@ describe('Frontend contract behavior', () => {
       {
         name: 'conversation snapshot',
         invoke: () => fetchConversationSnapshotValidated('conversation 1', '/tmp/project one'),
-        expectedUrl: '/api/conversations/conversation%201?project_path=%2Ftmp%2Fproject%20one',
+        expectedUrl: '/workspace/api/conversations/conversation%201?project_path=%2Ftmp%2Fproject%20one',
         response: jsonResponse({
           conversation_id: 'conversation 1',
           project_path: '/tmp/project one',
@@ -576,7 +576,7 @@ describe('Frontend contract behavior', () => {
           message: 'Draft a spec edit proposal.',
           model: 'gpt-5.3',
         }),
-        expectedUrl: '/api/conversations/conversation%201/turns',
+        expectedUrl: '/workspace/api/conversations/conversation%201/turns',
         expectedMethod: 'POST',
         response: jsonResponse({
           conversation_id: 'conversation 1',
@@ -600,7 +600,7 @@ describe('Frontend contract behavior', () => {
       {
         name: 'conversation delete',
         invoke: () => deleteConversationValidated('conversation 1', '/tmp/project one'),
-        expectedUrl: '/api/conversations/conversation%201?project_path=%2Ftmp%2Fproject%20one',
+        expectedUrl: '/workspace/api/conversations/conversation%201?project_path=%2Ftmp%2Fproject%20one',
         expectedMethod: 'DELETE',
         response: jsonResponse({
           status: 'deleted',
@@ -620,7 +620,7 @@ describe('Frontend contract behavior', () => {
           model: 'gpt-5.3',
           flow_source: 'contract-behavior.dot',
         }),
-        expectedUrl: '/api/conversations/conversation%201/spec-edit-proposals/proposal%201/approve',
+        expectedUrl: '/workspace/api/conversations/conversation%201/spec-edit-proposals/proposal%201/approve',
         expectedMethod: 'POST',
         response: jsonResponse({
           conversation_id: 'conversation 1',
@@ -646,7 +646,7 @@ describe('Frontend contract behavior', () => {
         invoke: () => rejectSpecEditProposalValidated('conversation 1', 'proposal 1', {
           project_path: '/tmp/project one',
         }),
-        expectedUrl: '/api/conversations/conversation%201/spec-edit-proposals/proposal%201/reject',
+        expectedUrl: '/workspace/api/conversations/conversation%201/spec-edit-proposals/proposal%201/reject',
         expectedMethod: 'POST',
         response: jsonResponse({
           conversation_id: 'conversation 1',
@@ -674,7 +674,7 @@ describe('Frontend contract behavior', () => {
           model: 'gpt-5.3',
           flow_source: 'contract-behavior.dot',
         }),
-        expectedUrl: '/api/conversations/conversation%201/execution-cards/execution%201/review',
+        expectedUrl: '/workspace/api/conversations/conversation%201/execution-cards/execution%201/review',
         expectedMethod: 'POST',
         response: jsonResponse({
           conversation_id: 'conversation 1',
@@ -700,7 +700,7 @@ describe('Frontend contract behavior', () => {
       {
         name: 'preview',
         invoke: () => fetchPreviewValidated('digraph G {}'),
-        expectedUrl: '/preview',
+        expectedUrl: '/attractor/preview',
         expectedMethod: 'POST',
         response: jsonResponse({ status: 'ok', graph: { nodes: [], edges: [] } }),
         assertResult: (result) => expect(result).toMatchObject({ status: 'ok' }),
@@ -716,7 +716,7 @@ describe('Frontend contract behavior', () => {
             flow_name: 'alpha.dot',
             flow_content: 'digraph G {}',
           }),
-        expectedUrl: '/pipelines',
+        expectedUrl: '/attractor/pipelines',
         expectedMethod: 'POST',
         response: jsonResponse({ status: 'accepted', pipeline_id: 'run-start', run_id: 'run-start' }),
         assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', pipeline_id: 'run-start' }),
@@ -728,14 +728,14 @@ describe('Frontend contract behavior', () => {
       {
         name: 'pipeline status',
         invoke: () => fetchPipelineStatusValidated('run status'),
-        expectedUrl: '/pipelines/run%20status',
+        expectedUrl: '/attractor/pipelines/run%20status',
         response: jsonResponse({ pipeline_id: 'run status', status: 'running' }),
         assertResult: (result) => expect(result).toMatchObject({ pipeline_id: 'run status', status: 'running' }),
       },
       {
         name: 'pipeline cancel',
         invoke: () => fetchPipelineCancelValidated('run cancel'),
-        expectedUrl: '/pipelines/run%20cancel/cancel',
+        expectedUrl: '/attractor/pipelines/run%20cancel/cancel',
         expectedMethod: 'POST',
         response: jsonResponse({ status: 'accepted', pipeline_id: 'run cancel' }),
         assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', pipeline_id: 'run cancel' }),
@@ -743,21 +743,21 @@ describe('Frontend contract behavior', () => {
       {
         name: 'pipeline graph',
         invoke: () => fetchPipelineGraphValidated('run graph'),
-        expectedUrl: '/pipelines/run%20graph/graph',
+        expectedUrl: '/attractor/pipelines/run%20graph/graph',
         response: new Response('<svg><g /></svg>', { status: 200 }),
         assertResult: (result) => expect(result).toContain('<svg>'),
       },
       {
         name: 'pipeline questions',
         invoke: () => fetchPipelineQuestionsValidated('run questions'),
-        expectedUrl: '/pipelines/run%20questions/questions',
+        expectedUrl: '/attractor/pipelines/run%20questions/questions',
         response: jsonResponse({ questions: [{ question_id: 'q-1' }] }),
         assertResult: (result) => expect(result).toEqual({ questions: [{ question_id: 'q-1' }] }),
       },
       {
         name: 'pipeline answer',
         invoke: () => fetchPipelineAnswerValidated('run answer', 'q 1', 'approve'),
-        expectedUrl: '/pipelines/run%20answer/questions/q%201/answer',
+        expectedUrl: '/attractor/pipelines/run%20answer/questions/q%201/answer',
         expectedMethod: 'POST',
         response: jsonResponse({ status: 'accepted', pipeline_id: 'run answer', question_id: 'q 1' }),
         assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', question_id: 'q 1' }),
@@ -772,7 +772,7 @@ describe('Frontend contract behavior', () => {
       {
         name: 'pipeline checkpoint',
         invoke: () => fetchPipelineCheckpointValidated('run checkpoint'),
-        expectedUrl: '/pipelines/run%20checkpoint/checkpoint',
+        expectedUrl: '/attractor/pipelines/run%20checkpoint/checkpoint',
         response: jsonResponse({ pipeline_id: 'run checkpoint', checkpoint: { node: 'n-1' } }),
         assertResult: (result) =>
           expect(result).toEqual({ pipeline_id: 'run checkpoint', checkpoint: { node: 'n-1' } }),
@@ -780,7 +780,7 @@ describe('Frontend contract behavior', () => {
       {
         name: 'pipeline context',
         invoke: () => fetchPipelineContextValidated('run context'),
-        expectedUrl: '/pipelines/run%20context/context',
+        expectedUrl: '/attractor/pipelines/run%20context/context',
         response: jsonResponse({ pipeline_id: 'run context', context: { branch: 'main' } }),
         assertResult: (result) =>
           expect(result).toEqual({ pipeline_id: 'run context', context: { branch: 'main' } }),
@@ -788,14 +788,14 @@ describe('Frontend contract behavior', () => {
       {
         name: 'runs list',
         invoke: () => fetchRunsListValidated(),
-        expectedUrl: '/runs',
+        expectedUrl: '/attractor/runs',
         response: jsonResponse({ runs: [{ run_id: 'run-1', status: 'running' }] }),
         assertResult: (result) => expect(result).toEqual({ runs: [{ run_id: 'run-1', status: 'running', flow_name: '', working_directory: '', model: '', started_at: '', result: undefined, project_path: undefined, git_branch: undefined, git_commit: undefined, spec_id: undefined, plan_id: undefined, ended_at: undefined, last_error: undefined, token_usage: undefined }] }),
       },
       {
         name: 'runtime status',
         invoke: () => fetchRuntimeStatusValidated(),
-        expectedUrl: '/status',
+        expectedUrl: '/attractor/status',
         response: jsonResponse({ status: 'idle' }),
         assertResult: (result) =>
           expect(result).toEqual({
@@ -835,7 +835,7 @@ describe('Frontend contract behavior', () => {
       ),
     )
     await expect(fetchPreviewValidated('digraph G {}')).rejects.toMatchObject<ApiHttpError>({
-      endpoint: '/preview',
+      endpoint: '/attractor/preview',
       status: 422,
       detail: 'Preview validation failed.',
     })
@@ -845,7 +845,7 @@ describe('Frontend contract behavior', () => {
       vi.fn(async () => new Response('Gateway timeout', { status: 504 })),
     )
     await expect(fetchPipelineStatusValidated('run-504')).rejects.toMatchObject<ApiHttpError>({
-      endpoint: '/pipelines/{id}',
+      endpoint: '/attractor/pipelines/{id}',
       status: 504,
       detail: 'Gateway timeout',
     })
@@ -869,7 +869,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith(`/pipelines/${encodeURIComponent(runId)}`)) {
+        if (url.endsWith(`/attractor/pipelines/${encodeURIComponent(runId)}`)) {
           return jsonResponse({ runtime: 'idle' })
         }
         return jsonResponse({})
@@ -894,7 +894,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:12.2.02] keeps non-dependent run-inspector surfaces functional under partial API failure', async () => {
     const runId = 'run-contract-partial-failure'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -915,7 +915,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -1031,14 +1031,14 @@ describe('Frontend contract behavior', () => {
     let previewRequestCount = 0
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/api/flows/contract-behavior.dot')) {
+      if (url.endsWith('/attractor/api/flows/contract-behavior.dot')) {
         return jsonResponse({ content: initialDot })
       }
-      if (url.endsWith('/preview')) {
+      if (url.endsWith('/attractor/preview')) {
         previewRequestCount += 1
         return jsonResponse(previewPayload)
       }
-      if (url.endsWith('/api/flows') && init?.method === 'POST') {
+      if (url.endsWith('/attractor/api/flows') && init?.method === 'POST') {
         return jsonResponse({ saved: true })
       }
       return jsonResponse({}, { status: 404 })
@@ -1248,10 +1248,15 @@ describe('Frontend contract behavior', () => {
       const conversationId = conversationIdMatch ? decodeURIComponent(conversationIdMatch[1]!) : null
       const requestBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
 
-      if (url.includes('/api/projects/metadata')) {
-        return jsonResponse({ branch: 'main', commit: 'abc123def456' })
+      if (url.includes('/workspace/api/projects/metadata')) {
+        return jsonResponse({
+          name: 'project-contract-behavior',
+          directory: '/tmp/project-contract-behavior',
+          branch: 'main',
+          commit: 'abc123def456',
+        })
       }
-      if (conversationId && endpoint.pathname === `/api/conversations/${encodeURIComponent(conversationId)}` && !init?.method) {
+      if (conversationId && endpoint.pathname === `/workspace/api/conversations/${encodeURIComponent(conversationId)}` && !init?.method) {
         const snapshot = conversationSnapshots[conversationId] ?? {
           conversation_id: conversationId,
           project_path: endpoint.searchParams.get('project_path') || '/tmp/project-contract-behavior',
@@ -1440,7 +1445,7 @@ describe('Frontend contract behavior', () => {
     })
 
     const requestedUrls = fetchMock.mock.calls.map(([input]) => requestUrl(input as RequestInfo | URL))
-    expect(requestedUrls.some((url) => url.includes(`/api/conversations/${encodeURIComponent(conversationId!)}/spec-edit-proposals/proposal-contract/approve`))).toBe(true)
+    expect(requestedUrls.some((url) => url.includes(`/workspace/api/conversations/${encodeURIComponent(conversationId!)}/spec-edit-proposals/proposal-contract/approve`))).toBe(true)
     expect(screen.getByTestId('project-ai-conversation-history-list')).not.toHaveTextContent('Execution planning failed')
     expect(useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.planStatus).toBe('draft')
     expect(useStore.getState().viewMode).toBe('projects')
@@ -1512,10 +1517,15 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = requestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
-          return jsonResponse({ branch: 'main', commit: 'abc123def456' })
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return jsonResponse({
+            name: 'project-contract-behavior',
+            directory: '/tmp/project-contract-behavior',
+            branch: 'main',
+            commit: 'abc123def456',
+          })
         }
-        if (url.includes(`/api/conversations/${encodeURIComponent(conversationId)}`) && !init?.method) {
+        if (url.includes(`/workspace/api/conversations/${encodeURIComponent(conversationId)}`) && !init?.method) {
           return jsonResponse(reviewSnapshot)
         }
         if (url.includes('/execution-cards/') && url.endsWith('/review') && init?.method === 'POST') {
@@ -1616,13 +1626,18 @@ describe('Frontend contract behavior', () => {
     const buildLaunchFailureMessage = 'build launch contract failure'
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.includes('/api/projects/metadata')) {
-        return jsonResponse({ branch: 'main', commit: 'abc123def456' })
+      if (url.includes('/workspace/api/projects/metadata')) {
+        return jsonResponse({
+          name: 'project-contract-behavior',
+          directory: '/tmp/project-contract-behavior',
+          branch: 'main',
+          commit: 'abc123def456',
+        })
       }
-      if (url.endsWith('/api/flows/contract-behavior.dot')) {
+      if (url.endsWith('/attractor/api/flows/contract-behavior.dot')) {
         return jsonResponse({ content: 'digraph BuildContract { start -> end }' })
       }
-      if (url.endsWith('/pipelines') && init?.method === 'POST') {
+      if (url.endsWith('/attractor/pipelines') && init?.method === 'POST') {
         return jsonResponse({ detail: buildLaunchFailureMessage }, { status: 503 })
       }
       return jsonResponse({})
@@ -1651,12 +1666,11 @@ describe('Frontend contract behavior', () => {
 
     await user.click(screen.getByTestId('execute-button'))
 
-    expect(screen.getByTestId('run-start-error-banner')).toHaveTextContent(
-      'Build workflow launch requires an approved plan state.',
-    )
-    expect(screen.getByTestId('build-workflow-failure-diagnostics')).toHaveTextContent(
-      'Build workflow launch requires an approved plan state.',
-    )
+    await waitFor(() => {
+      expect(screen.getByTestId('build-workflow-failure-diagnostics')).toHaveTextContent(
+        'Build workflow launch requires an approved plan state.',
+      )
+    })
     expect(screen.getByTestId('build-workflow-rerun-button')).toBeDisabled()
     expect(fetchMock).not.toHaveBeenCalled()
 
@@ -1676,13 +1690,13 @@ describe('Frontend contract behavior', () => {
     await user.click(screen.getByTestId('execute-button'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('run-start-error-banner')).toHaveTextContent(buildLaunchFailureMessage)
+      expect(screen.getByTestId('build-workflow-failure-message')).toHaveTextContent(buildLaunchFailureMessage)
     })
     expect(screen.getByTestId('build-workflow-failure-message')).toHaveTextContent(buildLaunchFailureMessage)
     expect(screen.getByTestId('build-workflow-rerun-button')).toBeEnabled()
 
     const pipelineCall = fetchMock.mock.calls.find(
-      ([request, init]) => requestUrl(request as RequestInfo | URL).endsWith('/pipelines') && init?.method === 'POST',
+      ([request, init]) => requestUrl(request as RequestInfo | URL).endsWith('/attractor/pipelines') && init?.method === 'POST',
     )
     expect(pipelineCall).toBeDefined()
     const pipelinePayload = JSON.parse((pipelineCall?.[1] as RequestInit).body as string) as {
@@ -1888,7 +1902,7 @@ describe('Frontend contract behavior', () => {
 
       cleanup()
       const runId = 'run-responsive-contract'
-      const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+      const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
       const runRecord = {
         run_id: runId,
         flow_name: 'contract-behavior.dot',
@@ -1909,7 +1923,7 @@ describe('Frontend contract behavior', () => {
         'fetch',
         vi.fn(async (input: RequestInfo | URL) => {
           const url = requestUrl(input)
-          if (url.endsWith('/runs')) {
+          if (url.endsWith('/attractor/runs')) {
             return jsonResponse({ runs: [runRecord] })
           }
           if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -2112,7 +2126,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:13.3.01] defines explicit performance budgets for canvas interaction and timeline updates', async () => {
     const runId = 'run-performance-budget-contract'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -2133,13 +2147,13 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/api/flows/contract-behavior.dot')) {
+        if (url.endsWith('/attractor/api/flows/contract-behavior.dot')) {
           return jsonResponse({
             name: 'contract-behavior.dot',
             content: 'digraph G { start [label="Start"]; end [label="End"]; start -> end; }',
           })
         }
-        if (url.endsWith('/preview')) {
+        if (url.endsWith('/attractor/preview')) {
           return jsonResponse({
             status: 'ok',
             graph: {
@@ -2153,7 +2167,7 @@ describe('Frontend contract behavior', () => {
             diagnostics: [],
           })
         }
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -2250,13 +2264,13 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/api/flows/contract-behavior.dot')) {
+        if (url.endsWith('/attractor/api/flows/contract-behavior.dot')) {
           return jsonResponse({
             name: 'contract-behavior.dot',
             content: 'digraph G { start -> end; }',
           })
         }
-        if (url.endsWith('/preview')) {
+        if (url.endsWith('/attractor/preview')) {
           return jsonResponse({
             status: 'ok',
             graph: {
@@ -2303,7 +2317,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:13.3.03] caps timeline entries and surfaces trimming under sustained SSE throughput', async () => {
     const runId = 'run-timeline-throughput-contract'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const maxItems = 200
     const totalEvents = maxItems + 35
     const runRecord = {
@@ -2326,7 +2340,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -2472,7 +2486,7 @@ describe('Frontend contract behavior', () => {
     ]
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/api/projects')) {
+      if (url.endsWith('/workspace/api/projects')) {
         return jsonResponse([
           {
             project_id: 'project-contract-behavior-1234',
@@ -2483,11 +2497,11 @@ describe('Frontend contract behavior', () => {
           },
         ])
       }
-      if (url.includes('/api/projects/pick-directory')) {
+      if (url.includes('/workspace/api/projects/pick-directory')) {
         const nextDirectory = pickedDirectories.shift()
         return jsonResponse(nextDirectory ? { status: 'selected', directory_path: nextDirectory } : { status: 'canceled' })
       }
-      if (url.includes('/api/projects/register')) {
+      if (url.includes('/workspace/api/projects/register')) {
         const payload = init?.body ? JSON.parse(String(init.body)) as { project_path?: string } : {}
         const projectPath = payload.project_path ?? '/tmp/registered-project'
         return jsonResponse({
@@ -2498,15 +2512,20 @@ describe('Frontend contract behavior', () => {
           active_conversation_id: null,
         })
       }
-      if (url.includes('/api/projects/metadata')) {
+      if (url.includes('/workspace/api/projects/metadata')) {
         const directory = new URL(url, 'http://localhost').searchParams.get('directory') ?? ''
         if (directory.includes('non-git')) {
-          return jsonResponse({ branch: null, commit: null })
+          return jsonResponse({ name: 'non-git-project', directory, branch: null, commit: null })
         }
         if (directory.includes('detached')) {
-          return jsonResponse({ branch: null, commit: 'abc123def456' })
+          return jsonResponse({ name: 'detached-git-project', directory, branch: null, commit: 'abc123def456' })
         }
-        return jsonResponse({ branch: 'main', commit: 'abc123def456' })
+        return jsonResponse({
+          name: directory.split('/').filter(Boolean).at(-1) ?? 'project',
+          directory,
+          branch: 'main',
+          commit: 'abc123def456',
+        })
       }
       return jsonResponse({})
     })
@@ -2867,7 +2886,7 @@ describe('Frontend contract behavior', () => {
     const runId = 'run-contract-human-gate'
     const pendingPrompt = 'Approve production deploy?'
     const gateId = 'gate-1'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -2888,7 +2907,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3008,7 +3027,7 @@ describe('Frontend contract behavior', () => {
     const runId = 'run-contract-human-gate-answer'
     const gateId = 'gate-approve'
     const pendingPrompt = 'Approve production deploy?'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const answerPath = `${runApiPath}/questions/${encodeURIComponent(gateId)}/answer`
     const runRecord = {
       run_id: runId,
@@ -3028,7 +3047,7 @@ describe('Frontend contract behavior', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/runs')) {
+      if (url.endsWith('/attractor/runs')) {
         return jsonResponse({ runs: [runRecord] })
       }
       if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3149,7 +3168,7 @@ describe('Frontend contract behavior', () => {
     const runId = 'run-contract-human-gate-metadata'
     const gateId = 'gate-metadata'
     const pendingPrompt = 'Choose deployment strategy'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -3170,7 +3189,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3289,7 +3308,7 @@ describe('Frontend contract behavior', () => {
     const confirmationGateId = 'gate-confirmation'
     const yesNoPrompt = 'Continue rollout?'
     const confirmationPrompt = 'Finalize release promotion?'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -3310,7 +3329,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3436,7 +3455,7 @@ describe('Frontend contract behavior', () => {
     const gateId = 'gate-freeform'
     const pendingPrompt = 'Provide release notes for this deployment gate.'
     const freeformAnswer = 'Need one more staging pass before production rollout.'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const answerPath = `${runApiPath}/questions/${encodeURIComponent(gateId)}/answer`
     const runRecord = {
       run_id: runId,
@@ -3456,7 +3475,7 @@ describe('Frontend contract behavior', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/runs')) {
+      if (url.endsWith('/attractor/runs')) {
         return jsonResponse({ runs: [runRecord] })
       }
       if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3579,7 +3598,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:10.2.04] covers each supported human-gate question type with type-specific UI affordances', async () => {
     const runId = 'run-contract-human-gate-type-matrix'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -3604,7 +3623,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3781,7 +3800,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:10.4.01] groups multi-question pending prompts by originating stage', async () => {
     const runId = 'run-contract-human-gate-grouped-prompts'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -3802,7 +3821,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3942,7 +3961,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:10.4.02] displays interviewer inform messages in context of the originating stage', async () => {
     const runId = 'run-contract-human-gate-inform-messages'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -3963,7 +3982,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -4083,7 +4102,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:10.4.03] preserves grouped interaction order and audit metadata', async () => {
     const runId = 'run-contract-human-gate-order-auditability'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -4104,7 +4123,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -4264,7 +4283,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:10.3.02] renders timeout/default-applied/skipped provenance in run timeline summaries', async () => {
     const runId = 'run-contract-human-gate-provenance'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -4285,7 +4304,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -4412,7 +4431,7 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:10.3.03] falls back to timeout and explicit-answer branches when outcome provenance is omitted', async () => {
     const runId = 'run-contract-human-gate-provenance-fallback'
-    const runApiPath = `/pipelines/${encodeURIComponent(runId)}`
+    const runApiPath = `/attractor/pipelines/${encodeURIComponent(runId)}`
     const runRecord = {
       run_id: runId,
       flow_name: 'contract-behavior.dot',
@@ -4433,7 +4452,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/runs')) {
+        if (url.endsWith('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -4579,13 +4598,13 @@ describe('Frontend contract behavior', () => {
     const saveResolvers: Array<() => void> = []
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/api/flows/contract-behavior.dot')) {
+      if (url.endsWith('/attractor/api/flows/contract-behavior.dot')) {
         return Promise.resolve(jsonResponse({ content: initialDot }))
       }
-      if (url.endsWith('/preview')) {
+      if (url.endsWith('/attractor/preview')) {
         return Promise.resolve(jsonResponse(previewPayload))
       }
-      if (url.endsWith('/api/flows') && init?.method === 'POST') {
+      if (url.endsWith('/attractor/api/flows') && init?.method === 'POST') {
         return new Promise<Response>((resolve) => {
           saveResolvers.push(() => resolve(jsonResponse({ status: 'saved' })))
         })
@@ -4608,7 +4627,7 @@ describe('Frontend contract behavior', () => {
     await waitFor(() => {
       const saveCalls = fetchMock.mock.calls.filter(([input, requestInit]) => {
         const callUrl = requestUrl(input as RequestInfo | URL)
-        return callUrl.endsWith('/api/flows') && (requestInit as RequestInit | undefined)?.method === 'POST'
+        return callUrl.endsWith('/attractor/api/flows') && (requestInit as RequestInit | undefined)?.method === 'POST'
       })
       expect(saveCalls).toHaveLength(1)
     })
@@ -4692,13 +4711,13 @@ digraph contract_behavior {
     const savedPayloads: Array<{ name: string; content: string }> = []
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/api/flows/contract-behavior.dot')) {
+      if (url.endsWith('/attractor/api/flows/contract-behavior.dot')) {
         return jsonResponse({ content: initialDot })
       }
-      if (url.endsWith('/preview')) {
+      if (url.endsWith('/attractor/preview')) {
         return jsonResponse(previewPayload)
       }
-      if (url.endsWith('/api/flows') && init?.method === 'POST') {
+      if (url.endsWith('/attractor/api/flows') && init?.method === 'POST') {
         const payload = JSON.parse(String(init.body)) as { name: string; content: string }
         savedPayloads.push(payload)
         return jsonResponse({ status: 'saved' })
@@ -4815,15 +4834,15 @@ digraph contract_behavior {
     let previewRequestCount = 0
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/api/flows/contract-behavior.dot')) {
+      if (url.endsWith('/attractor/api/flows/contract-behavior.dot')) {
         return jsonResponse({ content: initialDot })
       }
-      if (url.endsWith('/preview')) {
+      if (url.endsWith('/attractor/preview')) {
         const payload = previewRequestCount === 0 ? previewOkPayload : previewConflictPayload
         previewRequestCount += 1
         return jsonResponse(payload)
       }
-      if (url.endsWith('/api/flows') && init?.method === 'POST') {
+      if (url.endsWith('/attractor/api/flows') && init?.method === 'POST') {
         return jsonResponse({ status: 'saved' })
       }
       return jsonResponse({}, { status: 404 })
@@ -4925,7 +4944,7 @@ digraph contract_behavior {
     const savePayloads: Array<{ name: string; content: string }> = []
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/api/flows') && init?.method === 'POST') {
+      if (url.endsWith('/attractor/api/flows') && init?.method === 'POST') {
         const payload = JSON.parse(String(init.body)) as { name: string; content: string }
         savePayloads.push(payload)
         return jsonResponse({ status: 'saved' })
@@ -4990,7 +5009,7 @@ digraph contract_behavior {
     const savePayloads: Array<{ name: string; content: string }> = []
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/api/flows') && init?.method === 'POST') {
+      if (url.endsWith('/attractor/api/flows') && init?.method === 'POST') {
         const payload = JSON.parse(String(init.body)) as { name: string; content: string }
         savePayloads.push(payload)
         return jsonResponse({ status: 'saved' })

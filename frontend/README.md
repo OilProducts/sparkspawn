@@ -42,7 +42,7 @@ From the repo root, `just run` is the normal full-stack workflow.
 ## Build Output
 
 Production assets are emitted to `frontend/dist/`.
-To bundle them into the Python package, sync them into [attractor/ui_dist/](/Users/chris/tinker/sparkspawn/attractor/ui_dist) from the repo root:
+To bundle them into the Python package, sync them into [src/attractor/ui_dist/](/Users/chris/tinker/sparkspawn/src/attractor/ui_dist) from the repo root:
 
 ```bash
 ./scripts/sync_ui_dist.sh

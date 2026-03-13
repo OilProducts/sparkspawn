@@ -2,23 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Callable, Optional, Protocol
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from attractor.config import Settings
-from attractor.api.project_chat import ProjectChatService, resolve_runtime_workspace_path
-from attractor.storage import (
+from sparkspawn_common.runtime import normalize_project_path, resolve_runtime_workspace_path
+from workspace.attractor_client import AttractorApiClient, AttractorApiError
+from workspace.project_chat import ProjectChatService
+from workspace.storage import (
     delete_project_flow_binding,
     delete_project_record,
     list_project_records,
-    normalize_project_path,
     read_project_record,
     set_project_flow_binding,
     update_project_record,
@@ -65,17 +64,20 @@ class ExecutionCardReviewRequest(BaseModel):
     flow_source: Optional[str] = None
 
 
+class WorkspaceSettings(Protocol):
+    data_dir: Path
+
+
 @dataclass(frozen=True)
 class WorkspaceApiDependencies:
-    get_settings: Callable[[], Settings]
+    get_settings: Callable[[], WorkspaceSettings]
     get_project_chat: Callable[[], ProjectChatService]
+    get_attractor_client: Callable[[], AttractorApiClient]
     resolve_project_git_branch: Callable[[Path], Optional[str]]
     resolve_project_git_commit: Callable[[Path], Optional[str]]
     pick_project_directory: Callable[[], Optional[Path]]
     default_execution_planning_flow: str
     default_execution_dispatch_flow: str
-    launch_execution_planning_pipeline: Callable[..., Awaitable[None]]
-    launch_execution_card_pipeline: Callable[..., Awaitable[str]]
 
 
 def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
@@ -85,6 +87,13 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         "execution_card_approved",
         "execution_card_rejected",
         "execution_card_revision_requested",
+    }
+    terminal_pipeline_statuses = {
+        "success",
+        "failed",
+        "validation_error",
+        "canceled",
+        "cancelled",
     }
 
     def _serialize_project_record(project: Any) -> dict[str, object]:
@@ -124,6 +133,165 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         project = await asyncio.to_thread(read_project_record, deps.get_settings().data_dir, project_path)
         flow_bindings = project.flow_bindings if project is not None else {}
         return (flow_bindings.get(trigger) or "").strip() or fallback_flow
+
+    async def _ensure_flow_exists(flow_name: str) -> None:
+        exists = await deps.get_attractor_client().flow_exists(flow_name)
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"Unknown flow: {flow_name}")
+
+    async def _wait_for_pipeline_terminal_status(run_id: str) -> dict[str, Any]:
+        client = deps.get_attractor_client()
+        while True:
+            payload = await client.get_pipeline(run_id)
+            status = str(payload.get("status", "")).strip().lower()
+            if status in terminal_pipeline_statuses:
+                return payload
+            await asyncio.sleep(1.0)
+
+    async def _read_stage_response(run_id: str, stage_id: str) -> str:
+        client = deps.get_attractor_client()
+        for artifact_path in (f"logs/{stage_id}/response.md", f"{stage_id}/response.md"):
+            try:
+                text = await client.get_artifact_text(run_id, artifact_path)
+            except AttractorApiError:
+                continue
+            if text.strip():
+                return text
+        raise RuntimeError(f"Run {run_id} completed without a response artifact for stage {stage_id}.")
+
+    async def _launch_execution_planning_pipeline(
+        *,
+        conversation_id: str,
+        proposal_id: str,
+        workflow_run_id: str,
+        flow_source: str,
+        execution_flow_source: str,
+        model: Optional[str],
+        review_feedback: Optional[str],
+    ) -> None:
+        project_chat = deps.get_project_chat()
+        client = deps.get_attractor_client()
+        launch_spec = await asyncio.to_thread(
+            project_chat.prepare_execution_workflow_launch,
+            conversation_id,
+            proposal_id,
+            review_feedback,
+        )
+        try:
+            launch_payload = await client.start_pipeline(
+                run_id=workflow_run_id,
+                flow_name=flow_source,
+                working_directory=launch_spec.project_path,
+                model=model,
+                goal=launch_spec.prompt,
+                spec_id=launch_spec.spec_id,
+            )
+        except AttractorApiError as exc:
+            await asyncio.to_thread(
+                project_chat.fail_execution_workflow,
+                conversation_id,
+                workflow_run_id,
+                flow_source,
+                str(exc),
+            )
+            await project_chat.publish_snapshot(conversation_id)
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+        if launch_payload.get("status") != "started":
+            error = str(launch_payload.get("error") or "Execution planning flow could not be started.")
+            await asyncio.to_thread(
+                project_chat.fail_execution_workflow,
+                conversation_id,
+                workflow_run_id,
+                flow_source,
+                error,
+            )
+            await project_chat.publish_snapshot(conversation_id)
+            raise HTTPException(status_code=500, detail=error)
+
+        async def monitor() -> None:
+            try:
+                payload = await _wait_for_pipeline_terminal_status(workflow_run_id)
+                completed_status = str(payload.get("status", "")).strip().lower()
+                if completed_status != "success":
+                    error = str(payload.get("last_error") or f"Execution planning pipeline ended with status '{completed_status}'.").strip()
+                    await asyncio.to_thread(
+                        project_chat.fail_execution_workflow,
+                        conversation_id,
+                        workflow_run_id,
+                        flow_source,
+                        error,
+                    )
+                    await project_chat.publish_snapshot(conversation_id)
+                    return
+
+                raw_response = await _read_stage_response(workflow_run_id, "generate_execution_card")
+                execution_card = await asyncio.to_thread(
+                    project_chat.complete_execution_workflow,
+                    conversation_id,
+                    proposal_id,
+                    flow_source,
+                    execution_flow_source,
+                    workflow_run_id,
+                    raw_response,
+                )
+                await client.update_pipeline_metadata(
+                    workflow_run_id,
+                    plan_id=execution_card.id,
+                )
+                await project_chat.publish_snapshot(conversation_id)
+            except Exception as exc:  # noqa: BLE001
+                await asyncio.to_thread(
+                    project_chat.fail_execution_workflow,
+                    conversation_id,
+                    workflow_run_id,
+                    flow_source,
+                    str(exc),
+                )
+                await project_chat.publish_snapshot(conversation_id)
+
+        asyncio.create_task(monitor())
+
+    async def _launch_execution_card_pipeline(
+        *,
+        conversation_id: str,
+        execution_card_id: str,
+        project_path: str,
+        flow_source: str,
+        model: Optional[str],
+        spec_id: str,
+        plan_id: str,
+    ) -> str:
+        project_chat = deps.get_project_chat()
+        try:
+            launch_payload = await deps.get_attractor_client().start_pipeline(
+                run_id=None,
+                flow_name=flow_source,
+                working_directory=project_path,
+                model=model,
+                spec_id=spec_id,
+                plan_id=plan_id,
+            )
+        except AttractorApiError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+        if launch_payload.get("status") != "started":
+            error = str(launch_payload.get("error") or "Execution flow could not be started.")
+            raise HTTPException(status_code=500, detail=error)
+
+        run_id = str(launch_payload.get("run_id") or "")
+        if not run_id:
+            raise HTTPException(status_code=500, detail="Execution flow did not return a run id.")
+
+        await asyncio.to_thread(
+            project_chat.note_execution_card_dispatched,
+            conversation_id,
+            execution_card_id,
+            run_id,
+            flow_source,
+        )
+        await project_chat.publish_snapshot(conversation_id)
+        return run_id
 
     @router.get("/api/conversations/{conversation_id}")
     async def get_project_conversation(conversation_id: str, project_path: Optional[str] = None):
@@ -206,6 +374,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         flow_name = req.flow_name.strip()
         if not flow_name:
             raise HTTPException(status_code=400, detail="Flow name is required.")
+        await _ensure_flow_exists(flow_name)
         project = await asyncio.to_thread(
             set_project_flow_binding,
             deps.get_settings().data_dir,
@@ -319,6 +488,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 deps.default_execution_planning_flow,
             )
         )
+        await _ensure_flow_exists(effective_flow_source)
         try:
             snapshot, proposal = await asyncio.to_thread(
                 deps.get_project_chat().approve_spec_edit,
@@ -335,15 +505,13 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except subprocess.CalledProcessError as exc:
-            detail = exc.stderr.strip() if exc.stderr else str(exc)
-            raise HTTPException(status_code=500, detail=f"Failed to commit approved spec edit: {detail}") from exc
 
-        await deps.launch_execution_planning_pipeline(
+        await _launch_execution_planning_pipeline(
             conversation_id=conversation_id,
             proposal_id=proposal.id,
             workflow_run_id=workflow_run_id,
             flow_source=effective_flow_source,
+            execution_flow_source=deps.default_execution_dispatch_flow,
             model=req.model,
             review_feedback=None,
         )
@@ -417,7 +585,8 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 or persisted_execution_flow
                 or deps.default_execution_dispatch_flow
             )
-            await deps.launch_execution_card_pipeline(
+            await _ensure_flow_exists(effective_flow_source)
+            await _launch_execution_card_pipeline(
                 conversation_id=conversation_id,
                 execution_card_id=execution_card.id,
                 project_path=normalized_project_path,
@@ -427,11 +596,14 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 plan_id=execution_card.id,
             )
         elif proposal_id and workflow_run_id:
-            await deps.launch_execution_planning_pipeline(
+            resolved_review_flow = review_flow_source or deps.default_execution_planning_flow
+            await _ensure_flow_exists(resolved_review_flow)
+            await _launch_execution_planning_pipeline(
                 conversation_id=conversation_id,
                 proposal_id=proposal_id,
                 workflow_run_id=workflow_run_id,
-                flow_source=review_flow_source or deps.default_execution_planning_flow,
+                flow_source=resolved_review_flow,
+                execution_flow_source=deps.default_execution_dispatch_flow,
                 model=req.model,
                 review_feedback=req.message,
             )

@@ -56,7 +56,7 @@ def test_preview_preserves_warning_and_info_diagnostics(
 ) -> None:
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_info_diagnostics())
 
-    response = api_client.post("/preview", json={"flow_content": FLOW})
+    response = api_client.post("/attractor/preview", json={"flow_content": FLOW})
 
     assert response.status_code == 200
     payload = response.json()
@@ -72,7 +72,7 @@ def test_preview_validation_error_payload_shape(
 ) -> None:
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_error_diagnostics())
 
-    response = api_client.post("/preview", json={"flow_content": FLOW})
+    response = api_client.post("/attractor/preview", json={"flow_content": FLOW})
 
     assert response.status_code == 200
     payload = response.json()
@@ -109,7 +109,7 @@ def test_start_pipeline_preserves_warning_and_info_diagnostics(
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_info_diagnostics())
 
     response = api_client.post(
-        "/pipelines",
+        "/attractor/pipelines",
         json={
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
@@ -138,7 +138,7 @@ def test_start_pipeline_validation_error_payload_shape(
     monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_error_diagnostics())
 
     response = api_client.post(
-        "/pipelines",
+        "/attractor/pipelines",
         json={
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
@@ -192,7 +192,7 @@ def test_start_pipeline_runs_stylesheet_transform_before_validation(
     """
 
     response = api_client.post(
-        "/pipelines",
+        "/attractor/pipelines",
         json={
             "flow_content": flow,
             "working_directory": str(tmp_path / "work"),
@@ -229,7 +229,7 @@ def test_preview_applies_registered_custom_transform(api_client: TestClient) -> 
     server.clear_registered_transforms()
     try:
         server.register_transform(_CustomPromptTransform())
-        response = api_client.post("/preview", json={"flow_content": flow})
+        response = api_client.post("/attractor/preview", json={"flow_content": flow})
         assert response.status_code == 200
         payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
@@ -265,7 +265,7 @@ def test_preview_applies_multiple_custom_transforms_in_registration_order(api_cl
     try:
         server.register_transform(_AppendFirstTransform())
         server.register_transform(_AppendSecondTransform())
-        response = api_client.post("/preview", json={"flow_content": flow})
+        response = api_client.post("/attractor/preview", json={"flow_content": flow})
         assert response.status_code == 200
         payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
@@ -298,7 +298,7 @@ def test_preview_runs_custom_transforms_after_builtin_transforms(api_client: Tes
     server.clear_registered_transforms()
     try:
         server.register_transform(_BuiltInOrderingProbeTransform())
-        response = api_client.post("/preview", json={"flow_content": flow})
+        response = api_client.post("/attractor/preview", json={"flow_content": flow})
         assert response.status_code == 200
         payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
@@ -358,7 +358,7 @@ def test_start_pipeline_custom_transform_conflict_uses_later_registration_preced
         server.register_transform(_SetFirstModelTransform())
         server.register_transform(_SetSecondModelTransform())
         response = api_client.post(
-            "/pipelines",
+            "/attractor/pipelines",
             json={
                 "flow_content": flow,
                 "working_directory": str(tmp_path / "work"),
@@ -423,8 +423,8 @@ def test_preview_custom_transform_conflict_precedence_is_deterministic_across_ru
         server.register_transform(first)
         server.register_transform(second)
 
-        first_response = api_client.post("/preview", json={"flow_content": flow})
-        second_response = api_client.post("/preview", json={"flow_content": flow})
+        first_response = api_client.post("/attractor/preview", json={"flow_content": flow})
+        second_response = api_client.post("/attractor/preview", json={"flow_content": flow})
         assert first_response.status_code == 200
         assert second_response.status_code == 200
         first_payload = first_response.json()

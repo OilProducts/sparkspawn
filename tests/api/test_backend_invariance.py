@@ -7,10 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.codex_backends as codex_backends_module
-import attractor.api.project_chat as project_chat
+import workspace.project_chat as project_chat
 import attractor.api.server as server
 from attractor.engine import Context, load_checkpoint
 from attractor.engine.outcome import Outcome, OutcomeStatus
+from sparkspawn_common.runtime import build_project_id
 from tests.api._support import (
     SIMPLE_FLOW as FLOW,
     close_task_immediately as _close_task_immediately,
@@ -19,7 +20,7 @@ from tests.api._support import (
 
 
 def _start_pipeline_via_http(api_client: TestClient, payload: dict) -> dict:
-    response = api_client.post("/pipelines", json=payload)
+    response = api_client.post("/attractor/pipelines", json=payload)
     assert response.status_code == 200
     return response.json()
 
@@ -149,7 +150,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
     run_id = payload["run_id"]
     run_root = server._run_root(run_id)
     assert run_root.exists()
-    assert run_root == tmp_path / ".sparkspawn" / "projects" / server.build_project_id(str((tmp_path / "work").resolve())) / "runs" / run_id
+    assert run_root == tmp_path / ".sparkspawn" / "attractor" / "runs" / build_project_id(str((tmp_path / "work").resolve())) / run_id
 
     checkpoint = load_checkpoint(run_root / "state.json")
     assert checkpoint is not None

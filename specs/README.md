@@ -24,8 +24,6 @@ Execution artifacts stay outside this folder:
   Canonical workspace-layer specification above Attractor: projects, conversations, review artifacts, approvals, and provenance.
 - `sparkspawn-frontend.md`
   Canonical frontend-client specification: presentation boundaries, data-source separation, and client-state rules.
-- `ui-spec.md`
-  Canonical web UI specification.
 - `ui-user-stories.md`
   Stable user-story catalog.
 - `ui-story-records.md`

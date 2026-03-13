@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-import attractor.api.codex_app_server as codex_app_server
 import attractor.api.server as server
-import attractor.api.project_chat as project_chat
-import attractor.api.project_chat_session as project_chat_session
-from attractor.prompt_templates import PROMPTS_FILE_NAME
-from attractor.storage import ensure_project_paths
+import sparkspawn_common.codex_app_server as codex_app_server
+import workspace.project_chat as project_chat
+import workspace.project_chat_session as project_chat_session
+from workspace.prompt_templates import PROMPTS_FILE_NAME
+from workspace.storage import ensure_project_paths
 
 
 def test_extract_command_text_handles_list_and_string_payloads() -> None:
@@ -86,7 +86,7 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
             id="proposal-1",
             created_at="2026-03-08T12:01:00Z",
             summary="Summary",
-            changes=[project_chat.SpecEditProposalChange(path="specs/ui-spec.md", before="old", after="new")],
+            changes=[project_chat.SpecEditProposalChange(path="specs/sparkspawn-frontend.md", before="old", after="new")],
             status="approved",
         ),
         "Needs refinement",
@@ -130,7 +130,7 @@ def test_extract_spec_proposal_payload_requires_summary_and_changes() -> None:
             "summary": "Tighten the top bar.",
             "changes": [
                 {
-                    "path": "specs/ui-spec.md",
+                    "path": "specs/sparkspawn-frontend.md",
                     "before": "Header includes runtime metadata.",
                     "after": "Header includes only navigation and active project context.",
                 }
@@ -141,7 +141,7 @@ def test_extract_spec_proposal_payload_requires_summary_and_changes() -> None:
 
     assert payload["summary"] == "Tighten the top bar."
     assert payload["rationale"] == "Reduce chrome noise."
-    assert payload["changes"][0]["path"] == "specs/ui-spec.md"
+    assert payload["changes"][0]["path"] == "specs/sparkspawn-frontend.md"
 
 
 def test_dynamic_tool_spec_emphasizes_minimal_grounded_spec_edits() -> None:
@@ -530,7 +530,7 @@ def test_chat_session_handles_dynamic_tool_call(monkeypatch) -> None:
                             "summary": "Reduce header chrome.",
                             "changes": [
                                 {
-                                    "path": "specs/ui-spec.md",
+                                    "path": "specs/sparkspawn-frontend.md",
                                     "before": "Header contains extra metadata.",
                                     "after": "Header contains only navigation and active project context.",
                                 }
@@ -1028,7 +1028,7 @@ def test_send_turn_persists_spec_proposal_from_dynamic_tool_call(tmp_path: Path,
                     "summary": "Reduce top-bar chrome and keep only project context.",
                     "changes": [
                         {
-                            "path": "specs/ui-spec.md#home-header",
+                            "path": "specs/sparkspawn-frontend.md#home-header",
                             "before": "The home header surfaces execution controls and runtime metadata.",
                             "after": "The home header shows only navigation and active project context.",
                         }
@@ -1125,7 +1125,7 @@ def test_run_prepared_turn_does_not_duplicate_live_persisted_spec_proposal(tmp_p
         "summary": "Reduce header chrome.",
         "changes": [
             {
-                "path": "specs/ui-spec.md",
+                "path": "specs/sparkspawn-frontend.md",
                 "before": "Header contains extra metadata.",
                 "after": "Header contains only navigation and active project context.",
             }
@@ -1831,7 +1831,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: FakeSession())
 
     response = api_client.post(
-        "/api/conversations/conversation-test/turns",
+        "/workspace/api/conversations/conversation-test/turns",
         json={
             "project_path": str(tmp_path),
             "message": "hello",
@@ -1961,7 +1961,7 @@ def test_list_project_conversations_endpoint_returns_project_threads(api_client,
         )
     )
 
-    response = api_client.get("/api/projects/conversations", params={"project_path": str(tmp_path)})
+    response = api_client.get("/workspace/api/projects/conversations", params={"project_path": str(tmp_path)})
 
     assert response.status_code == 200
     payload = response.json()
@@ -1994,7 +1994,7 @@ def test_delete_project_conversation_endpoint_removes_thread_state(api_client, t
     )
 
     response = api_client.delete(
-        f"/api/conversations/{conversation_id}",
+        f"/workspace/api/conversations/{conversation_id}",
         params={"project_path": str(tmp_path)},
     )
 
@@ -2006,6 +2006,6 @@ def test_delete_project_conversation_endpoint_removes_thread_state(api_client, t
     }
     assert not (project_paths.conversations_dir / conversation_id).exists()
 
-    list_response = api_client.get("/api/projects/conversations", params={"project_path": str(tmp_path)})
+    list_response = api_client.get("/workspace/api/projects/conversations", params={"project_path": str(tmp_path)})
     assert list_response.status_code == 200
     assert list_response.json() == []

@@ -9,7 +9,7 @@ import { getToolHookCommandWarning } from "@/lib/graphAttrValidation"
 import { resolveEdgeFieldDiagnostics, resolveNodeFieldDiagnostics } from "@/lib/inspectorFieldDiagnostics"
 import { toExtensionAttrEntries } from "@/lib/extensionAttrs"
 import { retryLastSaveContent, saveFlowContent } from "@/lib/flowPersistence"
-import { fetchFlowListValidated } from '@/lib/attractorClient'
+import { deleteFlowValidated, fetchFlowListValidated } from '@/lib/attractorClient'
 import { resolveSaveRemediation } from "@/lib/saveRemediation"
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
@@ -152,9 +152,7 @@ export function Sidebar() {
         if (!activeProjectPath) return
         if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
 
-        await fetch(`/api/flows/${fileName}`, {
-            method: 'DELETE'
-        });
+        await deleteFlowValidated(fileName);
 
         if (activeFlow === fileName) {
             setActiveFlow(null);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { pipelineEventsUrl } from '@/lib/attractorClient'
 import { useStore } from '@/store'
 
 interface RoutingDecision {
@@ -23,7 +24,6 @@ interface FailureDecision {
 }
 
 const MAX_ITEMS = 6
-
 function prependLimited<T extends { id: string }>(items: T[], next: T): T[] {
     const deduped = items.filter((item) => item.id !== next.id)
     return [next, ...deduped].slice(0, MAX_ITEMS)
@@ -55,7 +55,7 @@ export function ExplainabilityPanel() {
         const stageOutcomes = new Map<string, string>()
         let previousStartedNode = ''
         let sequence = 0
-        const source = new EventSource(`/pipelines/${encodeURIComponent(selectedRunId)}/events`)
+        const source = new EventSource(pipelineEventsUrl(selectedRunId))
 
         source.onmessage = (event) => {
             try {

@@ -46,6 +46,7 @@ from attractor.api.codex_backends import (
 )
 from attractor.api.flow_sources import (
     ensure_flows_dir as _ensure_flows_dir_impl,
+    inject_pipeline_goal as _inject_pipeline_goal_impl,
     load_execution_planning_flow_content as _load_execution_planning_flow_content_impl,
     load_flow_content as _load_flow_content_impl,
     resolve_flow_path as _resolve_flow_path_impl,
@@ -69,20 +70,6 @@ from attractor.api.pipeline_runtime import (
     RuntimeState,
     WebInterviewer,
 )
-from attractor.api.project_chat import (
-    ProjectChatService,
-    resolve_runtime_workspace_path,
-)
-from attractor.api.workspace_api import (
-    create_workspace_router,
-    WorkspaceApiDependencies,
-)
-from attractor.storage import (
-    build_project_id,
-    ensure_project_paths,
-    normalize_project_path,
-    read_project_paths_by_id,
-)
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
 from attractor.interviewer.base import Interviewer
@@ -92,11 +79,15 @@ from attractor.transforms import (
     ModelStylesheetTransform,
     TransformPipeline,
 )
+from sparkspawn_common.runtime import resolve_runtime_workspace_path
+from workspace.attractor_client import AttractorApiClient
+from workspace.api import create_workspace_router, WorkspaceApiDependencies
+from workspace.project_chat import ProjectChatService
 
 
-app = FastAPI()
-attractor_app = FastAPI(title="Attractor API")
-workspace_app = FastAPI(title="Spark Spawn Workspace API")
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+attractor_app = FastAPI(title="Attractor API", docs_url="/docs", redoc_url=None, openapi_url="/openapi.json")
+workspace_app = FastAPI(title="Spark Spawn Workspace API", docs_url="/docs", redoc_url=None, openapi_url="/openapi.json")
 attractor_router = APIRouter()
 LOGGER = logging.getLogger(__name__)
 SETTINGS_LOCK = threading.Lock()
@@ -120,9 +111,9 @@ def configure_runtime_paths(
 ) -> Settings:
     global SETTINGS, PROJECT_CHAT
     current = get_settings()
-    _ = runs_dir
     updated = resolve_settings(
         data_dir=data_dir if data_dir is not None else current.data_dir,
+        runs_dir=runs_dir,
         flows_dir=flows_dir if flows_dir is not None else current.flows_dir,
         ui_dir=ui_dir if ui_dir is not None else current.ui_dir,
     )
@@ -345,11 +336,13 @@ def _pop_active_run(run_id: str) -> Optional[ActiveRun]:
 
 
 class PipelineStartRequest(BaseModel):
-    flow_content: str = Field(validation_alias=AliasChoices("flow_content", "dot_source"))
+    run_id: Optional[str] = None
+    flow_content: Optional[str] = Field(default=None, validation_alias=AliasChoices("flow_content", "dot_source"))
     working_directory: str = "./workspace"
     backend: str = "codex"
     model: Optional[str] = None
     flow_name: Optional[str] = None
+    goal: Optional[str] = None
     spec_id: Optional[str] = None
     plan_id: Optional[str] = None
 
@@ -372,10 +365,9 @@ class HumanAnswerRequest(BaseModel):
     selected_value: str
 
 
-class LegacyHumanAnswerRequest(BaseModel):
-    pipeline_id: str
-    question_id: str
-    selected_value: str
+class PipelineMetadataUpdateRequest(BaseModel):
+    spec_id: Optional[str] = None
+    plan_id: Optional[str] = None
 
 
 DEFAULT_FLOW = """digraph SoftwareFactory {
@@ -669,8 +661,25 @@ async def _start_pipeline(
             "error": f"Run id already exists: {run_id}",
         }
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[0])
+    flow_name = (req.flow_name or "").strip()
+    flow_content = (req.flow_content or "").strip()
+    if not flow_content:
+        if not flow_name:
+            return {
+                "status": "validation_error",
+                "error": "Either flow_content or flow_name is required.",
+            }
+        try:
+            flow_content = _load_flow_content(flow_name)
+        except HTTPException as exc:
+            return {
+                "status": "validation_error" if exc.status_code == 400 else "failed",
+                "error": str(exc.detail),
+            }
+    if req.goal:
+        flow_content = _inject_pipeline_goal_impl(flow_content, req.goal)
     try:
-        graph = parse_dot(req.flow_content)
+        graph = parse_dot(flow_content)
     except DotParseError as exc:
         RUNTIME.status = "validation_error"
         RUNTIME.last_error = str(exc)
@@ -712,7 +721,6 @@ async def _start_pipeline(
     os.makedirs(req.working_directory, exist_ok=True)
     working_dir = str(Path(req.working_directory).resolve())
     selected_model = (req.model or "").strip()
-    flow_name = (req.flow_name or "").strip()
     display_model = selected_model or "codex default (config/profile)"
 
     await _publish_run_event(
@@ -755,7 +763,7 @@ async def _start_pipeline(
     # NOTE: This artifact render intentionally uses the submitted DOT source.
     # It does not reflect transform/normalization changes applied to `graph`.
     # If post-transform fidelity is required, render from a serialized `graph` instead.
-    graphviz_export = export_graphviz_artifact(req.flow_content, run_root)
+    graphviz_export = export_graphviz_artifact(flow_content, run_root)
 
     context = Context(values=_graph_attr_context_seed(graph))
     run_root.mkdir(parents=True, exist_ok=True)
@@ -888,12 +896,7 @@ async def _start_pipeline(
 
 @attractor_router.post("/pipelines")
 async def create_pipeline(req: PipelineStartRequest):
-    return await _start_pipeline(req)
-
-
-@attractor_router.post("/run")
-async def run_pipeline(req: PipelineStartRequest):
-    return await _start_pipeline(req)
+    return await _start_pipeline(req, run_id=req.run_id)
 
 
 @attractor_router.get("/pipelines/{pipeline_id}")
@@ -957,6 +960,21 @@ async def get_pipeline_context(pipeline_id: str):
         "pipeline_id": pipeline_id,
         "context": dict(checkpoint.context),
     }
+
+
+@attractor_router.patch("/pipelines/{pipeline_id}/metadata")
+async def update_pipeline_metadata(pipeline_id: str, req: PipelineMetadataUpdateRequest):
+    _ensure_known_pipeline(pipeline_id)
+    await asyncio.to_thread(
+        _record_run_metadata,
+        pipeline_id,
+        spec_id=(req.spec_id or "").strip() or None,
+        plan_id=(req.plan_id or "").strip() or None,
+    )
+    record = _read_run_meta(_run_meta_path(pipeline_id))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Unknown pipeline")
+    return record.to_dict()
 
 
 @attractor_router.get("/pipelines/{pipeline_id}/artifacts")
@@ -1074,21 +1092,12 @@ async def submit_pipeline_answer(pipeline_id: str, question_id: str, req: HumanA
     return {"status": "accepted", "pipeline_id": pipeline_id, "question_id": question_id}
 
 
-@attractor_router.post("/answer")
-async def answer_pipeline(req: LegacyHumanAnswerRequest):
-    return await submit_pipeline_answer(
-        req.pipeline_id,
-        req.question_id,
-        HumanAnswerRequest(selected_value=req.selected_value),
-    )
-
-
 @attractor_router.post("/reset")
 async def reset_checkpoint(req: ResetRequest):
-    projects_root = get_settings().projects_dir
-    if projects_root.exists():
-        for runs_dir in projects_root.glob("*/runs"):
-            shutil.rmtree(runs_dir, ignore_errors=True)
+    runs_root = get_settings().runs_dir
+    if runs_root.exists():
+        shutil.rmtree(runs_root, ignore_errors=True)
+        runs_root.mkdir(parents=True, exist_ok=True)
     return {"status": "reset"}
 
 
@@ -1180,173 +1189,28 @@ def _load_execution_planning_flow_content(flow_source: str, prompt: str) -> str:
     return _load_execution_planning_flow_content_impl(_flows_dir(), flow_source, prompt)
 
 
-def _read_pipeline_stage_response(run_id: str, stage_id: str) -> str:
-    return pipeline_runs.read_pipeline_stage_response(get_settings, run_id, stage_id)
-
-
-def _record_run_plan_id(run_id: str, plan_id: str) -> None:
-    pipeline_runs.record_run_plan_id(get_settings, RUN_HISTORY_LOCK, run_id, plan_id)
-
-
-async def _launch_execution_planning_pipeline(
-    *,
-    conversation_id: str,
-    proposal_id: str,
-    workflow_run_id: str,
-    flow_source: str,
-    execution_flow_source: str,
-    model: Optional[str],
-    review_feedback: Optional[str],
-) -> None:
-    launch_spec = await asyncio.to_thread(
-        PROJECT_CHAT.prepare_execution_workflow_launch,
-        conversation_id,
-        proposal_id,
-        review_feedback,
-    )
-
-    async def handle_completion(completed_run_id: str, completed_status: str) -> None:
-        try:
-            if completed_status != "success":
-                record = _read_run_meta(_run_meta_path(completed_run_id))
-                error = (
-                    record.last_error
-                    if record is not None and record.last_error.strip()
-                    else f"Execution planning pipeline ended with status '{completed_status}'."
-                )
-                await asyncio.to_thread(
-                    PROJECT_CHAT.fail_execution_workflow,
-                    conversation_id,
-                    completed_run_id,
-                    flow_source,
-                    error,
-                )
-                await PROJECT_CHAT.publish_snapshot(conversation_id)
-                return
-
-            raw_response = await asyncio.to_thread(
-                _read_pipeline_stage_response,
-                completed_run_id,
-                EXECUTION_PLANNING_STAGE_ID,
-            )
-            execution_card = await asyncio.to_thread(
-                PROJECT_CHAT.complete_execution_workflow,
-                conversation_id,
-                proposal_id,
-                flow_source,
-                execution_flow_source,
-                completed_run_id,
-                raw_response,
-            )
-            await asyncio.to_thread(_record_run_plan_id, completed_run_id, execution_card.id)
-            await PROJECT_CHAT.publish_snapshot(conversation_id)
-        except Exception as exc:  # noqa: BLE001
-            await asyncio.to_thread(
-                PROJECT_CHAT.fail_execution_workflow,
-                conversation_id,
-                completed_run_id,
-                flow_source,
-                str(exc),
-            )
-            await PROJECT_CHAT.publish_snapshot(conversation_id)
-
-    try:
-        flow_content = _load_execution_planning_flow_content(flow_source, launch_spec.prompt)
-        launch_payload = await _start_pipeline(
-            PipelineStartRequest(
-                flow_content=flow_content,
-                working_directory=launch_spec.project_path,
-                backend="codex",
-                model=model,
-                flow_name=flow_source,
-                spec_id=launch_spec.spec_id,
-            ),
-            run_id=workflow_run_id,
-            on_complete=handle_completion,
-        )
-    except HTTPException as exc:
-        await asyncio.to_thread(
-            PROJECT_CHAT.fail_execution_workflow,
-            conversation_id,
-            workflow_run_id,
-            flow_source,
-            str(exc.detail),
-        )
-        await PROJECT_CHAT.publish_snapshot(conversation_id)
-        raise
-
-    if launch_payload.get("status") != "started":
-        error = str(
-            launch_payload.get("error")
-            or "Execution planning flow could not be started."
-        )
-        await asyncio.to_thread(
-            PROJECT_CHAT.fail_execution_workflow,
-            conversation_id,
-            workflow_run_id,
-            flow_source,
-            error,
-        )
-        await PROJECT_CHAT.publish_snapshot(conversation_id)
-        raise HTTPException(status_code=500, detail=error)
-
-
-async def _launch_execution_card_pipeline(
-    *,
-    conversation_id: str,
-    execution_card_id: str,
-    project_path: str,
-    flow_source: str,
-    model: Optional[str],
-    spec_id: str,
-    plan_id: str,
-) -> str:
-    flow_content = _load_flow_content(flow_source)
-    launch_payload = await _start_pipeline(
-        PipelineStartRequest(
-            flow_content=flow_content,
-            working_directory=project_path,
-            backend="codex",
-            model=model,
-            flow_name=flow_source,
-            spec_id=spec_id,
-            plan_id=plan_id,
-        ),
-    )
-    if launch_payload.get("status") != "started":
-        error = str(
-            launch_payload.get("error")
-            or "Execution flow could not be started."
-        )
-        raise HTTPException(status_code=500, detail=error)
-    run_id = str(launch_payload.get("run_id") or "")
-    if not run_id:
-        raise HTTPException(status_code=500, detail="Execution flow did not return a run id.")
-    snapshot = await asyncio.to_thread(
-        PROJECT_CHAT.note_execution_card_dispatched,
-        conversation_id,
-        execution_card_id,
-        run_id,
-        flow_source,
-    )
-    await PROJECT_CHAT.publish_snapshot(conversation_id)
-    return run_id
+def _record_run_metadata(run_id: str, *, spec_id: Optional[str] = None, plan_id: Optional[str] = None) -> None:
+    with RUN_HISTORY_LOCK:
+        record = _read_run_meta(_run_meta_path(run_id))
+        if record is None:
+            raise HTTPException(status_code=404, detail="Unknown pipeline")
+        if spec_id is not None:
+            record.spec_id = spec_id
+        if plan_id is not None:
+            record.plan_id = plan_id
+        _write_run_meta(record)
 
 
 WORKSPACE_ROUTER = create_workspace_router(
     WorkspaceApiDependencies(
         get_settings=get_settings,
         get_project_chat=lambda: PROJECT_CHAT,
+        get_attractor_client=lambda: AttractorApiClient(base_url="http://attractor.internal", app=attractor_app),
         resolve_project_git_branch=lambda runtime_path: _resolve_project_git_branch(runtime_path),
         resolve_project_git_commit=lambda runtime_path: _resolve_project_git_commit(runtime_path),
         pick_project_directory=lambda: _pick_project_directory(),
         default_execution_planning_flow=DEFAULT_EXECUTION_PLANNING_FLOW,
         default_execution_dispatch_flow=DEFAULT_EXECUTION_DISPATCH_FLOW,
-        launch_execution_planning_pipeline=lambda **kwargs: _launch_execution_planning_pipeline(
-            execution_flow_source=DEFAULT_EXECUTION_DISPATCH_FLOW,
-            **kwargs,
-        ),
-        launch_execution_card_pipeline=lambda **kwargs: _launch_execution_card_pipeline(**kwargs),
     )
 )
 
@@ -1455,11 +1319,5 @@ async def delete_flow(flow_name: str):
 
 attractor_app.include_router(attractor_router)
 workspace_app.include_router(WORKSPACE_ROUTER)
-
-# Legacy root paths stay available during the split so the current frontend and tests do not break.
-app.include_router(attractor_router)
-app.include_router(WORKSPACE_ROUTER)
-
-# Canonical boundary-prefixed apps for the next client/state phase.
 app.mount("/attractor", attractor_app)
 app.mount("/workspace", workspace_app)

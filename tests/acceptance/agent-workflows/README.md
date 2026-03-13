@@ -3,7 +3,8 @@
 This directory contains high-level product workflow tests for Spark Spawn.
 
 These files are not source-of-truth product specifications. They are acceptance assets derived from:
-- `/Users/chris/tinker/sparkspawn/specs/ui-spec.md`
+- `/Users/chris/tinker/sparkspawn/specs/sparkspawn-frontend.md`
+- `/Users/chris/tinker/sparkspawn/specs/sparkspawn-workspace.md`
 - `/Users/chris/tinker/sparkspawn/specs/ui-user-stories.md`
 - `/Users/chris/tinker/sparkspawn/specs/ui-story-records.md`
 

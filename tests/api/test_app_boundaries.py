@@ -31,7 +31,7 @@ def test_workspace_subapp_exposes_project_listing(api_client: TestClient, tmp_pa
     project_path.mkdir(parents=True)
 
     register_response = api_client.post(
-        "/api/projects/register",
+        "/workspace/api/projects/register",
         json={"project_path": str(project_path)},
     )
     assert register_response.status_code == 200
@@ -42,3 +42,16 @@ def test_workspace_subapp_exposes_project_listing(api_client: TestClient, tmp_pa
     payload = response.json()
     assert isinstance(payload, list)
     assert any(project["project_path"] == str(project_path) for project in payload)
+
+
+def test_root_app_does_not_expose_legacy_api_aliases(api_client: TestClient) -> None:
+    assert api_client.get("/status").status_code == 404
+    assert api_client.get("/runs").status_code == 404
+    assert api_client.get("/api/projects").status_code == 404
+
+
+def test_subapps_have_separate_docs_and_root_app_does_not(api_client: TestClient) -> None:
+    assert api_client.get("/docs").status_code == 404
+    assert api_client.get("/openapi.json").status_code == 404
+    assert api_client.get("/attractor/docs").status_code == 200
+    assert api_client.get("/workspace/docs").status_code == 200

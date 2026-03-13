@@ -9,14 +9,14 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from attractor.api import codex_app_server
-from attractor.api.project_chat_common import (
+from sparkspawn_common import codex_app_server
+from workspace.project_chat_common import (
     as_non_empty_string,
     build_codex_runtime_environment,
     normalize_project_path_value,
     resolve_runtime_workspace_path,
 )
-from attractor.api.project_chat_models import (
+from workspace.project_chat_models import (
     ChatTurnLiveEvent,
     ChatTurnResult,
     DynamicToolInvocationResult,

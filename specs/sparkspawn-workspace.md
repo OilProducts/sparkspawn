@@ -4,7 +4,7 @@ This document defines the Spark Spawn workspace layer that sits above a complian
 
 It is intentionally separate from:
 - [attractor-spec.md](/Users/chris/tinker/sparkspawn/specs/attractor-spec.md), which defines the workflow engine
-- [ui-spec.md](/Users/chris/tinker/sparkspawn/specs/ui-spec.md), which currently mixes presentation and workspace concerns
+- [sparkspawn-frontend.md](/Users/chris/tinker/sparkspawn/specs/sparkspawn-frontend.md), which defines the frontend-client behavior above the workspace and Attractor contracts
 
 This document is the source of truth for the domain model and service behavior on the Spark Spawn side of Attractor.
 
@@ -27,6 +27,11 @@ Attractor remains a standalone workflow runtime.
 Spark Spawn remains a standalone workspace product.
 
 In the current deployment model, Spark Spawn Workspace and Attractor MAY run inside one backend process, but they MUST remain distinct service surfaces. A modular monolith is acceptable; a mixed undifferentiated API surface is not.
+
+The canonical Workspace HTTP surface is mounted under:
+- `/workspace/...`
+
+Workspace APIs MUST NOT depend on duplicate root-path aliases.
 
 ---
 

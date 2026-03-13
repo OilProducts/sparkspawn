@@ -46,24 +46,64 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/pick-directory')) {
-          return new Response(JSON.stringify({ status: 'canceled' }), {
+      if (url.includes('/workspace/api/projects/pick-directory')) {
+        return new Response(JSON.stringify({ status: 'canceled' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/workspace/api/projects/metadata')) {
+        return new Response(JSON.stringify({ branch: 'main', commit: 'abcdef0' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/workspace/api/projects/conversations')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/workspace/api/projects/register')) {
+        return new Response(
+          JSON.stringify({
+            project_id: 'project-quick-switch',
+            project_path: '/tmp/quick-switch-project',
+            display_name: 'quick-switch-project',
+            created_at: new Date().toISOString(),
+            last_opened_at: new Date().toISOString(),
+            last_accessed_at: null,
+            is_favorite: false,
+            active_conversation_id: null,
+            flow_bindings: {},
+          }),
+          {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/api/projects/metadata')) {
-          return new Response(JSON.stringify({ branch: 'main' }), {
+          },
+        )
+      }
+      if (url.includes('/workspace/api/projects')) {
+        return new Response(
+          JSON.stringify([
+            {
+              project_id: 'project-quick-switch',
+              project_path: '/tmp/quick-switch-project',
+              display_name: 'quick-switch-project',
+              created_at: new Date().toISOString(),
+              last_opened_at: new Date().toISOString(),
+              last_accessed_at: null,
+              is_favorite: false,
+              active_conversation_id: null,
+              flow_bindings: {},
+            },
+          ]),
+          {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/api/projects/conversations')) {
-          return new Response(JSON.stringify([]), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
+          },
+        )
+      }
         return new Response(JSON.stringify({}), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -121,19 +161,19 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/pick-directory')) {
+        if (url.includes('/workspace/api/projects/pick-directory')) {
           return new Response(JSON.stringify({ detail: 'picker unavailable' }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -168,19 +208,19 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/pick-directory')) {
+        if (url.includes('/workspace/api/projects/pick-directory')) {
           return new Response(JSON.stringify({ status: 'selected', directory_path: '/tmp/quick-switch-project' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects') && !url.includes('/api/projects/conversations') && !url.includes('/api/projects/metadata') && !url.includes('/api/projects/register') && !url.includes('/api/projects/pick-directory')) {
+        if (url.includes('/workspace/api/projects') && !url.includes('/workspace/api/projects/conversations') && !url.includes('/workspace/api/projects/metadata') && !url.includes('/workspace/api/projects/register') && !url.includes('/workspace/api/projects/pick-directory')) {
           return new Response(JSON.stringify({ detail: 'skip registry sync for preloaded test state' }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/register')) {
+        if (url.includes('/workspace/api/projects/register')) {
           return new Response(JSON.stringify({
             project_id: 'quick-switch-project-1234',
             project_path: '/tmp/quick-switch-project',
@@ -192,13 +232,13 @@ describe('ProjectsPanel', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -226,19 +266,19 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/pick-directory')) {
+        if (url.includes('/workspace/api/projects/pick-directory')) {
           return new Response(JSON.stringify({ detail: 'picker unavailable' }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.endsWith('/api/projects')) {
+        if (url.endsWith('/workspace/api/projects')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/register')) {
+        if (url.includes('/workspace/api/projects/register')) {
           return new Response(JSON.stringify({
             project_id: 'quick-switch-project-1234',
             project_path: '/tmp/quick-switch-project',
@@ -250,13 +290,13 @@ describe('ProjectsPanel', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -305,25 +345,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return await new Promise<Response>((resolve) => {
             resolveTurnResponse = resolve
           })
@@ -420,25 +460,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return new Response(
             JSON.stringify({
               conversation_id: 'conversation-home-project-1',
@@ -505,19 +545,19 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(
             JSON.stringify({
               conversation_id: 'conversation-ordering-1',
@@ -672,19 +712,19 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(
             JSON.stringify({
               conversation_id: 'conversation-tool-collapse-1',
@@ -787,19 +827,19 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(
             JSON.stringify({
               conversation_id: 'conversation-thinking-collapse-1',
@@ -900,25 +940,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return await new Promise<Response>((resolve) => {
             resolveTurnResponse = resolve
           })
@@ -1064,25 +1104,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return await new Promise<Response>((resolve) => {
             resolveTurnResponse = resolve
           })
@@ -1226,25 +1266,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return await new Promise<Response>((resolve) => {
             resolveTurnResponse = resolve
           })
@@ -1489,25 +1529,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return await new Promise<Response>((resolve) => {
             resolveTurnResponse = resolve
           })
@@ -1687,25 +1727,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return await new Promise<Response>((resolve) => {
             resolveTurnResponse = resolve
           })
@@ -1864,25 +1904,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return new Promise<Response>(() => {})
         }
         return new Response(JSON.stringify({}), {
@@ -1990,13 +2030,13 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([
             {
               conversation_id: 'conversation-inline-proposal',
@@ -2011,7 +2051,7 @@ describe('ProjectsPanel', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/conversation-inline-proposal') && !url.includes('/turns')) {
+        if (url.includes('/workspace/api/conversations/conversation-inline-proposal') && !url.includes('/turns')) {
           return new Response(JSON.stringify({
             conversation_id: 'conversation-inline-proposal',
             project_path: '/tmp/chat-project',
@@ -2136,25 +2176,25 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && init?.method === 'POST') {
+        if (url.includes('/workspace/api/conversations/') && init?.method === 'POST') {
           return new Response(JSON.stringify({ detail: 'backend unavailable' }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({ detail: 'Unknown conversation' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' },
@@ -2201,19 +2241,19 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/conversations/') && !init?.method) {
+        if (url.includes('/workspace/api/conversations/') && !init?.method) {
           return new Response(JSON.stringify({
             conversation_id: 'conversation-scroll-1',
             project_path: '/tmp/chat-scroll-project',
@@ -2448,13 +2488,13 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(
             JSON.stringify(conversationSummaries),
             {
@@ -2582,13 +2622,13 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(
             JSON.stringify(conversationSummaries),
             {
@@ -2782,13 +2822,13 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/projects/metadata')) {
+        if (url.includes('/workspace/api/projects/metadata')) {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects/conversations')) {
+        if (url.includes('/workspace/api/projects/conversations')) {
           return new Response(JSON.stringify(conversationSummaries), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },

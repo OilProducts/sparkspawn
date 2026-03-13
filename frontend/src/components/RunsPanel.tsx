@@ -16,6 +16,10 @@ import {
     fetchPipelineGraphValidated,
     fetchPipelineQuestionsValidated,
     fetchRunsListValidated,
+    fetchPipelineArtifactsValidated,
+    fetchPipelineArtifactPreviewValidated,
+    pipelineArtifactHref,
+    pipelineEventsUrl,
 } from '@/lib/attractorClient'
 import { RunArtifactsCard } from './runs/RunArtifactsCard'
 import { RunCheckpointCard } from './runs/RunCheckpointCard'
@@ -182,11 +186,6 @@ const graphvizErrorFromResponse = (status: number, detail: string | null): Graph
         help: detail ? `Backend returned: ${detail}.` : 'Retry, and check backend availability if this keeps failing.',
     }
 }
-
-const encodeArtifactPath = (artifactPath: string): string => artifactPath
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/')
 
 const EXPECTED_CORE_ARTIFACT_PATHS = ['manifest.json', 'checkpoint.json']
 
@@ -873,43 +872,15 @@ export function RunsPanel() {
         setIsArtifactLoading(true)
         setArtifactError(null)
         try {
-            const res = await fetch(`/pipelines/${encodeURIComponent(selectedRunSummary.run_id)}/artifacts`)
-            if (!res.ok) {
-                let detail: string | null = null
-                try {
-                    const errorBody = await res.json()
-                    detail = asErrorDetail(errorBody)
-                } catch {
-                    detail = null
-                }
-                setArtifactData(null)
-                setArtifactError(artifactErrorFromResponse(res.status, detail))
-                return
-            }
-            const payload = await res.json() as ArtifactListResponse
-            const artifacts = Array.isArray(payload.artifacts)
-                ? payload.artifacts
-                    .map((entry) => {
-                        if (!entry || typeof entry !== 'object') return null
-                        const candidate = entry as Partial<ArtifactListEntry>
-                        const artifactPath = typeof candidate.path === 'string' ? candidate.path.trim() : ''
-                        if (!artifactPath) return null
-                        return {
-                            path: artifactPath,
-                            size_bytes: typeof candidate.size_bytes === 'number' ? candidate.size_bytes : 0,
-                            media_type: typeof candidate.media_type === 'string' ? candidate.media_type : 'application/octet-stream',
-                            viewable: candidate.viewable === true,
-                        } satisfies ArtifactListEntry
-                    })
-                    .filter((entry): entry is ArtifactListEntry => entry !== null)
-                : []
-            setArtifactData({
-                pipeline_id: payload.pipeline_id,
-                artifacts,
-            })
+            const payload = await fetchPipelineArtifactsValidated(selectedRunSummary.run_id)
+            setArtifactData(payload)
         } catch (err) {
             console.error(err)
             setArtifactData(null)
+            if (err instanceof ApiHttpError) {
+                setArtifactError(artifactErrorFromResponse(err.status, err.detail))
+                return
+            }
             setArtifactError({
                 message: 'Unable to load artifacts.',
                 help: 'Check your network/backend connection and retry.',
@@ -1059,7 +1030,7 @@ export function RunsPanel() {
         setTimelineCategoryFilter('all')
         setTimelineSeverityFilter('all')
 
-        const source = new EventSource(`/pipelines/${encodeURIComponent(selectedRunTimelineId)}/events`)
+        const source = new EventSource(pipelineEventsUrl(selectedRunTimelineId))
         source.onopen = () => {
             setTimelineError(null)
             setIsTimelineLive(true)
@@ -1182,23 +1153,14 @@ export function RunsPanel() {
         }
         setIsArtifactViewerLoading(true)
         try {
-            const encodedPath = encodeArtifactPath(entry.path)
-            const res = await fetch(`/pipelines/${encodeURIComponent(selectedRunSummary.run_id)}/artifacts/${encodedPath}`)
-            if (!res.ok) {
-                let detail: string | null = null
-                try {
-                    const errorBody = await res.json()
-                    detail = asErrorDetail(errorBody)
-                } catch {
-                    detail = null
-                }
-                setArtifactViewerError(artifactPreviewErrorFromResponse(res.status, detail))
-                return
-            }
-            const payload = await res.text()
+            const payload = await fetchPipelineArtifactPreviewValidated(selectedRunSummary.run_id, entry.path)
             setArtifactViewerPayload(payload)
         } catch (error) {
             console.error(error)
+            if (error instanceof ApiHttpError) {
+                setArtifactViewerError(artifactPreviewErrorFromResponse(error.status, error.detail))
+                return
+            }
             setArtifactViewerError('Unable to load artifact preview. Check your network/backend connection and retry.')
         } finally {
             setIsArtifactViewerLoading(false)
@@ -1206,8 +1168,7 @@ export function RunsPanel() {
     }, [selectedRunSummary])
     const artifactDownloadHref = useCallback((artifactPath: string) => {
         if (!selectedRunSummary) return ''
-        const encodedPath = encodeArtifactPath(artifactPath)
-        return `/pipelines/${encodeURIComponent(selectedRunSummary.run_id)}/artifacts/${encodedPath}?download=1`
+        return pipelineArtifactHref(selectedRunSummary.run_id, artifactPath, true)
     }, [selectedRunSummary])
     const graphvizViewerSrc = useMemo(() => {
         if (!graphvizMarkup) return ''

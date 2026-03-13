@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@/store'
-import { ApiHttpError, fetchPipelineStatusValidated } from '@/lib/attractorClient'
+import { ApiHttpError, fetchPipelineStatusValidated, pipelineEventsUrl } from '@/lib/attractorClient'
 import { resolveSaveRemediation } from '@/lib/saveRemediation'
 
 function classifyLog(message: string): 'info' | 'success' | 'error' {
@@ -20,7 +20,6 @@ const RUNTIME_STAGE_STATUS_MAP: Record<string, 'running' | 'success' | 'failed'>
 }
 const SELECTED_RUN_STATUS_DEGRADED_MESSAGE =
     'Selected run status endpoint is unavailable or incompatible. Live event streaming preflight is in degraded mode.'
-
 interface RuntimeStageCursor {
     stageIndex: number
     status: 'running' | 'success' | 'failed'
@@ -224,7 +223,7 @@ export function RunStream() {
             }
             if (metadataAbort.signal.aborted) return
 
-            const source = new EventSource(`/pipelines/${encodeURIComponent(selectedRunId)}/events`)
+            const source = new EventSource(pipelineEventsUrl(selectedRunId))
             source.onmessage = handleMessage
             eventSource = source
         }

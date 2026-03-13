@@ -23,7 +23,7 @@ test("semantic-equivalence save blocks mismatch and confirms no-op round-trip fo
   let mismatchInjected = false
   let mismatchTargetContent: string | null = null
 
-  await page.route("**/api/flows", async (route) => {
+  await page.route("**/attractor/api/flows", async (route) => {
     const request = route.request()
     if (request.method() === "GET") {
       await route.fulfill({
@@ -73,7 +73,7 @@ test("semantic-equivalence save blocks mismatch and confirms no-op round-trip fo
     await route.continue()
   })
 
-  await page.route("**/api/flows/semantic.dot", async (route) => {
+  await page.route("**/attractor/api/flows/semantic.dot", async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue()
       return
@@ -95,7 +95,7 @@ test("semantic-equivalence save blocks mismatch and confirms no-op round-trip fo
     })
   })
 
-  await page.route("**/preview", async (route) => {
+  await page.route("**/attractor/preview", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

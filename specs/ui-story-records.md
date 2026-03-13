@@ -37,7 +37,8 @@ As a ...
 **References**
 
 - `ui-user-stories.md#...`
-- `ui-spec.md#...`
+- `sparkspawn-frontend.md#...`
+- `sparkspawn-workspace.md#...`
 
 ---
 
@@ -81,5 +82,6 @@ As a user, when I send a message in project chat, I want to see the assistant re
 **References**
 
 - `ui-user-stories.md#2-project-scoped-ai-conversation-and-spec-editing`
-- `ui-spec.md#55-ai-conversation-and-spec-authoring-loop`
+- `sparkspawn-frontend.md`
+- `sparkspawn-workspace.md`
 - `conversation-paradigm.md`

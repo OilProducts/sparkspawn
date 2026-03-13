@@ -12,9 +12,26 @@ import {
     parseDiagnosticList,
 } from './shared'
 
+export const ATTRACTOR_BASE = '/attractor'
+export const ATTRACTOR_API_BASE = `${ATTRACTOR_BASE}/api`
+
+function attractorUrl(path: string): string {
+    return `${ATTRACTOR_BASE}${path}`
+}
+
+export function pipelineEventsUrl(pipelineId: string): string {
+    return attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/events`)
+}
+
 export interface FlowPayloadResponse {
     name: string
     content: string
+}
+
+export interface SaveFlowApiResponse {
+    ok: boolean
+    statusCode: number
+    payload: unknown
 }
 
 export interface PreviewResponsePayload {
@@ -108,7 +125,7 @@ export interface RuntimeStatusResponse {
     last_run_id?: string | null
 }
 
-export function parseFlowListResponse(payload: unknown, endpoint = '/api/flows'): string[] {
+export function parseFlowListResponse(payload: unknown, endpoint = '/attractor/api/flows'): string[] {
     if (!Array.isArray(payload)) {
         throw new ApiSchemaError(endpoint, 'Expected an array of flow names.')
     }
@@ -118,7 +135,7 @@ export function parseFlowListResponse(payload: unknown, endpoint = '/api/flows')
     return [...payload]
 }
 
-export function parseFlowPayloadResponse(payload: unknown, endpoint = '/api/flows/{name}'): FlowPayloadResponse {
+export function parseFlowPayloadResponse(payload: unknown, endpoint = '/attractor/api/flows/{name}'): FlowPayloadResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
         name: typeof record.name === 'string' ? record.name : '',
@@ -126,7 +143,7 @@ export function parseFlowPayloadResponse(payload: unknown, endpoint = '/api/flow
     }
 }
 
-export function parsePreviewResponse(payload: unknown, endpoint = '/preview'): PreviewResponsePayload {
+export function parsePreviewResponse(payload: unknown, endpoint = '/attractor/preview'): PreviewResponsePayload {
     const record = expectObjectRecord(payload, endpoint)
     const status = typeof record.status === 'string' ? record.status : 'ok'
     const graphRecord = asUnknownRecord(record.graph)
@@ -160,7 +177,7 @@ export function parsePreviewResponse(payload: unknown, endpoint = '/preview'): P
     }
 }
 
-export function parsePipelineStartResponse(payload: unknown, endpoint = '/pipelines'): PipelineStartResponse {
+export function parsePipelineStartResponse(payload: unknown, endpoint = '/attractor/pipelines'): PipelineStartResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
         status: expectString(record.status, endpoint, 'status'),
@@ -174,7 +191,7 @@ export function parsePipelineStartResponse(payload: unknown, endpoint = '/pipeli
     }
 }
 
-export function parsePipelineStatusResponse(payload: unknown, endpoint = '/pipelines/{id}'): PipelineStatusResponse {
+export function parsePipelineStatusResponse(payload: unknown, endpoint = '/attractor/pipelines/{id}'): PipelineStatusResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
         pipeline_id: expectString(record.pipeline_id, endpoint, 'pipeline_id'),
@@ -190,7 +207,7 @@ export function parsePipelineStatusResponse(payload: unknown, endpoint = '/pipel
     }
 }
 
-export function parsePipelineCancelResponse(payload: unknown, endpoint = '/pipelines/{id}/cancel'): PipelineCancelResponse {
+export function parsePipelineCancelResponse(payload: unknown, endpoint = '/attractor/pipelines/{id}/cancel'): PipelineCancelResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
         status: expectString(record.status, endpoint, 'status'),
@@ -200,7 +217,7 @@ export function parsePipelineCancelResponse(payload: unknown, endpoint = '/pipel
 
 export function parsePipelineCheckpointResponse(
     payload: unknown,
-    endpoint = '/pipelines/{id}/checkpoint',
+    endpoint = '/attractor/pipelines/{id}/checkpoint',
 ): PipelineCheckpointResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
@@ -209,7 +226,7 @@ export function parsePipelineCheckpointResponse(
     }
 }
 
-export function parsePipelineContextResponse(payload: unknown, endpoint = '/pipelines/{id}/context'): PipelineContextResponse {
+export function parsePipelineContextResponse(payload: unknown, endpoint = '/attractor/pipelines/{id}/context'): PipelineContextResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
         pipeline_id: expectString(record.pipeline_id, endpoint, 'pipeline_id'),
@@ -219,7 +236,7 @@ export function parsePipelineContextResponse(payload: unknown, endpoint = '/pipe
 
 export function parsePipelineQuestionsResponse(
     payload: unknown,
-    endpoint = '/pipelines/{id}/questions',
+    endpoint = '/attractor/pipelines/{id}/questions',
 ): PipelineQuestionsResponse {
     const record = expectObjectRecord(payload, endpoint)
     const rawQuestions = record.questions
@@ -235,7 +252,7 @@ export function parsePipelineQuestionsResponse(
 
 export function parsePipelineAnswerResponse(
     payload: unknown,
-    endpoint = '/pipelines/{id}/questions/{qid}/answer',
+    endpoint = '/attractor/pipelines/{id}/questions/{qid}/answer',
 ): PipelineAnswerResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
@@ -245,7 +262,7 @@ export function parsePipelineAnswerResponse(
     }
 }
 
-export function parsePipelineGraphResponse(payload: unknown, endpoint = '/pipelines/{id}/graph'): PipelineGraphResponse {
+export function parsePipelineGraphResponse(payload: unknown, endpoint = '/attractor/pipelines/{id}/graph'): PipelineGraphResponse {
     if (typeof payload !== 'string') {
         throw new ApiSchemaError(endpoint, 'Expected SVG/text response body.')
     }
@@ -286,7 +303,7 @@ function parseRunRecord(payload: unknown): RunRecordResponse | null {
     }
 }
 
-export function parseRunsListResponse(payload: unknown, endpoint = '/runs'): RunsListResponse {
+export function parseRunsListResponse(payload: unknown, endpoint = '/attractor/runs'): RunsListResponse {
     const record = expectObjectRecord(payload, endpoint)
     if (!Array.isArray(record.runs)) {
         throw new ApiSchemaError(endpoint, 'Expected "runs" to be an array.')
@@ -298,7 +315,7 @@ export function parseRunsListResponse(payload: unknown, endpoint = '/runs'): Run
     }
 }
 
-export function parseRuntimeStatusResponse(payload: unknown, endpoint = '/status'): RuntimeStatusResponse {
+export function parseRuntimeStatusResponse(payload: unknown, endpoint = '/attractor/status'): RuntimeStatusResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
         status: expectString(record.status, endpoint, 'status'),
@@ -312,68 +329,100 @@ export function parseRuntimeStatusResponse(payload: unknown, endpoint = '/status
 }
 
 export async function fetchFlowListValidated(): Promise<string[]> {
-    return fetchJsonWithValidation('/api/flows', undefined, '/api/flows', parseFlowListResponse)
+    return fetchJsonWithValidation(attractorUrl('/api/flows'), undefined, '/attractor/api/flows', parseFlowListResponse)
 }
 
 export async function fetchFlowPayloadValidated(flowName: string): Promise<FlowPayloadResponse> {
-    const url = `/api/flows/${encodeURIComponent(flowName)}`
-    return fetchJsonWithValidation(url, undefined, '/api/flows/{name}', parseFlowPayloadResponse)
+    const url = attractorUrl(`/api/flows/${encodeURIComponent(flowName)}`)
+    return fetchJsonWithValidation(url, undefined, '/attractor/api/flows/{name}', parseFlowPayloadResponse)
+}
+
+export async function saveFlowValidated(
+    name: string,
+    content: string,
+    expectSemanticEquivalence: boolean,
+): Promise<SaveFlowApiResponse> {
+    const response = await fetch(attractorUrl('/api/flows'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            name,
+            content,
+            expect_semantic_equivalence: expectSemanticEquivalence,
+        }),
+    })
+    let payload: unknown = null
+    try {
+        payload = await response.json()
+    } catch {
+        payload = null
+    }
+    return {
+        ok: response.ok,
+        statusCode: response.status,
+        payload,
+    }
+}
+
+export async function deleteFlowValidated(flowName: string): Promise<void> {
+    const url = attractorUrl(`/api/flows/${encodeURIComponent(flowName)}`)
+    await fetchJsonWithValidation(url, { method: 'DELETE' }, '/attractor/api/flows/{name}', () => undefined)
 }
 
 export async function fetchPreviewValidated(flowContent: string): Promise<PreviewResponsePayload> {
     return fetchJsonWithValidation(
-        '/preview',
+        attractorUrl('/preview'),
         {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ flow_content: flowContent }),
         },
-        '/preview',
+        '/attractor/preview',
         parsePreviewResponse,
     )
 }
 
 export async function fetchPipelineStartValidated(payload: Record<string, unknown>): Promise<PipelineStartResponse> {
     return fetchJsonWithValidation(
-        '/pipelines',
+        attractorUrl('/pipelines'),
         {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         },
-        '/pipelines',
+        '/attractor/pipelines',
         parsePipelineStartResponse,
     )
 }
 
 export async function fetchPipelineStatusValidated(pipelineId: string): Promise<PipelineStatusResponse> {
-    const url = `/pipelines/${encodeURIComponent(pipelineId)}`
-    return fetchJsonWithValidation(url, undefined, '/pipelines/{id}', parsePipelineStatusResponse)
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}`)
+    return fetchJsonWithValidation(url, undefined, '/attractor/pipelines/{id}', parsePipelineStatusResponse)
 }
 
 export async function fetchPipelineCancelValidated(pipelineId: string): Promise<PipelineCancelResponse> {
-    const url = `/pipelines/${encodeURIComponent(pipelineId)}/cancel`
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/cancel`)
     return fetchJsonWithValidation(
         url,
         { method: 'POST' },
-        '/pipelines/{id}/cancel',
+        '/attractor/pipelines/{id}/cancel',
         parsePipelineCancelResponse,
     )
 }
 
 export async function fetchPipelineCheckpointValidated(pipelineId: string): Promise<PipelineCheckpointResponse> {
-    const url = `/pipelines/${encodeURIComponent(pipelineId)}/checkpoint`
-    return fetchJsonWithValidation(url, undefined, '/pipelines/{id}/checkpoint', parsePipelineCheckpointResponse)
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/checkpoint`)
+    return fetchJsonWithValidation(url, undefined, '/attractor/pipelines/{id}/checkpoint', parsePipelineCheckpointResponse)
 }
 
 export async function fetchPipelineContextValidated(pipelineId: string): Promise<PipelineContextResponse> {
-    const url = `/pipelines/${encodeURIComponent(pipelineId)}/context`
-    return fetchJsonWithValidation(url, undefined, '/pipelines/{id}/context', parsePipelineContextResponse)
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/context`)
+    return fetchJsonWithValidation(url, undefined, '/attractor/pipelines/{id}/context', parsePipelineContextResponse)
 }
 
 export async function fetchPipelineQuestionsValidated(pipelineId: string): Promise<PipelineQuestionsResponse> {
-    const url = `/pipelines/${encodeURIComponent(pipelineId)}/questions`
-    return fetchJsonWithValidation(url, undefined, '/pipelines/{id}/questions', parsePipelineQuestionsResponse)
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/questions`)
+    return fetchJsonWithValidation(url, undefined, '/attractor/pipelines/{id}/questions', parsePipelineQuestionsResponse)
 }
 
 export async function fetchPipelineAnswerValidated(
@@ -381,7 +430,7 @@ export async function fetchPipelineAnswerValidated(
     questionId: string,
     selectedValue: string,
 ): Promise<PipelineAnswerResponse> {
-    const url = `/pipelines/${encodeURIComponent(pipelineId)}/questions/${encodeURIComponent(questionId)}/answer`
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/questions/${encodeURIComponent(questionId)}/answer`)
     return fetchJsonWithValidation(
         url,
         {
@@ -392,20 +441,77 @@ export async function fetchPipelineAnswerValidated(
                 selected_value: selectedValue,
             }),
         },
-        '/pipelines/{id}/questions/{qid}/answer',
+        '/attractor/pipelines/{id}/questions/{qid}/answer',
         parsePipelineAnswerResponse,
     )
 }
 
 export async function fetchPipelineGraphValidated(pipelineId: string): Promise<PipelineGraphResponse> {
-    const url = `/pipelines/${encodeURIComponent(pipelineId)}/graph`
-    return fetchTextWithValidation(url, undefined, '/pipelines/{id}/graph', parsePipelineGraphResponse)
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/graph`)
+    return fetchTextWithValidation(url, undefined, '/attractor/pipelines/{id}/graph', parsePipelineGraphResponse)
 }
 
 export async function fetchRunsListValidated(): Promise<RunsListResponse> {
-    return fetchJsonWithValidation('/runs', undefined, '/runs', parseRunsListResponse)
+    return fetchJsonWithValidation(attractorUrl('/runs'), undefined, '/attractor/runs', parseRunsListResponse)
 }
 
 export async function fetchRuntimeStatusValidated(): Promise<RuntimeStatusResponse> {
-    return fetchJsonWithValidation('/status', undefined, '/status', parseRuntimeStatusResponse)
+    return fetchJsonWithValidation(attractorUrl('/status'), undefined, '/attractor/status', parseRuntimeStatusResponse)
+}
+
+export interface ArtifactListEntry {
+    path: string
+    size_bytes: number
+    media_type: string
+    viewable: boolean
+}
+
+export interface ArtifactListResponse {
+    pipeline_id: string
+    artifacts: ArtifactListEntry[]
+}
+
+export function parseArtifactListResponse(
+    payload: unknown,
+    endpoint = '/attractor/pipelines/{id}/artifacts',
+): ArtifactListResponse {
+    const record = expectObjectRecord(payload, endpoint)
+    return {
+        pipeline_id: expectString(record.pipeline_id, endpoint, 'pipeline_id'),
+        artifacts: Array.isArray(record.artifacts)
+            ? record.artifacts
+                .map((entry) => expectObjectRecord(entry, endpoint))
+                .map((entry) => ({
+                    path: expectString(entry.path, endpoint, 'path'),
+                    size_bytes: typeof entry.size_bytes === 'number' ? entry.size_bytes : 0,
+                    media_type: expectString(entry.media_type, endpoint, 'media_type'),
+                    viewable: entry.viewable === true,
+                }))
+            : [],
+    }
+}
+
+export async function fetchPipelineArtifactsValidated(pipelineId: string): Promise<ArtifactListResponse> {
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/artifacts`)
+    return fetchJsonWithValidation(url, undefined, '/attractor/pipelines/{id}/artifacts', parseArtifactListResponse)
+}
+
+function encodeArtifactPathSegments(artifactPath: string): string {
+    return artifactPath
+        .replace(/\\/g, '/')
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/')
+}
+
+export async function fetchPipelineArtifactPreviewValidated(pipelineId: string, artifactPath: string): Promise<string> {
+    const encodedPath = encodeArtifactPathSegments(artifactPath)
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/artifacts/${encodedPath}`)
+    return fetchTextWithValidation(url, undefined, '/pipelines/{id}/artifacts/{artifact_path}', parsePipelineGraphResponse)
+}
+
+export function pipelineArtifactHref(pipelineId: string, artifactPath: string, download = false): string {
+    const encodedPath = encodeArtifactPathSegments(artifactPath)
+    const query = download ? '?download=1' : ''
+    return attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/artifacts/${encodedPath}${query}`)
 }

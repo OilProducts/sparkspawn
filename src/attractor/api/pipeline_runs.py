@@ -17,11 +17,11 @@ from attractor.api.run_records import (
 )
 from attractor.config import Settings
 from attractor.engine import load_checkpoint
-from attractor.storage import build_project_id, ensure_project_paths, normalize_project_path, read_project_paths_by_id
+from sparkspawn_common.runtime import build_project_id, normalize_project_path
 
 
 def runs_root(get_settings: Callable[[], Settings]) -> Path:
-    root = get_settings().projects_dir
+    root = get_settings().runs_dir
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -31,10 +31,7 @@ def project_runs_dir(get_settings: Callable[[], Settings], project_path: str) ->
     if not normalized_project_path:
         return None
     project_id = build_project_id(normalized_project_path)
-    project_paths = read_project_paths_by_id(get_settings().data_dir, project_id)
-    if project_paths is None:
-        return None
-    return project_paths.runs_dir
+    return runs_root(get_settings) / project_id
 
 
 def iter_run_roots(get_settings: Callable[[], Settings], *, project_path: Optional[str] = None) -> list[Path]:
@@ -48,7 +45,7 @@ def iter_run_roots(get_settings: Callable[[], Settings], *, project_path: Option
     projects_root = runs_root(get_settings)
     if not projects_root.exists():
         return run_roots
-    for run_dir in sorted(projects_root.glob("*/runs")):
+    for run_dir in sorted(projects_root.iterdir()):
         if not run_dir.is_dir():
             continue
         run_roots.extend(sorted((path for path in run_dir.iterdir() if path.is_dir()), key=lambda item: item.name))
@@ -66,8 +63,7 @@ def ensure_run_root_for_project(get_settings: Callable[[], Settings], run_id: st
     normalized_project_path = normalize_project_path(project_path)
     if not normalized_project_path:
         raise ValueError("Run storage requires a project path.")
-    project_paths = ensure_project_paths(get_settings().data_dir, normalized_project_path)
-    run_root = project_paths.runs_dir / run_id
+    run_root = project_runs_dir(get_settings, normalized_project_path) / run_id
     run_root.mkdir(parents=True, exist_ok=True)
     return run_root
 

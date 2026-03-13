@@ -13,7 +13,7 @@ test("run summary panel renders populated metadata for item 9.1-01", async ({ pa
   const projectPath = `/tmp/ui-smoke-project-runs-summary-${Date.now()}`
   const runId = `run-summary-${Date.now()}`
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -68,7 +68,7 @@ test("run summary metadata refresh and stale-state indicator for item 9.1-02", a
     ;(globalThis as typeof globalThis & { __RUNS_METADATA_STALE_AFTER_MS__?: number }).__RUNS_METADATA_STALE_AFTER_MS__ = 250
   })
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     refreshCount += 1
     await route.fulfill({
       status: 200,
@@ -122,7 +122,7 @@ test("run history rows include project identity and git metadata for item 9.6-02
   const projectPath = `/tmp/ui-smoke-project-runs-traceability-${Date.now()}`
   const runId = `run-traceability-${Date.now()}`
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -163,7 +163,7 @@ test("run history rows link associated spec and plan artifacts when available fo
   const projectPath = `/tmp/ui-smoke-project-runs-artifact-links-${Date.now()}`
   const runId = `run-artifact-links-${Date.now()}`
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -206,7 +206,7 @@ test("run checkpoint viewer fetches checkpoint payload for item 9.2-01", async (
   const runId = `run-checkpoint-${Date.now()}`
   let checkpointFetchCount = 0
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -232,7 +232,7 @@ test("run checkpoint viewer fetches checkpoint payload for item 9.2-01", async (
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     checkpointFetchCount += 1
     await route.fulfill({
       status: 200,
@@ -269,7 +269,7 @@ test("run checkpoint viewer handles unavailable checkpoint for item 9.2-03", asy
   const runId = `run-checkpoint-unavailable-${Date.now()}`
   let checkpointFetchCount = 0
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -295,7 +295,7 @@ test("run checkpoint viewer handles unavailable checkpoint for item 9.2-03", asy
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     checkpointFetchCount += 1
     await route.fulfill({
       status: 404,
@@ -326,7 +326,7 @@ test("run context viewer supports searchable key/value inspection for item 9.3-0
   const runId = `run-context-${Date.now()}`
   let contextFetchCount = 0
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -352,7 +352,7 @@ test("run context viewer supports searchable key/value inspection for item 9.3-0
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -367,7 +367,7 @@ test("run context viewer supports searchable key/value inspection for item 9.3-0
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     contextFetchCount += 1
     await route.fulfill({
       status: 200,
@@ -422,7 +422,7 @@ test("run context viewer renders typed scalar and structured values for item 9.3
   const projectPath = `/tmp/ui-smoke-project-runs-context-typed-${Date.now()}`
   const runId = `run-context-typed-${Date.now()}`
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -448,7 +448,7 @@ test("run context viewer renders typed scalar and structured values for item 9.3
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -463,7 +463,7 @@ test("run context viewer renders typed scalar and structured values for item 9.3
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -509,7 +509,7 @@ test("run context viewer exposes copy/export actions for item 9.3-03", async ({ 
   const projectPath = `/tmp/ui-smoke-project-runs-context-copy-export-${Date.now()}`
   const runId = `run-context-copy-export-${Date.now()}`
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -535,7 +535,7 @@ test("run context viewer exposes copy/export actions for item 9.3-03", async ({ 
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -550,7 +550,7 @@ test("run context viewer exposes copy/export actions for item 9.3-03", async ({ 
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -656,7 +656,7 @@ test("pending human gates are discoverable in execution and runs views for item 
     ;(window as typeof window & { EventSource: typeof EventSource }).EventSource = MockEventSource as unknown as typeof EventSource
   }, { targetRunId: runId, questionPrompt: pendingPrompt })
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -682,7 +682,7 @@ test("pending human gates are discoverable in execution and runs views for item 
     })
   })
 
-  await page.route(`**/pipelines/${runId}`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -694,7 +694,7 @@ test("pending human gates are discoverable in execution and runs views for item 
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -709,7 +709,7 @@ test("pending human gates are discoverable in execution and runs views for item 
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -820,7 +820,7 @@ test("pending human gates render YES_NO and CONFIRMATION semantics for item 10.2
     },
   )
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -846,7 +846,7 @@ test("pending human gates render YES_NO and CONFIRMATION semantics for item 10.2
     })
   })
 
-  await page.route(`**/pipelines/${runId}`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -858,7 +858,7 @@ test("pending human gates render YES_NO and CONFIRMATION semantics for item 10.2
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -873,7 +873,7 @@ test("pending human gates render YES_NO and CONFIRMATION semantics for item 10.2
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -983,7 +983,7 @@ test("pending human gates render FREEFORM interaction and submit text answers fo
     },
   )
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1009,7 +1009,7 @@ test("pending human gates render FREEFORM interaction and submit text answers fo
     })
   })
 
-  await page.route(`**/pipelines/${runId}`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1021,7 +1021,7 @@ test("pending human gates render FREEFORM interaction and submit text answers fo
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1036,7 +1036,7 @@ test("pending human gates render FREEFORM interaction and submit text answers fo
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1049,7 +1049,7 @@ test("pending human gates render FREEFORM interaction and submit text answers fo
     })
   })
 
-  await page.route(`**/pipelines/${runId}/questions/${questionId}/answer`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/questions/${questionId}/answer`, async (route) => {
     const payload = route.request().postDataJSON()
     submittedSelectedValue = typeof payload?.selected_value === "string" ? payload.selected_value : null
     await route.fulfill({
@@ -1137,7 +1137,7 @@ test("run event timeline renders typed lifecycle and runtime events for item 9.4
     ;(window as typeof window & { EventSource: typeof EventSource }).EventSource = MockEventSource as unknown as typeof EventSource
   }, runId)
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1163,7 +1163,7 @@ test("run event timeline renders typed lifecycle and runtime events for item 9.4
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1178,7 +1178,7 @@ test("run event timeline renders typed lifecycle and runtime events for item 9.4
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1266,7 +1266,7 @@ test("run event timeline filtering supports type, node/stage, category, and seve
     ;(window as typeof window & { EventSource: typeof EventSource }).EventSource = MockEventSource as unknown as typeof EventSource
   }, runId)
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1292,7 +1292,7 @@ test("run event timeline filtering supports type, node/stage, category, and seve
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1307,7 +1307,7 @@ test("run event timeline filtering supports type, node/stage, category, and seve
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1405,7 +1405,7 @@ test("run event timeline groups and correlates retry and interview sequences for
     ;(window as typeof window & { EventSource: typeof EventSource }).EventSource = MockEventSource as unknown as typeof EventSource
   }, runId)
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1431,7 +1431,7 @@ test("run event timeline groups and correlates retry and interview sequences for
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1446,7 +1446,7 @@ test("run event timeline groups and correlates retry and interview sequences for
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1530,7 +1530,7 @@ test("run event timeline replays stream history and appends live events for item
     ;(window as typeof window & { EventSource: typeof EventSource }).EventSource = MockEventSource as unknown as typeof EventSource
   }, runId)
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1556,7 +1556,7 @@ test("run event timeline replays stream history and appends live events for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1571,7 +1571,7 @@ test("run event timeline replays stream history and appends live events for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1603,7 +1603,7 @@ test("run artifact browser lists run outputs and supports view/download for item
   const projectPath = `/tmp/ui-smoke-project-runs-artifacts-${Date.now()}`
   const runId = `run-artifacts-${Date.now()}`
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1629,7 +1629,7 @@ test("run artifact browser lists run outputs and supports view/download for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1644,7 +1644,7 @@ test("run artifact browser lists run outputs and supports view/download for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1657,7 +1657,7 @@ test("run artifact browser lists run outputs and supports view/download for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/artifacts`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/artifacts`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1687,7 +1687,7 @@ test("run artifact browser lists run outputs and supports view/download for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/artifacts/**`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/artifacts/**`, async (route) => {
     const url = new URL(route.request().url())
     if (url.pathname.endsWith(`/pipelines/${runId}/artifacts`)) {
       await route.fallback()
@@ -1737,7 +1737,7 @@ test("run graphviz viewer renders /pipelines/{id}/graph output for item 9.5-02",
   const projectPath = `/tmp/ui-smoke-project-runs-graphviz-${Date.now()}`
   const runId = `run-graphviz-${Date.now()}`
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1763,7 +1763,7 @@ test("run graphviz viewer renders /pipelines/{id}/graph output for item 9.5-02",
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1778,7 +1778,7 @@ test("run graphviz viewer renders /pipelines/{id}/graph output for item 9.5-02",
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1791,7 +1791,7 @@ test("run graphviz viewer renders /pipelines/{id}/graph output for item 9.5-02",
     })
   })
 
-  await page.route(`**/pipelines/${runId}/artifacts`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/artifacts`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1802,7 +1802,7 @@ test("run graphviz viewer renders /pipelines/{id}/graph output for item 9.5-02",
     })
   })
 
-  await page.route(`**/pipelines/${runId}/graph`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/graph`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "image/svg+xml",
@@ -1834,7 +1834,7 @@ test("run artifact browser handles missing files and partial run states for item
   const projectPath = `/tmp/ui-smoke-project-runs-artifacts-missing-${Date.now()}`
   const runId = `run-artifacts-missing-${Date.now()}`
 
-  await page.route("**/runs", async (route) => {
+  await page.route("**/attractor/runs", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1860,7 +1860,7 @@ test("run artifact browser handles missing files and partial run states for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/checkpoint`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/checkpoint`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1875,7 +1875,7 @@ test("run artifact browser handles missing files and partial run states for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/context`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1888,7 +1888,7 @@ test("run artifact browser handles missing files and partial run states for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/artifacts`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/artifacts`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1906,7 +1906,7 @@ test("run artifact browser handles missing files and partial run states for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/artifacts/**`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/artifacts/**`, async (route) => {
     const url = new URL(route.request().url())
     if (url.pathname.endsWith(`/pipelines/${runId}/artifacts`)) {
       await route.fallback()
@@ -1919,7 +1919,7 @@ test("run artifact browser handles missing files and partial run states for item
     })
   })
 
-  await page.route(`**/pipelines/${runId}/graph`, async (route) => {
+  await page.route(`**/attractor/pipelines/${runId}/graph`, async (route) => {
     await route.fulfill({
       status: 404,
       contentType: "application/json",

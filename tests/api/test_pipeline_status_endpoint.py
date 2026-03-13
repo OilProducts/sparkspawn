@@ -39,7 +39,7 @@ def test_get_pipeline_returns_progress_for_active_run(
     run_root = server._run_root(run_id)
     _write_checkpoint(run_root, current_node="plan", completed_nodes=["start"])
 
-    response = api_client.get(f"/pipelines/{run_id}")
+    response = api_client.get(f"/attractor/pipelines/{run_id}")
 
     assert response.status_code == 200
     payload = response.json()
@@ -68,7 +68,7 @@ def test_get_pipeline_uses_checkpoint_progress_for_persisted_run(
     run_root = server._run_root(run_id)
     _write_checkpoint(run_root, current_node="done", completed_nodes=["start", "plan"])
 
-    response = api_client.get(f"/pipelines/{run_id}")
+    response = api_client.get(f"/attractor/pipelines/{run_id}")
 
     assert response.status_code == 200
     payload = response.json()

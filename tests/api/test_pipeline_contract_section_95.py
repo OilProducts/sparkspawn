@@ -29,7 +29,7 @@ def test_section_95_core_endpoints_are_registered() -> None:
         ("GET", "/pipelines/{}/context"),
     }
     seen: set[tuple[str, str]] = set()
-    for route in server.app.routes:
+    for route in server.attractor_app.routes:
         path = getattr(route, "path", None)
         methods = getattr(route, "methods", None)
         if not path or not methods:

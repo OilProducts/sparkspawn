@@ -18,15 +18,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': backendUrl,
-      '/run': backendUrl,
-      '/preview': backendUrl,
-      '/status': backendUrl,
-      '/pause': backendUrl,
-      '/abort': backendUrl,
-      '/runs': backendUrl,
-      '/human': backendUrl,
-      '/ws': {
+      '/attractor': backendUrl,
+      '/workspace': backendUrl,
+      '/attractor/ws': {
         target: wsUrl,
         ws: true,
       },

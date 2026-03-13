@@ -28,14 +28,18 @@ SPARKSPAWN_HOME/
   config/
   runtime/
   logs/
-  projects/
-    <project-id>/
-      project.toml
-      conversations/
-      workflow/
-      proposals/
-      execution-cards/
-      runs/
+  workspace/
+    projects/
+      <project-id>/
+        project.toml
+        conversations/
+        workflow/
+        proposals/
+        execution-cards/
+  attractor/
+    runs/
+      <project-id>/
+        <run-id>/
 ```
 
 ### Top-Level Directories
@@ -49,8 +53,11 @@ SPARKSPAWN_HOME/
 - `logs/`
   Spark Spawn application logs.
 
-- `projects/`
-  Project-scoped Spark Spawn workflow state, keyed by stable Spark Spawn storage id.
+- `workspace/`
+  Workspace-owned Spark Spawn state such as projects, conversations, proposals, execution cards, and trigger bindings.
+
+- `attractor/`
+  Attractor-owned engine state such as pipeline run records and derived runtime artifacts.
 
 ## Project Identity
 
@@ -75,7 +82,7 @@ Path moves are out of scope.
 ## Per-Project Spark Spawn Layout
 
 Each registered project has a directory under:
-- `SPARKSPAWN_HOME/projects/<project-id>/`
+- `SPARKSPAWN_HOME/workspace/projects/<project-id>/`
 
 This is Spark Spawn-owned state for that project.
 
@@ -96,9 +103,6 @@ It contains:
 - `execution-cards/`
   Execution card records and related review state.
   This is also the home for the work-package/task-tracker planning surface; there is no separate durable implementation-plan artifact category.
-
-- `runs/`
-  Run metadata and Spark Spawn-managed run records for that project.
 
 ## Spark Spawn-Owned Data
 
@@ -159,12 +163,12 @@ Some artifacts are easy to misclassify. Use these defaults:
 
 | Artifact | Owner | Canonical location | Durable? |
 | --- | --- | --- | --- |
-| Conversation thread | Spark Spawn | `SPARKSPAWN_HOME/projects/<project-id>/conversations/` | Yes |
-| Turn/event history | Spark Spawn | `SPARKSPAWN_HOME/projects/<project-id>/conversations/` | Yes |
-| Workflow log | Spark Spawn | `SPARKSPAWN_HOME/projects/<project-id>/workflow/` | Yes |
-| Spec proposal | Spark Spawn | `SPARKSPAWN_HOME/projects/<project-id>/proposals/` | Yes |
-| Execution card / work package | Spark Spawn | `SPARKSPAWN_HOME/projects/<project-id>/execution-cards/` | Yes |
-| Run metadata | Spark Spawn | `SPARKSPAWN_HOME/projects/<project-id>/runs/` | Yes |
+| Conversation thread | Spark Spawn Workspace | `SPARKSPAWN_HOME/workspace/projects/<project-id>/conversations/` | Yes |
+| Turn/event history | Spark Spawn Workspace | `SPARKSPAWN_HOME/workspace/projects/<project-id>/conversations/` | Yes |
+| Workflow log | Spark Spawn Workspace | `SPARKSPAWN_HOME/workspace/projects/<project-id>/workflow/` | Yes |
+| Spec proposal | Spark Spawn Workspace | `SPARKSPAWN_HOME/workspace/projects/<project-id>/proposals/` | Yes |
+| Execution card / work package | Spark Spawn Workspace | `SPARKSPAWN_HOME/workspace/projects/<project-id>/execution-cards/` | Yes |
+| Run metadata | Attractor | `SPARKSPAWN_HOME/attractor/runs/<project-id>/<run-id>/` | Yes |
 | Implementation plan summary | Spark Spawn | attached to execution-card/task-tracker state | No separate artifact class |
 | Specification | Project | repository `specs/` | Yes |
 | User story | Project | repository `specs/` | Yes |
@@ -176,8 +180,8 @@ Some artifacts are easy to misclassify. Use these defaults:
 ## Cross-Project Behavior
 
 Because Spark Spawn owns workflow state centrally:
-- a conversation about `~/collatz` belongs in `SPARKSPAWN_HOME/projects/<project-id>/...`
-- a conversation about this repository also belongs in `SPARKSPAWN_HOME/projects/<project-id>/...`
+- a conversation about `~/collatz` belongs in `SPARKSPAWN_HOME/workspace/projects/<project-id>/...`
+- a conversation about this repository also belongs in `SPARKSPAWN_HOME/workspace/projects/<project-id>/...`
 
 The invariant is not “store project workflow state inside the target repository.”
 

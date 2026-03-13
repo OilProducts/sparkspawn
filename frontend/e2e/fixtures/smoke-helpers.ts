@@ -25,7 +25,7 @@ export const ensureScreenshotDir = () => {
 export const screenshotPath = (name: string) => path.join(screenshotDir, name)
 
 export async function stubProjectMetadata(page: Page, metadata?: { branch?: string; commit?: string }) {
-  await page.route('**/api/projects/metadata**', async (route) => {
+  await page.route('**/workspace/api/projects/metadata**', async (route) => {
     const requestUrl = new URL(route.request().url())
     const directory = requestUrl.searchParams.get('directory') ?? ''
     const name = directory.split('/').filter(Boolean).pop() ?? directory
@@ -44,7 +44,7 @@ export async function stubProjectMetadata(page: Page, metadata?: { branch?: stri
 
 export async function cloneFlowForSmokeTest(page: Page, clonePrefix: string): Promise<string> {
   const cloneName = `${clonePrefix}-${Date.now()}.dot`
-  const sourceResponse = await page.request.get(`/api/flows/${encodeURIComponent(IMPLEMENT_SPEC_FLOW)}`)
+  const sourceResponse = await page.request.get(`/attractor/api/flows/${encodeURIComponent(IMPLEMENT_SPEC_FLOW)}`)
   if (!sourceResponse.ok()) {
     throw new Error(`Failed to load ${IMPLEMENT_SPEC_FLOW} for smoke clone: HTTP ${sourceResponse.status()}`)
   }
@@ -54,7 +54,7 @@ export async function cloneFlowForSmokeTest(page: Page, clonePrefix: string): Pr
     throw new Error(`Source flow ${IMPLEMENT_SPEC_FLOW} returned empty content for smoke clone.`)
   }
 
-  const saveResponse = await page.request.post('/api/flows', {
+  const saveResponse = await page.request.post('/attractor/api/flows', {
     data: { name: cloneName, content: sourcePayload.content },
   })
   if (!saveResponse.ok()) {
@@ -65,7 +65,7 @@ export async function cloneFlowForSmokeTest(page: Page, clonePrefix: string): Pr
 }
 
 export async function deleteFlowAfterSmoke(page: Page, flowName: string): Promise<void> {
-  const response = await page.request.delete(`/api/flows/${encodeURIComponent(flowName)}`)
+  const response = await page.request.delete(`/attractor/api/flows/${encodeURIComponent(flowName)}`)
   if (!response.ok() && response.status() !== 404) {
     throw new Error(`Failed to delete smoke clone ${flowName}: HTTP ${response.status()}`)
   }

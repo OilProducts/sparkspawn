@@ -7,8 +7,14 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-import attractor.api.project_chat as project_chat
+import workspace.project_chat as project_chat
 import attractor.api.server as server
+
+
+def _write_flow(name: str, content: str = "digraph G { start [shape=Mdiamond]; done [shape=Msquare]; start -> done; }\n") -> None:
+    flows_dir = server.get_settings().flows_dir
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    (flows_dir / name).write_text(content, encoding="utf-8")
 
 
 def test_list_runs_includes_project_and_git_metadata_fields(
@@ -36,7 +42,7 @@ def test_list_runs_includes_project_and_git_metadata_fields(
         )
     )
 
-    response = api_client.get("/runs")
+    response = api_client.get("/attractor/runs")
 
     assert response.status_code == 200
     payload = response.json()
@@ -72,7 +78,7 @@ def test_list_runs_includes_spec_and_plan_artifact_links_when_available_item_9_6
         )
     )
 
-    response = api_client.get("/runs")
+    response = api_client.get("/attractor/runs")
 
     assert response.status_code == 200
     payload = response.json()
@@ -128,7 +134,7 @@ def test_list_runs_filters_durable_history_by_project_item_9_6_01(
     )
 
     filtered_response = api_client.get(
-        "/runs",
+        "/attractor/runs",
         params={"project_path": str(tmp_path / "project-alpha")},
     )
     assert filtered_response.status_code == 200
@@ -169,7 +175,7 @@ def test_list_runs_backfills_missing_timestamps_from_run_log_item_9_6_04(
         encoding="utf-8",
     )
 
-    response = api_client.get("/runs")
+    response = api_client.get("/attractor/runs")
 
     assert response.status_code == 200
     payload = response.json()
@@ -216,7 +222,7 @@ def test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04(
             encoding="utf-8",
         )
 
-    response = api_client.get("/runs")
+    response = api_client.get("/attractor/runs")
     assert response.status_code == 200
     payload = response.json()
     run_ids = [run["run_id"] for run in payload["runs"]]
@@ -296,7 +302,7 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
     )
 
     response = api_client.post(
-        "/api/conversations/conversation-test/spec-edit-proposals/proposal-1/approve",
+        "/workspace/api/conversations/conversation-test/spec-edit-proposals/proposal-1/approve",
         json={
             "project_path": project_path,
             "flow_source": "plan-generation.dot",
@@ -308,7 +314,7 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
 
     terminal_status = "running"
     for _ in range(200):
-        pipeline_response = api_client.get(f"/pipelines/{workflow_run_id}")
+        pipeline_response = api_client.get(f"/attractor/pipelines/{workflow_run_id}")
         assert pipeline_response.status_code == 200
         terminal_status = pipeline_response.json()["status"]
         if terminal_status != "running":
@@ -319,7 +325,7 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
     snapshot = {}
     for _ in range(200):
         conversation_response = api_client.get(
-            "/api/conversations/conversation-test",
+            "/workspace/api/conversations/conversation-test",
             params={"project_path": project_path},
         )
         assert conversation_response.status_code == 200
@@ -338,11 +344,11 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
     assert record.status == "success"
     assert record.plan_id == snapshot["execution_cards"][0]["id"]
 
-    checkpoint_response = api_client.get(f"/pipelines/{workflow_run_id}/checkpoint")
+    checkpoint_response = api_client.get(f"/attractor/pipelines/{workflow_run_id}/checkpoint")
     assert checkpoint_response.status_code == 200
-    context_response = api_client.get(f"/pipelines/{workflow_run_id}/context")
+    context_response = api_client.get(f"/attractor/pipelines/{workflow_run_id}/context")
     assert context_response.status_code == 200
-    artifacts_response = api_client.get(f"/pipelines/{workflow_run_id}/artifacts")
+    artifacts_response = api_client.get(f"/attractor/pipelines/{workflow_run_id}/artifacts")
     assert artifacts_response.status_code == 200
     artifact_paths = [entry["path"] for entry in artifacts_response.json()["artifacts"]]
     assert "artifacts/graphviz/pipeline.dot" in artifact_paths
@@ -393,9 +399,10 @@ def test_execution_planning_approval_uses_project_trigger_binding_when_present(
         lambda backend_name, working_dir, emit, model=None: _Backend(),
     )
 
-    api_client.post("/api/projects/register", json={"project_path": project_path})
+    _write_flow("custom-plan.dot")
+    api_client.post("/workspace/api/projects/register", json={"project_path": project_path})
     binding_response = api_client.put(
-        "/api/projects/flow-bindings/spec_edit_approved",
+        "/workspace/api/projects/flow-bindings/spec_edit_approved",
         json={
             "project_path": project_path,
             "flow_name": "custom-plan.dot",
@@ -423,7 +430,7 @@ def test_execution_planning_approval_uses_project_trigger_binding_when_present(
     )
 
     response = api_client.post(
-        "/api/conversations/conversation-test/spec-edit-proposals/proposal-1/approve",
+        "/workspace/api/conversations/conversation-test/spec-edit-proposals/proposal-1/approve",
         json={
             "project_path": project_path,
         },
@@ -500,7 +507,7 @@ def test_approved_execution_card_launches_selected_flow_run(
     )
 
     response = api_client.post(
-        "/api/conversations/conversation-test/execution-cards/execution-card-1/review",
+        "/workspace/api/conversations/conversation-test/execution-cards/execution-card-1/review",
         json={
             "project_path": project_path,
             "disposition": "approved",
@@ -511,7 +518,7 @@ def test_approved_execution_card_launches_selected_flow_run(
 
     assert response.status_code == 200
 
-    runs_response = api_client.get("/runs", params={"project_path": project_path})
+    runs_response = api_client.get("/attractor/runs", params={"project_path": project_path})
     assert runs_response.status_code == 200
     runs_payload = runs_response.json()["runs"]
     matching_runs = [run for run in runs_payload if run["plan_id"] == "execution-card-1"]
@@ -522,7 +529,7 @@ def test_approved_execution_card_launches_selected_flow_run(
 
     terminal_status = "running"
     for _ in range(200):
-        pipeline_response = api_client.get(f"/pipelines/{launched_run['run_id']}")
+        pipeline_response = api_client.get(f"/attractor/pipelines/{launched_run['run_id']}")
         assert pipeline_response.status_code == 200
         terminal_status = pipeline_response.json()["status"]
         if terminal_status != "running":
@@ -531,7 +538,7 @@ def test_approved_execution_card_launches_selected_flow_run(
     assert terminal_status == "success"
 
     snapshot_response = api_client.get(
-        "/api/conversations/conversation-test",
+        "/workspace/api/conversations/conversation-test",
         params={"project_path": project_path},
     )
     assert snapshot_response.status_code == 200
@@ -606,7 +613,7 @@ def test_approved_execution_card_defaults_legacy_planning_flow_to_dispatch_flow(
     )
 
     response = api_client.post(
-        "/api/conversations/conversation-test/execution-cards/execution-card-1/review",
+        "/workspace/api/conversations/conversation-test/execution-cards/execution-card-1/review",
         json={
             "project_path": project_path,
             "disposition": "approved",
@@ -616,7 +623,7 @@ def test_approved_execution_card_defaults_legacy_planning_flow_to_dispatch_flow(
 
     assert response.status_code == 200
 
-    runs_response = api_client.get("/runs", params={"project_path": project_path})
+    runs_response = api_client.get("/attractor/runs", params={"project_path": project_path})
     assert runs_response.status_code == 200
     runs_payload = runs_response.json()["runs"]
     matching_runs = [run for run in runs_payload if run["plan_id"] == "execution-card-1"]
@@ -662,9 +669,10 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
         lambda backend_name, working_dir, emit, model=None: _Backend(),
     )
 
-    api_client.post("/api/projects/register", json={"project_path": project_path})
+    _write_flow("custom-implement.dot")
+    api_client.post("/workspace/api/projects/register", json={"project_path": project_path})
     binding_response = api_client.put(
-        "/api/projects/flow-bindings/execution_card_approved",
+        "/workspace/api/projects/flow-bindings/execution_card_approved",
         json={
             "project_path": project_path,
             "flow_name": "custom-implement.dot",
@@ -699,7 +707,7 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
     )
 
     response = api_client.post(
-        "/api/conversations/conversation-test/execution-cards/execution-card-1/review",
+        "/workspace/api/conversations/conversation-test/execution-cards/execution-card-1/review",
         json={
             "project_path": project_path,
             "disposition": "approved",
@@ -709,7 +717,7 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
 
     assert response.status_code == 200
 
-    runs_response = api_client.get("/runs", params={"project_path": project_path})
+    runs_response = api_client.get("/attractor/runs", params={"project_path": project_path})
     assert runs_response.status_code == 200
     matching_runs = [run for run in runs_response.json()["runs"] if run["plan_id"] == "execution-card-1"]
     assert len(matching_runs) == 1

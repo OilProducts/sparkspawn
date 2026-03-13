@@ -1886,7 +1886,7 @@ This section defines how to validate that an implementation of this spec is comp
 - [ ] Transform interface: `transform(graph) -> graph`
 - [ ] Built-in variable expansion transform replaces `$goal` in prompts
 - [ ] Custom transforms can be registered and run in order
-- [ ] HTTP server mode (if implemented): POST /run starts pipeline, GET /status checks state, POST /answer submits human input
+- [ ] HTTP server mode (if implemented): POST /pipelines starts pipeline, GET /status checks state, POST /pipelines/{id}/questions/{qid}/answer submits human input
 
 ### 11.12 Cross-Feature Parity Matrix
 

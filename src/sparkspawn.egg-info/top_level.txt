@@ -1,1 +1,3 @@
 attractor
+sparkspawn_common
+workspace

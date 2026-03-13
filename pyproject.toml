@@ -9,6 +9,7 @@ description = "Add your description here"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.111,<1.0",
+    "httpx>=0.27,<1.0",
     "platformdirs>=4.0",
     "pydantic>=2.7,<3.0",
     "uvicorn[standard]>=0.30,<1.0",
@@ -24,13 +25,12 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["attractor*"]
+include = ["attractor*", "workspace*", "sparkspawn_common*"]
 
 [tool.setuptools.package-data]
 attractor = ["ui_dist/**"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.27,<1.0",
     "pytest>=8.4.2",
 ]

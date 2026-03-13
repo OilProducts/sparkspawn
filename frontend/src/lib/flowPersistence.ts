@@ -1,4 +1,5 @@
 import { useStore, type SaveErrorKind } from '@/store'
+import { saveFlowValidated } from '@/lib/attractorClient'
 
 interface SaveFlowErrorDetail {
     status?: string
@@ -56,59 +57,42 @@ export async function saveFlowContent(name: string, content: string, options?: S
     lastSaveRequest = { name, content, options }
     markSaveInFlight()
 
-    let response: Response
     try {
-        response = await fetch('/api/flows', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name,
-                content,
-                expect_semantic_equivalence: options?.expectSemanticEquivalence === true,
-            }),
-        })
+        const response = await saveFlowValidated(name, content, options?.expectSemanticEquivalence === true)
+        if (!response.ok) {
+            const detail = parseErrorDetail(response.payload)
+            const message = buildErrorMessage(detail.status, detail.error, response.statusCode)
+            if (detail.status === 'conflict' || (response.statusCode === 409 && detail.status !== 'semantic_mismatch')) {
+                markSaveConflict(message)
+                return false
+            }
+            let errorKind: SaveErrorKind = 'http'
+            if (detail.status === 'parse_error') {
+                errorKind = 'parse_error'
+            } else if (detail.status === 'validation_error') {
+                errorKind = 'validation_error'
+            }
+            markSaveFailure(message, errorKind)
+            return false
+        }
+
+        const status = typeof (response.payload as { status?: unknown } | null)?.status === 'string'
+            ? (response.payload as { status: string }).status
+            : undefined
+        if (status !== 'saved') {
+            if (status === 'conflict') {
+                markSaveConflict(buildErrorMessage(status, undefined, response.statusCode))
+                return false
+            }
+            markSaveFailure(FALLBACK_SAVE_FAILURE_MESSAGE, 'unknown')
+            return false
+        }
+
+        markSaveSuccess()
+        return true
     } catch (error) {
         const message = error instanceof Error ? error.message : 'network error while saving flow'
         markSaveFailure(`Flow save failed: ${message}`, 'network')
         return false
     }
-
-    let payload: unknown = null
-    try {
-        payload = await response.json()
-    } catch {
-        payload = null
-    }
-
-    if (!response.ok) {
-        const detail = parseErrorDetail(payload)
-        const message = buildErrorMessage(detail.status, detail.error, response.status)
-        if (detail.status === 'conflict' || (response.status === 409 && detail.status !== 'semantic_mismatch')) {
-            markSaveConflict(message)
-            return false
-        }
-        let errorKind: SaveErrorKind = 'http'
-        if (detail.status === 'parse_error') {
-            errorKind = 'parse_error'
-        } else if (detail.status === 'validation_error') {
-            errorKind = 'validation_error'
-        }
-        markSaveFailure(message, errorKind)
-        return false
-    }
-
-    const status = typeof (payload as { status?: unknown } | null)?.status === 'string'
-        ? (payload as { status: string }).status
-        : undefined
-    if (status !== 'saved') {
-        if (status === 'conflict') {
-            markSaveConflict(buildErrorMessage(status, undefined, response.status))
-            return false
-        }
-        markSaveFailure(FALLBACK_SAVE_FAILURE_MESSAGE, 'unknown')
-        return false
-    }
-
-    markSaveSuccess()
-    return true
 }

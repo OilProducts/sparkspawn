@@ -7,6 +7,7 @@ import { ExplainabilityPanel } from "./ExplainabilityPanel"
 type GraphArtifactAvailability = "idle" | "checking" | "available" | "missing" | "error"
 
 const ACTIVE_RUNTIME_STATUSES = new Set(["running", "cancel_requested", "abort_requested"])
+const ATTRACTOR_BASE_PREFIX = '/attractor'
 
 export function Terminal() {
     const viewMode = useStore((state) => state.viewMode)
@@ -125,7 +126,7 @@ export function Terminal() {
                 {selectedRunId && graphArtifactAvailability === "available" ? (
                     <a
                         data-testid="execution-footer-workflow-artifact-link"
-                        href={`/pipelines/${encodeURIComponent(selectedRunId)}/graph`}
+                        href={`${ATTRACTOR_BASE_PREFIX}/pipelines/${encodeURIComponent(selectedRunId)}/graph`}
                         target="_blank"
                         rel="noreferrer"
                         className="whitespace-nowrap rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-muted"

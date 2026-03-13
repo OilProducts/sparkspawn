@@ -240,9 +240,17 @@ Workspace state may link the user into a specific run, but the inspector still o
 
 The frontend SHOULD be able to work with any Attractor implementation that satisfies [attractor-spec.md](/Users/chris/tinker/sparkspawn/specs/attractor-spec.md).
 
+The canonical engine-facing HTTP surface is mounted under:
+- `/attractor/...`
+
 ### 9.2 Workspace Independence
 
 The frontend SHOULD consume Spark Spawn workspace behavior through explicit workspace APIs rather than direct filesystem assumptions or browser-owned durable state.
+
+The canonical workspace-facing HTTP surface is mounted under:
+- `/workspace/...`
+
+The frontend MUST treat those mounted surfaces as canonical and MUST NOT depend on duplicate root-path aliases.
 
 ### 9.3 Model Runtime Independence
 

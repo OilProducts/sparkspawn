@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from attractor.api.project_chat_common import (
+from workspace.project_chat_common import (
     as_non_empty_string as _as_non_empty_string,
     build_codex_runtime_environment,
     iso_now as _iso_now,
@@ -22,7 +22,7 @@ from attractor.api.project_chat_common import (
     slugify as _slugify,
     summarize_turns_for_debug as _summarize_turns_for_debug,
 )
-from attractor.api.project_chat_models import (
+from workspace.project_chat_models import (
     CHAT_SESSION_VERSION,
     ChatTurnLiveEvent,
     ChatTurnResult,
@@ -42,17 +42,17 @@ from attractor.api.project_chat_models import (
     SpecEditProposal,
     ToolCallRecord,
 )
-from attractor.api.project_chat_reviews import ProjectChatReviewService
-from attractor.api.project_chat_session import (
+from workspace.project_chat_reviews import ProjectChatReviewService
+from workspace.project_chat_session import (
     APP_SERVER_REQUEST_TIMEOUT_SECONDS,
     CHAT_TURN_IDLE_TIMEOUT_SECONDS,
     CodexAppServerChatSession,
     _extract_spec_proposal_payload,
     _tool_call_from_item,
 )
-from attractor.api.project_chat_storage import ProjectChatRepository
-from attractor.prompt_templates import load_prompt_templates, render_prompt_template
-from attractor.storage import ProjectPaths
+from workspace.project_chat_storage import ProjectChatRepository
+from workspace.prompt_templates import load_prompt_templates, render_prompt_template
+from workspace.storage import ProjectPaths
 
 
 CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"

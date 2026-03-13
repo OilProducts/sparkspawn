@@ -18,7 +18,7 @@ def test_cancel_pipeline_returns_404_for_unknown_pipeline(
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
-    response = api_client.post("/pipelines/missing-run/cancel")
+    response = api_client.post("/attractor/pipelines/missing-run/cancel")
     assert response.status_code == 404
     assert response.json()["detail"] == "Unknown pipeline"
 
@@ -32,15 +32,15 @@ def test_cancel_pipeline_requests_cancel_for_active_run(
     start_payload = _start_pipeline(api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])
 
-    response = api_client.post(f"/pipelines/{run_id}/cancel")
+    response = api_client.post(f"/attractor/pipelines/{run_id}/cancel")
     assert response.status_code == 200
     payload = response.json()
 
-    status_response = api_client.get(f"/pipelines/{run_id}")
+    status_response = api_client.get(f"/attractor/pipelines/{run_id}")
     assert status_response.status_code == 200
     status_payload = status_response.json()
 
-    runs_response = api_client.get("/runs")
+    runs_response = api_client.get("/attractor/runs")
     assert runs_response.status_code == 200
     run_rows = runs_response.json()["runs"]
     row = next((entry for entry in run_rows if entry["run_id"] == run_id), None)
@@ -72,7 +72,7 @@ def test_cancel_pipeline_ignores_non_running_known_pipeline(
     final_status = _wait_for_pipeline_terminal_status(api_client, run_id)
     assert final_status == "success"
 
-    response = api_client.post(f"/pipelines/{run_id}/cancel")
+    response = api_client.post(f"/attractor/pipelines/{run_id}/cancel")
     assert response.status_code == 200
     payload = response.json()
 

@@ -13,9 +13,11 @@ import {
     type ExecutionCardResponse,
     type SpecEditProposalResponse,
     approveSpecEditProposalValidated,
+    conversationEventsUrl,
     fetchConversationSnapshotValidated,
     fetchProjectRegistryValidated,
     fetchProjectConversationListValidated,
+    fetchProjectMetadataValidated,
     pickProjectDirectoryValidated,
     parseConversationSnapshotResponse,
     parseConversationStreamEventResponse,
@@ -1238,16 +1240,12 @@ export function HomePanel() {
             const entries = await Promise.all(
                 projectPathsToFetch.map(async (projectPath) => {
                     try {
-                        const response = await fetch(`/api/projects/metadata?directory=${encodeURIComponent(projectPath)}`)
-                        if (!response.ok) {
-                            return [projectPath, { ...EMPTY_PROJECT_GIT_METADATA }] as const
-                        }
-                        const payload = (await response.json()) as { branch?: string | null; commit?: string | null }
+                        const metadata = await fetchProjectMetadataValidated(projectPath)
                         return [
                             projectPath,
                             {
-                                branch: asProjectGitMetadataField(payload.branch),
-                                commit: asProjectGitMetadataField(payload.commit),
+                                branch: asProjectGitMetadataField(metadata.branch),
+                                commit: asProjectGitMetadataField(metadata.commit),
                             },
                         ] as const
                     } catch {
@@ -1434,7 +1432,7 @@ export function HomePanel() {
         void loadSnapshot()
 
         if (typeof EventSource !== "undefined") {
-            const eventStreamUrl = `/api/conversations/${encodeURIComponent(activeConversationId)}/events?project_path=${encodeURIComponent(activeProjectPath)}`
+            const eventStreamUrl = conversationEventsUrl(activeConversationId, activeProjectPath)
             eventSource = new EventSource(eventStreamUrl)
             eventSource.onmessage = (event) => {
                 if (isCancelled) {
@@ -1443,11 +1441,11 @@ export function HomePanel() {
                 try {
                     const payload = JSON.parse(event.data) as { type?: string; state?: unknown }
                     if (payload.type === "conversation_snapshot") {
-                        const snapshot = parseConversationSnapshotResponse(payload.state, "/api/conversations/{id}/events")
+                        const snapshot = parseConversationSnapshotResponse(payload.state, "/workspace/api/conversations/{id}/events")
                         applyConversationSnapshotRef.current?.(activeProjectPath, snapshot, "event-stream-snapshot")
                         return
                     }
-                    const parsedEvent = parseConversationStreamEventResponse(payload, "/api/conversations/{id}/events")
+                    const parsedEvent = parseConversationStreamEventResponse(payload, "/workspace/api/conversations/{id}/events")
                     if (!parsedEvent) {
                         return
                     }
@@ -1494,28 +1492,19 @@ export function HomePanel() {
         projectPath: string,
     ): Promise<{ metadata: ProjectGitMetadata; error?: string }> => {
         try {
-            const response = await fetch(`/api/projects/metadata?directory=${encodeURIComponent(projectPath)}`)
-            if (!response.ok) {
-                let message = "Unable to verify project Git state."
-                try {
-                    const payload = (await response.json()) as { detail?: string }
-                    if (payload.detail) {
-                        message = payload.detail
-                    }
-                } catch {
-                    // Ignore malformed error payloads.
-                }
-                return { metadata: { ...EMPTY_PROJECT_GIT_METADATA }, error: message }
-            }
-            const payload = (await response.json()) as { branch?: string | null; commit?: string | null }
+            const payload = await fetchProjectMetadataValidated(projectPath)
             return {
                 metadata: {
                     branch: asProjectGitMetadataField(payload.branch),
                     commit: asProjectGitMetadataField(payload.commit),
                 },
             }
-        } catch {
-            return { metadata: { ...EMPTY_PROJECT_GIT_METADATA }, error: "Unable to verify project Git state." }
+        } catch (err) {
+            let message = "Unable to verify project Git state."
+            if (err instanceof ApiHttpError && err.detail) {
+                message = err.detail
+            }
+            return { metadata: { ...EMPTY_PROJECT_GIT_METADATA }, error: message }
         }
     }
 

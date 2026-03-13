@@ -27,11 +27,12 @@ The UI also supports a direct authoring workflow: Home -> Editor -> Execution ->
 
 ## Architecture
 
-- [attractor/](/Users/chris/tinker/sparkspawn/attractor): FastAPI server, CLI, DOT parser/validator, execution engine, handlers, runtime storage
+- [src/attractor/](/Users/chris/tinker/sparkspawn/src/attractor): Attractor runtime, pipeline engine, handlers, CLI, and mounted Attractor API
+- [src/workspace/](/Users/chris/tinker/sparkspawn/src/workspace): Spark Spawn workspace service, conversations, review artifacts, trigger bindings, and mounted Workspace API
 - [frontend/](/Users/chris/tinker/sparkspawn/frontend): React 19 + Vite UI
 - [flows/](/Users/chris/tinker/sparkspawn/flows): sample and reference `.dot` flows, including planning flows
 - [tests/](/Users/chris/tinker/sparkspawn/tests): backend tests, UI contracts, and acceptance assets
-- [specs/](/Users/chris/tinker/sparkspawn/specs): product notes and workflow references
+- [specs/](/Users/chris/tinker/sparkspawn/specs): Attractor, workspace, frontend, and storage specifications
 
 ## Requirements
 
@@ -101,7 +102,8 @@ By default, Spark Spawn stores runtime data under `~/.sparkspawn`:
 - `config/`
 - `runtime/`
 - `logs/`
-- `projects/`
+- `workspace/projects/`
+- `attractor/runs/`
 - `flows/`
 
 Important path overrides:
@@ -114,17 +116,23 @@ Important path overrides:
 
 ## API Overview
 
-The canonical route inventory lives in [attractor/api/server.py](/Users/chris/tinker/sparkspawn/attractor/api/server.py). Current API groups include:
+The canonical route inventory lives in [server.py](/Users/chris/tinker/sparkspawn/src/attractor/api/server.py) and [api.py](/Users/chris/tinker/sparkspawn/src/workspace/api.py).
 
-- Runtime and runs: `GET /status`, `GET /runs`
-- Pipeline execution: `POST /pipelines`, `POST /run`, `GET /pipelines/{id}`, `POST /pipelines/{id}/cancel`
-- Pipeline inspection: `GET /pipelines/{id}/events`, `GET /pipelines/{id}/checkpoint`, `GET /pipelines/{id}/context`, `GET /pipelines/{id}/graph`, `GET /pipelines/{id}/artifacts`
-- Human-gate actions: `GET /pipelines/{id}/questions`, `POST /pipelines/{id}/questions/{question_id}/answer`
-- Flow management: `GET /api/flows`, `POST /api/flows`, `GET /api/flows/{name}`, `DELETE /api/flows/{name}`
-- Project management: `GET /api/projects`, `POST /api/projects/register`, `PATCH /api/projects/state`, `DELETE /api/projects`
-- Project metadata and directory selection: `GET /api/projects/metadata`, `POST /api/projects/pick-directory`
-- Project conversations: `GET /api/projects/conversations`, `GET /api/conversations/{conversation_id}`, `GET /api/conversations/{conversation_id}/events`, `POST /api/conversations/{conversation_id}/turns`, `DELETE /api/conversations/{conversation_id}`
-- Review workflows: `POST /api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/approve`, `POST /api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/reject`, `POST /api/conversations/{conversation_id}/execution-cards/{execution_card_id}/review`
+The root app is a mount host only. Canonical public API surfaces are:
+- Attractor docs/OpenAPI under `/attractor/docs` and `/attractor/openapi.json`
+- Workspace docs/OpenAPI under `/workspace/docs` and `/workspace/openapi.json`
+
+Current API groups include:
+
+- Attractor runtime and runs: `GET /attractor/status`, `GET /attractor/runs`
+- Attractor pipeline execution: `POST /attractor/pipelines`, `GET /attractor/pipelines/{id}`, `POST /attractor/pipelines/{id}/cancel`
+- Attractor pipeline inspection: `GET /attractor/pipelines/{id}/events`, `GET /attractor/pipelines/{id}/checkpoint`, `GET /attractor/pipelines/{id}/context`, `GET /attractor/pipelines/{id}/graph`, `GET /attractor/pipelines/{id}/artifacts`
+- Attractor human-gate actions: `GET /attractor/pipelines/{id}/questions`, `POST /attractor/pipelines/{id}/questions/{question_id}/answer`
+- Attractor flow management: `GET /attractor/api/flows`, `POST /attractor/api/flows`, `GET /attractor/api/flows/{name}`, `DELETE /attractor/api/flows/{name}`
+- Workspace project management: `GET /workspace/api/projects`, `POST /workspace/api/projects/register`, `PATCH /workspace/api/projects/state`, `DELETE /workspace/api/projects`
+- Workspace flow bindings and metadata: `GET /workspace/api/projects/flow-bindings`, `PUT /workspace/api/projects/flow-bindings/{trigger}`, `DELETE /workspace/api/projects/flow-bindings/{trigger}`, `GET /workspace/api/projects/metadata`, `POST /workspace/api/projects/pick-directory`
+- Workspace conversations: `GET /workspace/api/projects/conversations`, `GET /workspace/api/conversations/{conversation_id}`, `GET /workspace/api/conversations/{conversation_id}/events`, `POST /workspace/api/conversations/{conversation_id}/turns`, `DELETE /workspace/api/conversations/{conversation_id}`
+- Workspace review workflows: `POST /workspace/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/approve`, `POST /workspace/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/reject`, `POST /workspace/api/conversations/{conversation_id}/execution-cards/{execution_card_id}/review`
 
 ## Repository Commands
 

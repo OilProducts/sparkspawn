@@ -4,13 +4,13 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
-from attractor.api.project_chat_common import (
+from workspace.project_chat_common import (
     extract_json_object,
     iso_now,
     normalize_project_path_value,
     slugify,
 )
-from attractor.api.project_chat_models import (
+from workspace.project_chat_models import (
     ConversationState,
     ConversationTurn,
     ConversationTurnEvent,
@@ -22,7 +22,7 @@ from attractor.api.project_chat_models import (
     SpecEditProposal,
     SpecEditProposalChange,
 )
-from attractor.api.project_chat_storage import ProjectChatRepository
+from workspace.project_chat_storage import ProjectChatRepository
 
 
 class ProjectChatReviewService:

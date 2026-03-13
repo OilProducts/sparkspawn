@@ -50,25 +50,25 @@ describe('App shell behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/api/flows')) {
+        if (url.includes('/attractor/api/flows')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/status')) {
+        if (url.includes('/attractor/status')) {
           return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/api/projects')) {
+        if (url.includes('/workspace/api/projects')) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/runs')) {
+        if (url.includes('/attractor/runs')) {
           return new Response(JSON.stringify({ runs: [] }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },

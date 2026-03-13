@@ -46,7 +46,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
     const url = new URL(requestUrl)
     const pathname = url.pathname
 
-    if (pathname === '/status') {
+    if (pathname === '/attractor/status') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -60,7 +60,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
-    if (pathname === '/runs') {
+    if (pathname === '/attractor/runs') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -71,7 +71,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
-    if (pathname === '/api/flows' && requestMethod === 'GET') {
+    if (pathname === '/attractor/api/flows' && requestMethod === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -80,7 +80,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
-    if (pathname === `/api/flows/${encodeURIComponent(MOBILE_FLOW_NAME)}` && requestMethod === 'GET') {
+    if (pathname === `/attractor/api/flows/${encodeURIComponent(MOBILE_FLOW_NAME)}` && requestMethod === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -92,7 +92,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
-    if (pathname === '/preview' && requestMethod === 'POST') {
+    if (pathname === '/attractor/preview' && requestMethod === 'POST') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -108,7 +108,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
-    if (pathname === '/api/projects/metadata' && requestMethod === 'GET') {
+    if (pathname === '/workspace/api/projects/metadata' && requestMethod === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -120,7 +120,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
-    if (pathname === `/pipelines/${encodeURIComponent(MOBILE_RUN_ID)}` && requestMethod === 'GET') {
+    if (pathname === `/attractor/pipelines/${encodeURIComponent(MOBILE_RUN_ID)}` && requestMethod === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -137,7 +137,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
-    if (pathname === '/runs' && requestMethod === 'GET') {
+    if (pathname === '/attractor/runs' && requestMethod === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

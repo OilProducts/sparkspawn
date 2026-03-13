@@ -108,14 +108,14 @@ describe('Project-scoped workflow behavior', () => {
         const conversationId = getConversationIdFromUrl(url)
         const requestBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
 
-        if (endpoint.pathname === '/api/projects/metadata') {
+        if (endpoint.pathname === '/workspace/api/projects/metadata') {
           return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
         }
 
-        if (endpoint.pathname === '/api/projects/conversations') {
+        if (endpoint.pathname === '/workspace/api/projects/conversations') {
           const projectPath = endpoint.searchParams.get('project_path') || '/tmp/unknown-project'
           const summaries = Object.values(conversationSnapshots)
             .filter((snapshot) => snapshot.project_path === projectPath)
@@ -136,7 +136,7 @@ describe('Project-scoped workflow behavior', () => {
           })
         }
 
-        if (conversationId && endpoint.pathname.endsWith(`/api/conversations/${conversationId}`) && !init?.method) {
+        if (conversationId && endpoint.pathname.endsWith(`/workspace/api/conversations/${conversationId}`) && !init?.method) {
           const projectPath = endpoint.searchParams.get('project_path') || conversationSnapshots[conversationId]?.project_path || '/tmp/unknown-project'
           const snapshot = conversationSnapshots[conversationId]
             ? cloneSnapshot(conversationSnapshots[conversationId]!)
@@ -148,7 +148,7 @@ describe('Project-scoped workflow behavior', () => {
           })
         }
 
-        if (conversationId && endpoint.pathname.endsWith(`/api/conversations/${conversationId}/turns`) && init?.method === 'POST') {
+        if (conversationId && endpoint.pathname.endsWith(`/workspace/api/conversations/${conversationId}/turns`) && init?.method === 'POST') {
           const projectPath = String(requestBody.project_path || '/tmp/unknown-project')
           const message = String(requestBody.message || '')
           const proposalId = `proposal-${conversationId}`

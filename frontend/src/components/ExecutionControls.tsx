@@ -8,6 +8,7 @@ import {
     fetchPipelineCancelValidated,
     fetchPipelineStartValidated,
 } from '@/lib/attractorClient'
+import { fetchProjectMetadataValidated } from '@/lib/workspaceClient'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 
 type WorkflowFailureDiagnostics = {
@@ -137,15 +138,8 @@ export function ExecutionControls() {
 
     const confirmGitPolicyGate = async () => {
         try {
-            const metadataRes = await fetch(`/api/projects/metadata?directory=${encodeURIComponent(runInitiationForm.projectPath)}`)
-            if (!metadataRes.ok) {
-                const warning = 'Unable to verify project Git state before run start.'
-                setRunStartGitPolicyWarning(warning)
-                return window.confirm(`${warning} Continue with run start anyway?`)
-            }
-
-            const metadata = (await metadataRes.json()) as { branch?: string | null }
-            const branch = typeof metadata?.branch === 'string' ? metadata.branch.trim() : ''
+            const metadata = await fetchProjectMetadataValidated(runInitiationForm.projectPath)
+            const branch = typeof metadata.branch === 'string' ? metadata.branch.trim() : ''
             if (branch) {
                 setRunStartGitPolicyWarning(null)
                 return true
@@ -154,12 +148,12 @@ export function ExecutionControls() {
             const warning = 'Project Git policy check failed: active project is not a Git repository.'
             setRunStartGitPolicyWarning(warning)
             const allowNonGitRun = window.confirm(`${warning} Continue with run start anyway?`)
-            if (!allowNonGitRun) {
-                return false
-            }
-            return true
-        } catch {
+            return allowNonGitRun
+        } catch (err) {
             const warning = 'Unable to verify project Git state before run start.'
+            if (err instanceof ApiHttpError && err.detail) {
+                console.warn(err.detail)
+            }
             setRunStartGitPolicyWarning(warning)
             return window.confirm(`${warning} Continue with run start anyway?`)
         }

@@ -5,9 +5,6 @@ import os
 from pathlib import Path
 from typing import Mapping, Optional
 
-from attractor.prompt_templates import ensure_prompt_templates
-
-
 ENV_HOME_DIR = "SPARKSPAWN_HOME"
 ENV_FLOWS_DIR = "SPARKSPAWN_FLOWS_DIR"
 ENV_UI_DIR = "SPARKSPAWN_UI_DIR"
@@ -20,7 +17,10 @@ class Settings:
     config_dir: Path
     runtime_dir: Path
     logs_dir: Path
+    workspace_dir: Path
     projects_dir: Path
+    attractor_dir: Path
+    runs_dir: Path
     flows_dir: Path
     ui_dir: Optional[Path]
     legacy_ui_index: Optional[Path]
@@ -29,6 +29,7 @@ class Settings:
 def resolve_settings(
     *,
     data_dir: Path | str | None = None,
+    runs_dir: Path | str | None = None,
     flows_dir: Path | str | None = None,
     ui_dir: Path | str | None = None,
     env: Mapping[str, str] | None = None,
@@ -39,7 +40,6 @@ def resolve_settings(
     default_config_dir = default_data_dir / "config"
     default_runtime_dir = default_data_dir / "runtime"
     default_logs_dir = default_data_dir / "logs"
-    default_projects_dir = default_data_dir / "projects"
     default_flows_dir = (
         (project_root / "flows")
         if (project_root / ".git").exists()
@@ -59,7 +59,14 @@ def resolve_settings(
     resolved_config_dir = resolved_data_dir / "config"
     resolved_runtime_dir = resolved_data_dir / "runtime"
     resolved_logs_dir = resolved_data_dir / "logs"
-    resolved_projects_dir = resolved_data_dir / "projects"
+    resolved_workspace_dir = resolved_data_dir / "workspace"
+    resolved_projects_dir = resolved_workspace_dir / "projects"
+    resolved_attractor_dir = resolved_data_dir / "attractor"
+    resolved_runs_dir = _coalesce_path(
+        cli_value=runs_dir,
+        env_value=None,
+        default_value=resolved_attractor_dir / "runs",
+    )
     resolved_flows_dir = _coalesce_path(
         cli_value=flows_dir,
         env_value=env_map.get(ENV_FLOWS_DIR),
@@ -78,7 +85,10 @@ def resolve_settings(
         config_dir=resolved_config_dir,
         runtime_dir=resolved_runtime_dir,
         logs_dir=resolved_logs_dir,
+        workspace_dir=resolved_workspace_dir,
         projects_dir=resolved_projects_dir,
+        attractor_dir=resolved_attractor_dir,
+        runs_dir=resolved_runs_dir,
         flows_dir=resolved_flows_dir,
         ui_dir=resolved_ui_dir,
         legacy_ui_index=legacy_ui_index,
@@ -89,9 +99,11 @@ def validate_settings(settings: Settings) -> None:
     ensure_writable_directory(settings.config_dir, "config")
     ensure_writable_directory(settings.runtime_dir, "runtime")
     ensure_writable_directory(settings.logs_dir, "logs")
+    ensure_writable_directory(settings.workspace_dir, "workspace")
     ensure_writable_directory(settings.projects_dir, "projects")
+    ensure_writable_directory(settings.attractor_dir, "attractor")
+    ensure_writable_directory(settings.runs_dir, "runs")
     ensure_writable_directory(settings.flows_dir, "flows")
-    ensure_prompt_templates(settings.config_dir)
     if settings.ui_dir:
         ui_index = settings.ui_dir / "index.html"
         if not ui_index.exists():

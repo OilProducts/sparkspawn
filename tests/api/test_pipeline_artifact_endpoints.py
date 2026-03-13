@@ -47,7 +47,7 @@ def test_list_pipeline_artifacts_returns_run_outputs_for_known_pipeline(
     # Internal checkpoint state should not be exposed by the artifact browser list.
     (run_root / "state.json").write_text("{}", encoding="utf-8")
 
-    response = api_client.get(f"/pipelines/{run_id}/artifacts")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/artifacts")
 
     assert response.status_code == 200
     payload = response.json()
@@ -76,7 +76,7 @@ def test_get_pipeline_artifact_file_returns_file_for_known_artifact(
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text("# prompt", encoding="utf-8")
 
-    response = api_client.get(f"/pipelines/{run_id}/artifacts/plan/prompt.md")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/artifacts/plan/prompt.md")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
@@ -90,7 +90,7 @@ def test_get_pipeline_artifact_file_rejects_parent_traversal(
 ) -> None:
     run_id, _ = _seed_run(api_client, monkeypatch, tmp_path)
 
-    response = api_client.get(f"/pipelines/{run_id}/artifacts/%2E%2E/run.json")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/artifacts/%2E%2E/run.json")
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid artifact path"
@@ -103,7 +103,7 @@ def test_get_pipeline_artifact_file_returns_404_when_missing(
 ) -> None:
     run_id, _ = _seed_run(api_client, monkeypatch, tmp_path)
 
-    response = api_client.get(f"/pipelines/{run_id}/artifacts/plan/missing.md")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/artifacts/plan/missing.md")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Artifact not found"

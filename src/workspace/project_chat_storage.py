@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from attractor.api.project_chat_common import (
+from workspace.project_chat_common import (
     as_non_empty_string,
     build_conversation_preview,
     derive_conversation_title,
@@ -16,7 +16,7 @@ from attractor.api.project_chat_common import (
     resolve_runtime_workspace_path,
     truncate_text,
 )
-from attractor.api.project_chat_models import (
+from workspace.project_chat_models import (
     CHAT_SESSION_VERSION,
     ConversationSessionState,
     ConversationState,
@@ -26,10 +26,11 @@ from attractor.api.project_chat_models import (
     ToolCallRecord,
     WorkflowEvent,
 )
-from attractor.storage import (
+from workspace.storage import (
     ProjectPaths,
     ensure_project_paths,
     read_project_paths_by_id,
+    workspace_projects_root,
 )
 
 
@@ -39,9 +40,7 @@ class ProjectChatRepository:
         self._lock = lock
 
     def projects_root(self) -> Path:
-        root = self._data_dir / "projects"
-        root.mkdir(parents=True, exist_ok=True)
-        return root
+        return workspace_projects_root(self._data_dir)
 
     def project_paths(self, project_path: str) -> ProjectPaths:
         return ensure_project_paths(self._data_dir, project_path)

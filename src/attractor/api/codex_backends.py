@@ -8,11 +8,11 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-from attractor.api import codex_app_server
-from attractor.api.project_chat import build_codex_runtime_environment, resolve_runtime_workspace_path
 from attractor.engine.context import Context
 from attractor.engine.outcome import Outcome, OutcomeStatus
 from attractor.handlers.base import CodergenBackend
+from sparkspawn_common import codex_app_server
+from sparkspawn_common.runtime import build_codex_runtime_environment, resolve_runtime_workspace_path
 
 
 class LocalCodexCliBackend(CodergenBackend):

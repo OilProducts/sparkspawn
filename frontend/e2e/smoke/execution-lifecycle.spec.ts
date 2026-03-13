@@ -27,7 +27,7 @@ test("warning-only diagnostics still allow execute with explicit banner for item
   const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-warning-only")
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       const body = route.request().postData() || ""
       if (body.includes(promptToken)) {
         await route.fulfill({
@@ -70,7 +70,7 @@ test("warning-only diagnostics still allow execute with explicit banner for item
 
     const previewRequest = page.waitForRequest(
       (request) =>
-        request.url().includes("/preview") &&
+        request.url().includes("/attractor/preview") &&
         request.method() === "POST" &&
         (request.postData() || "").includes(promptToken),
     )
@@ -95,7 +95,7 @@ test("diagnostics transitions toggle execute blocking and warning state for item
   const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-diagnostic-transition")
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       const body = route.request().postData() || ""
       if (body.includes(errorToken)) {
         await route.fulfill({
@@ -172,7 +172,7 @@ test("diagnostics transitions toggle execute blocking and warning state for item
     const waitForPreviewToken = (token: string) =>
       page.waitForRequest(
         (request) =>
-          request.url().includes("/preview") &&
+          request.url().includes("/attractor/preview") &&
           request.method() === "POST" &&
           (request.postData() || "").includes(token),
       )
@@ -224,14 +224,14 @@ test("planning/build failures show diagnostics and rerun affordances for item 8.
     await page.getByTestId("project-spec-approve-for-plan-button").click()
     await expect(page.getByText("Spec status:")).toContainText("approved")
 
-    await page.route("**/api/projects/metadata?*", async (route) => {
+    await page.route("**/workspace/api/projects/metadata?*", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({ branch: "main" }),
       })
     })
-    await page.route("**/api/flows/*", async (route) => {
+    await page.route("**/attractor/api/flows/*", async (route) => {
       await route.fulfill({
         status: 500,
         contentType: "application/json",

@@ -18,7 +18,7 @@ def test_list_pipeline_questions_returns_404_for_unknown_pipeline(
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
-    response = api_client.get("/pipelines/missing-run/questions")
+    response = api_client.get("/attractor/pipelines/missing-run/questions")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Unknown pipeline"
@@ -55,7 +55,7 @@ def test_list_pipeline_questions_returns_only_pending_questions_for_requested_ru
         }
     monkeypatch.setattr(server, "HUMAN_BROKER", broker)
 
-    response = api_client.get(f"/pipelines/{run_id}/questions")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/questions")
 
     assert response.status_code == 200
     payload = response.json()
@@ -104,7 +104,7 @@ def test_list_pipeline_questions_excludes_answered_questions_for_requested_run(
         }
     monkeypatch.setattr(server, "HUMAN_BROKER", broker)
 
-    response = api_client.get(f"/pipelines/{run_id}/questions")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/questions")
 
     assert response.status_code == 200
     payload = response.json()
@@ -131,7 +131,7 @@ def test_submit_pipeline_answer_returns_404_for_unknown_pipeline(
     monkeypatch.setattr(server, "HUMAN_BROKER", server.HumanGateBroker())
 
     response = api_client.post(
-        "/pipelines/missing-run/questions/q-1/answer",
+        "/attractor/pipelines/missing-run/questions/q-1/answer",
         json={"selected_value": "approve"},
     )
 
@@ -162,7 +162,7 @@ def test_submit_pipeline_answer_accepts_pending_question_for_pipeline(
     monkeypatch.setattr(server, "HUMAN_BROKER", broker)
 
     response = api_client.post(
-        f"/pipelines/{run_id}/questions/q-1/answer",
+        f"/attractor/pipelines/{run_id}/questions/q-1/answer",
         json={"selected_value": "approve"},
     )
 
@@ -197,7 +197,7 @@ def test_submit_pipeline_answer_rejects_question_owned_by_other_pipeline(
     monkeypatch.setattr(server, "HUMAN_BROKER", broker)
 
     response = api_client.post(
-        f"/pipelines/{run_b}/questions/q-1/answer",
+        f"/attractor/pipelines/{run_b}/questions/q-1/answer",
         json={"selected_value": "approve"},
     )
 

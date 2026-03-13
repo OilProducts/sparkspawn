@@ -9,6 +9,19 @@ import {
     fetchJsonWithValidation,
 } from './shared'
 
+const WORKSPACE_PREFIX = '/workspace'
+const WORKSPACE_API_PREFIX = `${WORKSPACE_PREFIX}/api`
+
+function workspaceUrl(path: string): string {
+    return `${WORKSPACE_API_PREFIX}${path}`
+}
+
+export function conversationEventsUrl(conversationId: string, projectPath: string): string {
+    return workspaceUrl(
+        `/conversations/${encodeURIComponent(conversationId)}/events?project_path=${encodeURIComponent(projectPath)}`,
+    )
+}
+
 export interface ConversationTurnResponse {
     id: string
     role: 'user' | 'assistant' | 'system'
@@ -166,6 +179,13 @@ export type ProjectDirectoryPickResponse =
     | {
         status: 'canceled'
     }
+
+export interface ProjectMetadataResponse {
+    name?: string
+    directory?: string
+    branch?: string | null
+    commit?: string | null
+}
 
 export interface ConversationTurnUpsertEventResponse {
     type: 'turn_upsert'
@@ -427,7 +447,7 @@ function parseProjectRecordResponse(value: unknown, endpoint: string): ProjectRe
 
 export function parseProjectFlowBindingsResponse(
     payload: unknown,
-    endpoint = '/api/projects/flow-bindings',
+    endpoint = '/workspace/api/projects/flow-bindings',
 ): ProjectFlowBindingsResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
@@ -436,7 +456,7 @@ export function parseProjectFlowBindingsResponse(
     }
 }
 
-export function parseProjectRecordListResponse(payload: unknown, endpoint = '/api/projects'): ProjectRecordResponse[] {
+export function parseProjectRecordListResponse(payload: unknown, endpoint = '/workspace/api/projects'): ProjectRecordResponse[] {
     if (!Array.isArray(payload)) {
         throw new ApiSchemaError(endpoint, 'Expected an array of projects.')
     }
@@ -445,7 +465,7 @@ export function parseProjectRecordListResponse(payload: unknown, endpoint = '/ap
         .filter((entry): entry is ProjectRecordResponse => entry !== null)
 }
 
-export function parseProjectRecordResponsePayload(payload: unknown, endpoint = '/api/projects/register'): ProjectRecordResponse {
+export function parseProjectRecordResponsePayload(payload: unknown, endpoint = '/workspace/api/projects/register'): ProjectRecordResponse {
     const record = parseProjectRecordResponse(payload, endpoint)
     if (!record) {
         throw new ApiSchemaError(endpoint, 'Expected a project record response.')
@@ -455,7 +475,7 @@ export function parseProjectRecordResponsePayload(payload: unknown, endpoint = '
 
 export function parseConversationSummaryListResponse(
     payload: unknown,
-    endpoint = '/api/projects/conversations',
+    endpoint = '/workspace/api/projects/conversations',
 ): ConversationSummaryResponse[] {
     if (!Array.isArray(payload)) {
         throw new ApiSchemaError(endpoint, 'Expected an array of conversation summaries.')
@@ -467,7 +487,7 @@ export function parseConversationSummaryListResponse(
 
 export function parseConversationDeleteResponse(
     payload: unknown,
-    endpoint = '/api/conversations/{id}',
+    endpoint = '/workspace/api/conversations/{id}',
 ): ConversationDeleteResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
@@ -479,7 +499,7 @@ export function parseConversationDeleteResponse(
 
 export function parseProjectDeleteResponse(
     payload: unknown,
-    endpoint = '/api/projects',
+    endpoint = '/workspace/api/projects',
 ): ProjectDeleteResponse {
     const record = expectObjectRecord(payload, endpoint)
     return {
@@ -492,7 +512,7 @@ export function parseProjectDeleteResponse(
 
 export function parseProjectDirectoryPickResponse(
     payload: unknown,
-    endpoint = '/api/projects/pick-directory',
+    endpoint = '/workspace/api/projects/pick-directory',
 ): ProjectDirectoryPickResponse {
     const record = expectObjectRecord(payload, endpoint)
     const status = expectString(record.status, endpoint, 'status')
@@ -508,9 +528,22 @@ export function parseProjectDirectoryPickResponse(
     throw new ApiSchemaError(endpoint, `Expected "status" to be "selected" or "canceled"; got "${status}".`)
 }
 
+export function parseProjectMetadataResponse(
+    payload: unknown,
+    endpoint = '/workspace/api/projects/metadata',
+): ProjectMetadataResponse {
+    const record = expectObjectRecord(payload, endpoint)
+    return {
+        name: asOptionalString(record.name),
+        directory: asOptionalString(record.directory),
+        branch: asOptionalString(record.branch),
+        commit: asOptionalString(record.commit),
+    }
+}
+
 export function parseConversationSnapshotResponse(
     payload: unknown,
-    endpoint = '/api/conversations/{id}',
+    endpoint = '/workspace/api/conversations/{id}',
 ): ConversationSnapshotResponse {
     const record = expectObjectRecord(payload, endpoint)
     const turns = Array.isArray(record.turns)
@@ -563,7 +596,7 @@ export function parseConversationSnapshotResponse(
 
 export function parseConversationStreamEventResponse(
     payload: unknown,
-    endpoint = '/api/conversations/{id}/events',
+    endpoint = '/workspace/api/conversations/{id}/events',
 ): ConversationTurnUpsertEventResponse | ConversationTurnEventStreamResponse | null {
     const record = expectObjectRecord(payload, endpoint)
     const type = typeof record.type === 'string' ? record.type : ''
@@ -614,33 +647,33 @@ export async function fetchConversationSnapshotValidated(
     conversationId: string,
     projectPath: string,
 ): Promise<ConversationSnapshotResponse> {
-    const url = `/api/conversations/${encodeURIComponent(conversationId)}?project_path=${encodeURIComponent(projectPath)}`
-    return fetchJsonWithValidation(url, undefined, '/api/conversations/{id}', parseConversationSnapshotResponse)
+    const url = workspaceUrl(`/conversations/${encodeURIComponent(conversationId)}?project_path=${encodeURIComponent(projectPath)}`)
+    return fetchJsonWithValidation(url, undefined, '/workspace/api/conversations/{id}', parseConversationSnapshotResponse)
 }
 
 export async function deleteConversationValidated(
     conversationId: string,
     projectPath: string,
 ): Promise<ConversationDeleteResponse> {
-    const url = `/api/conversations/${encodeURIComponent(conversationId)}?project_path=${encodeURIComponent(projectPath)}`
+    const url = workspaceUrl(`/conversations/${encodeURIComponent(conversationId)}?project_path=${encodeURIComponent(projectPath)}`)
     return fetchJsonWithValidation(
         url,
         {
             method: 'DELETE',
         },
-        '/api/conversations/{id}',
+        '/workspace/api/conversations/{id}',
         parseConversationDeleteResponse,
     )
 }
 
 export async function deleteProjectValidated(projectPath: string): Promise<ProjectDeleteResponse> {
-    const url = `/api/projects?project_path=${encodeURIComponent(projectPath)}`
+    const url = workspaceUrl(`/projects?project_path=${encodeURIComponent(projectPath)}`)
     return fetchJsonWithValidation(
         url,
         {
             method: 'DELETE',
         },
-        '/api/projects',
+        '/workspace/api/projects',
         parseProjectDeleteResponse,
     )
 }
@@ -648,23 +681,23 @@ export async function deleteProjectValidated(projectPath: string): Promise<Proje
 export async function fetchProjectConversationListValidated(
     projectPath: string,
 ): Promise<ConversationSummaryResponse[]> {
-    const url = `/api/projects/conversations?project_path=${encodeURIComponent(projectPath)}`
-    return fetchJsonWithValidation(url, undefined, '/api/projects/conversations', parseConversationSummaryListResponse)
+    const url = workspaceUrl(`/projects/conversations?project_path=${encodeURIComponent(projectPath)}`)
+    return fetchJsonWithValidation(url, undefined, '/workspace/api/projects/conversations', parseConversationSummaryListResponse)
 }
 
 export async function fetchProjectRegistryValidated(): Promise<ProjectRecordResponse[]> {
-    return fetchJsonWithValidation('/api/projects', undefined, '/api/projects', parseProjectRecordListResponse)
+    return fetchJsonWithValidation(workspaceUrl('/projects'), undefined, '/workspace/api/projects', parseProjectRecordListResponse)
 }
 
 export async function registerProjectValidated(projectPath: string): Promise<ProjectRecordResponse> {
     return fetchJsonWithValidation(
-        '/api/projects/register',
+        workspaceUrl('/projects/register'),
         {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ project_path: projectPath }),
         },
-        '/api/projects/register',
+        '/workspace/api/projects/register',
         parseProjectRecordResponsePayload,
     )
 }
@@ -676,20 +709,20 @@ export async function updateProjectStateValidated(payload: {
     active_conversation_id?: string | null
 }): Promise<ProjectRecordResponse> {
     return fetchJsonWithValidation(
-        '/api/projects/state',
+        workspaceUrl('/projects/state'),
         {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         },
-        '/api/projects/state',
+        '/workspace/api/projects/state',
         parseProjectRecordResponsePayload,
     )
 }
 
 export async function fetchProjectFlowBindingsValidated(projectPath: string): Promise<ProjectFlowBindingsResponse> {
-    const url = `/api/projects/flow-bindings?project_path=${encodeURIComponent(projectPath)}`
-    return fetchJsonWithValidation(url, undefined, '/api/projects/flow-bindings', parseProjectFlowBindingsResponse)
+    const url = workspaceUrl(`/projects/flow-bindings?project_path=${encodeURIComponent(projectPath)}`)
+    return fetchJsonWithValidation(url, undefined, '/workspace/api/projects/flow-bindings', parseProjectFlowBindingsResponse)
 }
 
 export async function updateProjectFlowBindingValidated(
@@ -697,7 +730,7 @@ export async function updateProjectFlowBindingValidated(
     trigger: string,
     flowName: string,
 ): Promise<ProjectFlowBindingsResponse> {
-    const url = `/api/projects/flow-bindings/${encodeURIComponent(trigger)}`
+    const url = workspaceUrl(`/projects/flow-bindings/${encodeURIComponent(trigger)}`)
     return fetchJsonWithValidation(
         url,
         {
@@ -708,7 +741,7 @@ export async function updateProjectFlowBindingValidated(
                 flow_name: flowName,
             }),
         },
-        '/api/projects/flow-bindings/{trigger}',
+        '/workspace/api/projects/flow-bindings/{trigger}',
         parseProjectFlowBindingsResponse,
     )
 }
@@ -717,25 +750,35 @@ export async function deleteProjectFlowBindingValidated(
     projectPath: string,
     trigger: string,
 ): Promise<ProjectFlowBindingsResponse> {
-    const url = `/api/projects/flow-bindings/${encodeURIComponent(trigger)}?project_path=${encodeURIComponent(projectPath)}`
+    const url = workspaceUrl(`/projects/flow-bindings/${encodeURIComponent(trigger)}?project_path=${encodeURIComponent(projectPath)}`)
     return fetchJsonWithValidation(
         url,
         {
             method: 'DELETE',
         },
-        '/api/projects/flow-bindings/{trigger}',
+        '/workspace/api/projects/flow-bindings/{trigger}',
         parseProjectFlowBindingsResponse,
     )
 }
 
 export async function pickProjectDirectoryValidated(): Promise<ProjectDirectoryPickResponse> {
     return fetchJsonWithValidation(
-        '/api/projects/pick-directory',
+        workspaceUrl('/projects/pick-directory'),
         {
             method: 'POST',
         },
-        '/api/projects/pick-directory',
+        '/workspace/api/projects/pick-directory',
         parseProjectDirectoryPickResponse,
+    )
+}
+
+export async function fetchProjectMetadataValidated(directory: string): Promise<ProjectMetadataResponse> {
+    const url = workspaceUrl(`/projects/metadata?directory=${encodeURIComponent(directory)}`)
+    return fetchJsonWithValidation(
+        url,
+        undefined,
+        '/workspace/api/projects/metadata',
+        parseProjectMetadataResponse,
     )
 }
 
@@ -743,7 +786,7 @@ export async function sendConversationTurnValidated(
     conversationId: string,
     payload: { project_path: string; message: string; model?: string | null },
 ): Promise<ConversationSnapshotResponse> {
-    const url = `/api/conversations/${encodeURIComponent(conversationId)}/turns`
+    const url = workspaceUrl(`/conversations/${encodeURIComponent(conversationId)}/turns`)
     return fetchJsonWithValidation(
         url,
         {
@@ -751,7 +794,7 @@ export async function sendConversationTurnValidated(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         },
-        '/api/conversations/{id}/turns',
+        '/workspace/api/conversations/{id}/turns',
         parseConversationSnapshotResponse,
     )
 }
@@ -761,7 +804,7 @@ export async function approveSpecEditProposalValidated(
     proposalId: string,
     payload: { project_path: string; model?: string | null; flow_source?: string | null },
 ): Promise<ConversationSnapshotResponse> {
-    const url = `/api/conversations/${encodeURIComponent(conversationId)}/spec-edit-proposals/${encodeURIComponent(proposalId)}/approve`
+    const url = workspaceUrl(`/conversations/${encodeURIComponent(conversationId)}/spec-edit-proposals/${encodeURIComponent(proposalId)}/approve`)
     return fetchJsonWithValidation(
         url,
         {
@@ -769,7 +812,7 @@ export async function approveSpecEditProposalValidated(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         },
-        '/api/conversations/{id}/spec-edit-proposals/{proposalId}/approve',
+        '/workspace/api/conversations/{id}/spec-edit-proposals/{proposalId}/approve',
         parseConversationSnapshotResponse,
     )
 }
@@ -779,7 +822,7 @@ export async function rejectSpecEditProposalValidated(
     proposalId: string,
     payload: { project_path: string },
 ): Promise<ConversationSnapshotResponse> {
-    const url = `/api/conversations/${encodeURIComponent(conversationId)}/spec-edit-proposals/${encodeURIComponent(proposalId)}/reject`
+    const url = workspaceUrl(`/conversations/${encodeURIComponent(conversationId)}/spec-edit-proposals/${encodeURIComponent(proposalId)}/reject`)
     return fetchJsonWithValidation(
         url,
         {
@@ -787,7 +830,7 @@ export async function rejectSpecEditProposalValidated(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         },
-        '/api/conversations/{id}/spec-edit-proposals/{proposalId}/reject',
+        '/workspace/api/conversations/{id}/spec-edit-proposals/{proposalId}/reject',
         parseConversationSnapshotResponse,
     )
 }
@@ -803,7 +846,7 @@ export async function reviewExecutionCardValidated(
         flow_source?: string | null
     },
 ): Promise<ConversationSnapshotResponse> {
-    const url = `/api/conversations/${encodeURIComponent(conversationId)}/execution-cards/${encodeURIComponent(executionCardId)}/review`
+    const url = workspaceUrl(`/conversations/${encodeURIComponent(conversationId)}/execution-cards/${encodeURIComponent(executionCardId)}/review`)
     return fetchJsonWithValidation(
         url,
         {
@@ -811,7 +854,7 @@ export async function reviewExecutionCardValidated(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         },
-        '/api/conversations/{id}/execution-cards/{executionCardId}/review',
+        '/workspace/api/conversations/{id}/execution-cards/{executionCardId}/review',
         parseConversationSnapshotResponse,
     )
 }

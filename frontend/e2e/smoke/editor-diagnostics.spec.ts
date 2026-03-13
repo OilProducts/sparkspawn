@@ -107,7 +107,7 @@ test("prompt edits trigger live preview diagnostics before blur for item 5.1-03"
   const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-live-prompt")
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       const body = route.request().postData() || ""
       if (body.includes(promptToken)) {
         await route.fulfill({
@@ -150,7 +150,7 @@ test("prompt edits trigger live preview diagnostics before blur for item 5.1-03"
 
     const previewRequest = page.waitForRequest(
       (request) =>
-        request.url().includes("/preview") &&
+        request.url().includes("/attractor/preview") &&
         request.method() === "POST" &&
         (request.postData() || "").includes(promptToken),
     )
@@ -180,7 +180,7 @@ test("medium graph performance profile renders optimizations for item 13.3-02", 
   }))
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -225,7 +225,7 @@ test("validation panel supports filter and sort controls for item 7.1-01", async
   const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-validation-panel")
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       const body = route.request().postData() || ""
       if (body.includes(promptToken)) {
         await route.fulfill({
@@ -281,7 +281,7 @@ test("validation panel supports filter and sort controls for item 7.1-01", async
 
     const previewRequest = page.waitForRequest(
       (request) =>
-        request.url().includes("/preview") &&
+        request.url().includes("/attractor/preview") &&
         request.method() === "POST" &&
         (request.postData() || "").includes(promptToken),
     )
@@ -314,7 +314,7 @@ test("inline node and edge diagnostic badges render for item 7.1-02", async ({ p
   let nodeId: string | null = null
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       const body = route.request().postData() || ""
       if (body.includes(promptToken) && nodeId) {
         await route.fulfill({
@@ -368,7 +368,7 @@ test("inline node and edge diagnostic badges render for item 7.1-02", async ({ p
     await expect(promptField).toBeVisible()
     const previewRequest = page.waitForRequest(
       (request) =>
-        request.url().includes("/preview") &&
+        request.url().includes("/attractor/preview") &&
         request.method() === "POST" &&
         (request.postData() || "").includes(promptToken),
     )
@@ -397,7 +397,7 @@ test("inspector field-level diagnostics map to matching fields for item 7.1-03",
   const selectedEdgeTarget = "audit_rework"
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       const body = route.request().postData() || ""
       if (body.includes(promptToken) && selectedNodeId) {
         await route.fulfill({
@@ -463,7 +463,7 @@ test("inspector field-level diagnostics map to matching fields for item 7.1-03",
 
     const previewRequest = page.waitForRequest(
       (request) =>
-        request.url().includes("/preview") &&
+        request.url().includes("/attractor/preview") &&
         request.method() === "POST" &&
         (request.postData() || "").includes(promptToken),
     )
@@ -499,7 +499,7 @@ test("validation diagnostics navigate to matching canvas entities for item 7.3-0
   let selectedNodeId: string | null = null
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       const body = route.request().postData() || ""
       if (body.includes(promptToken) && selectedNodeId) {
         await route.fulfill({
@@ -552,7 +552,7 @@ test("validation diagnostics navigate to matching canvas entities for item 7.3-0
     await expect(promptField).toBeVisible()
     const previewRequest = page.waitForRequest(
       (request) =>
-        request.url().includes("/preview") &&
+        request.url().includes("/attractor/preview") &&
         request.method() === "POST" &&
         (request.postData() || "").includes(promptToken),
     )
@@ -585,7 +585,7 @@ test("stylesheet parse diagnostics render in graph settings for item 6.5-02", as
   const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-stylesheet-diagnostics")
 
   try {
-    await page.route("**/preview", async (route) => {
+    await page.route("**/attractor/preview", async (route) => {
       const body = route.request().postData() || ""
       if (body.includes(stylesheetToken)) {
         await route.fulfill({
@@ -625,7 +625,7 @@ test("stylesheet parse diagnostics render in graph settings for item 6.5-02", as
 
     const previewRequest = page.waitForRequest(
       (request) =>
-        request.url().includes("/preview") &&
+        request.url().includes("/attractor/preview") &&
         request.method() === "POST" &&
         (request.postData() || "").includes(stylesheetToken),
     )

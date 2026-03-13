@@ -19,7 +19,7 @@ def test_get_pipeline_context_returns_404_for_unknown_pipeline(
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
-    response = api_client.get("/pipelines/missing-run/context")
+    response = api_client.get("/attractor/pipelines/missing-run/context")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Unknown pipeline"
@@ -52,7 +52,7 @@ def test_get_pipeline_context_returns_context_for_known_pipeline(
     )
     save_checkpoint(run_root / "state.json", checkpoint)
 
-    response = api_client.get(f"/pipelines/{run_id}/context")
+    response = api_client.get(f"/attractor/pipelines/{run_id}/context")
 
     assert response.status_code == 200
     payload = response.json()

@@ -9,6 +9,12 @@ from fastapi.testclient import TestClient
 import attractor.api.server as server
 
 
+def _write_flow(name: str, content: str = "digraph G { start [shape=Mdiamond]; done [shape=Msquare]; start -> done; }\n") -> None:
+    flows_dir = server.get_settings().flows_dir
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    (flows_dir / name).write_text(content, encoding="utf-8")
+
+
 def test_project_metadata_returns_name_directory_and_branch_for_git_repo(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -31,7 +37,7 @@ def test_project_metadata_returns_name_directory_and_branch_for_git_repo(
     monkeypatch.setattr(server.subprocess, "run", fake_run)
 
     response = api_client.get(
-        "/api/projects/metadata",
+        "/workspace/api/projects/metadata",
         params={"directory": str(project_dir)},
     )
 
@@ -58,7 +64,7 @@ def test_project_metadata_returns_null_branch_for_non_git_directory(
     monkeypatch.setattr(server.subprocess, "run", fake_run)
 
     response = api_client.get(
-        "/api/projects/metadata",
+        "/workspace/api/projects/metadata",
         params={"directory": str(project_dir)},
     )
 
@@ -74,7 +80,7 @@ def test_project_metadata_returns_null_branch_for_non_git_directory(
 
 def test_project_metadata_rejects_non_absolute_directory(api_client: TestClient) -> None:
     response = api_client.get(
-        "/api/projects/metadata",
+        "/workspace/api/projects/metadata",
         params={"directory": "./relative-project"},
     )
 
@@ -92,7 +98,7 @@ def test_project_directory_picker_returns_selected_absolute_directory(
 
     monkeypatch.setattr(server, "_pick_project_directory", lambda prompt="": project_dir)
 
-    response = api_client.post("/api/projects/pick-directory")
+    response = api_client.post("/workspace/api/projects/pick-directory")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -107,7 +113,7 @@ def test_project_directory_picker_returns_canceled_when_no_directory_selected(
 ) -> None:
     monkeypatch.setattr(server, "_pick_project_directory", lambda prompt="": None)
 
-    response = api_client.post("/api/projects/pick-directory")
+    response = api_client.post("/workspace/api/projects/pick-directory")
 
     assert response.status_code == 200
     assert response.json() == {"status": "canceled"}
@@ -122,7 +128,7 @@ def test_project_directory_picker_reports_unavailable_runtime(
 
     monkeypatch.setattr(server, "_pick_project_directory", fail)
 
-    response = api_client.post("/api/projects/pick-directory")
+    response = api_client.post("/workspace/api/projects/pick-directory")
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Native directory picker is unavailable."
@@ -136,7 +142,7 @@ def test_project_registry_endpoints_persist_project_metadata(
     project_dir.mkdir()
 
     register_response = api_client.post(
-        "/api/projects/register",
+        "/workspace/api/projects/register",
         json={"project_path": str(project_dir)},
     )
 
@@ -148,7 +154,7 @@ def test_project_registry_endpoints_persist_project_metadata(
     assert register_payload["active_conversation_id"] is None
     assert register_payload["flow_bindings"] == {}
 
-    list_response = api_client.get("/api/projects")
+    list_response = api_client.get("/workspace/api/projects")
 
     assert list_response.status_code == 200
     assert list_response.json() == [register_payload]
@@ -166,10 +172,10 @@ def test_project_state_endpoint_updates_favorite_and_conversation_metadata(
     project_dir = (tmp_path / "tracked-project").resolve()
     project_dir.mkdir()
 
-    api_client.post("/api/projects/register", json={"project_path": str(project_dir)})
+    api_client.post("/workspace/api/projects/register", json={"project_path": str(project_dir)})
 
     response = api_client.patch(
-        "/api/projects/state",
+        "/workspace/api/projects/state",
         json={
             "project_path": str(project_dir),
             "is_favorite": True,
@@ -192,11 +198,12 @@ def test_project_flow_binding_endpoints_persist_trigger_bindings(
 ) -> None:
     project_dir = (tmp_path / "binding-project").resolve()
     project_dir.mkdir()
+    _write_flow("plan-generation.dot")
 
-    api_client.post("/api/projects/register", json={"project_path": str(project_dir)})
+    api_client.post("/workspace/api/projects/register", json={"project_path": str(project_dir)})
 
     put_response = api_client.put(
-        "/api/projects/flow-bindings/spec_edit_approved",
+        "/workspace/api/projects/flow-bindings/spec_edit_approved",
         json={
             "project_path": str(project_dir),
             "flow_name": "plan-generation.dot",
@@ -212,7 +219,7 @@ def test_project_flow_binding_endpoints_persist_trigger_bindings(
     }
 
     get_response = api_client.get(
-        "/api/projects/flow-bindings",
+        "/workspace/api/projects/flow-bindings",
         params={"project_path": str(project_dir)},
     )
 
@@ -225,7 +232,7 @@ def test_project_flow_binding_endpoints_persist_trigger_bindings(
     }
 
     delete_response = api_client.delete(
-        "/api/projects/flow-bindings/spec_edit_approved",
+        "/workspace/api/projects/flow-bindings/spec_edit_approved",
         params={"project_path": str(project_dir)},
     )
 
@@ -244,7 +251,7 @@ def test_project_delete_endpoint_removes_registered_project_storage(
     project_dir.mkdir()
 
     register_response = api_client.post(
-        "/api/projects/register",
+        "/workspace/api/projects/register",
         json={"project_path": str(project_dir)},
     )
     assert register_response.status_code == 200
@@ -256,7 +263,7 @@ def test_project_delete_endpoint_removes_registered_project_storage(
     (project_root / "workflow" / "conversation-a.json").write_text("{}", encoding="utf-8")
 
     response = api_client.delete(
-        "/api/projects",
+        "/workspace/api/projects",
         params={"project_path": str(project_dir)},
     )
 
@@ -269,6 +276,6 @@ def test_project_delete_endpoint_removes_registered_project_storage(
     }
     assert not project_root.exists()
 
-    list_response = api_client.get("/api/projects")
+    list_response = api_client.get("/workspace/api/projects")
     assert list_response.status_code == 200
     assert list_response.json() == []

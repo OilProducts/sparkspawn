@@ -205,7 +205,7 @@ def test_save_flow_rejects_parse_invalid_dot(
     target = tmp_path / "flows" / "bad.dot"
 
     response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": "bad.dot",
             "content": INVALID_PARSE_FLOW,
@@ -226,7 +226,7 @@ def test_save_flow_rejects_validation_error_dot(
     target = tmp_path / "flows" / "bad.dot"
 
     response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": "bad.dot",
             "content": INVALID_VALIDATION_FLOW,
@@ -243,7 +243,7 @@ def test_save_flow_rejects_validation_error_dot(
 
 def test_save_flow_persists_valid_dot(api_client: TestClient, tmp_path: Path) -> None:
     response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": "good.dot",
             "content": VALID_FLOW,
@@ -277,7 +277,7 @@ digraph ExistingFlow {
     )
 
     response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": "good.dot",
             "content": VALID_FLOW,
@@ -311,7 +311,7 @@ digraph G {
 """
 
     response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": "good.dot",
             "content": non_equivalent_flow,
@@ -339,7 +339,7 @@ def test_save_flow_no_op_semantic_equivalence_for_spec_valid_fixtures_item_11_2_
     fixture_flow_name = f"fixture-no-op-{Path(fixture_rel_path).stem}.dot"
 
     seed_response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": fixture_flow_name,
             "content": fixture_content,
@@ -353,7 +353,7 @@ def test_save_flow_no_op_semantic_equivalence_for_spec_valid_fixtures_item_11_2_
     )
 
     no_op_response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": fixture_flow_name,
             "content": no_op_save_content,
@@ -371,7 +371,7 @@ def test_save_flow_open_edit_save_reopen_preserves_advanced_attrs_item_11_2_02(
 ) -> None:
     flow_name = "fixture-open-edit-save-reopen-advanced.dot"
     seed_response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": flow_name,
             "content": ADVANCED_ATTR_ROUND_TRIP_FLOW,
@@ -389,7 +389,7 @@ def test_save_flow_open_edit_save_reopen_preserves_advanced_attrs_item_11_2_02(
     assert "loop_restart=false" in edited_content
 
     save_response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": flow_name,
             "content": edited_content,
@@ -397,7 +397,7 @@ def test_save_flow_open_edit_save_reopen_preserves_advanced_attrs_item_11_2_02(
     )
     assert save_response.status_code == 200, save_response.text
 
-    reopen_response = api_client.get(f"/api/flows/{flow_name}")
+    reopen_response = api_client.get(f"/attractor/api/flows/{flow_name}")
     assert reopen_response.status_code == 200, reopen_response.text
     reopened_content = reopen_response.json()["content"]
 
@@ -431,7 +431,7 @@ def test_save_flow_open_edit_save_reopen_preserves_label_regressions_item_11_2_0
 ) -> None:
     flow_name = "fixture-open-edit-save-reopen-lossy-label.dot"
     seed_response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": flow_name,
             "content": LOSSY_LABEL_WITHOUT_SEMICOLON_FLOW,
@@ -446,7 +446,7 @@ def test_save_flow_open_edit_save_reopen_preserves_label_regressions_item_11_2_0
     assert "timeout=45s" in edited_content
 
     save_response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": flow_name,
             "content": edited_content,
@@ -454,7 +454,7 @@ def test_save_flow_open_edit_save_reopen_preserves_label_regressions_item_11_2_0
     )
     assert save_response.status_code == 200, save_response.text
 
-    reopen_response = api_client.get(f"/api/flows/{flow_name}")
+    reopen_response = api_client.get(f"/attractor/api/flows/{flow_name}")
     assert reopen_response.status_code == 200, reopen_response.text
     reopened_content = reopen_response.json()["content"]
 
@@ -479,7 +479,7 @@ def test_flow_endpoints_use_project_root_not_process_cwd(
     monkeypatch.chdir(unrelated_cwd)
 
     response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": "cwd-check.dot",
             "content": VALID_FLOW,
@@ -492,7 +492,7 @@ def test_flow_endpoints_use_project_root_not_process_cwd(
 
 
 def test_get_flow_raises_404_for_missing_flow(api_client: TestClient) -> None:
-    response = api_client.get("/api/flows/missing.dot")
+    response = api_client.get("/attractor/api/flows/missing.dot")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Flow not found."
@@ -506,20 +506,20 @@ def test_delete_flow_deletes_existing_flow_and_raises_404_for_missing(
     flow_path.parent.mkdir(parents=True, exist_ok=True)
     flow_path.write_text(VALID_FLOW, encoding="utf-8")
 
-    delete_response = api_client.delete("/api/flows/delete-me.dot")
+    delete_response = api_client.delete("/attractor/api/flows/delete-me.dot")
     assert delete_response.status_code == 200
     payload = delete_response.json()
     assert payload == {"status": "deleted"}
     assert not flow_path.exists()
 
-    missing_response = api_client.delete("/api/flows/delete-me.dot")
+    missing_response = api_client.delete("/attractor/api/flows/delete-me.dot")
     assert missing_response.status_code == 404
     assert missing_response.json()["detail"] == "Flow not found."
 
 
 def test_flow_name_must_be_single_file_name(api_client: TestClient) -> None:
     response = api_client.post(
-        "/api/flows",
+        "/attractor/api/flows",
         json={
             "name": "../escape.dot",
             "content": VALID_FLOW,

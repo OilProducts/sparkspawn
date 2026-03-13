@@ -113,13 +113,13 @@ describe('Execution controls behavior', () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
-      if (url.includes('/api/projects/metadata')) {
+      if (url.includes('/workspace/api/projects/metadata')) {
         return new Response(JSON.stringify({ branch: 'main' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (url.endsWith('/api/flows/run-opened.dot')) {
+      if (url.endsWith('/attractor/api/flows/run-opened.dot')) {
         return new Response(JSON.stringify({
           name: 'run-opened.dot',
           content: 'digraph run_opened { start -> done }',
@@ -128,7 +128,7 @@ describe('Execution controls behavior', () => {
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (url.endsWith('/pipelines') && init?.method === 'POST') {
+      if (url.endsWith('/attractor/pipelines') && init?.method === 'POST') {
         return new Response(JSON.stringify({ status: 'started', pipeline_id: 'run-123' }), {
           status: 202,
           headers: { 'Content-Type': 'application/json' },
@@ -170,7 +170,7 @@ describe('Execution controls behavior', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/pipelines',
+        '/attractor/pipelines',
         expect.objectContaining({
           method: 'POST',
           body: expect.stringContaining('"flow_name":"run-opened.dot"'),
@@ -224,7 +224,7 @@ describe('Execution controls behavior', () => {
     await user.click(screen.getByTestId('execution-footer-cancel-button'))
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/pipelines/run-99/cancel', { method: 'POST' })
+      expect(fetchMock).toHaveBeenCalledWith('/attractor/pipelines/run-99/cancel', { method: 'POST' })
     })
     expect(useStore.getState().runtimeStatus).toBe('cancel_requested')
   })
