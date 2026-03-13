@@ -48,7 +48,7 @@ import type {
     TimelineEventCategory,
     TimelineEventEntry,
     TimelineSeverity,
-} from './runs/types'
+} from './runs/shared'
 
 const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
     PipelineStarted: 'lifecycle',
@@ -86,18 +86,6 @@ const asFiniteNumber = (value: unknown): number | null => {
         return null
     }
     return value
-}
-
-const asErrorDetail = (value: unknown): string | null => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        return null
-    }
-    const detail = (value as Record<string, unknown>).detail
-    if (typeof detail !== 'string') {
-        return null
-    }
-    const trimmed = detail.trim()
-    return trimmed.length > 0 ? trimmed : null
 }
 
 const checkpointErrorFromResponse = (status: number, detail: string | null): CheckpointErrorState => {

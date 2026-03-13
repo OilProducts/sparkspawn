@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useStore } from '@/store'
+import { useStore, type RuntimeStatus } from '@/store'
 import { ApiHttpError, fetchPipelineStatusValidated, pipelineEventsUrl } from '@/lib/attractorClient'
 import { resolveSaveRemediation } from '@/lib/saveRemediation'
 
@@ -24,6 +24,22 @@ interface RuntimeStageCursor {
     stageIndex: number
     status: 'running' | 'success' | 'failed'
     pendingRetry: boolean
+}
+
+const RUNTIME_STATUS_SET = new Set<RuntimeStatus>([
+    'idle',
+    'running',
+    'abort_requested',
+    'cancel_requested',
+    'aborted',
+    'canceled',
+    'failed',
+    'validation_error',
+    'success',
+])
+
+function isRuntimeStatus(value: string): value is RuntimeStatus {
+    return RUNTIME_STATUS_SET.has(value as RuntimeStatus)
 }
 
 export function RunStream() {
@@ -129,7 +145,7 @@ export function RunStream() {
                             }
                         }
                         const currentGate = useStore.getState().humanGate
-                        if (runtimeNodeStatus !== 'waiting' && currentGate?.nodeId === runtimeNodeId) {
+                        if (currentGate?.nodeId === runtimeNodeId) {
                             clearHumanGate()
                         }
                     }
@@ -187,7 +203,7 @@ export function RunStream() {
                     clearHumanGate()
                     setRuntimeStatus('running')
                 }
-                if (data.type === 'runtime' && data.status) {
+                if (data.type === 'runtime' && typeof data.status === 'string' && isRuntimeStatus(data.status)) {
                     setRuntimeStatus(data.status)
                 }
             } catch {
@@ -218,7 +234,7 @@ export function RunStream() {
             }
             if (metadataAbort.signal.aborted) return
 
-            if (typeof data?.status === 'string') {
+            if (typeof data?.status === 'string' && isRuntimeStatus(data.status)) {
                 setRuntimeStatus(data.status)
             }
             if (metadataAbort.signal.aborted) return

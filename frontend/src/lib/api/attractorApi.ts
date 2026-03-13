@@ -1,4 +1,5 @@
 import type { CanonicalPreviewGraphPayload } from '@/lib/canonicalFlowModel'
+import type { PipelineStartPayload } from '@/lib/pipelineStartPayload'
 import {
     ApiSchemaError,
     asOptionalNullableString,
@@ -382,7 +383,7 @@ export async function fetchPreviewValidated(flowContent: string): Promise<Previe
     )
 }
 
-export async function fetchPipelineStartValidated(payload: Record<string, unknown>): Promise<PipelineStartResponse> {
+export async function fetchPipelineStartValidated(payload: PipelineStartPayload): Promise<PipelineStartResponse> {
     return fetchJsonWithValidation(
         attractorUrl('/pipelines'),
         {

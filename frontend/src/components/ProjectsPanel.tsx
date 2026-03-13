@@ -818,7 +818,6 @@ export function HomePanel() {
     const setConversationId = useStore((state) => state.setConversationId)
     const appendProjectEventEntry = useStore((state) => state.appendProjectEventEntry)
     const updateProjectScopedWorkspace = useStore((state) => state.updateProjectScopedWorkspace)
-    const activeFlow = useStore((state) => state.activeFlow)
     const model = useStore((state) => state.model)
 
     const [projectGitMetadata, setProjectGitMetadata] = useState<Record<string, ProjectGitMetadata>>({})
@@ -1185,18 +1184,19 @@ export function HomePanel() {
                 [event.conversation_id]: appendLiveConversationTurnEvent(current[event.conversation_id] || [], event.event),
             }))
         }
-        if (!nextSnapshot) {
+        const updatedSnapshot = nextSnapshot as ConversationSnapshotResponse | null
+        if (updatedSnapshot === null) {
             return
         }
         setProjectConversationSummaries((current) => ({
             ...current,
             [projectPath]: upsertConversationSummary(current[projectPath] || [], {
-                conversation_id: nextSnapshot.conversation_id,
-                project_path: nextSnapshot.project_path,
-                title: nextSnapshot.title,
-                created_at: nextSnapshot.created_at,
-                updated_at: nextSnapshot.updated_at,
-                last_message_preview: nextSnapshot.turns
+                conversation_id: updatedSnapshot.conversation_id,
+                project_path: updatedSnapshot.project_path,
+                title: updatedSnapshot.title,
+                created_at: updatedSnapshot.created_at,
+                updated_at: updatedSnapshot.updated_at,
+                last_message_preview: updatedSnapshot.turns
                     .filter((turn) => turn.kind === "message" && turn.content.trim().length > 0)
                     .slice(-1)[0]?.content || null,
             }),
@@ -1528,25 +1528,26 @@ export function HomePanel() {
             setProjectRegistrationError(validation.error ?? "Project directory path is required.")
             return
         }
-        const gitMetadata = await ensureProjectGitRepository(validation.normalizedPath)
+        const normalizedProjectPath = validation.normalizedPath
+        const gitMetadata = await ensureProjectGitRepository(normalizedProjectPath)
         if (!gitMetadata) {
             return
         }
-        const result = registerProject(validation.normalizedPath)
+        const result = registerProject(normalizedProjectPath)
         if (!result.ok) {
             setProjectRegistrationError(result.error ?? "Unable to register the project.")
             return
         }
         try {
-            const projectRecord = await registerProjectValidated(validation.normalizedPath)
+            const projectRecord = await registerProjectValidated(normalizedProjectPath)
             upsertProjectRegistryEntry(toHydratedProjectRecord(projectRecord))
         } catch (error) {
             useStore.setState((state) => {
                 const nextProjectRegistry = { ...state.projectRegistry }
                 const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
-                delete nextProjectRegistry[validation.normalizedPath]
-                delete nextProjectScopedWorkspaces[validation.normalizedPath]
-                const nextActiveProjectPath = state.activeProjectPath === validation.normalizedPath ? null : state.activeProjectPath
+                delete nextProjectRegistry[normalizedProjectPath]
+                delete nextProjectScopedWorkspaces[normalizedProjectPath]
+                const nextActiveProjectPath = state.activeProjectPath === normalizedProjectPath ? null : state.activeProjectPath
                 return {
                     projectRegistry: nextProjectRegistry,
                     projectScopedWorkspaces: nextProjectScopedWorkspaces,
@@ -2069,7 +2070,6 @@ export function HomePanel() {
                     <ProjectConversationSurface
                         activeProjectLabel={activeProjectLabel}
                         activeProjectPath={activeProjectPath}
-                        activeConversationId={activeConversationId}
                         hasRenderableConversationHistory={hasRenderableConversationHistory}
                         isConversationPinnedToBottom={isConversationPinnedToBottom}
                         isNarrowViewport={isNarrowViewport}

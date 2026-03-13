@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { OctagonX, Play } from 'lucide-react'
 import { useStore, type RuntimeStatus } from '@/store'
-import { buildPipelineStartPayload } from '@/lib/pipelineStartPayload'
+import { buildPipelineStartPayload, type PipelineStartPayload } from '@/lib/pipelineStartPayload'
 import {
     ApiHttpError,
     fetchFlowPayloadValidated,
@@ -188,7 +188,7 @@ export function ExecutionControls() {
                 },
                 flow.content
             )
-            const runData = await fetchPipelineStartValidated(startPayload as Record<string, unknown>)
+            const runData = await fetchPipelineStartValidated(startPayload as PipelineStartPayload)
             if (runData?.status !== 'started') {
                 const reason = runData?.error || runData?.status || 'Unknown run error'
                 throw new Error(`Run not started: ${reason}`)

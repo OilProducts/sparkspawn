@@ -248,6 +248,10 @@ export function ProjectConversationHistory({
                             )
                         }
 
+                        if (entry.kind !== 'message') {
+                            return null
+                        }
+
                         return (
                             <li
                                 key={key}

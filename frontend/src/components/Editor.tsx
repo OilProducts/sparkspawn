@@ -14,7 +14,7 @@ import type { Connection, Edge, EdgeChange, Node, NodeChange, OnSelectionChangeP
 import '@xyflow/react/dist/style.css';
 import ELK from 'elkjs/lib/elk.bundled.js';
 
-import { useStore, type DiagnosticEntry, type GraphAttrs } from '@/store';
+import { useStore, type GraphAttrs } from '@/store';
 import { TaskNode } from './TaskNode';
 import { ValidationEdge } from './ValidationEdge';
 import { ValidationPanel } from './ValidationPanel';

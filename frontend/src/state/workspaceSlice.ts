@@ -11,13 +11,8 @@ import {
 } from './store-helpers'
 import type {
     AppState,
-    ArtifactProvenanceReference,
-    HydratedProjectRecord,
-    PlanStatus,
-    ProjectEventLogEntry,
     ProjectRegistrationResult,
     ProjectScopedWorkspace,
-    ProjectScopedWorkspacePatch,
     RegisteredProject,
     WorkspaceSlice,
 } from './store-types'
@@ -226,10 +221,10 @@ export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice
                 projectRegistry: nextProjectRegistry,
                 projectScopedWorkspaces: nextProjectScopedWorkspaces,
                 recentProjectPaths: pushRecentProjectPath(state.recentProjectPaths, nextProjectPath),
-                activeFlow: nextProjectPath ? nextProjectScope.activeFlow : null,
+                activeFlow: nextProjectPath && nextProjectScope ? nextProjectScope.activeFlow : null,
                 executionFlow: isProjectSwitch ? null : state.executionFlow,
                 selectedRunId: isProjectSwitch ? null : state.selectedRunId,
-                workingDir: nextProjectPath ? nextProjectScope.workingDir : DEFAULT_WORKING_DIRECTORY,
+                workingDir: nextProjectPath && nextProjectScope ? nextProjectScope.workingDir : DEFAULT_WORKING_DIRECTORY,
                 runtimeStatus: isProjectSwitch ? 'idle' : state.runtimeStatus,
                 nodeStatuses: isProjectSwitch ? {} : state.nodeStatuses,
                 humanGate: isProjectSwitch ? null : state.humanGate,

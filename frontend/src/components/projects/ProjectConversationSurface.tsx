@@ -4,7 +4,6 @@ import { HomeWorkspace } from '@/components/HomeWorkspace'
 interface ProjectConversationSurfaceProps {
     activeProjectLabel: string | null
     activeProjectPath: string | null
-    activeConversationId: string | null
     hasRenderableConversationHistory: boolean
     isConversationPinnedToBottom: boolean
     isNarrowViewport: boolean
@@ -24,7 +23,6 @@ interface ProjectConversationSurfaceProps {
 export function ProjectConversationSurface({
     activeProjectLabel,
     activeProjectPath,
-    activeConversationId,
     hasRenderableConversationHistory,
     isConversationPinnedToBottom,
     isNarrowViewport,

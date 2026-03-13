@@ -15,7 +15,7 @@ export function Navbar() {
         const selectableModes = NAV_MODE_ORDER.filter(
             (candidate) => activeProjectPath || !NAV_MODES_REQUIRING_ACTIVE_PROJECT.has(candidate)
         )
-        const modeCycle = selectableModes.length > 0 ? selectableModes : ['home']
+        const modeCycle: ViewMode[] = selectableModes.length > 0 ? selectableModes : ['home']
         const currentIndex = modeCycle.indexOf(mode)
         const startIndex = currentIndex >= 0 ? currentIndex : 0
         const nextIndex = (startIndex + direction + modeCycle.length) % modeCycle.length

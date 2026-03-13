@@ -75,7 +75,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function cloneCanonicalAttrMap(
-    attrs: Record<string, unknown> | null | undefined,
+    attrs: unknown,
     excludedKeys?: Set<string>,
 ): CanonicalAttrMap {
     const record = asRecord(attrs)

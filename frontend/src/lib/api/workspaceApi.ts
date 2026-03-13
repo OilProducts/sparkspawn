@@ -205,7 +205,7 @@ export interface ConversationTurnEventStreamResponse {
     event: ConversationTurnEventResponse
 }
 
-function parseConversationTurnResponse(value: unknown, endpoint: string): ConversationTurnResponse | null {
+function parseConversationTurnResponse(value: unknown, _endpoint: string): ConversationTurnResponse | null {
     const record = asUnknownRecord(value)
     if (!record) {
         return null
@@ -238,7 +238,7 @@ function parseConversationTurnResponse(value: unknown, endpoint: string): Conver
     }
 }
 
-function parseConversationTurnEventResponse(value: unknown, endpoint: string): ConversationTurnEventResponse | null {
+function parseConversationTurnEventResponse(value: unknown, _endpoint: string): ConversationTurnEventResponse | null {
     const record = asUnknownRecord(value)
     if (
         !record
@@ -374,7 +374,7 @@ function parseExecutionCardResponse(value: unknown): ExecutionCardResponse | nul
             .map((entry) => asUnknownRecord(entry))
             .filter((entry): entry is Record<string, unknown> => entry !== null)
             .filter((entry) => typeof entry.id === 'string' && typeof entry.disposition === 'string' && typeof entry.message === 'string' && typeof entry.created_at === 'string')
-            .map((entry) => ({
+            .map((entry): ExecutionCardResponse['review_feedback'][number] => ({
                 id: String(entry.id),
                 disposition: entry.disposition === 'approved' || entry.disposition === 'rejected' || entry.disposition === 'revision_requested'
                     ? entry.disposition
@@ -400,7 +400,7 @@ function parseExecutionCardResponse(value: unknown): ExecutionCardResponse | nul
     }
 }
 
-function parseConversationSummaryResponse(value: unknown, endpoint: string): ConversationSummaryResponse | null {
+function parseConversationSummaryResponse(value: unknown, _endpoint: string): ConversationSummaryResponse | null {
     const record = asUnknownRecord(value)
     if (
         !record
@@ -422,7 +422,7 @@ function parseConversationSummaryResponse(value: unknown, endpoint: string): Con
     }
 }
 
-function parseProjectRecordResponse(value: unknown, endpoint: string): ProjectRecordResponse | null {
+function parseProjectRecordResponse(value: unknown, _endpoint: string): ProjectRecordResponse | null {
     const record = asUnknownRecord(value)
     if (
         !record
