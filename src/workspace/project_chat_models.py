@@ -146,6 +146,9 @@ class ChatTurnLiveEvent:
     tool_call_id: Optional[str] = None
     tool_call: Optional[ToolCallRecord] = None
     spec_proposal_payload: Optional[dict[str, Any]] = None
+    app_turn_id: Optional[str] = None
+    item_id: Optional[str] = None
+    summary_index: Optional[int] = None
 
 
 @dataclass
@@ -172,6 +175,101 @@ class DynamicToolInvocationResult:
 
 
 @dataclass
+class ConversationSegmentSource:
+    app_turn_id: Optional[str] = None
+    item_id: Optional[str] = None
+    summary_index: Optional[int] = None
+    call_id: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.app_turn_id is not None:
+            payload["app_turn_id"] = self.app_turn_id
+        if self.item_id is not None:
+            payload["item_id"] = self.item_id
+        if self.summary_index is not None:
+            payload["summary_index"] = self.summary_index
+        if self.call_id is not None:
+            payload["call_id"] = self.call_id
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ConversationSegmentSource":
+        summary_index = payload.get("summary_index")
+        return cls(
+            app_turn_id=str(payload.get("app_turn_id")) if payload.get("app_turn_id") is not None else None,
+            item_id=str(payload.get("item_id")) if payload.get("item_id") is not None else None,
+            summary_index=int(summary_index) if isinstance(summary_index, int) else None,
+            call_id=str(payload.get("call_id")) if payload.get("call_id") is not None else None,
+        )
+
+
+@dataclass
+class ConversationSegment:
+    id: str
+    turn_id: str
+    order: int
+    kind: str
+    role: str
+    status: str
+    timestamp: str
+    updated_at: str
+    content: str = ""
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+    artifact_id: Optional[str] = None
+    tool_call: Optional[ToolCallRecord] = None
+    source: ConversationSegmentSource = field(default_factory=ConversationSegmentSource)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "turn_id": self.turn_id,
+            "order": self.order,
+            "kind": self.kind,
+            "role": self.role,
+            "status": self.status,
+            "timestamp": self.timestamp,
+            "updated_at": self.updated_at,
+            "content": self.content,
+            "source": self.source.to_dict(),
+        }
+        if self.completed_at is not None:
+            payload["completed_at"] = self.completed_at
+        if self.error is not None:
+            payload["error"] = self.error
+        if self.artifact_id is not None:
+            payload["artifact_id"] = self.artifact_id
+        if self.tool_call is not None:
+            payload["tool_call"] = self.tool_call.to_dict()
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ConversationSegment":
+        source_payload = payload.get("source")
+        return cls(
+            id=str(payload.get("id", "")),
+            turn_id=str(payload.get("turn_id", "")),
+            order=int(payload.get("order", 0) or 0),
+            kind=str(payload.get("kind", "")),
+            role=str(payload.get("role", "assistant") or "assistant"),
+            status=str(payload.get("status", "complete") or "complete"),
+            timestamp=str(payload.get("timestamp", "")),
+            updated_at=str(payload.get("updated_at", payload.get("timestamp", "")) or ""),
+            content=str(payload.get("content", "")),
+            completed_at=str(payload.get("completed_at")) if payload.get("completed_at") is not None else None,
+            error=str(payload.get("error")) if payload.get("error") is not None else None,
+            artifact_id=str(payload.get("artifact_id")) if payload.get("artifact_id") is not None else None,
+            tool_call=ToolCallRecord.from_dict(payload.get("tool_call"))
+            if isinstance(payload.get("tool_call"), dict)
+            else None,
+            source=ConversationSegmentSource.from_dict(source_payload)
+            if isinstance(source_payload, dict)
+            else ConversationSegmentSource(),
+        )
+
+
+@dataclass
 class ConversationTurnEvent:
     id: str
     turn_id: str
@@ -183,6 +281,8 @@ class ConversationTurnEvent:
     tool_call_id: Optional[str] = None
     tool_call: Optional[ToolCallRecord] = None
     artifact_id: Optional[str] = None
+    segment_id: Optional[str] = None
+    segment: Optional[ConversationSegment] = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -202,6 +302,10 @@ class ConversationTurnEvent:
             payload["tool_call"] = self.tool_call.to_dict()
         if self.artifact_id is not None:
             payload["artifact_id"] = self.artifact_id
+        if self.segment_id is not None:
+            payload["segment_id"] = self.segment_id
+        if self.segment is not None:
+            payload["segment"] = self.segment.to_dict()
         return payload
 
     @classmethod
@@ -219,6 +323,10 @@ class ConversationTurnEvent:
             if isinstance(payload.get("tool_call"), dict)
             else None,
             artifact_id=str(payload.get("artifact_id")) if payload.get("artifact_id") is not None else None,
+            segment_id=str(payload.get("segment_id")) if payload.get("segment_id") is not None else None,
+            segment=ConversationSegment.from_dict(payload.get("segment"))
+            if isinstance(payload.get("segment"), dict)
+            else None,
         )
 
 
@@ -286,6 +394,238 @@ def _migrate_legacy_turns(raw_turns: list[dict[str, Any]]) -> tuple[list[Convers
             last_assistant_turn_id = migrated_turn.id
 
     return turns, turn_events
+
+
+def _materialize_segments(
+    turns: list[ConversationTurn],
+    turn_events: list[ConversationTurnEvent],
+) -> list[ConversationSegment]:
+    segments: list[ConversationSegment] = []
+    turn_order = {turn.id: index for index, turn in enumerate(turns)}
+    events_by_turn: dict[str, list[ConversationTurnEvent]] = {}
+    for event in sorted(turn_events, key=lambda entry: (turn_order.get(entry.turn_id, 10**9), entry.sequence, entry.timestamp, entry.id)):
+        events_by_turn.setdefault(event.turn_id, []).append(event)
+
+    def next_segment_order(turn_id: str) -> int:
+        max_order = 0
+        for segment in segments:
+            if segment.turn_id == turn_id and segment.order > max_order:
+                max_order = segment.order
+        return max_order + 1
+
+    def upsert_segment(segment: ConversationSegment) -> None:
+        for index, existing in enumerate(segments):
+            if existing.id != segment.id:
+                continue
+            segments[index] = segment
+            return
+        segments.append(segment)
+
+    def build_reasoning_segment_id(turn_id: str, event: ConversationTurnEvent) -> str:
+        if event.segment_id:
+            return event.segment_id
+        source = event.segment.source if event.segment is not None else ConversationSegmentSource()
+        source_turn_id = source.app_turn_id or turn_id
+        source_item_id = source.item_id or event.id
+        source_summary_index = source.summary_index if source.summary_index is not None else 0
+        return f"segment-reasoning-{source_turn_id}-{source_item_id}-{source_summary_index}"
+
+    def build_assistant_segment_id(turn_id: str, event: ConversationTurnEvent) -> str:
+        if event.segment_id:
+            return event.segment_id
+        source = event.segment.source if event.segment is not None else ConversationSegmentSource()
+        if source.app_turn_id and source.item_id:
+            return f"segment-assistant-{source.app_turn_id}-{source.item_id}"
+        return f"segment-assistant-{turn_id}"
+
+    def build_tool_segment_id(turn_id: str, event: ConversationTurnEvent) -> str:
+        if event.segment_id:
+            return event.segment_id
+        source = event.segment.source if event.segment is not None else ConversationSegmentSource()
+        tool_id = event.tool_call_id or source.call_id or source.item_id or event.id
+        turn_source = source.app_turn_id or turn_id
+        return f"segment-tool-{turn_source}-{tool_id}"
+
+    for turn in turns:
+        if turn.role == "user":
+            continue
+        if turn.kind == "spec_edit_proposal" and turn.artifact_id:
+            segments.append(
+                ConversationSegment(
+                    id=f"segment-artifact-{turn.artifact_id}",
+                    turn_id=turn.id,
+                    order=1,
+                    kind="spec_edit_proposal",
+                    role="system",
+                    status="complete",
+                    timestamp=turn.timestamp,
+                    updated_at=turn.timestamp,
+                    artifact_id=turn.artifact_id,
+                )
+            )
+            continue
+        if turn.kind == "execution_card" and turn.artifact_id:
+            segments.append(
+                ConversationSegment(
+                    id=f"segment-artifact-{turn.artifact_id}",
+                    turn_id=turn.id,
+                    order=1,
+                    kind="execution_card",
+                    role="system",
+                    status="complete",
+                    timestamp=turn.timestamp,
+                    updated_at=turn.timestamp,
+                    artifact_id=turn.artifact_id,
+                )
+            )
+            continue
+        if turn.role != "assistant":
+            continue
+        for event in events_by_turn.get(turn.id, []):
+            if event.segment is not None:
+                upsert_segment(event.segment)
+                continue
+            if event.kind == "reasoning_summary":
+                segment_id = build_reasoning_segment_id(turn.id, event)
+                existing = next((segment for segment in segments if segment.id == segment_id), None)
+                if existing is None:
+                    existing = ConversationSegment(
+                        id=segment_id,
+                        turn_id=turn.id,
+                        order=next_segment_order(turn.id),
+                        kind="reasoning",
+                        role="assistant",
+                        status="streaming",
+                        timestamp=event.timestamp,
+                        updated_at=event.timestamp,
+                        content=event.content_delta or "",
+                    )
+                else:
+                    existing.content = f"{existing.content}{event.content_delta or ''}"
+                    existing.updated_at = event.timestamp
+                upsert_segment(existing)
+                continue
+            if event.kind == "assistant_delta":
+                segment_id = build_assistant_segment_id(turn.id, event)
+                existing = next((segment for segment in segments if segment.id == segment_id), None)
+                if existing is None:
+                    existing = ConversationSegment(
+                        id=segment_id,
+                        turn_id=turn.id,
+                        order=next_segment_order(turn.id),
+                        kind="assistant_message",
+                        role="assistant",
+                        status="streaming",
+                        timestamp=event.timestamp,
+                        updated_at=event.timestamp,
+                        content=event.content_delta or "",
+                    )
+                else:
+                    existing.content = f"{existing.content}{event.content_delta or ''}"
+                    existing.updated_at = event.timestamp
+                upsert_segment(existing)
+                continue
+            if event.kind in {"tool_call_started", "tool_call_updated", "tool_call_completed", "tool_call_failed"} and event.tool_call is not None:
+                segment_id = build_tool_segment_id(turn.id, event)
+                status = event.tool_call.status
+                existing = next((segment for segment in segments if segment.id == segment_id), None)
+                if existing is None:
+                    existing = ConversationSegment(
+                        id=segment_id,
+                        turn_id=turn.id,
+                        order=next_segment_order(turn.id),
+                        kind="tool_call",
+                        role="system",
+                        status=status,
+                        timestamp=event.timestamp,
+                        updated_at=event.timestamp,
+                        tool_call=ToolCallRecord.from_dict(event.tool_call.to_dict()),
+                    )
+                else:
+                    existing.status = status
+                    existing.updated_at = event.timestamp
+                    existing.tool_call = ToolCallRecord.from_dict(event.tool_call.to_dict())
+                if status != "running":
+                    existing.completed_at = event.timestamp
+                upsert_segment(existing)
+                continue
+            if event.kind == "spec_edit_proposal_created" and event.artifact_id:
+                upsert_segment(
+                    ConversationSegment(
+                        id=event.segment_id or f"segment-artifact-{event.artifact_id}",
+                        turn_id=turn.id,
+                        order=next_segment_order(turn.id),
+                        kind="spec_edit_proposal",
+                        role="system",
+                        status="complete",
+                        timestamp=event.timestamp,
+                        updated_at=event.timestamp,
+                        artifact_id=event.artifact_id,
+                    )
+                )
+                continue
+            if event.kind == "assistant_completed":
+                assistant_segments = [
+                    segment for segment in segments
+                    if segment.turn_id == turn.id and segment.kind == "assistant_message"
+                ]
+                if assistant_segments:
+                    latest = assistant_segments[-1]
+                    latest.status = "complete"
+                    latest.updated_at = event.timestamp
+                    latest.completed_at = event.timestamp
+                    if turn.content.strip():
+                        latest.content = turn.content
+                    upsert_segment(latest)
+                elif turn.content.strip():
+                    upsert_segment(
+                        ConversationSegment(
+                            id=build_assistant_segment_id(turn.id, event),
+                            turn_id=turn.id,
+                            order=next_segment_order(turn.id),
+                            kind="assistant_message",
+                            role="assistant",
+                            status="complete",
+                            timestamp=event.timestamp,
+                            updated_at=event.timestamp,
+                            completed_at=event.timestamp,
+                            content=turn.content,
+                            error=turn.error,
+                        )
+                    )
+                continue
+            if event.kind == "assistant_failed":
+                assistant_segments = [
+                    segment for segment in segments
+                    if segment.turn_id == turn.id and segment.kind == "assistant_message"
+                ]
+                if assistant_segments:
+                    latest = assistant_segments[-1]
+                    latest.status = "failed"
+                    latest.updated_at = event.timestamp
+                    latest.completed_at = event.timestamp
+                    latest.error = turn.error or event.message
+                    if turn.content.strip():
+                        latest.content = turn.content
+                    upsert_segment(latest)
+                else:
+                    upsert_segment(
+                        ConversationSegment(
+                            id=build_assistant_segment_id(turn.id, event),
+                            turn_id=turn.id,
+                            order=next_segment_order(turn.id),
+                            kind="assistant_message",
+                            role="assistant",
+                            status="failed",
+                            timestamp=event.timestamp,
+                            updated_at=event.timestamp,
+                            completed_at=event.timestamp,
+                            content=turn.content or event.message or "",
+                            error=turn.error or event.message,
+                        )
+                    )
+    segments.sort(key=lambda segment: (turn_order.get(segment.turn_id, 10**9), segment.order, segment.timestamp, segment.id))
+    return segments
 
 
 @dataclass
@@ -546,13 +886,11 @@ class ConversationState:
     updated_at: str = ""
     turns: list[ConversationTurn] = field(default_factory=list)
     turn_events: list[ConversationTurnEvent] = field(default_factory=list)
+    segments: list[ConversationSegment] = field(default_factory=list)
     event_log: list[WorkflowEvent] = field(default_factory=list)
     spec_edit_proposals: list[SpecEditProposal] = field(default_factory=list)
     execution_cards: list[ExecutionCard] = field(default_factory=list)
     execution_workflow: ExecutionWorkflowState = field(default_factory=ExecutionWorkflowState)
-
-    def persisted_turn_events(self) -> list[ConversationTurnEvent]:
-        return [event for event in self.turn_events if event.kind != "assistant_delta"]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -562,7 +900,7 @@ class ConversationState:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "turns": [turn.to_dict() for turn in self.turns],
-            "turn_events": [event.to_dict() for event in self.persisted_turn_events()],
+            "segments": [segment.to_dict() for segment in self.segments],
             "event_log": [entry.to_dict() for entry in self.event_log],
             "spec_edit_proposals": [proposal.to_dict() for proposal in self.spec_edit_proposals],
             "execution_cards": [card.to_dict() for card in self.execution_cards],
@@ -573,6 +911,7 @@ class ConversationState:
     def from_dict(cls, payload: dict[str, Any]) -> "ConversationState":
         raw_turns = payload.get("turns")
         raw_turn_events = payload.get("turn_events")
+        raw_segments = payload.get("segments")
         raw_events = payload.get("event_log")
         raw_proposals = payload.get("spec_edit_proposals")
         raw_cards = payload.get("execution_cards")
@@ -603,6 +942,11 @@ class ConversationState:
             updated_at=updated_at or created_at or _iso_now(),
             turns=turns,
             turn_events=turn_events,
+            segments=[
+                ConversationSegment.from_dict(segment)
+                for segment in raw_segments
+                if isinstance(segment, dict)
+            ] if isinstance(raw_segments, list) else _materialize_segments(turns, turn_events),
             event_log=[
                 WorkflowEvent.from_dict(entry)
                 for entry in raw_events

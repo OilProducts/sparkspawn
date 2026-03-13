@@ -2,11 +2,11 @@ import { type PlanStatus, type ProjectRegistrationResult, useStore } from "@/sto
 import { type ChangeEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react"
 import {
     ApiHttpError,
+    type ConversationSegmentResponse,
     type ConversationSummaryResponse,
     type ConversationSnapshotResponse,
     type ConversationTurnEventStreamResponse,
     type ConversationTurnUpsertEventResponse,
-    type ConversationTurnEventResponse,
     type ConversationTurnResponse,
     deleteConversationValidated,
     deleteProjectValidated,
@@ -329,7 +329,7 @@ const ensureConversationSnapshotShell = (
     created_at: "",
     updated_at: "",
     turns: [],
-    turn_events: [],
+    segments: [],
     event_log: [],
     spec_edit_proposals: [],
     execution_cards: [],
@@ -358,29 +358,22 @@ const upsertConversationTurn = (
     }
 }
 
-const appendConversationTurnEvent = (
+const upsertConversationSegment = (
     snapshot: ConversationSnapshotResponse,
-    event: ConversationTurnEventResponse,
+    segment: ConversationSegmentResponse,
 ): ConversationSnapshotResponse => {
-    if (snapshot.turn_events.some((entry) => entry.id === event.id)) {
-        return snapshot
+    const nextSegments = [...snapshot.segments]
+    const existingIndex = nextSegments.findIndex((entry) => entry.id === segment.id)
+    if (existingIndex >= 0) {
+        nextSegments[existingIndex] = segment
+    } else {
+        nextSegments.push(segment)
     }
-    return {
-        ...snapshot,
-        turn_events: [...snapshot.turn_events, event],
-    }
-}
-
-const isTransientConversationTurnEvent = (event: ConversationTurnEventResponse) => (
-    event.kind === 'assistant_delta'
-)
-
-const sortConversationTurnEvents = (events: ConversationTurnEventResponse[]) => (
-    [...events].sort((left, right) => {
+    nextSegments.sort((left, right) => {
         if (left.turn_id === right.turn_id) {
-            const sequenceDelta = left.sequence - right.sequence
-            if (sequenceDelta !== 0) {
-                return sequenceDelta
+            const orderDelta = left.order - right.order
+            if (orderDelta !== 0) {
+                return orderDelta
             }
             const timestampDelta = left.timestamp.localeCompare(right.timestamp)
             if (timestampDelta !== 0) {
@@ -390,29 +383,10 @@ const sortConversationTurnEvents = (events: ConversationTurnEventResponse[]) => 
         }
         return left.timestamp.localeCompare(right.timestamp)
     })
-)
-
-const appendLiveConversationTurnEvent = (
-    events: ConversationTurnEventResponse[],
-    event: ConversationTurnEventResponse,
-): ConversationTurnEventResponse[] => {
-    if (events.some((entry) => entry.id === event.id)) {
-        return events
+    return {
+        ...snapshot,
+        segments: nextSegments,
     }
-    return sortConversationTurnEvents([...events, event])
-}
-
-const pruneLiveConversationTurnEvents = (
-    events: ConversationTurnEventResponse[],
-    snapshot: ConversationSnapshotResponse,
-): ConversationTurnEventResponse[] => {
-    const snapshotTurnById = new Map(snapshot.turns.map((turn) => [turn.id, turn]))
-    return events.filter((event) => {
-        if (!isTransientConversationTurnEvent(event)) {
-            return false
-        }
-        return snapshotTurnById.has(event.turn_id)
-    })
 }
 
 const sanitizeStreamingTurnUpsert = (
@@ -450,7 +424,7 @@ const scoreConversationSnapshotFreshness = (snapshot: ConversationSnapshotRespon
     const contentScore = snapshot.turns.reduce((score, turn) => score + turn.content.length, 0)
     return (
         snapshot.turns.length * 100000
-        + snapshot.turn_events.length * 1000
+        + snapshot.segments.length * 1000
         + turnStatusScore * 100
         + contentScore
     )
@@ -483,14 +457,14 @@ const formatWorkedDuration = (elapsedSeconds: number): string => {
 
 const resolveWorkedElapsedSeconds = (
     turn: ConversationTurnResponse,
-    turnEvents: ConversationTurnEventResponse[],
+    turnSegments: ConversationSegmentResponse[],
     completedTimestamp: string,
 ): number | null => {
     const completedMs = Date.parse(completedTimestamp)
     if (Number.isNaN(completedMs)) {
         return null
     }
-    const candidateTimestamps = [turn.timestamp, ...turnEvents.map((event) => event.timestamp)]
+    const candidateTimestamps = [turn.timestamp, ...turnSegments.map((segment) => segment.timestamp)]
         .map((value) => Date.parse(value))
         .filter((value) => !Number.isNaN(value) && value <= completedMs)
     if (candidateTimestamps.length === 0) {
@@ -502,196 +476,105 @@ const resolveWorkedElapsedSeconds = (
 
 const buildAssistantTimelineEntries = (
     turn: ConversationTurnResponse,
-    turnEvents: ConversationTurnEventResponse[],
+    turnSegments: ConversationSegmentResponse[],
 ): ConversationTimelineEntry[] => {
     const entries: ConversationTimelineEntry[] = []
-    let currentAssistantMessageIndex = -1
-    let currentThinkingIndex = -1
-    let accumulatedAssistantContent = ""
-    let needsFinalMessageSeparator = false
     let hadWorkActivity = false
+    let insertedFinalSeparator = false
+    const sortedSegments = [...turnSegments].sort((left, right) => left.order - right.order)
 
-    const startAssistantEntry = (
-        timestamp: string,
-        content: string,
-        presentation: "default" | "thinking",
-        status: ConversationTurnResponse["status"],
-    ) => {
-        const entry: ConversationTimelineEntry = {
-            id: `${turn.id}:${presentation}:${entries.length}`,
-            kind: "message",
-            role: "assistant",
-            content,
-            timestamp,
-            status,
-            error: turn.error ?? null,
-            presentation,
+    sortedSegments.forEach((segment) => {
+        if (!insertedFinalSeparator && hadWorkActivity && segment.kind === "assistant_message") {
+            const elapsedSeconds = resolveWorkedElapsedSeconds(turn, turnSegments, segment.timestamp)
+            const label = elapsedSeconds === null
+                ? "Worked"
+                : `Worked for ${formatWorkedDuration(elapsedSeconds)}`
+            entries.push({
+                id: `${turn.id}:final-separator:${entries.length}`,
+                kind: "final_separator",
+                role: "system",
+                timestamp: segment.timestamp,
+                label,
+            })
+            insertedFinalSeparator = true
         }
-        entries.push(entry)
-        if (presentation === "thinking") {
-            currentThinkingIndex = entries.length - 1
-        } else {
-            currentAssistantMessageIndex = entries.length - 1
-        }
-    }
-
-    const maybeInsertFinalMessageSeparator = (timestamp: string) => {
-        if (!needsFinalMessageSeparator || !hadWorkActivity) {
+        if (segment.kind === "assistant_message") {
+            entries.push({
+                id: segment.id,
+                kind: "message",
+                role: "assistant",
+                content: segment.content,
+                timestamp: segment.timestamp,
+                status: segment.status === "running" ? "streaming" : segment.status,
+                error: segment.error ?? null,
+            })
             return
         }
-        const elapsedSeconds = resolveWorkedElapsedSeconds(turn, turnEvents, timestamp)
-        const label = elapsedSeconds === null
-            ? "Worked"
-            : `Worked for ${formatWorkedDuration(elapsedSeconds)}`
-        entries.push({
-            id: `${turn.id}:final-separator:${entries.length}`,
-            kind: "final_separator",
-            role: "system",
-            timestamp,
-            label,
-        })
-        needsFinalMessageSeparator = false
-        hadWorkActivity = false
-    }
-
-    const appendAssistantMessageDelta = (timestamp: string, contentDelta: string) => {
-        if (currentAssistantMessageIndex < 0) {
-            maybeInsertFinalMessageSeparator(timestamp)
-            startAssistantEntry(timestamp, contentDelta, "default", turn.status)
-        } else {
-            const entry = entries[currentAssistantMessageIndex]
-            if (entry.kind === "message") {
-                entry.content = `${entry.content}${contentDelta}`
-                entry.status = turn.status
-                entry.error = turn.error ?? null
-            }
-        }
-        accumulatedAssistantContent = `${accumulatedAssistantContent}${contentDelta}`
-    }
-
-    const appendReasoningSummaryDelta = (timestamp: string, contentDelta: string) => {
-        if (currentThinkingIndex < 0) {
-            startAssistantEntry(timestamp, contentDelta, "thinking", "streaming")
-        } else {
-            const entry = entries[currentThinkingIndex]
-            if (entry.kind === "message") {
-                entry.content = `${entry.content}${contentDelta}`
-                entry.status = "streaming"
-            }
-        }
-    }
-
-    const resetAssistantSegmentPointers = () => {
-        currentAssistantMessageIndex = -1
-        currentThinkingIndex = -1
-    }
-
-    turnEvents.forEach((event) => {
-        if (event.kind === "assistant_delta") {
-            appendAssistantMessageDelta(event.timestamp || turn.timestamp, event.content_delta || "")
+        if (segment.kind === "reasoning") {
+            entries.push({
+                id: segment.id,
+                kind: "message",
+                role: "assistant",
+                content: segment.content,
+                timestamp: segment.timestamp,
+                status: segment.status === "running" ? "streaming" : segment.status,
+                error: segment.error ?? null,
+                presentation: "thinking",
+            })
             return
         }
-        if (event.kind === "reasoning_summary") {
-            appendReasoningSummaryDelta(event.timestamp || turn.timestamp, event.content_delta || "")
-            return
-        }
-        if (event.tool_call && event.tool_call_id) {
-            const nextEntry: ConversationTimelineEntry = {
-                id: event.tool_call_id,
+        if (segment.kind === "tool_call" && segment.tool_call) {
+            entries.push({
+                id: segment.id,
                 kind: "tool_call",
                 role: "system",
-                timestamp: event.timestamp,
+                timestamp: segment.timestamp,
                 toolCall: {
-                    id: event.tool_call.id,
-                    kind: event.tool_call.kind,
-                    status: event.tool_call.status,
-                    title: event.tool_call.title,
-                    command: event.tool_call.command ?? null,
-                    output: event.tool_call.output ?? null,
-                    filePaths: event.tool_call.file_paths,
+                    id: segment.tool_call.id,
+                    kind: segment.tool_call.kind,
+                    status: segment.tool_call.status,
+                    title: segment.tool_call.title,
+                    command: segment.tool_call.command ?? null,
+                    output: segment.tool_call.output ?? null,
+                    filePaths: segment.tool_call.file_paths,
                 },
-            }
-            const existingIndex = entries.findIndex((entry) => entry.kind === "tool_call" && entry.id === event.tool_call_id)
-            if (existingIndex >= 0) {
-                entries[existingIndex] = nextEntry
-            } else {
-                entries.push(nextEntry)
-            }
+            })
             hadWorkActivity = true
-            needsFinalMessageSeparator = true
-            resetAssistantSegmentPointers()
             return
         }
-        if (event.kind === "spec_edit_proposal_created" && event.artifact_id) {
+        if (segment.kind === "spec_edit_proposal" && segment.artifact_id) {
             entries.push({
-                id: event.id,
+                id: segment.id,
                 kind: "spec_edit_proposal",
                 role: "system",
-                artifactId: event.artifact_id,
-                timestamp: event.timestamp,
+                artifactId: segment.artifact_id,
+                timestamp: segment.timestamp,
             })
-            resetAssistantSegmentPointers()
             return
         }
-        if (event.kind === "assistant_completed") {
-            if (!accumulatedAssistantContent && turn.content.trim()) {
-                maybeInsertFinalMessageSeparator(event.timestamp || turn.timestamp)
-                startAssistantEntry(event.timestamp || turn.timestamp, turn.content, "default", "complete")
-            } else if (turn.content.startsWith(accumulatedAssistantContent)) {
-                const remainingContent = turn.content.slice(accumulatedAssistantContent.length)
-                if (remainingContent) {
-                    maybeInsertFinalMessageSeparator(event.timestamp || turn.timestamp)
-                    startAssistantEntry(event.timestamp || turn.timestamp, remainingContent, "default", "complete")
-                    accumulatedAssistantContent = turn.content
-                } else if (currentAssistantMessageIndex >= 0) {
-                    const entry = entries[currentAssistantMessageIndex]
-                    if (entry.kind === "message") {
-                        entry.status = "complete"
-                    }
-                }
-            } else if (currentAssistantMessageIndex >= 0) {
-                const entry = entries[currentAssistantMessageIndex]
-                if (entry.kind === "message") {
-                    entry.content = turn.content
-                    entry.status = "complete"
-                }
-            } else if (turn.content.trim()) {
-                maybeInsertFinalMessageSeparator(event.timestamp || turn.timestamp)
-                startAssistantEntry(event.timestamp || turn.timestamp, turn.content, "default", "complete")
-            }
-            currentThinkingIndex = -1
-            return
-        }
-        if (event.kind === "assistant_failed") {
-            if (currentAssistantMessageIndex >= 0) {
-                const entry = entries[currentAssistantMessageIndex]
-                if (entry.kind === "message") {
-                    entry.status = "failed"
-                    entry.error = turn.error ?? event.message ?? null
-                }
-            } else {
-                startAssistantEntry(
-                    event.timestamp || turn.timestamp,
-                    turn.content || event.message || "",
-                    "default",
-                    "failed",
-                )
-            }
-            currentThinkingIndex = -1
+        if (segment.kind === "execution_card" && segment.artifact_id) {
+            entries.push({
+                id: segment.id,
+                kind: "execution_card",
+                role: "system",
+                artifactId: segment.artifact_id,
+                timestamp: segment.timestamp,
+            })
         }
     })
 
-    if (entries.length === 0 && turn.content.trim() && (turn.status === "complete" || turn.status === "failed")) {
-        startAssistantEntry(turn.timestamp, turn.content, "default", turn.status)
-    }
-
-    const needsTrailingThinkingEntry = (
-        (turn.status === "pending" || turn.status === "streaming")
-        && currentAssistantMessageIndex < 0
-        && currentThinkingIndex < 0
-    )
-    if (needsTrailingThinkingEntry) {
-        startAssistantEntry(turn.timestamp, "", "thinking", turn.status)
+    if (entries.length === 0) {
+        const presentation = turn.status === "complete" || turn.status === "failed" ? "default" : "thinking"
+        entries.push({
+            id: `${turn.id}:${presentation}:placeholder`,
+            kind: "message",
+            role: "assistant",
+            content: turn.content,
+            timestamp: turn.timestamp,
+            status: turn.status,
+            error: turn.error ?? null,
+            presentation,
+        })
     }
 
     return entries
@@ -699,7 +582,6 @@ const buildAssistantTimelineEntries = (
 
 const buildConversationTimelineEntries = (
     snapshot: ConversationSnapshotResponse | null,
-    liveTurnEvents: ConversationTurnEventResponse[],
     optimisticSend: OptimisticSendState | null,
 ): ConversationTimelineEntry[] => {
     if (!snapshot) {
@@ -718,39 +600,17 @@ const buildConversationTimelineEntries = (
         ]
     }
 
-    const eventsByTurn = new Map<string, ConversationTurnEventResponse[]>()
-    const sortedEvents = sortConversationTurnEvents([...snapshot.turn_events, ...liveTurnEvents])
-    sortedEvents.forEach((event) => {
-        const entries = eventsByTurn.get(event.turn_id) || []
-        entries.push(event)
-        eventsByTurn.set(event.turn_id, entries)
-    })
-
     const timeline: ConversationTimelineEntry[] = []
+    const segmentsByTurn = new Map<string, ConversationSegmentResponse[]>()
+    snapshot.segments.forEach((segment) => {
+        const entries = segmentsByTurn.get(segment.turn_id) || []
+        entries.push(segment)
+        segmentsByTurn.set(segment.turn_id, entries)
+    })
     snapshot.turns.forEach((turn) => {
-        if (turn.kind === "spec_edit_proposal" && turn.artifact_id) {
-            timeline.push({
-                id: turn.id,
-                kind: "spec_edit_proposal",
-                role: "system",
-                artifactId: turn.artifact_id,
-                timestamp: turn.timestamp,
-            })
-            return
-        }
-        if (turn.kind === "execution_card" && turn.artifact_id) {
-            timeline.push({
-                id: turn.id,
-                kind: "execution_card",
-                role: "system",
-                artifactId: turn.artifact_id,
-                timestamp: turn.timestamp,
-            })
-            return
-        }
         if (turn.role === "user" || turn.role === "assistant") {
             if (turn.role === "assistant") {
-                timeline.push(...buildAssistantTimelineEntries(turn, eventsByTurn.get(turn.id) || []))
+                timeline.push(...buildAssistantTimelineEntries(turn, segmentsByTurn.get(turn.id) || []))
                 return
             }
             timeline.push({
@@ -822,7 +682,6 @@ export function HomePanel() {
 
     const [projectGitMetadata, setProjectGitMetadata] = useState<Record<string, ProjectGitMetadata>>({})
     const [projectConversationSnapshots, setProjectConversationSnapshots] = useState<Record<string, ConversationSnapshotResponse>>({})
-    const [projectConversationLiveEvents, setProjectConversationLiveEvents] = useState<Record<string, ConversationTurnEventResponse[]>>({})
     const [projectConversationSummaries, setProjectConversationSummaries] = useState<Record<string, ConversationSummaryResponse[]>>({})
     const [chatDraft, setChatDraft] = useState("")
     const [panelError, setPanelError] = useState<string | null>(null)
@@ -854,16 +713,14 @@ export function HomePanel() {
         : EMPTY_PROJECT_GIT_METADATA
     const activeConversationId = activeProjectScope?.conversationId ?? null
     const activeConversationSnapshot = activeConversationId ? projectConversationSnapshots[activeConversationId] || null : null
-    const activeConversationLiveEvents = activeConversationId ? projectConversationLiveEvents[activeConversationId] || [] : []
     const activeProjectConversationSummaries = activeProjectPath ? projectConversationSummaries[activeProjectPath] || [] : []
     const activeProjectEventLog = activeProjectScope?.projectEventLog || []
     const activeConversationHistory = useMemo(
         () => buildConversationTimelineEntries(
             activeConversationSnapshot,
-            activeConversationLiveEvents,
             optimisticSend && optimisticSend.conversationId === activeConversationId ? optimisticSend : null,
         ),
-        [activeConversationId, activeConversationLiveEvents, activeConversationSnapshot, optimisticSend],
+        [activeConversationId, activeConversationSnapshot, optimisticSend],
     )
     const activeSpecEditProposals = activeConversationSnapshot?.spec_edit_proposals || []
     const activeExecutionCards = activeConversationSnapshot?.execution_cards || []
@@ -1052,22 +909,6 @@ export function HomePanel() {
             ...current,
             [snapshot.conversation_id]: snapshot,
         }))
-        setProjectConversationLiveEvents((current) => {
-            const existing = current[snapshot.conversation_id] || []
-            const nextEvents = pruneLiveConversationTurnEvents(existing, snapshot)
-            if (nextEvents.length === 0) {
-                if (!(snapshot.conversation_id in current)) {
-                    return current
-                }
-                const next = { ...current }
-                delete next[snapshot.conversation_id]
-                return next
-            }
-            return {
-                ...current,
-                [snapshot.conversation_id]: nextEvents,
-            }
-        })
         setProjectConversationSummaries((current) => ({
             ...current,
             [projectPath]: upsertConversationSummary(current[projectPath] || [], {
@@ -1157,13 +998,6 @@ export function HomePanel() {
                     title: event.title,
                     updated_at: event.updated_at,
                 }
-            } else if (!isTransientConversationTurnEvent(event.event)) {
-                mergedSnapshot = {
-                    ...appendConversationTurnEvent(existingSnapshot, event.event),
-                    project_path: event.project_path,
-                    title: event.title,
-                    updated_at: event.updated_at,
-                }
             } else {
                 mergedSnapshot = {
                     ...existingSnapshot,
@@ -1172,18 +1006,15 @@ export function HomePanel() {
                     updated_at: event.updated_at,
                 }
             }
+            if (event.type === "turn_event" && event.event.segment) {
+                mergedSnapshot = upsertConversationSegment(mergedSnapshot, event.event.segment)
+            }
             nextSnapshot = mergedSnapshot
             return {
                 ...current,
                 [event.conversation_id]: mergedSnapshot,
             }
         })
-        if (event.type === "turn_event" && isTransientConversationTurnEvent(event.event)) {
-            setProjectConversationLiveEvents((current) => ({
-                ...current,
-                [event.conversation_id]: appendLiveConversationTurnEvent(current[event.conversation_id] || [], event.event),
-            }))
-        }
         const updatedSnapshot = nextSnapshot as ConversationSnapshotResponse | null
         if (updatedSnapshot === null) {
             return

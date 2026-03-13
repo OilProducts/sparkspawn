@@ -11,6 +11,7 @@ It exists to prevent ambiguity between:
 Source of truth for broader conversation lifecycle and storage:
 - `conversation-paradigm.md`
 - `storage-boundaries.md`
+- `conversation-state-model.md`
 
 ## Purpose
 
@@ -69,10 +70,14 @@ Allowed normalized event kinds:
 Durable conversation state consists of:
 - conversations
 - turns
-- durable turn events
+- materialized render segments
+- workspace artifacts and provenance
+
+The canonical durable state model is defined in:
+- `conversation-state-model.md`
 
 It MUST live under:
-- `SPARKSPAWN_HOME/projects/<project-id>/conversations/`
+- `SPARKSPAWN_HOME/workspace/projects/<project-id>/conversations/`
 
 Live-only transient state may exist in memory during a turn, but it MUST NOT become the durable source of truth unless explicitly materialized as a durable event or finalized turn state.
 
@@ -109,7 +114,8 @@ Rules:
 - `summaryTextDelta` MUST NOT be rendered directly to users.
 - `reasoning_summary` events are for the dedicated thinking surface only.
 - `reasoning_summary` MUST NOT append or overwrite assistant response text.
-- live reasoning summaries are observational UI state; they are not ordinary assistant messages.
+- live reasoning summaries are not ordinary assistant messages.
+- durable reasoning reconstruction is defined by `conversation-state-model.md`, which requires reasoning content to collapse into stable render segments rather than remain raw delta history.
 
 ### Tool Calls
 
@@ -156,10 +162,9 @@ Rules:
 The following are durable:
 - conversation records
 - turn records
-- tool-call lifecycle events
-- `assistant_completed`
-- `assistant_failed`
-- `retry_started`
+- materialized render segments
+- workspace artifacts and provenance
+- coarse workflow/event log entries
 
 ### Not Persisted As Raw Live Stream
 
@@ -170,7 +175,9 @@ The following MUST NOT be treated as durable append-only transcript facts by def
 
 Assistant streaming deltas may be compacted into the final assistant turn content rather than retained forever as raw deltas.
 
-Reasoning summaries may remain live-only unless Spark Spawn later introduces an explicit durable reasoning-summary artifact. If such an artifact is introduced, it MUST remain distinct from assistant message content.
+Reasoning summaries MUST NOT be persisted as raw append-only delta history in `state.json`.
+
+Instead, reasoning content MUST be compacted into durable render segments as defined by `conversation-state-model.md`, and those segments MUST remain distinct from assistant message content.
 
 ## Frontend Rendering Contract
 

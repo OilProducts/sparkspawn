@@ -284,6 +284,134 @@ def test_append_turn_event_records_tool_call_against_assistant_turn(tmp_path: Pa
     assert completed_event.tool_call.output == "AGENTS.md\n"
 
 
+def test_conversation_state_materializes_reasoning_segments_from_legacy_events_by_summary_index() -> None:
+    state = project_chat.ConversationState.from_dict(
+        {
+            "conversation_id": "conversation-test",
+            "project_path": "/tmp/project",
+            "title": "Legacy reasoning stream",
+            "created_at": "2026-03-13T10:00:00Z",
+            "updated_at": "2026-03-13T10:00:05Z",
+            "turns": [
+                {
+                    "id": "turn-user-1",
+                    "role": "user",
+                    "content": "Explain your plan.",
+                    "timestamp": "2026-03-13T10:00:00Z",
+                    "status": "complete",
+                    "kind": "message",
+                },
+                {
+                    "id": "turn-assistant-1",
+                    "role": "assistant",
+                    "content": "Here is the grounded plan.",
+                    "timestamp": "2026-03-13T10:00:01Z",
+                    "status": "complete",
+                    "kind": "message",
+                    "parent_turn_id": "turn-user-1",
+                },
+            ],
+            "turn_events": [
+                {
+                    "id": "event-reasoning-1a",
+                    "turn_id": "turn-assistant-1",
+                    "sequence": 1,
+                    "timestamp": "2026-03-13T10:00:01Z",
+                    "kind": "reasoning_summary",
+                    "content_delta": "**Reviewing repo** Looking through the project layout. ",
+                    "segment": {
+                        "id": "segment-reasoning-app-turn-1-item-rs-1-0",
+                        "turn_id": "turn-assistant-1",
+                        "order": 1,
+                        "kind": "reasoning",
+                        "role": "assistant",
+                        "status": "streaming",
+                        "timestamp": "2026-03-13T10:00:01Z",
+                        "updated_at": "2026-03-13T10:00:01Z",
+                        "content": "**Reviewing repo** Looking through the project layout. ",
+                        "source": {
+                            "app_turn_id": "app-turn-1",
+                            "item_id": "item-rs-1",
+                            "summary_index": 0,
+                        },
+                    },
+                },
+                {
+                    "id": "event-reasoning-1b",
+                    "turn_id": "turn-assistant-1",
+                    "sequence": 2,
+                    "timestamp": "2026-03-13T10:00:02Z",
+                    "kind": "reasoning_summary",
+                    "content_delta": "Checking README and specs.",
+                    "segment": {
+                        "id": "segment-reasoning-app-turn-1-item-rs-1-0",
+                        "turn_id": "turn-assistant-1",
+                        "order": 1,
+                        "kind": "reasoning",
+                        "role": "assistant",
+                        "status": "streaming",
+                        "timestamp": "2026-03-13T10:00:01Z",
+                        "updated_at": "2026-03-13T10:00:02Z",
+                        "content": "**Reviewing repo** Looking through the project layout. Checking README and specs.",
+                        "source": {
+                            "app_turn_id": "app-turn-1",
+                            "item_id": "item-rs-1",
+                            "summary_index": 0,
+                        },
+                    },
+                },
+                {
+                    "id": "event-reasoning-2",
+                    "turn_id": "turn-assistant-1",
+                    "sequence": 3,
+                    "timestamp": "2026-03-13T10:00:03Z",
+                    "kind": "reasoning_summary",
+                    "content_delta": "**Considering proposal** Mapping the change to a minimal spec edit.",
+                    "segment": {
+                        "id": "segment-reasoning-app-turn-1-item-rs-1-1",
+                        "turn_id": "turn-assistant-1",
+                        "order": 2,
+                        "kind": "reasoning",
+                        "role": "assistant",
+                        "status": "streaming",
+                        "timestamp": "2026-03-13T10:00:03Z",
+                        "updated_at": "2026-03-13T10:00:03Z",
+                        "content": "**Considering proposal** Mapping the change to a minimal spec edit.",
+                        "source": {
+                            "app_turn_id": "app-turn-1",
+                            "item_id": "item-rs-1",
+                            "summary_index": 1,
+                        },
+                    },
+                },
+                {
+                    "id": "event-assistant-complete",
+                    "turn_id": "turn-assistant-1",
+                    "sequence": 4,
+                    "timestamp": "2026-03-13T10:00:05Z",
+                    "kind": "assistant_completed",
+                    "message": "Assistant turn completed.",
+                },
+            ],
+            "event_log": [],
+            "spec_edit_proposals": [],
+            "execution_cards": [],
+            "execution_workflow": {"status": "idle", "run_id": None, "error": None, "flow_source": None},
+        }
+    )
+
+    reasoning_segments = [segment for segment in state.segments if segment.kind == "reasoning"]
+    assistant_segments = [segment for segment in state.segments if segment.kind == "assistant_message"]
+
+    assert len(reasoning_segments) == 2
+    assert [segment.source.summary_index for segment in reasoning_segments] == [0, 1]
+    assert reasoning_segments[0].content.endswith("Checking README and specs.")
+    assert reasoning_segments[1].content == "**Considering proposal** Mapping the change to a minimal spec edit."
+    assert len(assistant_segments) == 1
+    assert assistant_segments[0].status == "complete"
+    assert assistant_segments[0].content == "Here is the grounded plan."
+
+
 def test_conversation_session_state_round_trips(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     project_paths = ensure_project_paths(tmp_path, "/tmp/project")
@@ -1056,7 +1184,10 @@ def test_send_turn_persists_spec_proposal_from_dynamic_tool_call(tmp_path: Path,
     assert snapshot["turns"][-1]["role"] == "assistant"
     assert snapshot["turns"][-1]["content"] == "I can tighten the top bar and relocate the overflow metadata."
     assert snapshot["spec_edit_proposals"][0]["summary"] == "Reduce top-bar chrome and keep only project context."
-    assert any(event["kind"] == "spec_edit_proposal_created" for event in snapshot["turn_events"])
+    proposal_segment = next((segment for segment in snapshot["segments"] if segment["kind"] == "spec_edit_proposal"), None)
+    assert proposal_segment is not None
+    assert proposal_segment["artifact_id"] == snapshot["spec_edit_proposals"][0]["id"]
+    assert proposal_segment["id"].startswith("segment-artifact-")
 
 
 def test_run_prepared_turn_persists_spec_proposal_before_turn_completion(tmp_path: Path, monkeypatch) -> None:
@@ -1114,7 +1245,11 @@ def test_run_prepared_turn_persists_spec_proposal_before_turn_completion(tmp_pat
     snapshot = service.get_snapshot("conversation-test", str(tmp_path))
 
     assert snapshot["spec_edit_proposals"][0]["summary"] == "Document the proposal workflow smoke test."
-    assert any(event["kind"] == "spec_edit_proposal_created" for event in snapshot["turn_events"])
+    assert any(
+        segment["kind"] == "spec_edit_proposal"
+        and segment["artifact_id"] == snapshot["spec_edit_proposals"][0]["id"]
+        for segment in snapshot["segments"]
+    )
 
 
 def test_run_prepared_turn_does_not_duplicate_live_persisted_spec_proposal(tmp_path: Path, monkeypatch) -> None:
@@ -1161,7 +1296,7 @@ def test_run_prepared_turn_does_not_duplicate_live_persisted_spec_proposal(tmp_p
     snapshot = service._run_prepared_turn(prepared)
 
     assert len(snapshot["spec_edit_proposals"]) == 1
-    assert len([event for event in snapshot["turn_events"] if event["kind"] == "spec_edit_proposal_created"]) == 1
+    assert len([segment for segment in snapshot["segments"] if segment["kind"] == "spec_edit_proposal"]) == 1
 
 
 def test_mark_execution_workflow_started_loads_conversation_without_project_argument(tmp_path: Path) -> None:
@@ -1720,9 +1855,9 @@ def test_start_turn_returns_initial_snapshot_before_background_completion(tmp_pa
 
     assert final_snapshot is not None
     assert final_snapshot["turns"][-1]["content"] == "ACK"
-    assert [event["kind"] for event in final_snapshot["turn_events"]] == [
-        "reasoning_summary",
-        "assistant_completed",
+    assert [segment["kind"] for segment in final_snapshot["segments"]] == [
+        "reasoning",
+        "assistant_message",
     ]
 
 
@@ -1845,7 +1980,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     assert [turn["role"] for turn in payload["turns"]] == ["user", "assistant"]
     assert payload["turns"][1]["content"] == ""
     assert payload["turns"][1]["status"] == "pending"
-    assert payload["turn_events"] == []
+    assert payload["segments"] == []
     assert entered_turn.wait(timeout=2)
 
     finish_turn.set()
@@ -1862,83 +1997,90 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     assert [turn["role"] for turn in final_snapshot["turns"]] == ["user", "assistant"]
     assert final_snapshot["turns"][1]["content"] == "ACK"
     assert final_snapshot["turns"][1]["status"] == "complete"
-    assert [event["kind"] for event in final_snapshot["turn_events"]] == [
-        "reasoning_summary",
-        "tool_call_started",
-        "assistant_completed",
+    assert [segment["kind"] for segment in final_snapshot["segments"]] == [
+        "reasoning",
+        "assistant_message",
+        "tool_call",
     ]
 
 
 def test_snapshot_compacts_streamed_assistant_deltas(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     project_paths = ensure_project_paths(tmp_path, str(tmp_path))
-    state = project_chat.ConversationState(
-        conversation_id="conversation-compact",
-        project_path=str(tmp_path),
-        title="Compact thread",
-        created_at="2026-03-07T18:00:00Z",
-        updated_at="2026-03-07T18:00:03Z",
-        turns=[
-            project_chat.ConversationTurn(
-                id="turn-user-1",
-                role="user",
-                content="hi",
-                timestamp="2026-03-07T18:00:00Z",
-                status="complete",
-            ),
-            project_chat.ConversationTurn(
-                id="turn-assistant-1",
-                role="assistant",
-                content="hello",
-                timestamp="2026-03-07T18:00:03Z",
-                status="complete",
-                parent_turn_id="turn-user-1",
-            ),
+    legacy_payload = {
+        "conversation_id": "conversation-compact",
+        "project_path": str(tmp_path),
+        "title": "Compact thread",
+        "created_at": "2026-03-07T18:00:00Z",
+        "updated_at": "2026-03-07T18:00:03Z",
+        "turns": [
+            {
+                "id": "turn-user-1",
+                "role": "user",
+                "content": "hi",
+                "timestamp": "2026-03-07T18:00:00Z",
+                "status": "complete",
+                "kind": "message",
+            },
+            {
+                "id": "turn-assistant-1",
+                "role": "assistant",
+                "content": "hello",
+                "timestamp": "2026-03-07T18:00:03Z",
+                "status": "complete",
+                "kind": "message",
+                "parent_turn_id": "turn-user-1",
+            },
         ],
-        turn_events=[
-            project_chat.ConversationTurnEvent(
-                id="event-assistant-delta-1",
-                turn_id="turn-assistant-1",
-                sequence=1,
-                timestamp="2026-03-07T18:00:01Z",
-                kind="assistant_delta",
-                content_delta="hel",
-            ),
-            project_chat.ConversationTurnEvent(
-                id="event-reasoning-1",
-                turn_id="turn-assistant-1",
-                sequence=2,
-                timestamp="2026-03-07T18:00:01Z",
-                kind="reasoning_summary",
-                content_delta="Thinking about the repository structure.",
-            ),
-            project_chat.ConversationTurnEvent(
-                id="event-assistant-delta-2",
-                turn_id="turn-assistant-1",
-                sequence=3,
-                timestamp="2026-03-07T18:00:02Z",
-                kind="assistant_delta",
-                content_delta="lo",
-            ),
-            project_chat.ConversationTurnEvent(
-                id="event-assistant-completed-1",
-                turn_id="turn-assistant-1",
-                sequence=4,
-                timestamp="2026-03-07T18:00:03Z",
-                kind="assistant_completed",
-                message="Assistant turn completed.",
-            ),
+        "turn_events": [
+            {
+                "id": "event-assistant-delta-1",
+                "turn_id": "turn-assistant-1",
+                "sequence": 1,
+                "timestamp": "2026-03-07T18:00:01Z",
+                "kind": "assistant_delta",
+                "content_delta": "hel",
+            },
+            {
+                "id": "event-reasoning-1",
+                "turn_id": "turn-assistant-1",
+                "sequence": 2,
+                "timestamp": "2026-03-07T18:00:01Z",
+                "kind": "reasoning_summary",
+                "content_delta": "Thinking about the repository structure.",
+            },
+            {
+                "id": "event-assistant-delta-2",
+                "turn_id": "turn-assistant-1",
+                "sequence": 3,
+                "timestamp": "2026-03-07T18:00:02Z",
+                "kind": "assistant_delta",
+                "content_delta": "lo",
+            },
+            {
+                "id": "event-assistant-completed-1",
+                "turn_id": "turn-assistant-1",
+                "sequence": 4,
+                "timestamp": "2026-03-07T18:00:03Z",
+                "kind": "assistant_completed",
+                "message": "Assistant turn completed.",
+            },
         ],
+    }
+    (project_paths.conversations_dir / "conversation-compact").mkdir(parents=True, exist_ok=True)
+    (project_paths.conversations_dir / "conversation-compact" / "state.json").write_text(
+        json.dumps(legacy_payload, indent=2),
+        encoding="utf-8",
     )
-    service._write_state(state)
 
     snapshot = service.get_snapshot("conversation-compact", str(tmp_path))
 
-    assert [event["kind"] for event in snapshot["turn_events"]] == ["reasoning_summary", "assistant_completed"]
+    assert [segment["kind"] for segment in snapshot["segments"]] == ["assistant_message", "reasoning"]
     persisted = json.loads(
         (project_paths.conversations_dir / "conversation-compact" / "state.json").read_text(encoding="utf-8")
     )
-    assert [event["kind"] for event in persisted["turn_events"]] == ["reasoning_summary", "assistant_completed"]
+    assert "turn_events" not in persisted
+    assert [segment["kind"] for segment in persisted["segments"]] == ["assistant_message", "reasoning"]
 
 
 def test_list_project_conversations_endpoint_returns_project_threads(api_client, tmp_path: Path) -> None:

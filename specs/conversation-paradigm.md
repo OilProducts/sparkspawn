@@ -10,6 +10,9 @@ Source of truth for where conversation data must live:
 Source of truth for raw-event normalization, persistence, and live rendering:
 - `conversation-event-contract.md`
 
+Source of truth for durable conversation files, compacted segment state, and restart reconstruction:
+- `conversation-state-model.md`
+
 ## Purpose
 
 Project chat is not a generic message stream. It is the primary collaborative surface for:
@@ -35,7 +38,7 @@ A conversation is a durable thread within a single active project.
 
 Each conversation contains ordered turns.
 
-Each turn may contain ordered events.
+Each turn may contain ordered events and ordered render segments.
 
 ### Conversation
 
@@ -73,7 +76,7 @@ Examples:
 - assistant failed
 - retry started
 
-The UI may render turn events inline, but the canonical ordering is event order within a stable turn.
+The UI may render turn events inline while a turn is active, but restart-safe reconstruction is defined by the materialized segment model in `conversation-state-model.md`.
 
 ## Expected Send Behavior
 
@@ -173,8 +176,8 @@ The system must maintain these invariants:
 The preferred long-term model is:
 - durable conversations
 - stable turn ids
-- append-only turn events
+- stable render-segment ids
 - event-driven streaming
-- snapshots only for load/recovery
+- compacted snapshot state for load/recovery
 
 This document is the source of truth when streaming behavior, ordering, retry semantics, or artifact placement are ambiguous.

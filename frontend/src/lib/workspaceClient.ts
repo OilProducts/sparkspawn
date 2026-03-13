@@ -1,6 +1,7 @@
 export {
     type ConversationDeleteResponse,
     type ConversationSnapshotResponse,
+    type ConversationSegmentResponse,
     type ConversationSummaryResponse,
     type ConversationTurnEventResponse,
     type ConversationTurnEventStreamResponse,

@@ -127,6 +127,7 @@ class CodexAppServerTurnEvent:
     text: Optional[str] = None
     item: Optional[dict[str, Any]] = None
     item_id: Optional[str] = None
+    summary_index: Optional[int] = None
     phase: Optional[str] = None
     status: Optional[str] = None
     error: Optional[str] = None
@@ -144,6 +145,7 @@ class CodexAppServerTurnState:
     saw_task_complete: bool = False
     saw_final_answer_completion: bool = False
     saw_item_agent_message_delta: bool = False
+    saw_item_reasoning_delta: bool = False
     reasoning_summary_buffer: str = ""
 
     def has_terminal_message(self) -> bool:
@@ -218,14 +220,24 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
 
     if method == "item/reasoning/summaryTextDelta":
         delta = params.get("delta") or ""
+        state.saw_item_reasoning_delta = True
         if delta:
             state.reasoning_summary_buffer = f"{state.reasoning_summary_buffer}{delta}"
-            events.append(CodexAppServerTurnEvent(kind="reasoning_delta", text=str(delta)))
+            summary_index = params.get("summaryIndex")
+            events.append(
+                CodexAppServerTurnEvent(
+                    kind="reasoning_delta",
+                    text=str(delta),
+                    item_id=as_non_empty_string(params.get("itemId")),
+                    summary_index=int(summary_index) if isinstance(summary_index, int) else None,
+                )
+            )
         return events
 
     if method == "item/reasoning/summaryPartAdded":
         part = params.get("part")
         summary_text: Optional[str] = None
+        summary_index = params.get("summaryIndex")
         if isinstance(part, dict):
             for key in ("text", "summaryText", "summary_text"):
                 value = part.get(key)
@@ -237,10 +249,24 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
                 remaining_summary_text = summary_text[len(state.reasoning_summary_buffer):]
                 state.reasoning_summary_buffer = ""
                 if remaining_summary_text:
-                    events.append(CodexAppServerTurnEvent(kind="reasoning_delta", text=remaining_summary_text))
+                    events.append(
+                        CodexAppServerTurnEvent(
+                            kind="reasoning_delta",
+                            text=remaining_summary_text,
+                            item_id=as_non_empty_string(params.get("itemId")),
+                            summary_index=int(summary_index) if isinstance(summary_index, int) else None,
+                        )
+                    )
             else:
                 state.reasoning_summary_buffer = ""
-                events.append(CodexAppServerTurnEvent(kind="reasoning_delta", text=summary_text))
+                events.append(
+                    CodexAppServerTurnEvent(
+                        kind="reasoning_delta",
+                        text=summary_text,
+                        item_id=as_non_empty_string(params.get("itemId")),
+                        summary_index=int(summary_index) if isinstance(summary_index, int) else None,
+                    )
+                )
         return events
 
     if method == "codex/event/agent_message_delta":
@@ -336,6 +362,23 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
         if last_agent_message:
             state.final_agent_message = last_agent_message
         events.append(CodexAppServerTurnEvent(kind="task_completed", text=last_agent_message))
+        return events
+
+    if method in {"codex/event/reasoning_content_delta", "codex/event/agent_reasoning_delta"}:
+        if state.saw_item_reasoning_delta:
+            return events
+        msg = params.get("msg") or {}
+        delta = as_non_empty_string(msg.get("delta"))
+        if delta:
+            summary_index = msg.get("summary_index")
+            events.append(
+                CodexAppServerTurnEvent(
+                    kind="reasoning_delta",
+                    text=delta,
+                    item_id=as_non_empty_string(msg.get("item_id")),
+                    summary_index=int(summary_index) if isinstance(summary_index, int) else None,
+                )
+            )
         return events
 
     return events

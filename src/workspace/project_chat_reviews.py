@@ -11,6 +11,8 @@ from workspace.project_chat_common import (
     slugify,
 )
 from workspace.project_chat_models import (
+    ConversationSegment,
+    ConversationSegmentSource,
     ConversationState,
     ConversationTurn,
     ConversationTurnEvent,
@@ -52,10 +54,10 @@ class ProjectChatReviewService:
             summary = "Draft spec edit proposal"
 
         proposals_by_id = {proposal.id: proposal for proposal in state.spec_edit_proposals}
-        for event in state.turn_events:
-            if event.turn_id != parent_turn.id or event.kind != "spec_edit_proposal_created" or not event.artifact_id:
+        for segment in state.segments:
+            if segment.turn_id != parent_turn.id or segment.kind != "spec_edit_proposal" or not segment.artifact_id:
                 continue
-            existing_proposal = proposals_by_id.get(event.artifact_id)
+            existing_proposal = proposals_by_id.get(segment.artifact_id)
             if existing_proposal is None:
                 continue
             if existing_proposal.summary != summary:
@@ -78,12 +80,27 @@ class ProjectChatReviewService:
             status="pending",
         )
         state.spec_edit_proposals.append(proposal)
+        proposal_segment = ConversationSegment(
+            id=f"segment-artifact-{proposal.id}",
+            turn_id=parent_turn.id,
+            order=self._repository.next_turn_segment_order(state, parent_turn.id),
+            kind="spec_edit_proposal",
+            role="system",
+            status="complete",
+            timestamp=proposal.created_at,
+            updated_at=proposal.created_at,
+            artifact_id=proposal.id,
+            source=ConversationSegmentSource(),
+        )
+        self._repository.upsert_segment(state, proposal_segment)
         proposal_event = self._repository.append_turn_event(
             state,
             parent_turn.id,
             "spec_edit_proposal_created",
             sequence=sequence,
             artifact_id=proposal.id,
+            segment_id=proposal_segment.id,
+            segment=proposal_segment,
             message=f"Drafted spec edit proposal {proposal.id}.",
             timestamp=proposal.created_at,
         )
@@ -222,15 +239,29 @@ class ProjectChatReviewService:
                 work_items=work_items,
             )
             state.execution_cards.append(execution_card)
-            state.turns.append(
-                ConversationTurn(
-                    id=f"turn-{uuid.uuid4().hex}",
-                    role="system",
-                    content="",
-                    timestamp=now,
+            execution_card_turn = ConversationTurn(
+                id=f"turn-{uuid.uuid4().hex}",
+                role="system",
+                content="",
+                timestamp=now,
+                kind="execution_card",
+                artifact_id=execution_card.id,
+            )
+            state.turns.append(execution_card_turn)
+            self._repository.upsert_segment(
+                state,
+                ConversationSegment(
+                    id=f"segment-artifact-{execution_card.id}",
+                    turn_id=execution_card_turn.id,
+                    order=1,
                     kind="execution_card",
+                    role="system",
+                    status="complete",
+                    timestamp=now,
+                    updated_at=now,
                     artifact_id=execution_card.id,
-                )
+                    source=ConversationSegmentSource(),
+                ),
             )
             if state.execution_workflow.run_id == workflow_run_id:
                 state.execution_workflow = ExecutionWorkflowState(

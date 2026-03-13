@@ -54,6 +54,8 @@ export interface ConversationTurnEventResponse {
     message?: string | null
     tool_call_id?: string | null
     artifact_id?: string | null
+    segment_id?: string | null
+    segment?: ConversationSegmentResponse | null
     tool_call?: {
         kind: 'command_execution' | 'file_change' | 'dynamic_tool'
         status: 'running' | 'completed' | 'failed'
@@ -62,6 +64,36 @@ export interface ConversationTurnEventResponse {
         command?: string | null
         output?: string | null
         file_paths: string[]
+    } | null
+}
+
+export interface ConversationSegmentResponse {
+    id: string
+    turn_id: string
+    order: number
+    kind: 'assistant_message' | 'reasoning' | 'tool_call' | 'spec_edit_proposal' | 'execution_card'
+    role: 'assistant' | 'system'
+    status: 'pending' | 'streaming' | 'complete' | 'failed' | 'running'
+    timestamp: string
+    updated_at: string
+    content: string
+    completed_at?: string | null
+    error?: string | null
+    artifact_id?: string | null
+    tool_call?: {
+        kind: 'command_execution' | 'file_change' | 'dynamic_tool'
+        status: 'running' | 'completed' | 'failed'
+        id: string
+        title: string
+        command?: string | null
+        output?: string | null
+        file_paths: string[]
+    } | null
+    source?: {
+        app_turn_id?: string | null
+        item_id?: string | null
+        summary_index?: number | null
+        call_id?: string | null
     } | null
 }
 
@@ -120,7 +152,7 @@ export interface ConversationSnapshotResponse {
     created_at: string
     updated_at: string
     turns: ConversationTurnResponse[]
-    turn_events: ConversationTurnEventResponse[]
+    segments: ConversationSegmentResponse[]
     event_log: WorkflowEventResponse[]
     spec_edit_proposals: SpecEditProposalResponse[]
     execution_cards: ExecutionCardResponse[]
@@ -276,6 +308,8 @@ function parseConversationTurnEventResponse(value: unknown, _endpoint: string): 
         message: asOptionalNullableString(record.message),
         tool_call_id: asOptionalNullableString(record.tool_call_id),
         artifact_id: asOptionalNullableString(record.artifact_id),
+        segment_id: asOptionalNullableString(record.segment_id),
+        segment: parseConversationSegmentResponse(record.segment),
         tool_call: toolCall && typeof toolCall.title === 'string' && typeof toolCall.id === 'string'
             ? {
                 id: toolCall.id,
@@ -289,6 +323,80 @@ function parseConversationTurnEventResponse(value: unknown, _endpoint: string): 
                 command: asOptionalNullableString(toolCall.command),
                 output: asOptionalNullableString(toolCall.output),
                 file_paths: Array.isArray(toolCall.file_paths) ? toolCall.file_paths.map((entry) => String(entry)) : [],
+            }
+            : null,
+    }
+}
+
+function parseConversationSegmentResponse(value: unknown): ConversationSegmentResponse | null {
+    const record = asUnknownRecord(value)
+    if (
+        !record
+        || typeof record.id !== 'string'
+        || typeof record.turn_id !== 'string'
+        || typeof record.order !== 'number'
+        || typeof record.kind !== 'string'
+        || typeof record.role !== 'string'
+        || typeof record.status !== 'string'
+        || typeof record.timestamp !== 'string'
+        || typeof record.updated_at !== 'string'
+        || typeof record.content !== 'string'
+    ) {
+        return null
+    }
+    const kind = record.kind === 'assistant_message'
+        || record.kind === 'reasoning'
+        || record.kind === 'tool_call'
+        || record.kind === 'spec_edit_proposal'
+        || record.kind === 'execution_card'
+        ? record.kind
+        : null
+    if (!kind) {
+        return null
+    }
+    const role = record.role === 'system' ? 'system' : 'assistant'
+    const status = record.status === 'pending'
+        || record.status === 'streaming'
+        || record.status === 'failed'
+        || record.status === 'running'
+        ? record.status
+        : 'complete'
+    const toolCall = asUnknownRecord(record.tool_call)
+    const source = asUnknownRecord(record.source)
+    return {
+        id: record.id,
+        turn_id: record.turn_id,
+        order: record.order,
+        kind,
+        role,
+        status,
+        timestamp: record.timestamp,
+        updated_at: record.updated_at,
+        content: record.content,
+        completed_at: asOptionalNullableString(record.completed_at),
+        error: asOptionalNullableString(record.error),
+        artifact_id: asOptionalNullableString(record.artifact_id),
+        tool_call: toolCall && typeof toolCall.title === 'string' && typeof toolCall.id === 'string'
+            ? {
+                id: toolCall.id,
+                kind: toolCall.kind === 'file_change'
+                    ? 'file_change'
+                    : toolCall.kind === 'dynamic_tool'
+                        ? 'dynamic_tool'
+                        : 'command_execution',
+                status: toolCall.status === 'running' || toolCall.status === 'failed' ? toolCall.status : 'completed',
+                title: toolCall.title,
+                command: asOptionalNullableString(toolCall.command),
+                output: asOptionalNullableString(toolCall.output),
+                file_paths: Array.isArray(toolCall.file_paths) ? toolCall.file_paths.map((entry) => String(entry)) : [],
+            }
+            : null,
+        source: source
+            ? {
+                app_turn_id: asOptionalNullableString(source.app_turn_id),
+                item_id: asOptionalNullableString(source.item_id),
+                summary_index: typeof source.summary_index === 'number' ? source.summary_index : null,
+                call_id: asOptionalNullableString(source.call_id),
             }
             : null,
     }
@@ -556,10 +664,10 @@ export function parseConversationSnapshotResponse(
             .map((entry) => parseWorkflowEventResponse(entry))
             .filter((entry): entry is WorkflowEventResponse => entry !== null)
         : []
-    const turn_events = Array.isArray(record.turn_events)
-        ? record.turn_events
-            .map((entry) => parseConversationTurnEventResponse(entry, endpoint))
-            .filter((entry): entry is ConversationTurnEventResponse => entry !== null)
+    const segments = Array.isArray(record.segments)
+        ? record.segments
+            .map((entry) => parseConversationSegmentResponse(entry))
+            .filter((entry): entry is ConversationSegmentResponse => entry !== null)
         : []
     const spec_edit_proposals = Array.isArray(record.spec_edit_proposals)
         ? record.spec_edit_proposals
@@ -579,7 +687,7 @@ export function parseConversationSnapshotResponse(
         created_at: asOptionalString(record.created_at) || '',
         updated_at: asOptionalString(record.updated_at) || asOptionalString(record.created_at) || '',
         turns,
-        turn_events,
+        segments,
         event_log,
         spec_edit_proposals,
         execution_cards,

@@ -92,7 +92,7 @@ It contains:
   Canonical Spark Spawn metadata for the registered project.
 
 - `conversations/`
-  Conversation threads, turn history, turn events, and resumable AI-session metadata.
+  Conversation threads, normalized `state.json` snapshots, and raw `raw-log.jsonl` transport transcripts.
 
 - `workflow/`
   Workflow event logs and other project-scoped orchestration state.
@@ -108,13 +108,12 @@ It contains:
 
 The following are Spark Spawn-owned and belong under `SPARKSPAWN_HOME`:
 - conversation threads
-- conversation turn/event history
+- normalized conversation state and raw conversation transport logs
 - workflow logs
 - spec proposals
 - execution cards
 - task/work-package planning state
 - run metadata
-- resumable AI session state
 - project registry metadata
 - user configuration and defaults
 

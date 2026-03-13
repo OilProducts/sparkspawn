@@ -32,6 +32,8 @@ Execution artifacts stay outside this folder:
   Canonical definition of project chat conversations, turns, streaming, and review artifacts.
 - `conversation-event-contract.md`
   Canonical normalization, persistence, and rendering contract for project chat events.
+- `conversation-state-model.md`
+  Canonical durable conversation storage model: raw transcript versus materialized state, segment identity, compaction, and restart reconstruction.
 - `storage-boundaries.md`
   Canonical definition of app-owned versus project-owned data and where each must live.
 

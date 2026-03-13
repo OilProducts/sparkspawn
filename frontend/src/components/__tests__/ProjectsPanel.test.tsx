@@ -586,31 +586,20 @@ describe('ProjectsPanel', () => {
                   parent_turn_id: 'turn-user-1',
                 },
               ],
-              turn_events: [
+              segments: [
                 {
-                  id: 'event-tool-started-1',
+                  id: 'segment-tool-ls',
                   turn_id: 'turn-assistant-1',
-                  sequence: 1,
+                  order: 1,
+                  kind: 'tool_call',
+                  role: 'system',
+                  status: 'completed',
                   timestamp: '2026-03-07T19:46:10Z',
-                  kind: 'tool_call_started',
-                  tool_call_id: 'tool-ls',
-                  tool_call: {
-                    id: 'tool-ls',
-                    kind: 'command_execution',
-                    status: 'running',
-                    title: 'Run command',
-                    command: '/bin/zsh -lc ls',
-                    output: null,
-                    file_paths: [],
-                  },
-                },
-                {
-                  id: 'event-tool-completed-1',
-                  turn_id: 'turn-assistant-1',
-                  sequence: 2,
-                  timestamp: '2026-03-07T19:46:12Z',
-                  kind: 'tool_call_completed',
-                  tool_call_id: 'tool-ls',
+                  updated_at: '2026-03-07T19:46:12Z',
+                  completed_at: '2026-03-07T19:46:12Z',
+                  content: '',
+                  artifact_id: null,
+                  error: null,
                   tool_call: {
                     id: 'tool-ls',
                     kind: 'command_execution',
@@ -620,31 +609,21 @@ describe('ProjectsPanel', () => {
                     output: 'AGENTS.md',
                     file_paths: [],
                   },
+                  source: null,
                 },
                 {
-                  id: 'event-tool-started-2',
+                  id: 'segment-tool-ps',
                   turn_id: 'turn-assistant-1',
-                  sequence: 3,
+                  order: 2,
+                  kind: 'tool_call',
+                  role: 'system',
+                  status: 'completed',
                   timestamp: '2026-03-07T19:46:20Z',
-                  kind: 'tool_call_started',
-                  tool_call_id: 'tool-ps',
-                  tool_call: {
-                    id: 'tool-ps',
-                    kind: 'command_execution',
-                    status: 'running',
-                    title: 'Run command',
-                    command: '/bin/zsh -lc ps',
-                    output: null,
-                    file_paths: [],
-                  },
-                },
-                {
-                  id: 'event-tool-completed-2',
-                  turn_id: 'turn-assistant-1',
-                  sequence: 4,
-                  timestamp: '2026-03-07T19:46:22Z',
-                  kind: 'tool_call_completed',
-                  tool_call_id: 'tool-ps',
+                  updated_at: '2026-03-07T19:46:22Z',
+                  completed_at: '2026-03-07T19:46:22Z',
+                  content: '',
+                  artifact_id: null,
+                  error: null,
                   tool_call: {
                     id: 'tool-ps',
                     kind: 'command_execution',
@@ -654,14 +633,23 @@ describe('ProjectsPanel', () => {
                     output: 'PID TTY TIME CMD',
                     file_paths: [],
                   },
+                  source: null,
                 },
                 {
-                  id: 'event-assistant-completed-1',
+                  id: 'segment-assistant-summary',
                   turn_id: 'turn-assistant-1',
-                  sequence: 5,
+                  order: 3,
+                  kind: 'assistant_message',
+                  role: 'assistant',
+                  status: 'complete',
                   timestamp: '2026-03-07T19:46:30Z',
-                  kind: 'assistant_completed',
-                  message: 'Assistant turn completed.',
+                  updated_at: '2026-03-07T19:46:30Z',
+                  completed_at: '2026-03-07T19:46:30Z',
+                  content: 'Summary after tools.',
+                  artifact_id: null,
+                  error: null,
+                  tool_call: null,
+                  source: null,
                 },
               ],
               event_log: [],
@@ -753,14 +741,20 @@ describe('ProjectsPanel', () => {
                   parent_turn_id: 'turn-user-1',
                 },
               ],
-              turn_events: [
+              segments: [
                 {
-                  id: 'event-tool-completed-1',
+                  id: 'segment-tool-ls',
                   turn_id: 'turn-assistant-1',
-                  sequence: 1,
+                  order: 1,
+                  kind: 'tool_call',
+                  role: 'system',
+                  status: 'completed',
                   timestamp: '2026-03-07T19:46:12Z',
-                  kind: 'tool_call_completed',
-                  tool_call_id: 'tool-ls',
+                  updated_at: '2026-03-07T19:46:12Z',
+                  completed_at: '2026-03-07T19:46:12Z',
+                  content: '',
+                  artifact_id: null,
+                  error: null,
                   tool_call: {
                     id: 'tool-ls',
                     kind: 'command_execution',
@@ -770,14 +764,23 @@ describe('ProjectsPanel', () => {
                     output: 'AGENTS.md\nREADME.md',
                     file_paths: [],
                   },
+                  source: null,
                 },
                 {
-                  id: 'event-assistant-completed-1',
+                  id: 'segment-assistant-summary',
                   turn_id: 'turn-assistant-1',
-                  sequence: 2,
+                  order: 2,
+                  kind: 'assistant_message',
+                  role: 'assistant',
+                  status: 'complete',
                   timestamp: '2026-03-07T19:46:30Z',
-                  kind: 'assistant_completed',
-                  message: 'Assistant turn completed.',
+                  updated_at: '2026-03-07T19:46:30Z',
+                  completed_at: '2026-03-07T19:46:30Z',
+                  content: 'Summary after tools.',
+                  artifact_id: null,
+                  error: null,
+                  tool_call: null,
+                  source: null,
                 },
               ],
               event_log: [],
@@ -868,14 +871,22 @@ describe('ProjectsPanel', () => {
                   parent_turn_id: 'turn-user-1',
                 },
               ],
-              turn_events: [
+              segments: [
                 {
-                  id: 'event-reasoning-1',
+                  id: 'segment-reasoning-1',
                   turn_id: 'turn-assistant-1',
-                  sequence: 1,
+                  order: 1,
+                  kind: 'reasoning',
+                  role: 'assistant',
+                  status: 'streaming',
                   timestamp: '2026-03-07T20:10:02Z',
-                  kind: 'reasoning_summary',
-                  content_delta: '**Considering proposal** Looking for the smallest safe change first.',
+                  updated_at: '2026-03-07T20:10:02Z',
+                  completed_at: null,
+                  content: '**Considering proposal** Looking for the smallest safe change first.',
+                  artifact_id: null,
+                  error: null,
+                  tool_call: null,
+                  source: null,
                 },
               ],
               event_log: [],
@@ -912,7 +923,7 @@ describe('ProjectsPanel', () => {
     })
     expect(screen.queryByText('Looking for the smallest safe change first.')).not.toBeInTheDocument()
 
-    await user.click(screen.getByTestId('project-thinking-toggle-turn-assistant-1:thinking:0'))
+    await user.click(screen.getByTestId('project-thinking-toggle-segment-reasoning-1'))
 
     expect(screen.getByText('Looking for the smallest safe change first.')).toBeInTheDocument()
   })
@@ -1182,6 +1193,23 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-07T15:31:02Z',
             kind: 'reasoning_summary',
             content_delta: 'Scanning the project layout first.',
+            segment_id: 'segment-reasoning-live',
+            segment: {
+              id: 'segment-reasoning-live',
+              turn_id: 'turn-assistant-live',
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-07T15:31:02Z',
+              updated_at: '2026-03-07T15:31:02Z',
+              completed_at: null,
+              content: 'Scanning the project layout first.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
+            },
           },
         }),
       } as MessageEvent)
@@ -1220,7 +1248,24 @@ describe('ProjectsPanel', () => {
               parent_turn_id: 'turn-user-1',
             },
           ],
-          turn_events: [],
+          segments: [
+            {
+              id: 'segment-reasoning-live',
+              turn_id: 'turn-assistant-live',
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-07T15:31:02Z',
+              updated_at: '2026-03-07T15:31:02Z',
+              completed_at: null,
+              content: 'Scanning the project layout first.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
+            },
+          ],
           event_log: [],
           spec_edit_proposals: [],
           execution_cards: [],
@@ -1344,6 +1389,23 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-08T19:10:00Z',
             kind: 'reasoning_summary',
             content_delta: 'Scanning the repository structure first.',
+            segment_id: 'segment-reasoning-1',
+            segment: {
+              id: 'segment-reasoning-1',
+              turn_id: 'turn-assistant-1',
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-08T19:10:00Z',
+              updated_at: '2026-03-08T19:10:00Z',
+              completed_at: null,
+              content: 'Scanning the repository structure first.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
+            },
           },
         }),
       } as MessageEvent)
@@ -1361,6 +1423,23 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-08T19:10:01Z',
             kind: 'assistant_delta',
             content_delta: 'I’m going to scan the repository structure first.',
+            segment_id: 'segment-assistant-1',
+            segment: {
+              id: 'segment-assistant-1',
+              turn_id: 'turn-assistant-1',
+              order: 2,
+              kind: 'assistant_message',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-08T19:10:01Z',
+              updated_at: '2026-03-08T19:10:01Z',
+              completed_at: null,
+              content: 'I’m going to scan the repository structure first.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
+            },
           },
         }),
       } as MessageEvent)
@@ -1387,6 +1466,31 @@ describe('ProjectsPanel', () => {
               output: null,
               file_paths: [],
             },
+            segment_id: 'segment-tool-ls',
+            segment: {
+              id: 'segment-tool-ls',
+              turn_id: 'turn-assistant-1',
+              order: 3,
+              kind: 'tool_call',
+              role: 'system',
+              status: 'running',
+              timestamp: '2026-03-08T19:10:02Z',
+              updated_at: '2026-03-08T19:10:02Z',
+              completed_at: null,
+              content: '',
+              artifact_id: null,
+              error: null,
+              tool_call: {
+                id: 'tool-ls',
+                kind: 'command_execution',
+                status: 'running',
+                title: 'Run command',
+                command: '/bin/zsh -lc ls',
+                output: null,
+                file_paths: [],
+              },
+              source: null,
+            },
           },
         }),
       } as MessageEvent)
@@ -1404,6 +1508,23 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-08T19:10:03Z',
             kind: 'assistant_delta',
             content_delta: 'I found the main entry points and can summarize them.',
+            segment_id: 'segment-assistant-2',
+            segment: {
+              id: 'segment-assistant-2',
+              turn_id: 'turn-assistant-1',
+              order: 4,
+              kind: 'assistant_message',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-08T19:10:03Z',
+              updated_at: '2026-03-08T19:10:03Z',
+              completed_at: null,
+              content: 'I found the main entry points and can summarize them.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
+            },
           },
         }),
       } as MessageEvent)
@@ -1443,22 +1564,36 @@ describe('ProjectsPanel', () => {
               parent_turn_id: 'turn-user-1',
             },
           ],
-          turn_events: [
+          segments: [
             {
-              id: 'event-reasoning-1',
+              id: 'segment-reasoning-1',
               turn_id: 'turn-assistant-1',
-              sequence: 1,
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
               timestamp: '2026-03-08T19:10:00Z',
-              kind: 'reasoning_summary',
-              content_delta: 'Scanning the repository structure first.',
+              updated_at: '2026-03-08T19:10:00Z',
+              completed_at: null,
+              content: 'Scanning the repository structure first.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
             },
             {
-              id: 'event-tool-started-1',
+              id: 'segment-tool-ls',
               turn_id: 'turn-assistant-1',
-              sequence: 2,
+              order: 2,
+              kind: 'tool_call',
+              role: 'system',
+              status: 'completed',
               timestamp: '2026-03-08T19:10:02Z',
-              kind: 'tool_call_completed',
-              tool_call_id: 'tool-ls',
+              updated_at: '2026-03-08T19:10:02Z',
+              completed_at: '2026-03-08T19:10:02Z',
+              content: '',
+              artifact_id: null,
+              error: null,
               tool_call: {
                 id: 'tool-ls',
                 kind: 'command_execution',
@@ -1468,14 +1603,23 @@ describe('ProjectsPanel', () => {
                 output: 'README.md',
                 file_paths: [],
               },
+              source: null,
             },
             {
-              id: 'event-assistant-completed-1',
+              id: 'segment-assistant-2',
               turn_id: 'turn-assistant-1',
-              sequence: 3,
-              timestamp: '2026-03-08T19:10:04Z',
-              kind: 'assistant_completed',
-              message: 'Assistant turn completed.',
+              order: 3,
+              kind: 'assistant_message',
+              role: 'assistant',
+              status: 'complete',
+              timestamp: '2026-03-08T19:10:03Z',
+              updated_at: '2026-03-08T19:10:04Z',
+              completed_at: '2026-03-08T19:10:04Z',
+              content: 'I found the main entry points and can summarize them.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
             },
           ],
           event_log: [],
@@ -1607,6 +1751,23 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-08T19:28:38Z',
             kind: 'reasoning_summary',
             content_delta: 'Considering the spec proposal.',
+            segment_id: 'segment-reasoning-1',
+            segment: {
+              id: 'segment-reasoning-1',
+              turn_id: 'turn-assistant-1',
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-08T19:28:38Z',
+              updated_at: '2026-03-08T19:28:38Z',
+              completed_at: null,
+              content: 'Considering the spec proposal.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
+            },
           },
         }),
       } as MessageEvent)
@@ -1624,6 +1785,23 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-08T19:28:40Z',
             kind: 'assistant_delta',
             content_delta: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+            segment_id: 'segment-assistant-1',
+            segment: {
+              id: 'segment-assistant-1',
+              turn_id: 'turn-assistant-1',
+              order: 2,
+              kind: 'assistant_message',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-08T19:28:40Z',
+              updated_at: '2026-03-08T19:28:40Z',
+              completed_at: null,
+              content: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
+            },
           },
         }),
       } as MessageEvent)
@@ -1658,22 +1836,38 @@ describe('ProjectsPanel', () => {
               parent_turn_id: 'turn-user-1',
             },
           ],
-          turn_events: [
+          segments: [
             {
-              id: 'event-reasoning-1',
+              id: 'segment-reasoning-1',
               turn_id: 'turn-assistant-1',
-              sequence: 1,
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
               timestamp: '2026-03-08T19:28:38Z',
-              kind: 'reasoning_summary',
-              content_delta: 'Considering the spec proposal.',
+              updated_at: '2026-03-08T19:28:38Z',
+              completed_at: null,
+              content: 'Considering the spec proposal.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
             },
             {
-              id: 'event-assistant-completed-1',
+              id: 'segment-assistant-1',
               turn_id: 'turn-assistant-1',
-              sequence: 1,
-              timestamp: '2026-03-08T19:28:43Z',
-              kind: 'assistant_completed',
-              message: 'Assistant turn completed.',
+              order: 2,
+              kind: 'assistant_message',
+              role: 'assistant',
+              status: 'complete',
+              timestamp: '2026-03-08T19:28:40Z',
+              updated_at: '2026-03-08T19:28:43Z',
+              completed_at: '2026-03-08T19:28:43Z',
+              content: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
             },
           ],
           event_log: [],
@@ -1805,6 +1999,23 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-08T21:18:16Z',
             kind: 'reasoning_summary',
             content_delta: 'Checking the repo before drafting.',
+            segment_id: 'segment-reasoning-1',
+            segment: {
+              id: 'segment-reasoning-1',
+              turn_id: 'turn-assistant-1',
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-08T21:18:16Z',
+              updated_at: '2026-03-08T21:18:16Z',
+              completed_at: null,
+              content: 'Checking the repo before drafting.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
+            },
           },
         }),
       } as MessageEvent)
@@ -1839,22 +2050,38 @@ describe('ProjectsPanel', () => {
               parent_turn_id: 'turn-user-1',
             },
           ],
-          turn_events: [
+          segments: [
             {
-              id: 'event-reasoning-1',
+              id: 'segment-reasoning-1',
               turn_id: 'turn-assistant-1',
-              sequence: 1,
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
               timestamp: '2026-03-08T21:18:16Z',
-              kind: 'reasoning_summary',
-              content_delta: 'Checking the repo before drafting.',
+              updated_at: '2026-03-08T21:18:16Z',
+              completed_at: null,
+              content: 'Checking the repo before drafting.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
             },
             {
-              id: 'event-assistant-completed-1',
+              id: 'segment-assistant-1',
               turn_id: 'turn-assistant-1',
-              sequence: 2,
+              order: 2,
+              kind: 'assistant_message',
+              role: 'assistant',
+              status: 'complete',
               timestamp: '2026-03-08T21:18:33Z',
-              kind: 'assistant_completed',
-              message: 'Assistant turn completed.',
+              updated_at: '2026-03-08T21:18:33Z',
+              completed_at: '2026-03-08T21:18:33Z',
+              content: 'I can use `draft_spec_proposal`, but there is not yet a concrete project change to draft.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: null,
             },
           ],
           event_log: [],
@@ -1969,31 +2196,99 @@ describe('ProjectsPanel', () => {
       const events = [
         {
           id: 'reason-1',
+          segment_id: 'segment-reasoning-1',
           sequence: 1,
           kind: 'reasoning_summary',
           timestamp: '2026-03-08T20:10:00Z',
           content_delta: 'Planning from the project context. ',
+          segment: {
+            id: 'segment-reasoning-1',
+            turn_id: 'turn-assistant-interleaved',
+            order: 1,
+            kind: 'reasoning',
+            role: 'assistant',
+            status: 'streaming',
+            timestamp: '2026-03-08T20:10:00Z',
+            updated_at: '2026-03-08T20:10:00Z',
+            completed_at: null,
+            content: 'Planning from the project context. ',
+            artifact_id: null,
+            error: null,
+            tool_call: null,
+            source: null,
+          },
         },
         {
           id: 'assistant-1',
+          segment_id: 'segment-assistant-1',
           sequence: 2,
           kind: 'assistant_delta',
           timestamp: '2026-03-08T20:10:01Z',
           content_delta: 'I can use the spec proposal tool ',
+          segment: {
+            id: 'segment-assistant-1',
+            turn_id: 'turn-assistant-interleaved',
+            order: 2,
+            kind: 'assistant_message',
+            role: 'assistant',
+            status: 'streaming',
+            timestamp: '2026-03-08T20:10:01Z',
+            updated_at: '2026-03-08T20:10:01Z',
+            completed_at: null,
+            content: 'I can use the spec proposal tool ',
+            artifact_id: null,
+            error: null,
+            tool_call: null,
+            source: null,
+          },
         },
         {
           id: 'reason-2',
+          segment_id: 'segment-reasoning-1',
           sequence: 3,
           kind: 'reasoning_summary',
           timestamp: '2026-03-08T20:10:01Z',
           content_delta: 'and I am checking the repository first.',
+          segment: {
+            id: 'segment-reasoning-1',
+            turn_id: 'turn-assistant-interleaved',
+            order: 1,
+            kind: 'reasoning',
+            role: 'assistant',
+            status: 'streaming',
+            timestamp: '2026-03-08T20:10:00Z',
+            updated_at: '2026-03-08T20:10:01Z',
+            completed_at: null,
+            content: 'Planning from the project context. and I am checking the repository first.',
+            artifact_id: null,
+            error: null,
+            tool_call: null,
+            source: null,
+          },
         },
         {
           id: 'assistant-2',
+          segment_id: 'segment-assistant-1',
           sequence: 4,
           kind: 'assistant_delta',
           timestamp: '2026-03-08T20:10:02Z',
           content_delta: 'once we have a concrete change.',
+          segment: {
+            id: 'segment-assistant-1',
+            turn_id: 'turn-assistant-interleaved',
+            order: 2,
+            kind: 'assistant_message',
+            role: 'assistant',
+            status: 'streaming',
+            timestamp: '2026-03-08T20:10:01Z',
+            updated_at: '2026-03-08T20:10:02Z',
+            completed_at: null,
+            content: 'I can use the spec proposal tool once we have a concrete change.',
+            artifact_id: null,
+            error: null,
+            tool_call: null,
+            source: null,
+          },
         },
       ]
       for (const event of events) {
@@ -2011,6 +2306,8 @@ describe('ProjectsPanel', () => {
               timestamp: event.timestamp,
               kind: event.kind,
               content_delta: event.content_delta,
+              segment_id: event.segment_id,
+              segment: event.segment,
             },
           }),
         } as MessageEvent)
@@ -2068,24 +2365,30 @@ describe('ProjectsPanel', () => {
                 kind: 'message',
                 artifact_id: null,
               },
-              {
-                id: 'turn-assistant-inline',
-                role: 'assistant',
-                content: 'I drafted the proposal for review.',
-                timestamp: '2026-03-09T21:00:01Z',
+            {
+              id: 'turn-assistant-inline',
+              role: 'assistant',
+              content: 'I drafted the proposal for review.',
+              timestamp: '2026-03-09T21:00:01Z',
                 status: 'complete',
                 kind: 'message',
                 artifact_id: null,
               },
             ],
-            turn_events: [
+            segments: [
               {
-                id: 'event-tool-inline',
+                id: 'segment-tool-inline',
                 turn_id: 'turn-assistant-inline',
-                sequence: 1,
+                order: 1,
+                kind: 'tool_call',
+                role: 'system',
+                status: 'completed',
                 timestamp: '2026-03-09T21:00:01Z',
-                kind: 'tool_call_completed',
-                tool_call_id: 'tool-inline',
+                updated_at: '2026-03-09T21:00:01Z',
+                completed_at: '2026-03-09T21:00:01Z',
+                content: '',
+                artifact_id: null,
+                error: null,
                 tool_call: {
                   id: 'tool-inline',
                   kind: 'dynamic_tool',
@@ -2094,23 +2397,39 @@ describe('ProjectsPanel', () => {
                   output: 'Drafted spec proposal: Add proposal smoke test.',
                   file_paths: [],
                 },
+                source: null,
               },
               {
-                id: 'event-proposal-inline',
+                id: 'segment-artifact-proposal-inline',
                 turn_id: 'turn-assistant-inline',
-                sequence: 2,
+                order: 2,
+                kind: 'spec_edit_proposal',
+                role: 'system',
+                status: 'complete',
                 timestamp: '2026-03-09T21:00:02Z',
-                kind: 'spec_edit_proposal_created',
+                updated_at: '2026-03-09T21:00:02Z',
+                completed_at: '2026-03-09T21:00:02Z',
+                content: '',
                 artifact_id: 'proposal-inline',
-                message: 'Drafted spec edit proposal proposal-inline.',
+                error: null,
+                tool_call: null,
+                source: null,
               },
               {
-                id: 'event-assistant-inline',
+                id: 'segment-assistant-inline',
                 turn_id: 'turn-assistant-inline',
-                sequence: 3,
+                order: 3,
+                kind: 'assistant_message',
+                role: 'assistant',
+                status: 'complete',
                 timestamp: '2026-03-09T21:00:03Z',
-                kind: 'assistant_completed',
-                message: 'Assistant turn completed.',
+                updated_at: '2026-03-09T21:00:03Z',
+                completed_at: '2026-03-09T21:00:03Z',
+                content: 'I drafted the proposal for review.',
+                artifact_id: null,
+                error: null,
+                tool_call: null,
+                source: null,
               },
             ],
             event_log: [
@@ -2168,6 +2487,330 @@ describe('ProjectsPanel', () => {
       expect(replyIndex).toBeGreaterThan(-1)
       expect(proposalIndex).toBeLessThan(replyIndex)
     })
+  })
+
+  it('reconstructs multiple persisted reasoning segments from snapshot state', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify([
+            {
+              conversation_id: 'conversation-segments',
+              project_path: '/tmp/chat-project',
+              title: 'Segment thread',
+              created_at: '2026-03-13T10:00:00Z',
+              updated_at: '2026-03-13T10:00:05Z',
+              last_message_preview: 'Here is the grounded plan.',
+            },
+          ]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/conversations/conversation-segments') && !url.includes('/turns')) {
+          return new Response(JSON.stringify({
+            conversation_id: 'conversation-segments',
+            project_path: '/tmp/chat-project',
+            title: 'Segment thread',
+            created_at: '2026-03-13T10:00:00Z',
+            updated_at: '2026-03-13T10:00:05Z',
+            turns: [
+              {
+                id: 'turn-user-segments',
+                role: 'user',
+                content: 'Explain your plan.',
+                timestamp: '2026-03-13T10:00:00Z',
+                status: 'complete',
+                kind: 'message',
+                artifact_id: null,
+              },
+              {
+                id: 'turn-assistant-segments',
+                role: 'assistant',
+                content: 'Here is the grounded plan.',
+                timestamp: '2026-03-13T10:00:01Z',
+                status: 'complete',
+                kind: 'message',
+                artifact_id: null,
+              },
+            ],
+            segments: [
+              {
+                id: 'segment-reasoning-1',
+                turn_id: 'turn-assistant-segments',
+                order: 1,
+                kind: 'reasoning',
+                role: 'assistant',
+                status: 'complete',
+                timestamp: '2026-03-13T10:00:01Z',
+                updated_at: '2026-03-13T10:00:02Z',
+                completed_at: '2026-03-13T10:00:02Z',
+                content: '**Reviewing repo** Looking through the project layout.',
+                artifact_id: null,
+                error: null,
+                tool_call: null,
+                source: {
+                  app_turn_id: 'app-turn-1',
+                  item_id: 'item-rs-1',
+                  summary_index: 0,
+                  call_id: null,
+                },
+              },
+              {
+                id: 'segment-reasoning-2',
+                turn_id: 'turn-assistant-segments',
+                order: 2,
+                kind: 'reasoning',
+                role: 'assistant',
+                status: 'complete',
+                timestamp: '2026-03-13T10:00:03Z',
+                updated_at: '2026-03-13T10:00:03Z',
+                completed_at: '2026-03-13T10:00:03Z',
+                content: '**Considering proposal** Mapping the change to a minimal spec edit.',
+                artifact_id: null,
+                error: null,
+                tool_call: null,
+                source: {
+                  app_turn_id: 'app-turn-1',
+                  item_id: 'item-rs-1',
+                  summary_index: 1,
+                  call_id: null,
+                },
+              },
+              {
+                id: 'segment-assistant-1',
+                turn_id: 'turn-assistant-segments',
+                order: 3,
+                kind: 'assistant_message',
+                role: 'assistant',
+                status: 'complete',
+                timestamp: '2026-03-13T10:00:05Z',
+                updated_at: '2026-03-13T10:00:05Z',
+                completed_at: '2026-03-13T10:00:05Z',
+                content: 'Here is the grounded plan.',
+                artifact_id: null,
+                error: null,
+                tool_call: null,
+                source: {
+                  app_turn_id: 'app-turn-1',
+                  item_id: 'item-msg-1',
+                  summary_index: null,
+                  call_id: null,
+                },
+              },
+            ],
+            turn_events: [],
+            event_log: [],
+            spec_edit_proposals: [],
+            execution_cards: [],
+            execution_workflow: {
+              run_id: null,
+              status: 'idle',
+              error: null,
+              flow_source: null,
+            },
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response('Not found', { status: 404 })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+
+    render(<ProjectsPanel />)
+
+    const history = await screen.findByTestId('project-ai-conversation-history-list')
+    await waitFor(() => {
+      expect(history).toHaveTextContent('Reviewing repo')
+      expect(history).toHaveTextContent('Considering proposal')
+      expect(history).toHaveTextContent('Here is the grounded plan.')
+    })
+    expect(screen.getAllByTestId(/project-thinking-toggle-/)).toHaveLength(2)
+  })
+
+  it('upserts streamed segment payloads onto the matching reasoning card', async () => {
+    class MockEventSource {
+      static instances: MockEventSource[] = []
+
+      onmessage: ((event: MessageEvent) => void) | null = null
+
+      constructor(public url: string) {
+        MockEventSource.instances.push(this)
+      }
+
+      close() {}
+    }
+
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify([
+            {
+              conversation_id: 'conversation-segment-upsert',
+              project_path: '/tmp/chat-project',
+              title: 'Segment upsert thread',
+              created_at: '2026-03-13T11:00:00Z',
+              updated_at: '2026-03-13T11:00:01Z',
+              last_message_preview: 'Planning',
+            },
+          ]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/conversations/conversation-segment-upsert') && !url.includes('/turns')) {
+          return new Response(JSON.stringify({
+            conversation_id: 'conversation-segment-upsert',
+            project_path: '/tmp/chat-project',
+            title: 'Segment upsert thread',
+            created_at: '2026-03-13T11:00:00Z',
+            updated_at: '2026-03-13T11:00:01Z',
+            turns: [
+              {
+                id: 'turn-user-upsert',
+                role: 'user',
+                content: 'Draft the change.',
+                timestamp: '2026-03-13T11:00:00Z',
+                status: 'complete',
+                kind: 'message',
+                artifact_id: null,
+              },
+              {
+                id: 'turn-assistant-upsert',
+                role: 'assistant',
+                content: '',
+                timestamp: '2026-03-13T11:00:01Z',
+                status: 'streaming',
+                kind: 'message',
+                artifact_id: null,
+              },
+            ],
+            segments: [
+              {
+                id: 'segment-reasoning-live',
+                turn_id: 'turn-assistant-upsert',
+                order: 1,
+                kind: 'reasoning',
+                role: 'assistant',
+                status: 'streaming',
+                timestamp: '2026-03-13T11:00:01Z',
+                updated_at: '2026-03-13T11:00:01Z',
+                completed_at: null,
+                content: '**Considering proposal** Drafting the minimal edit.',
+                artifact_id: null,
+                error: null,
+                tool_call: null,
+                source: {
+                  app_turn_id: 'app-turn-2',
+                  item_id: 'item-rs-2',
+                  summary_index: 0,
+                  call_id: null,
+                },
+              },
+            ],
+            turn_events: [],
+            event_log: [],
+            spec_edit_proposals: [],
+            execution_cards: [],
+            execution_workflow: {
+              run_id: null,
+              status: 'idle',
+              error: null,
+              flow_source: null,
+            },
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/chat-project')
+      useStore.getState().setActiveProjectPath('/tmp/chat-project')
+      useStore.getState().setConversationId('conversation-segment-upsert')
+    })
+
+    render(<ProjectsPanel />)
+
+    const history = await screen.findByTestId('project-ai-conversation-history-list')
+    await waitFor(() => {
+      expect(history).toHaveTextContent('Considering proposal')
+    })
+    expect(screen.getAllByTestId(/project-thinking-toggle-/)).toHaveLength(1)
+
+    act(() => {
+      MockEventSource.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn_event',
+          conversation_id: 'conversation-segment-upsert',
+          project_path: '/tmp/chat-project',
+          title: 'Segment upsert thread',
+          updated_at: '2026-03-13T11:00:02Z',
+          event: {
+            id: 'event-reasoning-live-2',
+            turn_id: 'turn-assistant-upsert',
+            sequence: 2,
+            timestamp: '2026-03-13T11:00:02Z',
+            kind: 'reasoning_summary',
+            content_delta: ' Mapping the change to a minimal spec edit.',
+            segment_id: 'segment-reasoning-live',
+            segment: {
+              id: 'segment-reasoning-live',
+              turn_id: 'turn-assistant-upsert',
+              order: 1,
+              kind: 'reasoning',
+              role: 'assistant',
+              status: 'streaming',
+              timestamp: '2026-03-13T11:00:01Z',
+              updated_at: '2026-03-13T11:00:02Z',
+              completed_at: null,
+              content: '**Considering proposal** Drafting the minimal edit. Mapping the change to a minimal spec edit.',
+              artifact_id: null,
+              error: null,
+              tool_call: null,
+              source: {
+                app_turn_id: 'app-turn-2',
+                item_id: 'item-rs-2',
+                summary_index: 0,
+                call_id: null,
+              },
+            },
+          },
+        }),
+      } as MessageEvent)
+    })
+
+    await waitFor(() => {
+      expect(history).toHaveTextContent('Considering proposal')
+    })
+    expect(screen.getAllByTestId(/project-thinking-toggle-/)).toHaveLength(1)
   })
 
   it('keeps the composer cleared when sending a turn fails', async () => {

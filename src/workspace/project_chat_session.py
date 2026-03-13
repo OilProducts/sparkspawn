@@ -96,6 +96,29 @@ def _extract_spec_proposal_payload(arguments: Any) -> dict[str, Any]:
     return payload
 
 
+def _extract_app_turn_id(message: dict[str, Any]) -> Optional[str]:
+    params = message.get("params")
+    if not isinstance(params, dict):
+        return None
+    direct = as_non_empty_string(params.get("turnId"))
+    if direct:
+        return direct
+    turn = params.get("turn")
+    if isinstance(turn, dict):
+        nested = as_non_empty_string(turn.get("id"))
+        if nested:
+            return nested
+    nested_msg = params.get("msg")
+    if isinstance(nested_msg, dict):
+        nested = as_non_empty_string(nested_msg.get("turn_id") or nested_msg.get("turnId"))
+        if nested:
+            return nested
+    params_id = as_non_empty_string(params.get("id"))
+    if params_id and isinstance(message.get("method"), str) and str(message.get("method")).startswith("codex/event/"):
+        return params_id
+    return None
+
+
 class CodexAppServerChatSession:
     def __init__(
         self,
@@ -399,6 +422,7 @@ class CodexAppServerChatSession:
             last_activity_at = time.monotonic()
             spec_proposal_payloads: list[dict[str, Any]] = []
             tool_calls_by_id: dict[str, ToolCallRecord] = {}
+            current_app_turn_id: Optional[str] = None
             params: dict[str, Any] = {
                 "threadId": self._thread_id,
                 "input": [{"type": "text", "text": prompt}],
@@ -433,6 +457,9 @@ class CodexAppServerChatSession:
                 message = codex_app_server.parse_jsonrpc_line(line)
                 if message is None:
                     continue
+                extracted_turn_id = _extract_app_turn_id(message)
+                if extracted_turn_id:
+                    current_app_turn_id = extracted_turn_id
                 if "id" in message and "method" in message:
                     request_method = message.get("method")
                     request_params = message.get("params") or {}
@@ -453,6 +480,8 @@ class CodexAppServerChatSession:
                                 kind="tool_call_started",
                                 tool_call_id=item_id,
                                 tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                                app_turn_id=current_app_turn_id,
+                                item_id=item_id,
                             ),
                         )
                     elif request_method == "item/fileChange/requestApproval":
@@ -472,6 +501,8 @@ class CodexAppServerChatSession:
                                 kind="tool_call_started",
                                 tool_call_id=item_id,
                                 tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                                app_turn_id=current_app_turn_id,
+                                item_id=item_id,
                             ),
                         )
                     elif request_method == "item/tool/call":
@@ -490,6 +521,7 @@ class CodexAppServerChatSession:
                                 kind="tool_call_started",
                                 tool_call_id=call_id,
                                 tool_call=ToolCallRecord.from_dict(initial_tool_call.to_dict()),
+                                app_turn_id=current_app_turn_id,
                             ),
                         )
                         if on_dynamic_tool_call is None:
@@ -507,6 +539,7 @@ class CodexAppServerChatSession:
                                     kind="tool_call_failed",
                                     tool_call_id=call_id,
                                     tool_call=ToolCallRecord.from_dict(failed_tool_call.to_dict()),
+                                    app_turn_id=current_app_turn_id,
                                 ),
                             )
                             self._send_response(
@@ -532,6 +565,7 @@ class CodexAppServerChatSession:
                                     tool_call_id=call_id,
                                     tool_call=ToolCallRecord.from_dict(tool_result.tool_call.to_dict()),
                                     spec_proposal_payload=tool_result.spec_proposal_payload,
+                                    app_turn_id=current_app_turn_id,
                                 ),
                             )
                             self._send_response(message.get("id"), tool_result.response)
@@ -550,6 +584,7 @@ class CodexAppServerChatSession:
                                     kind="tool_call_failed",
                                     tool_call_id=call_id,
                                     tool_call=ToolCallRecord.from_dict(failed_tool_call.to_dict()),
+                                    app_turn_id=current_app_turn_id,
                                 ),
                             )
                             self._send_response(
@@ -567,13 +602,24 @@ class CodexAppServerChatSession:
                     if normalized_event.kind == "assistant_delta" and normalized_event.text:
                         self._emit_live_event(
                             on_event,
-                            ChatTurnLiveEvent(kind="assistant_delta", content_delta=normalized_event.text),
+                            ChatTurnLiveEvent(
+                                kind="assistant_delta",
+                                content_delta=normalized_event.text,
+                                app_turn_id=current_app_turn_id,
+                                item_id=normalized_event.item_id,
+                            ),
                         )
                         continue
                     if normalized_event.kind == "reasoning_delta" and normalized_event.text:
                         self._emit_live_event(
                             on_event,
-                            ChatTurnLiveEvent(kind="reasoning_summary", content_delta=normalized_event.text),
+                            ChatTurnLiveEvent(
+                                kind="reasoning_summary",
+                                content_delta=normalized_event.text,
+                                app_turn_id=current_app_turn_id,
+                                item_id=normalized_event.item_id,
+                                summary_index=normalized_event.summary_index,
+                            ),
                         )
                         continue
                     if normalized_event.kind == "assistant_message_completed" and normalized_event.text:
@@ -584,6 +630,8 @@ class CodexAppServerChatSession:
                                     kind="assistant_completed",
                                     content_delta=normalized_event.text,
                                     message="Assistant message completed.",
+                                    app_turn_id=current_app_turn_id,
+                                    item_id=normalized_event.item_id,
                                 ),
                             )
                         continue
@@ -599,6 +647,8 @@ class CodexAppServerChatSession:
                                 kind="tool_call_started",
                                 tool_call_id=normalized_event.item_id or tool_call.id,
                                 tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                                app_turn_id=current_app_turn_id,
+                                item_id=normalized_event.item_id,
                             ),
                         )
                         continue
@@ -614,6 +664,8 @@ class CodexAppServerChatSession:
                                 kind="tool_call_failed" if tool_call.status == "failed" else "tool_call_completed",
                                 tool_call_id=normalized_event.item_id or tool_call.id,
                                 tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                                app_turn_id=current_app_turn_id,
+                                item_id=normalized_event.item_id,
                             ),
                         )
                         continue
@@ -628,6 +680,8 @@ class CodexAppServerChatSession:
                                 kind="tool_call_updated",
                                 tool_call_id=tool_call.id,
                                 tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                                app_turn_id=current_app_turn_id,
+                                item_id=normalized_event.item_id or tool_call.id,
                             ),
                         )
                         continue
@@ -644,6 +698,7 @@ class CodexAppServerChatSession:
                             kind="tool_call_failed" if stream_state.last_error else "tool_call_completed",
                             tool_call_id=tool_call.id,
                             tool_call=ToolCallRecord.from_dict(tool_call.to_dict()),
+                            app_turn_id=current_app_turn_id,
                         ),
                     )
             if stream_state.last_error:
