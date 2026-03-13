@@ -5178,6 +5178,7 @@ digraph contract_behavior {
       directoryPath: '/tmp/persisted-project',
       isFavorite: true,
       lastAccessedAt: '2026-03-04T00:00:00.000Z',
+      flowBindings: {},
     })
     expect(restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']?.conversationId).toBe(
       'conversation-persisted-project',

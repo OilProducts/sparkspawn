@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Eye, OctagonX, RefreshCcw } from 'lucide-react'
+import { RefreshCcw } from 'lucide-react'
 import { useStore } from '@/store'
 import {
     computeRunMetadataFreshness,
@@ -17,143 +17,34 @@ import {
     fetchPipelineQuestionsValidated,
     fetchRunsListValidated,
 } from '@/lib/attractorClient'
-import { TIMELINE_UPDATE_BUDGET_MS } from '@/lib/performanceBudgets'
-
-interface RunRecord {
-    run_id: string
-    flow_name: string
-    status: string
-    result?: string | null
-    working_directory: string
-    project_path?: string
-    git_branch?: string | null
-    git_commit?: string | null
-    spec_id?: string | null
-    plan_id?: string | null
-    model: string
-    started_at: string
-    ended_at?: string | null
-    last_error?: string
-    token_usage?: number | null
-}
-
-interface CheckpointResponse {
-    pipeline_id: string
-    checkpoint: Record<string, unknown>
-}
-
-interface ContextResponse {
-    pipeline_id: string
-    context: Record<string, unknown>
-}
-
-interface ArtifactListEntry {
-    path: string
-    size_bytes: number
-    media_type: string
-    viewable: boolean
-}
-
-interface ArtifactListResponse {
-    pipeline_id: string
-    artifacts: ArtifactListEntry[]
-}
-
-interface CheckpointErrorState {
-    message: string
-    help: string
-}
-
-interface ContextErrorState {
-    message: string
-    help: string
-}
-
-interface ArtifactErrorState {
-    message: string
-    help: string
-}
-
-interface GraphvizErrorState {
-    message: string
-    help: string
-}
-
-interface FormattedContextValue {
-    renderedValue: string
-    valueType: string
-    renderKind: 'scalar' | 'structured'
-}
-
-interface ContextExportEntry {
-    key: string
-    value: unknown
-}
-
-type TimelineEventCategory = 'lifecycle' | 'stage' | 'parallel' | 'interview' | 'checkpoint'
-type TimelineSeverity = 'info' | 'warning' | 'error'
-type TimelineCorrelationKind = 'retry' | 'interview'
-
-interface TimelineEventEntry {
-    id: string
-    sequence: number
-    type: string
-    category: TimelineEventCategory
-    severity: TimelineSeverity
-    nodeId: string | null
-    stageIndex: number | null
-    summary: string
-    receivedAt: string
-    payload: Record<string, unknown>
-}
-
-interface TimelineCorrelationDescriptor {
-    key: string
-    kind: TimelineCorrelationKind
-    label: string
-}
-
-interface GroupedTimelineEntry {
-    id: string
-    correlation: TimelineCorrelationDescriptor | null
-    events: TimelineEventEntry[]
-}
-
-interface PendingInterviewGate {
-    eventId: string
-    sequence: number
-    receivedAt: string
-    nodeId: string | null
-    stageIndex: number | null
-    prompt: string
-    questionId: string | null
-    questionType: 'MULTIPLE_CHOICE' | 'YES_NO' | 'CONFIRMATION' | 'FREEFORM' | null
-    options: Array<{
-        label: string
-        value: string
-        key: string | null
-        description: string | null
-    }>
-}
-
-interface PendingQuestionSnapshot {
-    questionId: string
-    nodeId: string | null
-    prompt: string
-    questionType: 'MULTIPLE_CHOICE' | 'YES_NO' | 'CONFIRMATION' | 'FREEFORM' | null
-    options: Array<{
-        label: string
-        value: string
-        key: string | null
-        description: string | null
-    }>
-}
-
-interface PendingInterviewGateGroup {
-    key: string
-    heading: string
-    gates: PendingInterviewGate[]
-}
+import { RunArtifactsCard } from './runs/RunArtifactsCard'
+import { RunCheckpointCard } from './runs/RunCheckpointCard'
+import { RunContextCard } from './runs/RunContextCard'
+import { RunEventTimelineCard } from './runs/RunEventTimelineCard'
+import { RunGraphvizCard } from './runs/RunGraphvizCard'
+import { RunList } from './runs/RunList'
+import { RunSummaryCard } from './runs/RunSummaryCard'
+import type {
+    ArtifactErrorState,
+    ArtifactListEntry,
+    ArtifactListResponse,
+    CheckpointErrorState,
+    CheckpointResponse,
+    ContextErrorState,
+    ContextExportEntry,
+    ContextResponse,
+    FormattedContextValue,
+    GraphvizErrorState,
+    GroupedTimelineEntry,
+    PendingInterviewGate,
+    PendingInterviewGateGroup,
+    PendingQuestionSnapshot,
+    RunRecord,
+    TimelineCorrelationDescriptor,
+    TimelineEventCategory,
+    TimelineEventEntry,
+    TimelineSeverity,
+} from './runs/types'
 
 const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
     PipelineStarted: 'lifecycle',
@@ -175,30 +66,9 @@ const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
     CheckpointSaved: 'checkpoint',
 }
 
-const TIMELINE_CATEGORY_LABELS: Record<TimelineEventCategory, string> = {
-    lifecycle: 'Lifecycle',
-    stage: 'Stage',
-    parallel: 'Parallel',
-    interview: 'Interview',
-    checkpoint: 'Checkpoint',
-}
-
-const TIMELINE_SEVERITY_LABELS: Record<TimelineSeverity, string> = {
-    info: 'Info',
-    warning: 'Warning',
-    error: 'Error',
-}
-
-const TIMELINE_SEVERITY_STYLES: Record<TimelineSeverity, string> = {
-    info: 'border-border/80 bg-background text-muted-foreground',
-    warning: 'border-amber-500/40 bg-amber-500/10 text-amber-800',
-    error: 'border-destructive/40 bg-destructive/10 text-destructive',
-}
-
 const TIMELINE_MAX_ITEMS = 200
 const RETRY_CORRELATION_EVENT_TYPES = new Set(['StageStarted', 'StageFailed', 'StageRetrying', 'StageCompleted'])
 const PENDING_GATE_FALLBACK_RECEIVED_AT = '1970-01-01T00:00:00Z'
-const RUN_HISTORY_GRID_TEMPLATE = 'grid-cols-[minmax(112px,0.9fr)_minmax(112px,0.9fr)_minmax(320px,2.8fr)_minmax(144px,1fr)_minmax(144px,1fr)_minmax(96px,0.8fr)_minmax(96px,0.8fr)_minmax(164px,1.2fr)]'
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -631,58 +501,6 @@ const timelineCorrelationDescriptorFromEvent = (
     return null
 }
 
-const STATUS_STYLES: Record<string, string> = {
-    running: 'bg-sky-500/15 text-sky-700',
-    success: 'bg-green-500/15 text-green-800',
-    failed: 'bg-destructive/15 text-destructive',
-    fail: 'bg-destructive/15 text-destructive',
-    aborted: 'bg-amber-500/15 text-amber-800',
-    canceled: 'bg-amber-500/15 text-amber-800',
-    paused: 'bg-amber-500/15 text-amber-800',
-    pause_requested: 'bg-amber-500/15 text-amber-800',
-    abort_requested: 'bg-amber-500/15 text-amber-800',
-    cancel_requested: 'bg-amber-500/15 text-amber-800',
-    validation_error: 'bg-destructive/15 text-destructive',
-}
-
-const STATUS_LABELS: Record<string, string> = {
-    pause_requested: 'Pausing',
-    abort_requested: 'Canceling',
-    cancel_requested: 'Canceling',
-    aborted: 'Canceled',
-    canceled: 'Canceled',
-}
-
-const formatTimestamp = (value?: string | null) => {
-    if (!value) return '—'
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return '—'
-    return date.toLocaleString()
-}
-
-const formatDuration = (start?: string, end?: string | null, status?: string, now?: number) => {
-    if (!start) return '—'
-    const startMs = Date.parse(start)
-    if (!Number.isFinite(startMs)) return '—'
-    let endMs: number | null = null
-    if (end) {
-        const parsed = Date.parse(end)
-        if (Number.isFinite(parsed)) endMs = parsed
-    } else if (status === 'running' || status === 'pause_requested' || status === 'abort_requested' || status === 'cancel_requested') {
-        endMs = now ?? Date.now()
-    }
-    if (endMs === null) return '—'
-    const delta = Math.max(0, endMs - startMs)
-    const seconds = Math.floor(delta / 1000)
-    const minutes = Math.floor(seconds / 60)
-    const hours = Math.floor(minutes / 60)
-    const remSeconds = seconds % 60
-    const remMinutes = minutes % 60
-    if (hours > 0) return `${hours}h ${remMinutes}m`
-    if (minutes > 0) return `${minutes}m`
-    return `${remSeconds}s`
-}
-
 const normalizeScopePath = (value: string) => {
     const trimmed = value.trim()
     if (!trimmed) return ''
@@ -797,19 +615,6 @@ const pendingGateSemanticFallbackOptions = (
         ]
     }
     return []
-}
-
-const pendingGateSemanticHint = (
-    questionType: 'MULTIPLE_CHOICE' | 'YES_NO' | 'CONFIRMATION' | 'FREEFORM' | null,
-    optionValue: string
-): string | null => {
-    if (questionType !== 'YES_NO' && questionType !== 'CONFIRMATION') {
-        return null
-    }
-    if (optionValue === 'YES' || optionValue === 'NO') {
-        return `Sends ${optionValue}`
-    }
-    return null
 }
 
 const asPendingQuestionSnapshot = (value: unknown): PendingQuestionSnapshot | null => {
@@ -1735,27 +1540,11 @@ export function RunsPanel() {
                     </div>
                 )}
                 {selectedRunSummary && (
-                    <div data-testid="run-summary-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Run Summary</h3>
-                            <span className="text-xs text-muted-foreground">{selectedRunSummary.run_id}</span>
-                        </div>
-                        <div className="grid gap-x-6 gap-y-2 text-sm md:grid-cols-2">
-                            <div data-testid="run-summary-status"><span className="font-medium">Status:</span> {STATUS_LABELS[selectedRunSummary.status] || selectedRunSummary.status}</div>
-                            <div data-testid="run-summary-result"><span className="font-medium">Result:</span> {selectedRunSummary.result || '—'}</div>
-                            <div data-testid="run-summary-flow-name"><span className="font-medium">Flow:</span> {selectedRunSummary.flow_name || 'Untitled'}</div>
-                            <div data-testid="run-summary-started-at"><span className="font-medium">Started:</span> {formatTimestamp(selectedRunSummary.started_at)}</div>
-                            <div data-testid="run-summary-ended-at"><span className="font-medium">Ended:</span> {formatTimestamp(selectedRunSummary.ended_at)}</div>
-                            <div data-testid="run-summary-duration"><span className="font-medium">Duration:</span> {formatDuration(selectedRunSummary.started_at, selectedRunSummary.ended_at, selectedRunSummary.status, now)}</div>
-                            <div data-testid="run-summary-model"><span className="font-medium">Model:</span> {selectedRunSummary.model || 'default model'}</div>
-                            <div data-testid="run-summary-working-directory" className="break-all"><span className="font-medium">Working Dir:</span> {selectedRunSummary.working_directory || '—'}</div>
-                            <div data-testid="run-summary-project-path" className="break-all"><span className="font-medium">Project Path:</span> {selectedRunSummary.project_path || activeProjectPath || '—'}</div>
-                            <div data-testid="run-summary-git-branch"><span className="font-medium">Git Branch:</span> {selectedRunSummary.git_branch || '—'}</div>
-                            <div data-testid="run-summary-git-commit"><span className="font-medium">Git Commit:</span> {selectedRunSummary.git_commit || '—'}</div>
-                            <div data-testid="run-summary-last-error" className="break-all"><span className="font-medium">Last Error:</span> {selectedRunSummary.last_error || '—'}</div>
-                            <div data-testid="run-summary-token-usage"><span className="font-medium">Tokens:</span> {typeof selectedRunSummary.token_usage === 'number' ? selectedRunSummary.token_usage.toLocaleString() : '—'}</div>
-                        </div>
-                    </div>
+                    <RunSummaryCard
+                        activeProjectPath={activeProjectPath}
+                        now={now}
+                        run={selectedRunSummary}
+                    />
                 )}
                 {selectedRunSummary && degradedDetailPanels.length > 0 && (
                     <div
@@ -1769,742 +1558,113 @@ export function RunsPanel() {
                     </div>
                 )}
                 {selectedRunSummary && (
-                    <div data-testid="run-checkpoint-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Checkpoint</h3>
-                            <button
-                                onClick={() => void fetchCheckpoint()}
-                                data-testid="run-checkpoint-refresh-button"
-                                className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                            >
-                                {isCheckpointLoading ? 'Refreshing…' : 'Refresh'}
-                            </button>
-                        </div>
-                        {checkpointError && (
-                            <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                <div data-testid="run-checkpoint-error">{checkpointError.message}</div>
-                                <div data-testid="run-checkpoint-error-help" className="text-xs text-destructive/90">
-                                    {checkpointError.help}
-                                </div>
-                            </div>
-                        )}
-                        {!checkpointError && checkpointData && (
-                            <div className="space-y-3">
-                                <div className="grid gap-x-6 gap-y-2 text-sm md:grid-cols-3">
-                                    <div data-testid="run-checkpoint-current-node">
-                                        <span className="font-medium">Current Node:</span> {checkpointCurrentNode}
-                                    </div>
-                                    <div data-testid="run-checkpoint-completed-nodes">
-                                        <span className="font-medium">Completed Nodes:</span> {checkpointCompletedNodes}
-                                    </div>
-                                    <div data-testid="run-checkpoint-retry-counters">
-                                        <span className="font-medium">Retry Counters:</span> {checkpointRetryCounters}
-                                    </div>
-                                </div>
-                                <pre
-                                    data-testid="run-checkpoint-payload"
-                                    className="max-h-60 overflow-auto rounded-md border border-border/80 bg-muted/40 p-3 text-xs text-foreground"
-                                >
-                                    {JSON.stringify(checkpointData, null, 2)}
-                                </pre>
-                            </div>
-                        )}
-                    </div>
+                    <RunCheckpointCard
+                        checkpointCompletedNodes={checkpointCompletedNodes}
+                        checkpointCurrentNode={checkpointCurrentNode}
+                        checkpointData={checkpointData?.checkpoint ?? null}
+                        checkpointError={checkpointError}
+                        checkpointRetryCounters={checkpointRetryCounters}
+                        isLoading={isCheckpointLoading}
+                        onRefresh={() => {
+                            void fetchCheckpoint()
+                        }}
+                    />
                 )}
                 {selectedRunSummary && (
-                    <div data-testid="run-context-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Context</h3>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => {
-                                        setContextCopyStatus('')
-                                        void fetchContext()
-                                    }}
-                                    data-testid="run-context-refresh-button"
-                                    className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                                >
-                                    {isContextLoading ? 'Refreshing…' : 'Refresh'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => void copyContextToClipboard()}
-                                    data-testid="run-context-copy-button"
-                                    className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                                >
-                                    Copy JSON
-                                </button>
-                                <a
-                                    data-testid="run-context-export-button"
-                                    href={contextExportHref || undefined}
-                                    download={`run-context-${selectedRunSummary.run_id}.json`}
-                                    onClick={(event) => {
-                                        if (!contextExportHref) {
-                                            event.preventDefault()
-                                        }
-                                    }}
-                                    className={`inline-flex h-7 items-center rounded-md border px-2 text-[11px] font-medium ${
-                                        contextExportHref
-                                            ? 'border-border text-muted-foreground hover:text-foreground'
-                                            : 'cursor-not-allowed border-border/60 text-muted-foreground/50'
-                                    }`}
-                                >
-                                    Export JSON
-                                </a>
-                            </div>
-                        </div>
-                        {contextCopyStatus && (
-                            <div data-testid="run-context-copy-status" className="mb-3 text-xs text-muted-foreground">
-                                {contextCopyStatus}
-                            </div>
-                        )}
-                        <div className="mb-3">
-                            <input
-                                value={contextSearchQuery}
-                                onChange={(event) => setContextSearchQuery(event.target.value)}
-                                placeholder="Search context key or value..."
-                                data-testid="run-context-search-input"
-                                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                            />
-                        </div>
-                        {contextError && (
-                            <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                <div data-testid="run-context-error">{contextError.message}</div>
-                                <div data-testid="run-context-error-help" className="text-xs text-destructive/90">
-                                    {contextError.help}
-                                </div>
-                            </div>
-                        )}
-                        {!contextError && (
-                            <div className="overflow-hidden rounded-md border border-border/80">
-                                <table data-testid="run-context-table" className="w-full table-fixed border-collapse text-sm">
-                                    <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                                        <tr>
-                                            <th className="w-2/5 px-3 py-2 font-semibold">Key</th>
-                                            <th className="px-3 py-2 font-semibold">Value</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredContextRows.length > 0 ? (
-                                            filteredContextRows.map((row) => (
-                                                <tr key={row.key} data-testid="run-context-row" className="border-t border-border/70 align-top">
-                                                    <td className="px-3 py-2 font-mono text-xs text-foreground">{row.key}</td>
-                                                    <td className="space-x-2 px-3 py-2 font-mono text-xs text-foreground break-all">
-                                                        <span
-                                                            data-testid="run-context-row-type"
-                                                            className="inline-flex rounded border border-border/80 bg-muted/50 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground"
-                                                        >
-                                                            {row.valueType}
-                                                        </span>
-                                                        {row.renderKind === 'structured' ? (
-                                                            <div data-testid="run-context-row-value">
-                                                                <pre
-                                                                    data-testid="run-context-row-value-structured"
-                                                                    className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-border/70 bg-muted/40 px-2 py-1"
-                                                                >
-                                                                    {row.renderedValue}
-                                                                </pre>
-                                                            </div>
-                                                        ) : (
-                                                            <span data-testid="run-context-row-value">
-                                                                <span data-testid="run-context-row-value-scalar">{row.renderedValue}</span>
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        ) : (
-                                            <tr>
-                                                <td data-testid="run-context-empty" colSpan={2} className="px-3 py-4 text-sm text-muted-foreground">
-                                                    No context entries match the current search.
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
+                    <RunContextCard
+                        contextCopyStatus={contextCopyStatus}
+                        contextError={contextError}
+                        contextExportHref={contextExportHref || null}
+                        filteredContextRows={filteredContextRows}
+                        isLoading={isContextLoading}
+                        onCopy={() => {
+                            void copyContextToClipboard()
+                        }}
+                        onRefresh={() => {
+                            setContextCopyStatus('')
+                            void fetchContext()
+                        }}
+                        onSearchQueryChange={setContextSearchQuery}
+                        runId={selectedRunSummary.run_id}
+                        searchQuery={contextSearchQuery}
+                    />
                 )}
                 {selectedRunSummary && (
-                    <div data-testid="run-artifact-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Artifacts</h3>
-                            <button
-                                onClick={() => {
-                                    void fetchArtifacts()
-                                }}
-                                data-testid="run-artifact-refresh-button"
-                                className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                            >
-                                {isArtifactLoading ? 'Refreshing…' : 'Refresh'}
-                            </button>
-                        </div>
-                        {artifactError && (
-                            <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                <div data-testid="run-artifact-error">{artifactError.message}</div>
-                                <div data-testid="run-artifact-error-help" className="text-xs text-destructive/90">
-                                    {artifactError.help}
-                                </div>
-                            </div>
-                        )}
-                        {!artifactError && (
-                            <div className="space-y-3">
-                                {showPartialRunArtifactNote && (
-                                    <div
-                                        data-testid="run-artifact-partial-run-note"
-                                        className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800"
-                                    >
-                                        <div>This run may be partial or artifacts may have been pruned.</div>
-                                        {missingCoreArtifacts.length > 0 && (
-                                            <div className="mt-1">
-                                                Missing expected files: {missingCoreArtifacts.join(', ')}.
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                                <div className="overflow-hidden rounded-md border border-border/80">
-                                    <table data-testid="run-artifact-table" className="w-full table-fixed border-collapse text-sm">
-                                        <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                                            <tr>
-                                                <th className="w-1/2 px-3 py-2 font-semibold">Path</th>
-                                                <th className="w-28 px-3 py-2 font-semibold">Type</th>
-                                                <th className="w-28 px-3 py-2 font-semibold">Size</th>
-                                                <th className="px-3 py-2 font-semibold">Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {artifactEntries.length > 0 ? (
-                                                artifactEntries.map((artifact) => (
-                                                    <tr key={artifact.path} data-testid="run-artifact-row" className="border-t border-border/70 align-top">
-                                                        <td className="break-all px-3 py-2 font-mono text-xs text-foreground">{artifact.path}</td>
-                                                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{artifact.media_type}</td>
-                                                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{artifact.size_bytes.toLocaleString()}</td>
-                                                        <td className="px-3 py-2">
-                                                            <div className="flex items-center gap-2">
-                                                                <button
-                                                                    type="button"
-                                                                    data-testid="run-artifact-view-button"
-                                                                    disabled={!artifact.viewable}
-                                                                    onClick={() => void viewArtifact(artifact)}
-                                                                    className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                                                >
-                                                                    View
-                                                                </button>
-                                                                <a
-                                                                    data-testid="run-artifact-download-link"
-                                                                    href={artifactDownloadHref(artifact.path) || undefined}
-                                                                    download={artifact.path.split('/').pop() || 'artifact'}
-                                                                    className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                                                                >
-                                                                    Download
-                                                                </a>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                ))
-                                            ) : (
-                                                <tr>
-                                                    <td data-testid="run-artifact-empty" colSpan={4} className="px-3 py-4 text-sm text-muted-foreground">
-                                                        No run artifacts are available yet.
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div data-testid="run-artifact-viewer" className="rounded-md border border-border/80 bg-muted/30 p-3">
-                                    <div className="mb-2 text-xs text-muted-foreground">
-                                        {selectedArtifactEntry ? `Preview: ${selectedArtifactEntry.path}` : 'Select a viewable artifact to preview.'}
-                                    </div>
-                                    {isArtifactViewerLoading && (
-                                        <div data-testid="run-artifact-viewer-loading" className="text-xs text-muted-foreground">
-                                            Loading artifact preview...
-                                        </div>
-                                    )}
-                                    {!isArtifactViewerLoading && artifactViewerError && (
-                                        <div data-testid="run-artifact-viewer-error" className="text-xs text-destructive">
-                                            {artifactViewerError}
-                                        </div>
-                                    )}
-                                    {!isArtifactViewerLoading && !artifactViewerError && artifactViewerPayload && (
-                                        <pre
-                                            data-testid="run-artifact-viewer-payload"
-                                            className="max-h-60 overflow-auto whitespace-pre-wrap rounded border border-border/70 bg-background px-2 py-2 font-mono text-xs text-foreground"
-                                        >
-                                            {artifactViewerPayload}
-                                        </pre>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <RunArtifactsCard
+                        artifactDownloadHref={(artifactPath) => artifactDownloadHref(artifactPath) || null}
+                        artifactEntries={artifactEntries}
+                        artifactError={artifactError}
+                        artifactViewerError={artifactViewerError}
+                        artifactViewerPayload={artifactViewerPayload || null}
+                        isArtifactViewerLoading={isArtifactViewerLoading}
+                        isLoading={isArtifactLoading}
+                        missingCoreArtifacts={missingCoreArtifacts}
+                        onRefresh={() => {
+                            void fetchArtifacts()
+                        }}
+                        onViewArtifact={(artifact) => {
+                            void viewArtifact(artifact)
+                        }}
+                        selectedArtifactEntry={selectedArtifactEntry}
+                        showPartialRunArtifactNote={showPartialRunArtifactNote}
+                    />
                 )}
                 {selectedRunSummary && (
-                    <div data-testid="run-graphviz-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Graphviz Render</h3>
-                            <button
-                                onClick={() => {
-                                    void fetchGraphviz()
-                                }}
-                                data-testid="run-graphviz-refresh-button"
-                                className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                            >
-                                {isGraphvizLoading ? 'Refreshing…' : 'Refresh'}
-                            </button>
-                        </div>
-                        <div data-testid="run-graphviz-viewer" className="rounded-md border border-border/80 bg-muted/30 p-3">
-                            {isGraphvizLoading && (
-                                <div data-testid="run-graphviz-viewer-loading" className="text-xs text-muted-foreground">
-                                    Loading graph visualization...
-                                </div>
-                            )}
-                            {!isGraphvizLoading && graphvizError && (
-                                <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                    <div data-testid="run-graphviz-viewer-error">{graphvizError.message}</div>
-                                    <div data-testid="run-graphviz-viewer-error-help" className="text-xs text-destructive/90">
-                                        {graphvizError.help}
-                                    </div>
-                                </div>
-                            )}
-                            {!isGraphvizLoading && !graphvizError && graphvizViewerSrc && (
-                                <img
-                                    data-testid="run-graphviz-viewer-image"
-                                    src={graphvizViewerSrc}
-                                    alt={`Graphviz render for run ${selectedRunSummary.run_id}`}
-                                    className="w-full rounded-md border border-border/70 bg-background"
-                                />
-                            )}
-                        </div>
-                    </div>
+                    <RunGraphvizCard
+                        graphvizError={graphvizError}
+                        graphvizViewerSrc={graphvizViewerSrc || null}
+                        isGraphvizLoading={isGraphvizLoading}
+                        onRefresh={() => {
+                            void fetchGraphviz()
+                        }}
+                        runId={selectedRunSummary.run_id}
+                    />
                 )}
                 {selectedRunSummary && (
-                    <div
-                        data-testid="run-event-timeline-panel"
-                        data-responsive-layout={isNarrowViewport ? 'stacked' : 'split'}
-                        className={`rounded-md border border-border bg-card shadow-sm ${isNarrowViewport ? 'p-3' : 'p-4'}`}
-                    >
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Event Timeline</h3>
-                            <span
-                                className={`inline-flex rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                                    isTimelineLive
-                                        ? 'border-sky-500/40 bg-sky-500/10 text-sky-700'
-                                        : 'border-border bg-muted text-muted-foreground'
-                                }`}
-                            >
-                                {isTimelineLive ? 'Live' : 'Idle'}
-                            </span>
-                        </div>
-                        <div
-                            data-testid="timeline-update-performance-budget"
-                            data-budget-ms={TIMELINE_UPDATE_BUDGET_MS}
-                            className="mb-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
-                        >
-                            Timeline update budget: {TIMELINE_UPDATE_BUDGET_MS}ms max per stream update batch.
-                        </div>
-                        {(timelineEvents.length > 0 || timelineDroppedCount > 0) && (
-                            <div
-                                data-testid="run-event-timeline-throughput"
-                                data-max-items={TIMELINE_MAX_ITEMS}
-                                data-dropped-count={timelineDroppedCount}
-                                className="mb-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
-                            >
-                                Showing latest {Math.min(timelineEvents.length, TIMELINE_MAX_ITEMS)} events.
-                                {timelineDroppedCount > 0
-                                    ? ` Dropped ${timelineDroppedCount} older events to stay responsive.`
-                                    : ''}
-                            </div>
-                        )}
-                        {timelineError && (
-                            <div data-testid="run-event-timeline-error" className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                {timelineError}
-                            </div>
-                        )}
-                        {!timelineError && visiblePendingInterviewGates.length > 0 && (
-                            <div data-testid="run-pending-human-gates-panel" className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-                                <div className="text-xs font-semibold uppercase tracking-wide text-amber-800">
-                                    Pending Human Gates
-                                </div>
-                                {pendingGateActionError && (
-                                    <div
-                                        data-testid="run-pending-human-gate-answer-error"
-                                        className="mt-2 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
-                                    >
-                                        {pendingGateActionError}
-                                    </div>
-                                )}
-                                <div className="mt-2 space-y-2">
-                                    {groupedPendingInterviewGates.map((group) => (
-                                        <div
-                                            key={group.key}
-                                            data-testid="run-pending-human-gate-group"
-                                            className="rounded border border-amber-500/30 bg-amber-100/40 px-2 py-1.5"
-                                        >
-                                            <div
-                                                data-testid="run-pending-human-gate-group-heading"
-                                                className="text-[11px] font-semibold uppercase tracking-wide text-amber-800"
-                                            >
-                                                {group.heading}
-                                            </div>
-                                            <ul className="mt-1 space-y-1">
-                                                {group.gates.map((gate) => {
-                                                    const freeformAnswer = gate.questionId
-                                                        ? freeformAnswersByGateId[gate.questionId] ?? ''
-                                                        : ''
-                                                    return (
-                                                        <li key={gate.eventId} data-testid="run-pending-human-gate-item" className="text-xs text-amber-900">
-                                                            <div>{gate.prompt}</div>
-                                                            <div
-                                                                data-testid="run-pending-human-gate-item-audit"
-                                                                className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-amber-900/80"
-                                                            >
-                                                                <span className="font-mono">Order #{gate.sequence + 1}</span>
-                                                                <span>Question ID: {gate.questionId ?? '—'}</span>
-                                                                <span>Received: {formatTimestamp(gate.receivedAt)}</span>
-                                                            </div>
-                                                            {gate.questionId && gate.questionType === 'FREEFORM' && (
-                                                                <div className="mt-1 flex flex-wrap items-center gap-2">
-                                                                    <input
-                                                                        type="text"
-                                                                        data-testid={`run-pending-human-gate-freeform-input-${gate.questionId}`}
-                                                                        value={freeformAnswer}
-                                                                        onChange={(event) => {
-                                                                            const nextValue = event.target.value
-                                                                            setFreeformAnswersByGateId((previous) => ({
-                                                                                ...previous,
-                                                                                [gate.questionId!]: nextValue,
-                                                                            }))
-                                                                        }}
-                                                                        disabled={submittingGateIds[gate.questionId] === true}
-                                                                        placeholder="Type answer..."
-                                                                        className="h-7 min-w-[18rem] rounded border border-amber-500/40 bg-white px-2 text-[11px] text-amber-900 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:cursor-not-allowed disabled:opacity-70"
-                                                                    />
-                                                                    <button
-                                                                        type="button"
-                                                                        data-testid={`run-pending-human-gate-freeform-submit-${gate.questionId}`}
-                                                                        onClick={() => {
-                                                                            void submitPendingGateAnswer(gate, freeformAnswer)
-                                                                        }}
-                                                                        disabled={submittingGateIds[gate.questionId] === true || freeformAnswer.trim().length === 0}
-                                                                        className="inline-flex h-7 items-center rounded border border-amber-500/50 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                    >
-                                                                        Submit
-                                                                    </button>
-                                                                </div>
-                                                            )}
-                                                            {gate.questionId && gate.questionType !== 'FREEFORM' && gate.options.length > 0 && (
-                                                                <div className="mt-1 flex flex-wrap gap-1.5">
-                                                                    {gate.options.map((option) => (
-                                                                        <div key={option.value} className="space-y-1">
-                                                                            <button
-                                                                                type="button"
-                                                                                data-testid={`run-pending-human-gate-answer-${option.value}`}
-                                                                                onClick={() => {
-                                                                                    void submitPendingGateAnswer(gate, option.value)
-                                                                                }}
-                                                                                disabled={submittingGateIds[gate.questionId!] === true}
-                                                                                className="inline-flex h-6 items-center rounded border border-amber-500/50 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                            >
-                                                                                {option.label}
-                                                                            </button>
-                                                                            {(() => {
-                                                                                const semanticHint = pendingGateSemanticHint(gate.questionType, option.value)
-                                                                                const showMultipleChoiceMetadata = gate.questionType === 'MULTIPLE_CHOICE'
-                                                                                    && (option.key || option.description)
-                                                                                if (!showMultipleChoiceMetadata && !semanticHint) {
-                                                                                    return null
-                                                                                }
-                                                                                return (
-                                                                                    <div
-                                                                                        data-testid={`run-pending-human-gate-option-metadata-${option.value}`}
-                                                                                        className="flex items-center gap-1 text-[10px] text-amber-900/90"
-                                                                                    >
-                                                                                        {showMultipleChoiceMetadata && option.key && <span className="font-mono">[{option.key}]</span>}
-                                                                                        {showMultipleChoiceMetadata && option.description && <span>{option.description}</span>}
-                                                                                        {semanticHint && <span>{semanticHint}</span>}
-                                                                                    </div>
-                                                                                )
-                                                                            })()}
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </li>
-                                                    )
-                                                })}
-                                            </ul>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                        {!timelineError && (
-                            <div className={`mb-3 grid gap-2 ${isNarrowViewport ? 'grid-cols-1' : 'md:grid-cols-2'}`}>
-                                <label className="space-y-1 text-xs text-muted-foreground">
-                                    <span>Event Type</span>
-                                    <select
-                                        data-testid="run-event-timeline-filter-type"
-                                        value={timelineTypeFilter}
-                                        onChange={(event) => setTimelineTypeFilter(event.target.value)}
-                                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                                    >
-                                        <option value="all">All event types</option>
-                                        {timelineTypeOptions.map((type) => (
-                                            <option key={type} value={type}>{type}</option>
-                                        ))}
-                                    </select>
-                                </label>
-                                <label className="space-y-1 text-xs text-muted-foreground">
-                                    <span>Node/Stage</span>
-                                    <input
-                                        data-testid="run-event-timeline-filter-node-stage"
-                                        value={timelineNodeStageFilter}
-                                        onChange={(event) => setTimelineNodeStageFilter(event.target.value)}
-                                        placeholder="Node id or stage index..."
-                                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                                    />
-                                </label>
-                                <label className="space-y-1 text-xs text-muted-foreground">
-                                    <span>Category</span>
-                                    <select
-                                        data-testid="run-event-timeline-filter-category"
-                                        value={timelineCategoryFilter}
-                                        onChange={(event) => setTimelineCategoryFilter(event.target.value as 'all' | TimelineEventCategory)}
-                                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                                    >
-                                        <option value="all">All categories</option>
-                                        {Object.entries(TIMELINE_CATEGORY_LABELS).map(([category, label]) => (
-                                            <option key={category} value={category}>{label}</option>
-                                        ))}
-                                    </select>
-                                </label>
-                                <label className="space-y-1 text-xs text-muted-foreground">
-                                    <span>Severity</span>
-                                    <select
-                                        data-testid="run-event-timeline-filter-severity"
-                                        value={timelineSeverityFilter}
-                                        onChange={(event) => setTimelineSeverityFilter(event.target.value as 'all' | TimelineSeverity)}
-                                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                                    >
-                                        <option value="all">All severities</option>
-                                        <option value="info">Info</option>
-                                        <option value="warning">Warning</option>
-                                        <option value="error">Error</option>
-                                    </select>
-                                </label>
-                            </div>
-                        )}
-                        {!timelineError && timelineEvents.length === 0 && (
-                            <div data-testid="run-event-timeline-empty" className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                                No typed timeline events yet.
-                            </div>
-                        )}
-                        {!timelineError && timelineEvents.length > 0 && filteredTimelineEvents.length === 0 && (
-                            <div data-testid="run-event-timeline-empty" className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                                No timeline events match the current filters.
-                            </div>
-                        )}
-                        {groupedTimelineEntries.length > 0 && (
-                            <div data-testid="run-event-timeline-list" className="max-h-80 space-y-2 overflow-auto pr-1">
-                                {groupedTimelineEntries.map((entry) => (
-                                    <section
-                                        key={entry.id}
-                                        data-testid="run-event-timeline-group"
-                                        className="space-y-2 rounded-md border border-border/60 bg-background/50 p-2"
-                                    >
-                                        {entry.correlation && (
-                                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                                <span
-                                                    data-testid="run-event-timeline-group-label"
-                                                    className="inline-flex rounded border border-border/80 bg-background px-2 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground"
-                                                >
-                                                    {entry.correlation.label}
-                                                </span>
-                                                <span className="text-[11px] text-muted-foreground">
-                                                    {entry.events.length} event{entry.events.length === 1 ? '' : 's'}
-                                                </span>
-                                            </div>
-                                        )}
-                                        {entry.events.map((event) => (
-                                            <article
-                                                key={event.id}
-                                                data-testid="run-event-timeline-row"
-                                                className="rounded-md border border-border/70 bg-muted/30 px-3 py-2"
-                                            >
-                                                <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                                                    <span
-                                                        data-testid="run-event-timeline-row-type"
-                                                        className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 font-semibold uppercase tracking-wide text-foreground"
-                                                    >
-                                                        {event.type}
-                                                    </span>
-                                                    <span
-                                                        data-testid="run-event-timeline-row-category"
-                                                        className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 uppercase tracking-wide text-muted-foreground"
-                                                    >
-                                                        {TIMELINE_CATEGORY_LABELS[event.category]}
-                                                    </span>
-                                                    <span
-                                                        data-testid="run-event-timeline-row-severity"
-                                                        className={`inline-flex rounded border px-1.5 py-0.5 uppercase tracking-wide ${TIMELINE_SEVERITY_STYLES[event.severity]}`}
-                                                    >
-                                                        {TIMELINE_SEVERITY_LABELS[event.severity]}
-                                                    </span>
-                                                    <span data-testid="run-event-timeline-row-time" className="text-muted-foreground">
-                                                        {formatTimestamp(event.receivedAt)}
-                                                    </span>
-                                                </div>
-                                                {entry.correlation && (
-                                                    <p data-testid="run-event-timeline-row-correlation" className="mt-1 text-xs text-muted-foreground">
-                                                        {entry.correlation.kind === 'retry' ? 'Retry correlation' : 'Interview correlation'}: {entry.correlation.label}
-                                                    </p>
-                                                )}
-                                                <p data-testid="run-event-timeline-row-summary" className="mt-1 text-sm text-foreground">
-                                                    {event.summary}
-                                                </p>
-                                                {event.nodeId && (
-                                                    <p data-testid="run-event-timeline-row-node" className="text-xs text-muted-foreground">
-                                                        Node: {event.nodeId}
-                                                        {event.stageIndex !== null ? ` (index ${event.stageIndex})` : ''}
-                                                    </p>
-                                                )}
-                                            </article>
-                                        ))}
-                                    </section>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                    <RunEventTimelineCard
+                        isNarrowViewport={isNarrowViewport}
+                        isTimelineLive={isTimelineLive}
+                        timelineDroppedCount={timelineDroppedCount}
+                        timelineError={timelineError}
+                        timelineEvents={timelineEvents}
+                        visiblePendingInterviewGates={visiblePendingInterviewGates}
+                        groupedPendingInterviewGates={groupedPendingInterviewGates}
+                        pendingGateActionError={pendingGateActionError}
+                        submittingGateIds={submittingGateIds}
+                        freeformAnswersByGateId={freeformAnswersByGateId}
+                        timelineTypeFilter={timelineTypeFilter}
+                        timelineTypeOptions={timelineTypeOptions}
+                        timelineNodeStageFilter={timelineNodeStageFilter}
+                        timelineCategoryFilter={timelineCategoryFilter}
+                        timelineSeverityFilter={timelineSeverityFilter}
+                        filteredTimelineEvents={filteredTimelineEvents}
+                        groupedTimelineEntries={groupedTimelineEntries}
+                        onTimelineCategoryFilterChange={setTimelineCategoryFilter}
+                        onTimelineNodeStageFilterChange={setTimelineNodeStageFilter}
+                        onTimelineSeverityFilterChange={setTimelineSeverityFilter}
+                        onTimelineTypeFilterChange={setTimelineTypeFilter}
+                        onFreeformAnswerChange={(questionId, value) => {
+                            setFreeformAnswersByGateId((previous) => ({
+                                ...previous,
+                                [questionId]: value,
+                            }))
+                        }}
+                        onSubmitPendingGateAnswer={(gate, selectedValue) => {
+                            void submitPendingGateAnswer(gate, selectedValue)
+                        }}
+                    />
                 )}
-
-                <div className="rounded-md border border-border bg-card shadow-sm">
-                    {scopedRuns.length === 0 ? (
-                        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                            {activeProjectPath ? 'No runs for the active project yet.' : 'No runs yet.'}
-                        </div>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <div className="min-w-[1320px]">
-                                <div className={`grid ${RUN_HISTORY_GRID_TEMPLATE} gap-3 border-b bg-muted/20 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground`}>
-                                    <span className="min-w-0">Status</span>
-                                    <span className="min-w-0">Result</span>
-                                    <span className="min-w-0">Flow</span>
-                                    <span className="min-w-0">Started</span>
-                                    <span className="min-w-0">Ended</span>
-                                    <span className="min-w-0">Duration</span>
-                                    <span className="min-w-0">Tokens</span>
-                                    <span className="min-w-0 text-right">Actions</span>
-                                </div>
-                                <div className="divide-y">
-                                    {scopedRuns.map((run) => (
-                                        (() => {
-                                            const canCancel = run.status === 'running'
-                                            const cancelActionLabel = canCancel ? 'Cancel' : (
-                                                run.status === 'cancel_requested' || run.status === 'abort_requested'
-                                                    ? 'Canceling…'
-                                                    : run.status === 'canceled' || run.status === 'aborted'
-                                                        ? 'Canceled'
-                                                        : 'Cancel'
-                                            )
-                                            const cancelDisabledReason =
-                                                run.status === 'cancel_requested' || run.status === 'abort_requested'
-                                                    ? 'Cancel already requested for this run.'
-                                                    : run.status === 'canceled' || run.status === 'aborted'
-                                                        ? 'This run is already canceled.'
-                                                        : 'Cancel is only available while the run is active.'
-
-                                            return (
-                                                <div
-                                                    key={run.run_id}
-                                                    className={`grid ${RUN_HISTORY_GRID_TEMPLATE} items-start gap-3 px-4 py-3 text-sm ${
-                                                        selectedRunId === run.run_id ? 'bg-muted/40' : ''
-                                                    }`}
-                                                >
-                                                    <span
-                                                        className={`inline-flex h-6 min-w-0 items-center justify-center rounded-md px-2 text-[11px] font-semibold uppercase tracking-wide ${
-                                                            STATUS_STYLES[run.status] || 'bg-muted text-muted-foreground'
-                                                        }`}
-                                                    >
-                                                        {STATUS_LABELS[run.status] || run.status}
-                                                    </span>
-                                                    <span className="min-w-0 truncate pt-1 text-xs text-muted-foreground" title={run.result || undefined}>
-                                                        {run.result || '—'}
-                                                    </span>
-                                                    <div className="min-w-0 space-y-1">
-                                                        <div className="truncate font-medium text-foreground" title={run.flow_name || 'Untitled'}>
-                                                            {run.flow_name || 'Untitled'}
-                                                        </div>
-                                                        <div className="truncate text-[11px] text-muted-foreground" title={`${run.model || 'default model'} · ${run.run_id}`}>
-                                                            {run.model || 'default model'} · {run.run_id}
-                                                        </div>
-                                                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                                                            {run.spec_id && (
-                                                                <button
-                                                                    type="button"
-                                                                    data-testid="run-history-row-spec-artifact-link"
-                                                                    onClick={() => openRunArtifact(run, 'spec')}
-                                                                    className="truncate font-mono text-primary underline-offset-2 hover:underline"
-                                                                    title={run.spec_id}
-                                                                >
-                                                                    Spec {run.spec_id}
-                                                                </button>
-                                                            )}
-                                                            {run.plan_id && (
-                                                                <button
-                                                                    type="button"
-                                                                    data-testid="run-history-row-plan-artifact-link"
-                                                                    onClick={() => openRunArtifact(run, 'plan')}
-                                                                    className="truncate font-mono text-primary underline-offset-2 hover:underline"
-                                                                    title={run.plan_id}
-                                                                >
-                                                                    Plan {run.plan_id}
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    <span className="min-w-0 pt-1 text-xs text-muted-foreground">
-                                                        {formatTimestamp(run.started_at)}
-                                                    </span>
-                                                    <span className="min-w-0 pt-1 text-xs text-muted-foreground">
-                                                        {formatTimestamp(run.ended_at)}
-                                                    </span>
-                                                    <span className="min-w-0 pt-1 text-xs text-muted-foreground">
-                                                        {formatDuration(run.started_at, run.ended_at, run.status, now)}
-                                                    </span>
-                                                    <span className="min-w-0 pt-1 text-xs text-muted-foreground">
-                                                        {typeof run.token_usage === 'number' ? run.token_usage.toLocaleString() : '—'}
-                                                    </span>
-                                                    <div className="flex justify-end">
-                                                        <div className="inline-flex items-center gap-1 rounded-md border border-border/80 bg-background/90 p-1 shadow-sm">
-                                                            <button
-                                                                onClick={() => openRun(run)}
-                                                                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                                                            >
-                                                                <Eye className="h-3.5 w-3.5" />
-                                                                Open
-                                                            </button>
-                                                            <button
-                                                                onClick={() => requestCancel(run.run_id, run.status)}
-                                                                disabled={!canCancel}
-                                                                title={canCancel ? undefined : cancelDisabledReason}
-                                                                className="inline-flex h-7 items-center gap-1.5 rounded-md bg-destructive px-2 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
-                                                            >
-                                                                <OctagonX className="h-3.5 w-3.5" />
-                                                                {cancelActionLabel}
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )
-                                        })()
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
+                <RunList
+                    activeProjectPath={activeProjectPath}
+                    now={now}
+                    onOpenRun={openRun}
+                    onOpenRunArtifact={openRunArtifact}
+                    onRequestCancel={(runId, currentStatus) => {
+                        void requestCancel(runId, currentStatus)
+                    }}
+                    runs={scopedRuns}
+                    selectedRunId={selectedRunId}
+                />
             </div>
         </div>
     )

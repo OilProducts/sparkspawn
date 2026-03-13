@@ -128,6 +128,7 @@ describe('project scope store behavior', () => {
       directoryPath: '/tmp/project-a',
       isFavorite: false,
       lastAccessedAt: null,
+      flowBindings: {},
     })
     expect(next.projectScopedWorkspaces['/tmp/project-a']?.activeFlow).toBeNull()
     expect(next.activeFlow).toBeNull()

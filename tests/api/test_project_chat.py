@@ -10,6 +10,7 @@ import pytest
 import attractor.api.codex_app_server as codex_app_server
 import attractor.api.server as server
 import attractor.api.project_chat as project_chat
+import attractor.api.project_chat_session as project_chat_session
 from attractor.prompt_templates import PROMPTS_FILE_NAME
 from attractor.storage import ensure_project_paths
 
@@ -462,8 +463,8 @@ def test_chat_session_turn_accepts_task_complete_without_turn_completed_after_id
         session._thread_id = "thread-123"
         session._thread_initialized = True
 
-    monkeypatch.setattr(project_chat, "CHAT_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
-    monkeypatch.setattr(project_chat.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(project_chat_session, "CHAT_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(project_chat_session.time, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
     monkeypatch.setattr(
         session,
@@ -877,8 +878,8 @@ def test_chat_session_turn_accepts_final_answer_without_turn_completed_after_idl
         session._thread_id = "thread-123"
         session._thread_initialized = True
 
-    monkeypatch.setattr(project_chat, "CHAT_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
-    monkeypatch.setattr(project_chat.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(project_chat_session, "CHAT_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(project_chat_session.time, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
     monkeypatch.setattr(
         session,
@@ -919,8 +920,8 @@ def test_chat_session_turn_times_out_after_live_assistant_quiet_period_without_t
         session._thread_id = "thread-123"
         session._thread_initialized = True
 
-    monkeypatch.setattr(project_chat, "CHAT_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
-    monkeypatch.setattr(project_chat.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(project_chat_session, "CHAT_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(project_chat_session.time, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
     monkeypatch.setattr(
         session,

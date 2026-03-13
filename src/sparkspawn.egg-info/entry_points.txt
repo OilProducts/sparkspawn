@@ -1,0 +1,3 @@
+[console_scripts]
+sparkspawn = attractor.cli:main
+sparkspawn-ui-release-gate = attractor.ui_release_gate:main

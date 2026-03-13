@@ -24,6 +24,8 @@ The frontend must be able to talk to:
 
 It MUST NOT require the frontend to own or emulate engine behavior.
 
+When both backend surfaces are hosted by one deployable server, the frontend should still treat them as distinct API surfaces rather than as one undifferentiated backend.
+
 ---
 
 ## 2. Client Boundaries
@@ -74,6 +76,8 @@ The frontend consumes Spark Spawn workspace data for:
 - trigger-to-flow bindings
 - provenance references to flows and runs
 
+Trigger bindings are explicit workspace data. The frontend MUST NOT infer workflow launch flow selection from whichever flow is currently open in an editor or inspector.
+
 ### 3.2 Attractor Data
 
 The frontend consumes Attractor data for:
@@ -94,6 +98,8 @@ The frontend MUST preserve the conceptual separation between:
 - Attractor runs
 
 The UI may present them in adjacent surfaces, but it must not collapse them into one implied backend model.
+
+If one backend process exposes both surfaces, it SHOULD do so through explicit mounted route boundaries so the frontend can target Workspace and Attractor intentionally.
 
 ---
 
@@ -162,8 +168,11 @@ The frontend MUST NOT persist local state that can override backend truth for:
 - whether an artifact was approved
 - which runs belong to a project
 - which run an artifact launched
+- which flow a workflow trigger resolves to
 
 When local UI state becomes invalid relative to backend state, the backend wins.
+
+The frontend SHOULD rely on workspace-managed trigger bindings for workflow launches and only send an explicit flow override when the user is intentionally overriding the configured binding.
 
 ---
 

@@ -63,6 +63,7 @@ class ProjectRecord:
     last_accessed_at: str | None
     is_favorite: bool
     active_conversation_id: str | None
+    flow_bindings: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,7 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
             "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
             "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
             "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
+            "flow_bindings": _read_flow_bindings(payload),
         },
     )
 
@@ -200,6 +202,7 @@ def update_project_record(
         "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
         "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
         "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
+        "flow_bindings": _read_flow_bindings(payload),
     }
     if last_accessed_at is not _UNSET:
         next_payload["last_accessed_at"] = _normalize_optional_string(last_accessed_at)
@@ -230,6 +233,50 @@ def delete_project_record(home_dir: Path, project_path: str) -> DeletedProjectRe
     return deleted
 
 
+def set_project_flow_binding(home_dir: Path, project_path: str, trigger: str, flow_name: str) -> ProjectRecord:
+    project_paths = ensure_project_paths(home_dir, project_path)
+    payload = _read_project_record(project_paths.project_file)
+    next_flow_bindings = _read_flow_bindings(payload)
+    next_flow_bindings[trigger] = flow_name
+    _write_project_record(
+        project_paths.project_file,
+        {
+            "project_id": project_paths.project_id,
+            "project_path": project_paths.project_path,
+            "display_name": str(payload.get("display_name", "") or project_paths.display_name),
+            "created_at": str(payload.get("created_at", "") or _iso_now()),
+            "last_opened_at": str(payload.get("last_opened_at", "") or _iso_now()),
+            "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
+            "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
+            "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
+            "flow_bindings": next_flow_bindings,
+        },
+    )
+    return _build_project_record(project_paths)
+
+
+def delete_project_flow_binding(home_dir: Path, project_path: str, trigger: str) -> ProjectRecord:
+    project_paths = ensure_project_paths(home_dir, project_path)
+    payload = _read_project_record(project_paths.project_file)
+    next_flow_bindings = _read_flow_bindings(payload)
+    next_flow_bindings.pop(trigger, None)
+    _write_project_record(
+        project_paths.project_file,
+        {
+            "project_id": project_paths.project_id,
+            "project_path": project_paths.project_path,
+            "display_name": str(payload.get("display_name", "") or project_paths.display_name),
+            "created_at": str(payload.get("created_at", "") or _iso_now()),
+            "last_opened_at": str(payload.get("last_opened_at", "") or _iso_now()),
+            "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
+            "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
+            "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
+            "flow_bindings": next_flow_bindings,
+        },
+    )
+    return _build_project_record(project_paths)
+
+
 def _read_project_record(path: Path) -> dict[str, object]:
     if not path.exists():
         return {}
@@ -257,6 +304,22 @@ def _read_optional_bool(payload: dict[str, object], key: str, *, default: bool) 
     return default
 
 
+def _read_flow_bindings(payload: dict[str, object]) -> dict[str, str]:
+    raw_bindings = payload.get("flow_bindings")
+    if not isinstance(raw_bindings, dict):
+        return {}
+    next_bindings: dict[str, str] = {}
+    for raw_trigger, raw_flow_name in raw_bindings.items():
+        if not isinstance(raw_trigger, str) or not isinstance(raw_flow_name, str):
+            continue
+        trigger = raw_trigger.strip()
+        flow_name = raw_flow_name.strip()
+        if not trigger or not flow_name:
+            continue
+        next_bindings[trigger] = flow_name
+    return next_bindings
+
+
 def _build_project_record(project_paths: ProjectPaths) -> ProjectRecord:
     payload = _read_project_record(project_paths.project_file)
     return ProjectRecord(
@@ -268,6 +331,7 @@ def _build_project_record(project_paths: ProjectPaths) -> ProjectRecord:
         last_accessed_at=_read_optional_string(payload, "last_accessed_at"),
         is_favorite=_read_optional_bool(payload, "is_favorite", default=False),
         active_conversation_id=_read_optional_string(payload, "active_conversation_id"),
+        flow_bindings=_read_flow_bindings(payload),
     )
 
 
@@ -293,5 +357,14 @@ def _write_project_record(path: Path, payload: dict[str, Any]) -> None:
     lines.append(f"is_favorite = {_toml_bool(bool(payload.get('is_favorite', False)))}")
     if payload.get("active_conversation_id"):
         lines.append(f"active_conversation_id = {_toml_string(str(payload['active_conversation_id']))}")
+    flow_bindings = payload.get("flow_bindings")
+    if isinstance(flow_bindings, dict) and flow_bindings:
+        lines.append("")
+        lines.append("[flow_bindings]")
+        for trigger in sorted(flow_bindings.keys()):
+            flow_name = flow_bindings.get(trigger)
+            if not isinstance(trigger, str) or not isinstance(flow_name, str):
+                continue
+            lines.append(f"{trigger} = {_toml_string(flow_name)}")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")

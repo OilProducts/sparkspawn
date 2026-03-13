@@ -1,6 +1,5 @@
 import { type PlanStatus, type ProjectRegistrationResult, useStore } from "@/store"
 import { type ChangeEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronDown, ChevronUp, FileText, Folder, FolderOpen, Plus, Trash2 } from "lucide-react"
 import {
     ApiHttpError,
     type ConversationSummaryResponse,
@@ -28,8 +27,11 @@ import {
 } from "@/lib/workspaceClient"
 import { useNarrowViewport } from "@/lib/useNarrowViewport"
 import { isAbsoluteProjectPath, normalizeProjectPath } from "@/lib/projectPaths"
-import { HomeProjectSidebar } from "@/components/HomeProjectSidebar"
-import { HomeWorkspace } from "@/components/HomeWorkspace"
+import { ProjectConversationHistory } from "@/components/projects/ProjectConversationHistory"
+import { ProjectConversationSurface } from "@/components/projects/ProjectConversationSurface"
+import { ProjectsSidebar } from "@/components/projects/ProjectsSidebar"
+import type { ConversationTimelineEntry } from "@/components/projects/types"
+import type { ProjectGitMetadata } from "@/components/projects/presentation"
 
 const buildProjectConversationId = (projectPath: string) => {
     const normalizedProjectKey = projectPath
@@ -43,73 +45,20 @@ const buildProjectConversationId = (projectPath: string) => {
     return `conversation-${suffix}-${randomSuffix}`
 }
 
-const PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT = 12
 const DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT = 320
 const HOME_SIDEBAR_MIN_PRIMARY_HEIGHT = 208
 const HOME_SIDEBAR_MIN_SECONDARY_HEIGHT = 208
 const HOME_SIDEBAR_RESIZE_HANDLE_HEIGHT = 12
 const CONVERSATION_BOTTOM_THRESHOLD_PX = 24
 
-type ProjectGitMetadata = {
-    branch: string | null
-    commit: string | null
-}
-
 type PickerFileWithPath = File & {
     path?: string
     webkitRelativePath?: string
 }
 
-type SurfaceTone = "neutral" | "info" | "success" | "warning" | "danger"
-
 const EMPTY_PROJECT_GIT_METADATA: ProjectGitMetadata = {
     branch: null,
     commit: null,
-}
-
-const SURFACE_TONE_CLASS_MAP: Record<SurfaceTone, string> = {
-    neutral: "bg-muted/50 text-muted-foreground",
-    info: "bg-sky-500/15 text-sky-700",
-    success: "bg-emerald-500/15 text-emerald-800",
-    warning: "bg-amber-500/15 text-amber-800",
-    danger: "bg-destructive/10 text-destructive",
-}
-
-const getSurfaceToneClassName = (tone: SurfaceTone) => (
-    `rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${SURFACE_TONE_CLASS_MAP[tone]}`
-)
-
-const getSpecEditStatusPresentation = (status: SpecEditProposalResponse["status"]) => {
-    if (status === "applied") {
-        return { label: "Applied", tone: "success" as const }
-    }
-    if (status === "rejected") {
-        return { label: "Rejected", tone: "danger" as const }
-    }
-    return { label: "Pending review", tone: "warning" as const }
-}
-
-const getExecutionCardStatusPresentation = (status: ExecutionCardResponse["status"]) => {
-    if (status === "approved") {
-        return { label: "Approved", tone: "success" as const }
-    }
-    if (status === "rejected") {
-        return { label: "Rejected", tone: "danger" as const }
-    }
-    if (status === "revision-requested") {
-        return { label: "Revision requested", tone: "warning" as const }
-    }
-    return { label: "Draft", tone: "info" as const }
-}
-
-const getToolCallStatusPresentation = (status: "running" | "completed" | "failed") => {
-    if (status === "running") {
-        return { label: "Running", tone: "info" as const }
-    }
-    if (status === "failed") {
-        return { label: "Failed", tone: "danger" as const }
-    }
-    return { label: "Completed", tone: "success" as const }
 }
 
 const derivePlanStatusFromExecutionCard = (executionCard: ExecutionCardResponse | null): PlanStatus => {
@@ -247,11 +196,13 @@ const toHydratedProjectRecord = (project: {
     is_favorite: boolean
     last_accessed_at?: string | null
     active_conversation_id?: string | null
+    flow_bindings?: Record<string, string>
 }) => ({
     directoryPath: project.project_path,
     isFavorite: project.is_favorite === true,
     lastAccessedAt: typeof project.last_accessed_at === "string" ? project.last_accessed_at : null,
     activeConversationId: typeof project.active_conversation_id === "string" ? project.active_conversation_id : null,
+    flowBindings: project.flow_bindings ?? {},
 })
 
 const formatConversationAgeShort = (value: string) => {
@@ -357,47 +308,6 @@ const getLatestExecutionCard = (snapshot: ConversationSnapshotResponse | null) =
     }
     return snapshot.execution_cards[snapshot.execution_cards.length - 1] || null
 }
-
-type ConversationTimelineEntry =
-    | {
-        id: string
-        kind: "message"
-        role: "user" | "assistant"
-        content: string
-        timestamp: string
-        status: ConversationTurnResponse["status"]
-        error?: string | null
-        presentation?: "default" | "thinking"
-    }
-    | {
-        id: string
-        kind: "tool_call"
-        role: "system"
-        timestamp: string
-        toolCall: {
-            id: string
-            kind: "command_execution" | "file_change" | "dynamic_tool"
-            status: "running" | "completed" | "failed"
-            title: string
-            command?: string | null
-            output?: string | null
-            filePaths: string[]
-        }
-    }
-    | {
-        id: string
-        kind: "final_separator"
-        role: "system"
-        timestamp: string
-        label: string
-    }
-    | {
-        id: string
-        kind: "spec_edit_proposal" | "execution_card"
-        role: "system"
-        artifactId: string
-        timestamp: string
-    }
 
 type OptimisticSendState = {
     conversationId: string
@@ -555,22 +465,6 @@ const compareConversationSnapshotFreshness = (
     return scoreConversationSnapshotFreshness(left) - scoreConversationSnapshotFreshness(right)
 }
 
-const summarizeToolCallDetail = (toolCall: ConversationTimelineToolCall): string | null => {
-    if (toolCall.command?.trim()) {
-        return toolCall.command.trim()
-    }
-    if (toolCall.filePaths.length === 1) {
-        return toolCall.filePaths[0] || null
-    }
-    if (toolCall.filePaths.length > 1) {
-        return `${toolCall.filePaths.length} files`
-    }
-    if (toolCall.output?.trim()) {
-        return toolCall.output.trim().split("\n")[0] || null
-    }
-    return null
-}
-
 const formatWorkedDuration = (elapsedSeconds: number): string => {
     if (elapsedSeconds < 60) {
         return `${elapsedSeconds}s`
@@ -602,21 +496,6 @@ const resolveWorkedElapsedSeconds = (
     }
     const startedMs = Math.min(...candidateTimestamps)
     return Math.max(0, Math.round((completedMs - startedMs) / 1000))
-}
-
-const parseThinkingSummaryContent = (content: string): { heading: string | null; details: string } => {
-    const trimmed = content.trim()
-    if (!trimmed) {
-        return { heading: null, details: "" }
-    }
-    const match = trimmed.match(/^\*\*(.+?)\*\*\s*([\s\S]*)$/)
-    if (!match) {
-        return { heading: trimmed, details: "" }
-    }
-    return {
-        heading: match[1]?.trim() || null,
-        details: match[2]?.trim() || "",
-    }
 }
 
 const buildAssistantTimelineEntries = (
@@ -2113,16 +1992,6 @@ export function HomePanel() {
         return parsed.toLocaleString()
     }
 
-    const buildProposalDiffLines = (change: SpecEditProposalResponse["changes"][number]) => {
-        const beforeLines = change.before.split("\n").map((line) => ({ type: "removed" as const, text: line }))
-        const afterLines = change.after.split("\n").map((line) => ({ type: "added" as const, text: line }))
-        return [...beforeLines, ...afterLines]
-    }
-
-    const buildProposalChangeKey = (proposalId: string, changePath: string, index: number) => (
-        `${proposalId}:${changePath}:${index}`
-    )
-
     const toggleProposalChangeExpanded = (changeKey: string) => {
         setExpandedProposalChanges((current) => ({
             ...current,
@@ -2144,6 +2013,31 @@ export function HomePanel() {
         }))
     }
 
+    const conversationHistoryContent = (
+        <ProjectConversationHistory
+            activeConversationId={activeConversationId}
+            hasRenderableConversationHistory={hasRenderableConversationHistory}
+            activeConversationHistory={activeConversationHistory}
+            activeSpecEditProposalsById={activeSpecEditProposalsById}
+            activeExecutionCardsById={activeExecutionCardsById}
+            latestSpecEditProposalId={latestSpecEditProposalId}
+            latestExecutionCardId={latestExecutionCardId}
+            activeProjectGitMetadata={activeProjectGitMetadata}
+            expandedToolCalls={expandedToolCalls}
+            expandedThinkingEntries={expandedThinkingEntries}
+            expandedProposalChanges={expandedProposalChanges}
+            pendingSpecProposalId={pendingSpecProposalId}
+            pendingExecutionCardId={pendingExecutionCardId}
+            formatConversationTimestamp={formatConversationTimestamp}
+            onToggleToolCallExpanded={toggleToolCallExpanded}
+            onToggleThinkingEntryExpanded={toggleThinkingEntryExpanded}
+            onToggleProposalChangeExpanded={toggleProposalChangeExpanded}
+            onApproveSpecEditProposal={onApproveSpecEditProposal}
+            onRejectSpecEditProposal={onRejectSpecEditProposal}
+            onReviewExecutionCard={onReviewExecutionCard}
+        />
+    )
+
     return (
         <section
             data-testid="projects-panel"
@@ -2156,744 +2050,52 @@ export function HomePanel() {
                     data-testid="home-main-layout"
                     className={`grid gap-4 ${isNarrowViewport ? "grid-cols-1" : "min-h-0 flex-1 grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"}`}
                 >
-                    <HomeProjectSidebar className={isNarrowViewport ? "gap-4" : "h-full"}>
-                        <div
-                            ref={homeSidebarRef}
-                            data-testid="home-sidebar-stack"
-                            className={`flex ${isNarrowViewport ? "flex-col gap-4" : "h-full min-h-0 flex-col"}`}
-                        >
-                            <div
-                                data-testid="home-sidebar-primary-surface"
-                                className={`rounded-md border border-border bg-card shadow-sm ${isNarrowViewport ? "" : "min-h-0 overflow-hidden"}`}
-                                style={isNarrowViewport ? undefined : { height: `${homeSidebarPrimaryHeight}px` }}
-                            >
-                                <div className="flex h-full min-h-0 flex-col p-4">
-                                    <div className="mb-3 space-y-2">
-                                        <div
-                                            data-testid="quick-switch-controls"
-                                            data-responsive-layout={isNarrowViewport ? "stacked" : "inline"}
-                                            className={`items-start justify-between gap-2 ${isNarrowViewport ? "flex flex-col" : "flex"}`}
-                                        >
-                                            <h3 className="text-sm font-semibold text-foreground">Projects</h3>
-                                            <button
-                                                data-testid="quick-switch-new-button"
-                                                type="button"
-                                                onClick={onOpenProjectDirectoryChooser}
-                                                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            >
-                                                New
-                                            </button>
-                                        </div>
-                                        <input
-                                            ref={projectDirectoryPickerInputRef}
-                                            data-testid="project-directory-picker-input"
-                                            type="file"
-                                            multiple
-                                            onChange={onProjectDirectorySelected}
-                                            className="hidden"
-                                            tabIndex={-1}
-                                            aria-hidden="true"
-                                        />
-                                        {projectRegistrationError ? (
-                                            <p data-testid="project-registration-error" className="text-xs text-destructive">
-                                                {projectRegistrationError}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div className={isNarrowViewport ? "" : "min-h-0 flex-1 overflow-y-auto pr-1"}>
-                                        <ul data-testid="projects-list" className="space-y-1.5">
-                                            {orderedProjects.length === 0 ? (
-                                                <li className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                                                    No projects registered yet.
-                                                </li>
-                                            ) : (
-                                                orderedProjects.map((project) => {
-                                                    const projectPath = project.directoryPath
-                                                    const isActive = projectPath === activeProjectPath
-                                                    const projectConversationSummaries = isActive ? activeProjectConversationSummaries : []
-                                                    const isDeletingProject = pendingDeleteProjectPath === projectPath
-                                                    return (
-                                                        <li key={projectPath} className="group/project relative space-y-1">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    void onActivateProject(projectPath)
-                                                                }}
-                                                                aria-current={isActive ? "true" : undefined}
-                                                                title={projectPath}
-                                                                className={`w-full rounded-md px-2 py-2 pr-9 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActive
-                                                                    ? "bg-primary/10 text-foreground"
-                                                                    : "text-foreground hover:bg-muted/70"
-                                                                    }`}
-                                                            >
-                                                                <div className="flex items-center gap-2">
-                                                                    {isActive ? (
-                                                                        <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-                                                                    ) : (
-                                                                        <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
-                                                                    )}
-                                                                    <span className={`truncate text-sm font-medium ${isActive ? "text-foreground" : "text-foreground/90"}`}>
-                                                                        {formatProjectListLabel(projectPath)}
-                                                                    </span>
-                                                                </div>
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                aria-label="Remove project"
-                                                                title={`Remove project ${formatProjectListLabel(projectPath)}`}
-                                                                data-testid={`project-delete-${projectPath}`}
-                                                                onClick={() => {
-                                                                    void onDeleteProject(projectPath)
-                                                                }}
-                                                                disabled={isDeletingProject}
-                                                                className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/project:opacity-100 group-focus-within/project:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            >
-                                                                <Trash2 className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            {isActive ? (
-                                                                <div className="ml-5 border-l border-border/70 pl-2">
-                                                                    <div
-                                                                        data-testid="project-thread-controls"
-                                                                        className="mb-1 flex justify-end"
-                                                                    >
-                                                                        <button
-                                                                            data-testid="project-thread-new-button"
-                                                                            type="button"
-                                                                            onClick={onCreateConversationThread}
-                                                                            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                        >
-                                                                            <Plus className="h-3.5 w-3.5" />
-                                                                            <span>New thread</span>
-                                                                        </button>
-                                                                    </div>
-                                                                    <ul data-testid="project-thread-list" className="space-y-1">
-                                                                        {projectConversationSummaries.length === 0 ? (
-                                                                            <li className="px-2 py-1 text-[11px] text-muted-foreground">
-                                                                                No threads yet.
-                                                                            </li>
-                                                                        ) : (
-                                                                            projectConversationSummaries.map((conversation) => {
-                                                                                const isActiveConversation = conversation.conversation_id === activeConversationId
-                                                                                const ageLabel = formatConversationAgeShort(conversation.updated_at)
-                                                                                const isDeletingConversation = pendingDeleteConversationId === conversation.conversation_id
-                                                                                return (
-                                                                                    <li key={conversation.conversation_id} className="group/thread relative">
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() => onSelectConversationThread(conversation.conversation_id)}
-                                                                                            aria-current={isActiveConversation ? "true" : undefined}
-                                                                                            aria-label={`Open thread ${conversation.title}`}
-                                                                                            className={`w-full rounded-xl px-2 py-2 pr-9 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActiveConversation
-                                                                                                ? "bg-muted text-foreground shadow-sm"
-                                                                                                : "text-foreground/90 hover:bg-muted/60"
-                                                                                                }`}
-                                                                                        >
-                                                                                            <div className="flex items-center gap-2">
-                                                                                                <FileText className={`h-3.5 w-3.5 shrink-0 ${isActiveConversation ? "text-foreground" : "text-muted-foreground"}`} />
-                                                                                                <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                                                                                                    {conversation.title}
-                                                                                                </span>
-                                                                                                <span className="shrink-0 text-[11px] text-muted-foreground transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">
-                                                                                                    {ageLabel}
-                                                                                                </span>
-                                                                                            </div>
-                                                                                        </button>
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            aria-label={`Delete thread ${conversation.title}`}
-                                                                                            data-testid={`project-thread-delete-${conversation.conversation_id}`}
-                                                                                            onClick={() => {
-                                                                                                void onDeleteConversationThread(conversation.conversation_id, conversation.title)
-                                                                                            }}
-                                                                                            disabled={isDeletingConversation}
-                                                                                            className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                                        >
-                                                                                            <Trash2 className="h-3.5 w-3.5" />
-                                                                                        </button>
-                                                                                    </li>
-                                                                                )
-                                                                            })
-                                                                        )}
-                                                                    </ul>
-                                                                </div>
-                                                            ) : null}
-                                                        </li>
-                                                    )
-                                                })
-                                            )}
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                            {!isNarrowViewport ? (
-                                <div
-                                    data-testid="home-sidebar-resize-handle"
-                                    role="separator"
-                                    aria-label="Resize sidebar sections"
-                                    aria-orientation="horizontal"
-                                    tabIndex={0}
-                                    onPointerDown={onHomeSidebarResizePointerDown}
-                                    onKeyDown={onHomeSidebarResizeKeyDown}
-                                    className={`group flex h-3 shrink-0 cursor-row-resize items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isHomeSidebarResizing ? "bg-muted" : "hover:bg-muted/60"}`}
-                                >
-                                    <span className="h-1 w-12 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/70" />
-                                </div>
-                            ) : null}
-                            <div
-                                data-testid="project-event-log-surface"
-                                className={`flex min-h-[280px] flex-col rounded-md border border-border bg-card p-4 shadow-sm ${isNarrowViewport ? "" : "min-h-0 flex-1 overflow-hidden"}`}
-                            >
-                                <div className="mb-3 space-y-1">
-                                    <h3 className="text-sm font-semibold text-foreground">Workflow Event Log</h3>
-                                    <p className="text-xs text-muted-foreground">
-                                        Project-scoped operational events and workflow progression.
-                                    </p>
-                                </div>
-                                {!activeProjectPath ? (
-                                    <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                                        Select a project to view workflow events.
-                                    </p>
-                                ) : activeProjectEventLog.length === 0 ? (
-                                    <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                                        No workflow events recorded for this project yet.
-                                    </p>
-                                ) : (
-                                    <ol data-testid="project-event-log-list" className="flex-1 space-y-2 overflow-y-auto pr-1">
-                                        {[...activeProjectEventLog].reverse().map((entry, index) => (
-                                            <li key={`${entry.timestamp}-${index}`} className="rounded border border-border px-2 py-1.5">
-                                                <p className="text-[10px] text-muted-foreground">{formatConversationTimestamp(entry.timestamp)}</p>
-                                                <p className="text-xs text-foreground">{entry.message}</p>
-                                            </li>
-                                        ))}
-                                    </ol>
-                                )}
-                            </div>
-                        </div>
-                    </HomeProjectSidebar>
-                    <HomeWorkspace className={isNarrowViewport ? "space-y-4" : "h-full"}>
-                        <div
-                            data-testid="project-ai-conversation-surface"
-                            className={`rounded-md border border-border bg-card p-4 shadow-sm ${isNarrowViewport ? "" : "flex h-full min-h-0 flex-col"}`}
-                        >
-                            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                {activeProjectLabel ? `Project Chat - ${activeProjectLabel}` : "Project Chat"}
-                            </p>
-                            {!activeProjectPath ? (
-                                <p className={`rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground ${isNarrowViewport ? "" : "flex flex-1 items-center"}`}>
-                                    Select an active project to begin chatting.
-                                </p>
-                            ) : (
-                                <div className="flex min-h-0 flex-1 flex-col gap-3">
-                                    <div
-                                        ref={conversationBodyRef}
-                                        data-testid="project-ai-conversation-body"
-                                        onScroll={syncConversationPinnedState}
-                                        className={`flex min-h-0 flex-1 flex-col gap-3 ${isNarrowViewport ? "" : "overflow-y-auto pr-1"}`}
-                                    >
-                                        <div data-testid="project-ai-conversation-history" className="flex min-h-0 flex-col">
-                                            {!hasRenderableConversationHistory ? (
-                                                <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                                                    {activeConversationId
-                                                        ? "No conversation history for this thread yet."
-                                                        : "Create or select a thread to begin chatting."}
-                                                </p>
-                                            ) : (
-                                                <ol data-testid="project-ai-conversation-history-list" className="space-y-3">
-                                                    {activeConversationHistory.map((entry, index) => {
-                                                        const key = `${entry.id}-${entry.timestamp}-${index}`
-                                                        if (entry.kind === "tool_call") {
-                                                            const statusPresentation = getToolCallStatusPresentation(entry.toolCall.status)
-                                                            const isExpanded = expandedToolCalls[entry.toolCall.id] === true
-                                                            const summaryDetail = summarizeToolCallDetail(entry.toolCall)
-                                                            return (
-                                                                <li key={key} className="flex justify-start">
-                                                                    <div className="w-full rounded-md border border-border bg-muted/40 px-3 py-2">
-                                                                        <button
-                                                                            type="button"
-                                                                            data-testid={`project-tool-call-toggle-${entry.toolCall.id}`}
-                                                                            aria-expanded={isExpanded}
-                                                                            onClick={() => toggleToolCallExpanded(entry.toolCall.id)}
-                                                                            className="flex w-full items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                        >
-                                                                            {isExpanded ? (
-                                                                                <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                                                            ) : (
-                                                                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                                                            )}
-                                                                            <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                                                                {entry.toolCall.kind === "file_change" ? "File change" : "Tool call"}
-                                                                            </p>
-                                                                            <span className={getSurfaceToneClassName(statusPresentation.tone)}>
-                                                                                {statusPresentation.label}
-                                                                            </span>
-                                                                            <p className="shrink-0 text-xs font-medium text-foreground">{entry.toolCall.title}</p>
-                                                                            {summaryDetail ? (
-                                                                                <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-                                                                                    {summaryDetail}
-                                                                                </p>
-                                                                            ) : (
-                                                                                <p className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-                                                                                    {entry.toolCall.status === "running" ? "Running…" : "No additional details"}
-                                                                                </p>
-                                                                            )}
-                                                                        </button>
-                                                                        {isExpanded ? (
-                                                                            <div className="mt-2 space-y-2">
-                                                                                {entry.toolCall.command ? (
-                                                                                    <p className="whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground">
-                                                                                        {entry.toolCall.command}
-                                                                                    </p>
-                                                                                ) : null}
-                                                                                {entry.toolCall.filePaths.length > 0 ? (
-                                                                                    <ul className="space-y-1">
-                                                                                        {entry.toolCall.filePaths.map((path) => (
-                                                                                            <li key={`${key}-${path}`} className="font-mono text-[11px] text-muted-foreground">
-                                                                                                {path}
-                                                                                            </li>
-                                                                                        ))}
-                                                                                    </ul>
-                                                                                ) : null}
-                                                                                {entry.toolCall.output ? (
-                                                                                    <pre className="max-h-40 overflow-auto rounded border border-border/60 bg-background/80 px-2 py-1 whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">
-                                                                                        {entry.toolCall.output}
-                                                                                    </pre>
-                                                                                ) : null}
-                                                                            </div>
-                                                                        ) : null}
-                                                                    </div>
-                                                                </li>
-                                                            )
-                                                        }
-
-                                                        if (entry.kind === "final_separator") {
-                                                            return (
-                                                                <li key={key} className="flex justify-center">
-                                                                    <div className="flex w-full max-w-[85%] items-center gap-3 py-1 text-[11px] text-muted-foreground">
-                                                                        <span className="h-px flex-1 bg-border" />
-                                                                        <span className="shrink-0 whitespace-nowrap">{entry.label}</span>
-                                                                        <span className="h-px flex-1 bg-border" />
-                                                                    </div>
-                                                                </li>
-                                                            )
-                                                        }
-
-                                                        if (entry.kind === "message" && entry.role === "assistant" && entry.presentation === "thinking") {
-                                                            const parsedThinking = parseThinkingSummaryContent(entry.content)
-                                                            const heading = parsedThinking.heading || "Thinking..."
-                                                            const details = parsedThinking.details
-                                                            const isExpandable = details.length > 0
-                                                            const isExpanded = expandedThinkingEntries[entry.id] === true
-                                                            return (
-                                                                <li key={key} className="flex justify-start">
-                                                                    <div className="max-w-[85%] rounded border border-border/80 bg-background px-3 py-2 text-muted-foreground">
-                                                                        {isExpandable ? (
-                                                                            <button
-                                                                                type="button"
-                                                                                data-testid={`project-thinking-toggle-${entry.id}`}
-                                                                                aria-expanded={isExpanded}
-                                                                                onClick={() => toggleThinkingEntryExpanded(entry.id)}
-                                                                                className="flex w-full items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                            >
-                                                                                {isExpanded ? (
-                                                                                    <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                                                                ) : (
-                                                                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                                                                )}
-                                                                                <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
-                                                                                    {heading}
-                                                                                </p>
-                                                                            </button>
-                                                                        ) : (
-                                                                            <p className="text-xs font-semibold text-foreground">{heading}</p>
-                                                                        )}
-                                                                        {isExpanded && details ? (
-                                                                            <p className="mt-2 whitespace-pre-wrap text-xs italic leading-5">
-                                                                                {details}
-                                                                            </p>
-                                                                        ) : null}
-                                                                        <p className="mt-1 text-[10px] opacity-70">{formatConversationTimestamp(entry.timestamp)}</p>
-                                                                    </div>
-                                                                </li>
-                                                            )
-                                                        }
-
-                                                        if (entry.kind === "spec_edit_proposal") {
-                                                            const proposal = activeSpecEditProposalsById.get(entry.artifactId) || null
-                                                            if (!proposal) {
-                                                                return (
-                                                                    <li key={key} className="flex justify-start">
-                                                                        <div className="w-full rounded-md border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-                                                                            Spec edit artifact unavailable. Refresh the project chat to reload it.
-                                                                        </div>
-                                                                    </li>
-                                                                )
-                                                            }
-                                                            const statusPresentation = getSpecEditStatusPresentation(proposal.status)
-                                                            const isLatestProposal = proposal.id === latestSpecEditProposalId
-                                                            const proposalBranch = proposal.git_branch ?? activeProjectGitMetadata.branch
-                                                            const proposalCommit = proposal.git_commit ?? activeProjectGitMetadata.commit
-                                                            return (
-                                                                <li
-                                                                    key={key}
-                                                                    data-testid={isLatestProposal ? "project-spec-edit-proposal-history-row" : undefined}
-                                                                    className="flex justify-start"
-                                                                >
-                                                                    <div
-                                                                        data-testid={isLatestProposal ? "project-spec-edit-proposal-preview" : undefined}
-                                                                        className="w-full rounded-md border border-amber-500/30 bg-amber-500/[0.06] px-4 py-3"
-                                                                    >
-                                                                        <div className="flex flex-wrap items-start justify-between gap-3">
-                                                                            <div className="space-y-1">
-                                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-                                                                                        Spec edit card
-                                                                                    </p>
-                                                                                    <span className={getSurfaceToneClassName(statusPresentation.tone)}>
-                                                                                        {statusPresentation.label}
-                                                                                    </span>
-                                                                                </div>
-                                                                                <p className="text-sm font-medium text-foreground">{proposal.summary}</p>
-                                                                            </div>
-                                                                            <p className="text-[11px] text-muted-foreground">
-                                                                                {proposal.changes.length} changed section{proposal.changes.length === 1 ? "" : "s"}
-                                                                            </p>
-                                                                        </div>
-                                                                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                                                            <span>{formatConversationTimestamp(proposal.created_at)}</span>
-                                                                            <span className="font-mono">{proposal.id}</span>
-                                                                        </div>
-                                                                        <ul className="mt-3 space-y-2">
-                                                                            {proposal.changes.map((change, changeIndex) => {
-                                                                                const diffLines = buildProposalDiffLines(change)
-                                                                                const shouldCollapse = diffLines.length > PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT
-                                                                                const changeKey = buildProposalChangeKey(proposal.id, change.path, changeIndex)
-                                                                                const isExpanded = expandedProposalChanges[changeKey] === true
-                                                                                const visibleLines = shouldCollapse && !isExpanded
-                                                                                    ? diffLines.slice(0, PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT)
-                                                                                    : diffLines
-                                                                                return (
-                                                                                    <li
-                                                                                        key={`${proposal.id}-${change.path}-${changeIndex}`}
-                                                                                        className="rounded border border-amber-500/20 bg-background/80"
-                                                                                    >
-                                                                                        <div className="flex items-center justify-between gap-2 border-b border-amber-500/20 px-3 py-2">
-                                                                                            <p className="truncate text-[11px] font-medium text-foreground">{change.path}</p>
-                                                                                            {shouldCollapse ? (
-                                                                                                <button
-                                                                                                    type="button"
-                                                                                                    onClick={() => toggleProposalChangeExpanded(changeKey)}
-                                                                                                    className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                                                >
-                                                                                                    {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                                                                                                    {isExpanded ? "Collapse" : `Show all (${diffLines.length})`}
-                                                                                                </button>
-                                                                                            ) : null}
-                                                                                        </div>
-                                                                                        <div className="space-y-1 px-3 py-3">
-                                                                                            {visibleLines.map((line, lineIndex) => (
-                                                                                                <p
-                                                                                                    key={`${change.path}-${lineIndex}`}
-                                                                                                    className={`whitespace-pre-wrap rounded px-1.5 py-0.5 font-mono text-[11px] ${line.type === "removed"
-                                                                                                        ? "bg-red-500/10 text-red-800"
-                                                                                                        : "bg-emerald-500/10 text-emerald-800"
-                                                                                                        }`}
-                                                                                                >
-                                                                                                    {line.type === "removed" ? "- " : "+ "}
-                                                                                                    {line.text}
-                                                                                                </p>
-                                                                                            ))}
-                                                                                            {shouldCollapse && !isExpanded ? (
-                                                                                                <p className="text-[10px] text-muted-foreground">
-                                                                                                    Showing first {PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT} of {diffLines.length} lines.
-                                                                                                </p>
-                                                                                            ) : null}
-                                                                                        </div>
-                                                                                    </li>
-                                                                                )
-                                                                            })}
-                                                                        </ul>
-                                                                        {proposal.status === "pending" ? (
-                                                                            <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                                                <button
-                                                                                    data-testid={isLatestProposal ? "project-spec-edit-proposal-apply-button" : undefined}
-                                                                                    type="button"
-                                                                                    onClick={() => {
-                                                                                        void onApproveSpecEditProposal(proposal)
-                                                                                    }}
-                                                                                    disabled={pendingSpecProposalId === proposal.id}
-                                                                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                                                                >
-                                                                                    Apply proposal
-                                                                                </button>
-                                                                                <button
-                                                                                    data-testid={isLatestProposal ? "project-spec-edit-proposal-reject-button" : undefined}
-                                                                                    type="button"
-                                                                                    onClick={() => {
-                                                                                        void onRejectSpecEditProposal(proposal)
-                                                                                    }}
-                                                                                    disabled={pendingSpecProposalId === proposal.id}
-                                                                                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                                                                >
-                                                                                    Reject proposal
-                                                                                </button>
-                                                                            </div>
-                                                                        ) : proposal.status === "applied" ? (
-                                                                            <div className="mt-3 space-y-1 text-[11px] text-muted-foreground">
-                                                                                <p>
-                                                                                    Canonical spec edit:{" "}
-                                                                                    <span className="font-mono text-foreground">
-                                                                                        {proposal.canonical_spec_edit_id || "Pending canonical ID"}
-                                                                                    </span>
-                                                                                </p>
-                                                                                {(proposalBranch || proposalCommit) ? (
-                                                                                    <p>
-                                                                                        Git anchor:{" "}
-                                                                                        <span className="font-mono text-foreground">
-                                                                                            {proposalBranch || "detached"}@{proposalCommit || "unknown"}
-                                                                                        </span>
-                                                                                    </p>
-                                                                                ) : null}
-                                                                            </div>
-                                                                        ) : (
-                                                                            <p className="mt-3 text-[11px] text-muted-foreground">
-                                                                                This spec edit was rejected. Draft a follow-up change in chat if you want to replace it.
-                                                                            </p>
-                                                                        )}
-                                                                    </div>
-                                                                </li>
-                                                            )
-                                                        }
-
-                                                        if (entry.kind === "execution_card") {
-                                                            const executionCard = activeExecutionCardsById.get(entry.artifactId) || null
-                                                            if (!executionCard) {
-                                                                return (
-                                                                    <li key={key} className="flex justify-start">
-                                                                        <div className="w-full rounded-md border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-                                                                            Execution card artifact unavailable. Refresh the project chat to reload it.
-                                                                        </div>
-                                                                    </li>
-                                                                )
-                                                            }
-                                                            const statusPresentation = getExecutionCardStatusPresentation(executionCard.status)
-                                                            const isLatestExecutionCard = executionCard.id === latestExecutionCardId
-                                                            const canReview = executionCard.status === "draft"
-                                                            return (
-                                                                <li
-                                                                    key={key}
-                                                                    data-testid={isLatestExecutionCard ? "project-plan-generation-history-row" : undefined}
-                                                                    className="flex justify-start"
-                                                                >
-                                                                    <div
-                                                                        data-testid={isLatestExecutionCard ? "project-plan-generation-surface" : undefined}
-                                                                        className="w-full rounded-md border border-sky-500/20 bg-sky-500/[0.05] px-4 py-3"
-                                                                    >
-                                                                        <div className="flex flex-wrap items-start justify-between gap-3">
-                                                                            <div className="space-y-1">
-                                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
-                                                                                        Execution card
-                                                                                    </p>
-                                                                                    <span className={getSurfaceToneClassName(statusPresentation.tone)}>
-                                                                                        {statusPresentation.label}
-                                                                                    </span>
-                                                                                </div>
-                                                                                <p className="text-sm font-semibold text-foreground">{executionCard.title}</p>
-                                                                            </div>
-                                                                            <div className="space-y-1 text-right text-[11px] text-muted-foreground">
-                                                                                <p className="font-mono text-foreground">{executionCard.id}</p>
-                                                                                <p>Updated {formatConversationTimestamp(executionCard.updated_at)}</p>
-                                                                            </div>
-                                                                        </div>
-                                                                        <div className="mt-4 space-y-4">
-                                                                            <div className="space-y-2">
-                                                                                <p className="text-sm text-foreground">{executionCard.summary}</p>
-                                                                                <p className="text-xs leading-5 text-muted-foreground">{executionCard.objective}</p>
-                                                                            </div>
-                                                                            <section className="space-y-2">
-                                                                                <div className="flex items-center justify-between gap-2">
-                                                                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                                                                        Derived work items
-                                                                                    </p>
-                                                                                    <p className="text-[11px] text-muted-foreground">
-                                                                                        Review this package as a group before dispatch.
-                                                                                    </p>
-                                                                                </div>
-                                                                                <ol className="space-y-2">
-                                                                                    {executionCard.work_items.map((item) => (
-                                                                                        <li key={item.id} className="rounded-md border border-border bg-background/80 px-3 py-2">
-                                                                                            <div className="space-y-1">
-                                                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                                                    <span className="font-mono text-[10px] text-muted-foreground">{item.id}</span>
-                                                                                                    <p className="text-xs font-medium text-foreground">{item.title}</p>
-                                                                                                </div>
-                                                                                                <p className="text-[11px] leading-5 text-muted-foreground">{item.description}</p>
-                                                                                                {item.acceptance_criteria.length > 0 ? (
-                                                                                                    <ul className="space-y-1 pt-1">
-                                                                                                        {item.acceptance_criteria.map((criterion, criterionIndex) => (
-                                                                                                            <li key={`${item.id}-criterion-${criterionIndex}`} className="text-[11px] text-muted-foreground">
-                                                                                                                - {criterion}
-                                                                                                            </li>
-                                                                                                        ))}
-                                                                                                    </ul>
-                                                                                                ) : null}
-                                                                                            </div>
-                                                                                        </li>
-                                                                                    ))}
-                                                                                </ol>
-                                                                            </section>
-                                                                            <section
-                                                                                data-testid={isLatestExecutionCard ? "project-plan-gate-surface" : undefined}
-                                                                                className="space-y-2 rounded-md border border-border bg-background/80 px-3 py-3"
-                                                                            >
-                                                                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                                                                    <div>
-                                                                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                                                                            Review decision
-                                                                                        </p>
-                                                                                        <p className="text-xs text-foreground">
-                                                                                            Execution card status: <span className="font-medium">{executionCard.status}</span>
-                                                                                        </p>
-                                                                                    </div>
-                                                                                </div>
-                                                                                {canReview ? (
-                                                                                    <div className="flex flex-wrap items-center gap-2">
-                                                                                        <button
-                                                                                            data-testid={isLatestExecutionCard ? "project-plan-approve-button" : undefined}
-                                                                                            type="button"
-                                                                                            onClick={() => {
-                                                                                                void onReviewExecutionCard(executionCard, "approved")
-                                                                                            }}
-                                                                                            disabled={pendingExecutionCardId === executionCard.id}
-                                                                                            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                                                                        >
-                                                                                            Approve plan
-                                                                                        </button>
-                                                                                        <button
-                                                                                            data-testid={isLatestExecutionCard ? "project-plan-reject-button" : undefined}
-                                                                                            type="button"
-                                                                                            onClick={() => {
-                                                                                                void onReviewExecutionCard(executionCard, "rejected")
-                                                                                            }}
-                                                                                            disabled={pendingExecutionCardId === executionCard.id}
-                                                                                            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                                                                        >
-                                                                                            Reject plan
-                                                                                        </button>
-                                                                                        <button
-                                                                                            data-testid={isLatestExecutionCard ? "project-plan-request-revision-button" : undefined}
-                                                                                            type="button"
-                                                                                            onClick={() => {
-                                                                                                void onReviewExecutionCard(executionCard, "revision_requested")
-                                                                                            }}
-                                                                                            disabled={pendingExecutionCardId === executionCard.id}
-                                                                                            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                                                                        >
-                                                                                            Request revision
-                                                                                        </button>
-                                                                                    </div>
-                                                                                ) : null}
-                                                                            </section>
-                                                                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                                                                <span className="font-mono text-foreground">{executionCard.source_spec_edit_id}</span>
-                                                                                <span>/</span>
-                                                                                <span className="font-mono text-foreground">{executionCard.source_workflow_run_id}</span>
-                                                                                {executionCard.flow_source ? (
-                                                                                    <>
-                                                                                        <span>/</span>
-                                                                                        <span className="font-mono text-foreground">{executionCard.flow_source}</span>
-                                                                                    </>
-                                                                                ) : null}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </li>
-                                                            )
-                                                        }
-
-                                                        return (
-                                                            <li
-                                                                key={key}
-                                                                className={`flex ${entry.role === "user" ? "justify-end" : "justify-start"}`}
-                                                            >
-                                                                <div
-                                                                    className={`max-w-[85%] rounded border px-3 py-2 ${entry.role === "user"
-                                                                        ? "border-primary/40 bg-primary/10 text-foreground"
-                                                                        : entry.presentation === "thinking"
-                                                                            ? "border-border/80 bg-background text-muted-foreground"
-                                                                            : "border-border bg-muted/40 text-foreground"
-                                                                        }`}
-                                                                >
-                                                                    <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
-                                                                        {entry.role === "assistant"
-                                                                            ? (entry.presentation === "thinking" ? "Thinking" : "Spark Spawn")
-                                                                            : entry.role}
-                                                                    </p>
-                                                                    <p className={`whitespace-pre-wrap text-xs leading-5 ${entry.presentation === "thinking" ? "italic" : ""}`}>
-                                                                        {entry.role === "assistant" && entry.status !== "complete" && !entry.content.trim()
-                                                                            ? entry.status === "failed"
-                                                                                ? (entry.error || "Response failed.")
-                                                                                : "Thinking..."
-                                                                            : entry.content}
-                                                                    </p>
-                                                                    <p className="mt-1 text-[10px] opacity-70">{formatConversationTimestamp(entry.timestamp)}</p>
-                                                                </div>
-                                                            </li>
-                                                        )
-                                                    })}
-                                                </ol>
-                                            )}
-                                        </div>
-                                    </div>
-                                    {!isConversationPinnedToBottom && hasRenderableConversationHistory ? (
-                                        <div className="flex justify-end">
-                                            <button
-                                                type="button"
-                                                data-testid="project-ai-conversation-jump-to-bottom"
-                                                onClick={scrollConversationToBottom}
-                                                className="rounded border border-border bg-background/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            >
-                                                Jump to bottom
-                                            </button>
-                                        </div>
-                                    ) : null}
-                                    <form
-                                        data-testid="project-ai-conversation-composer"
-                                        onSubmit={onChatComposerSubmit}
-                                        className="shrink-0 space-y-2 pt-1"
-                                    >
-                                        <textarea
-                                            id="project-ai-conversation-input"
-                                            data-testid="project-ai-conversation-input"
-                                            value={chatDraft}
-                                            onChange={(event) => setChatDraft(event.target.value)}
-                                            onKeyDown={onChatComposerKeyDown}
-                                            aria-label="Message"
-                                            placeholder="Describe the spec change or requirement you want to work on..."
-                                            rows={4}
-                                            className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                        <div className="flex items-center justify-between gap-2">
-                                            <p className="text-[11px] text-muted-foreground">
-                                                Press Enter to send. Use Shift+Enter for a new line.
-                                            </p>
-                                            <button
-                                                data-testid="project-ai-conversation-send-button"
-                                                type="submit"
-                                                disabled={chatDraft.trim().length === 0 || isSendingChat}
-                                                className="rounded border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-                                            >
-                                                {chatSendButtonLabel}
-                                            </button>
-                                        </div>
-                                        {panelError ? (
-                                            <p className="text-[11px] text-destructive">{panelError}</p>
-                                        ) : null}
-                                    </form>
-                                </div>
-                            )}
-                        </div>
-                    </HomeWorkspace>
+                    <ProjectsSidebar
+                        isNarrowViewport={isNarrowViewport}
+                        homeSidebarRef={homeSidebarRef}
+                        homeSidebarPrimaryHeight={homeSidebarPrimaryHeight}
+                        projectDirectoryPickerInputRef={projectDirectoryPickerInputRef}
+                        projectRegistrationError={projectRegistrationError}
+                        orderedProjects={orderedProjects}
+                        activeProjectPath={activeProjectPath}
+                        activeConversationId={activeConversationId}
+                        activeProjectConversationSummaries={activeProjectConversationSummaries}
+                        pendingDeleteProjectPath={pendingDeleteProjectPath}
+                        pendingDeleteConversationId={pendingDeleteConversationId}
+                        activeProjectEventLog={activeProjectEventLog}
+                        isHomeSidebarResizing={isHomeSidebarResizing}
+                        onOpenProjectDirectoryChooser={onOpenProjectDirectoryChooser}
+                        onProjectDirectorySelected={onProjectDirectorySelected}
+                        onActivateProject={onActivateProject}
+                        onDeleteProject={onDeleteProject}
+                        onCreateConversationThread={onCreateConversationThread}
+                        onSelectConversationThread={onSelectConversationThread}
+                        onDeleteConversationThread={onDeleteConversationThread}
+                        onHomeSidebarResizePointerDown={onHomeSidebarResizePointerDown}
+                        onHomeSidebarResizeKeyDown={onHomeSidebarResizeKeyDown}
+                        formatProjectListLabel={formatProjectListLabel}
+                        formatConversationAgeShort={formatConversationAgeShort}
+                        formatConversationTimestamp={formatConversationTimestamp}
+                    />
+                    <ProjectConversationSurface
+                        activeProjectLabel={activeProjectLabel}
+                        activeProjectPath={activeProjectPath}
+                        activeConversationId={activeConversationId}
+                        hasRenderableConversationHistory={hasRenderableConversationHistory}
+                        isConversationPinnedToBottom={isConversationPinnedToBottom}
+                        isNarrowViewport={isNarrowViewport}
+                        chatDraft={chatDraft}
+                        chatSendButtonLabel={chatSendButtonLabel}
+                        isSendingChat={isSendingChat}
+                        panelError={panelError}
+                        conversationBodyRef={conversationBodyRef}
+                        historyContent={conversationHistoryContent}
+                        onSyncConversationPinnedState={syncConversationPinnedState}
+                        onScrollConversationToBottom={scrollConversationToBottom}
+                        onChatComposerSubmit={onChatComposerSubmit}
+                        onChatComposerKeyDown={onChatComposerKeyDown}
+                        onChatDraftChange={setChatDraft}
+                    />
                 </div>
             </div>
         </section>

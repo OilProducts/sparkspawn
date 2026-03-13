@@ -6,6 +6,8 @@ from typing import List
 import pytest
 from fastapi.testclient import TestClient
 
+import attractor.api.codex_backends as codex_backends_module
+import attractor.api.project_chat as project_chat
 import attractor.api.server as server
 from attractor.engine import Context, load_checkpoint
 from attractor.engine.outcome import Outcome, OutcomeStatus
@@ -222,7 +224,7 @@ def test_local_codex_app_server_backend_missing_binary_returns_fail_outcome_and_
     def _raise_missing(*args, **kwargs):
         raise FileNotFoundError("codex")
 
-    monkeypatch.setattr(server.subprocess, "Popen", _raise_missing)
+    monkeypatch.setattr(codex_backends_module.subprocess, "Popen", _raise_missing)
 
     result = backend.run("plan", "hello", Context())
 
@@ -235,10 +237,10 @@ def test_local_codex_app_server_backend_missing_binary_returns_fail_outcome_and_
 def test_resolve_runtime_workspace_path_maps_host_repo_root_override_to_runtime_repo_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runtime_repo_root = Path(server.__file__).resolve().parents[2]
+    runtime_repo_root = Path(server.__file__).resolve().parents[3]
     monkeypatch.setenv("ATTRACTOR_HOST_REPO_ROOT", "/Users/chris/tinker/sparkspawn")
     monkeypatch.setenv("ATTRACTOR_RUNTIME_REPO_ROOT", str(runtime_repo_root))
-    translated = server.resolve_runtime_workspace_path("/home/chris/tinker/sparkspawn/frontend")
+    translated = project_chat.resolve_runtime_workspace_path("/home/chris/tinker/sparkspawn/frontend")
 
     assert translated == str((runtime_repo_root / "frontend").resolve(strict=False))
 
@@ -258,7 +260,7 @@ def test_build_codex_runtime_environment_isolates_home_and_seeds_runtime_state(
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
 
-    env = server.build_codex_runtime_environment()
+    env = project_chat.build_codex_runtime_environment()
 
     assert env["HOME"] == str(runtime_root)
     assert env["CODEX_HOME"] == str(runtime_root / ".codex")
@@ -286,7 +288,7 @@ def test_build_codex_runtime_environment_falls_back_to_host_codex_home_when_seed
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
 
-    env = server.build_codex_runtime_environment()
+    env = project_chat.build_codex_runtime_environment()
 
     assert env["CODEX_HOME"] == str(runtime_root / ".codex")
     assert (runtime_root / ".codex" / "auth.json").read_text(encoding="utf-8") == '{"token":"host-seed"}'
@@ -303,7 +305,7 @@ def test_local_codex_app_server_backend_missing_runtime_working_directory_return
     def _raise_missing(*args, **kwargs):
         raise FileNotFoundError(str(missing_dir))
 
-    monkeypatch.setattr(server.subprocess, "Popen", _raise_missing)
+    monkeypatch.setattr(codex_backends_module.subprocess, "Popen", _raise_missing)
 
     result = backend.run("plan", "hello", Context())
 
@@ -428,10 +430,10 @@ def test_local_codex_app_server_backend_accepts_task_complete_without_turn_compl
     ]
     monotonic_values = iter([0.0, 0.1, 0.2, 0.3, 0.4, 1.6])
 
-    monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: FakeProcess(lines))
-    monkeypatch.setattr(server.selectors, "DefaultSelector", FakeSelector)
-    monkeypatch.setattr(server.codex_app_server, "APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
-    monkeypatch.setattr(server.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(codex_backends_module.subprocess, "Popen", lambda *args, **kwargs: FakeProcess(lines))
+    monkeypatch.setattr(codex_backends_module.selectors, "DefaultSelector", FakeSelector)
+    monkeypatch.setattr(codex_backends_module.codex_app_server, "APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(codex_backends_module.time, "monotonic", lambda: next(monotonic_values))
 
     result = backend.run("plan", "hello", Context())
 

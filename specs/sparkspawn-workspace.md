@@ -26,6 +26,8 @@ Attractor remains a standalone workflow runtime.
 
 Spark Spawn remains a standalone workspace product.
 
+In the current deployment model, Spark Spawn Workspace and Attractor MAY run inside one backend process, but they MUST remain distinct service surfaces. A modular monolith is acceptable; a mixed undifferentiated API surface is not.
+
 ---
 
 ## 2. Layer Boundaries
@@ -54,6 +56,8 @@ Spark Spawn owns:
 - trigger-to-flow bindings
 
 These concepts are outside the scope of the base Attractor spec.
+
+The canonical Workspace service surface SHOULD be exposed separately from the Attractor surface, even when both are hosted by one FastAPI/ASGI deployment.
 
 ### 2.3 Frontend
 
@@ -209,6 +213,28 @@ Spark Spawn owns:
 - project-to-flow associations
 - trigger-to-flow bindings
 - provenance metadata linking workspace artifacts to Attractor runs and flows
+
+### 6.4 Trigger Binding Model
+
+Trigger bindings are workspace resources, not Attractor flow resources.
+
+Each binding is:
+- project-scoped
+- keyed by a stable trigger name
+- resolved to a flow name owned by Attractor
+
+Initial trigger set:
+- `spec_edit_approved`
+- `execution_card_approved`
+- `execution_card_rejected`
+- `execution_card_revision_requested`
+
+The workspace service MUST resolve launch flow selection in this order:
+1. explicit request override
+2. project trigger binding
+3. built-in workspace fallback
+
+The workspace service MUST persist only the trigger-to-flow reference. It MUST NOT duplicate or take ownership of the underlying flow document.
 
 ### 6.3 Frontend-Owned State
 

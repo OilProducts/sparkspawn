@@ -4,13 +4,11 @@ import asyncio
 import json
 import logging
 import mimetypes
-from dataclasses import dataclass, field
 import threading
 import uuid
 import os
 import shutil
 import re
-import selectors
 import sys
 import time
 from datetime import datetime
@@ -18,7 +16,7 @@ from pathlib import Path
 import subprocess
 from typing import Any, Callable, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field
 
@@ -27,12 +25,9 @@ from attractor.dsl import (
     DotParseError,
     Diagnostic,
     DiagnosticSeverity,
-    format_dot,
-    normalize_graph,
     parse_dot,
     validate_graph,
 )
-from attractor.dsl.models import DotAttribute, DotValueType
 from attractor.engine import (
     Checkpoint,
     Context,
@@ -44,10 +39,38 @@ from attractor.engine import (
 )
 from attractor.graphviz_export import export_graphviz_artifact
 from attractor.config import Settings, resolve_settings, validate_settings
-from attractor.api import codex_app_server
+from attractor.api.codex_backends import (
+    LocalCodexAppServerBackend,
+    LocalCodexCliBackend,
+    build_codergen_backend as _build_codergen_backend_impl,
+)
+from attractor.api.flow_sources import (
+    ensure_flows_dir as _ensure_flows_dir_impl,
+    load_execution_planning_flow_content as _load_execution_planning_flow_content_impl,
+    load_flow_content as _load_flow_content_impl,
+    resolve_flow_path as _resolve_flow_path_impl,
+    semantic_signature as _semantic_signature_impl,
+)
+from attractor.api.run_records import (
+    RunRecord,
+    extract_token_usage,
+    hydrate_run_record_from_log,
+    normalize_run_status,
+    run_matches_project_scope,
+)
+from attractor.api import pipeline_runs
+from attractor.api.pipeline_runtime import (
+    ActiveRun,
+    BroadcastingRunner,
+    ConnectionManager,
+    ExecutionControl,
+    HumanGateBroker,
+    PipelineEventHub,
+    RuntimeState,
+    WebInterviewer,
+)
 from attractor.api.project_chat import (
     ProjectChatService,
-    build_codex_runtime_environment,
     resolve_runtime_workspace_path,
 )
 from attractor.api.workspace_api import (
@@ -72,6 +95,9 @@ from attractor.transforms import (
 
 
 app = FastAPI()
+attractor_app = FastAPI(title="Attractor API")
+workspace_app = FastAPI(title="Spark Spawn Workspace API")
+attractor_router = APIRouter()
 LOGGER = logging.getLogger(__name__)
 SETTINGS_LOCK = threading.Lock()
 SETTINGS = resolve_settings()
@@ -147,308 +173,12 @@ def _registered_transforms_snapshot() -> List[object]:
         return list(REGISTERED_TRANSFORMS)
 
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        for connection in list(self.active_connections):
-            try:
-                await connection.send_json(message)
-            except Exception:
-                pass
-
-
 manager = ConnectionManager()
-
-
-class ExecutionControl:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._cancel_requested = False
-
-    def reset(self) -> None:
-        with self._lock:
-            self._cancel_requested = False
-
-    def request_cancel(self) -> None:
-        with self._lock:
-            self._cancel_requested = True
-
-    def poll(self) -> Optional[str]:
-        with self._lock:
-            if self._cancel_requested:
-                return "abort"
-        return None
-
-
-class HumanGateBroker:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._pending: Dict[str, Dict[str, object]] = {}
-
-    def request(
-        self,
-        question: Question,
-        run_id: str,
-        node_id: str,
-        flow_name: str,
-        emit: Callable[[dict], None],
-    ) -> Answer:
-        gate_id = uuid.uuid4().hex
-        event = threading.Event()
-        with self._lock:
-            self._pending[gate_id] = {
-                "event": event,
-                "answer": None,
-                "run_id": run_id,
-                "node_id": node_id,
-                "flow_name": flow_name,
-                "prompt": question.prompt,
-                "options": [
-                    {"label": opt.label, "value": opt.value} for opt in question.options
-                ],
-            }
-
-        emit(
-            {
-                "type": "state",
-                "node": node_id,
-                "status": "waiting",
-            }
-        )
-        emit(
-            {
-                "type": "human_gate",
-                "question_id": gate_id,
-                "node_id": node_id,
-                "flow_name": flow_name,
-                "prompt": question.prompt,
-                "options": [
-                    {"label": opt.label, "value": opt.value} for opt in question.options
-                ],
-            }
-        )
-
-        timeout_seconds = question.timeout_seconds
-        wait_timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
-        responded = event.wait(wait_timeout)
-        with self._lock:
-            entry = self._pending.pop(gate_id, {})
-            selected = entry.get("answer") if entry else None
-
-        if not responded and question.default is not None:
-            return question.default
-        if selected:
-            return Answer(selected_values=[str(selected)])
-        return Answer(value=AnswerValue.TIMEOUT)
-
-    def answer(self, run_id: str, gate_id: str, selected_value: str) -> bool:
-        with self._lock:
-            entry = self._pending.get(gate_id)
-            if not entry:
-                return False
-            if str(entry.get("run_id", "")) != run_id:
-                return False
-            entry["answer"] = selected_value
-            entry["event"].set()
-            return True
-
-    def list_for_run(self, run_id: str) -> List[Dict[str, object]]:
-        with self._lock:
-            payload: List[Dict[str, object]] = []
-            for gate_id, entry in self._pending.items():
-                if str(entry.get("run_id", "")) != run_id:
-                    continue
-                if entry.get("answer") is not None:
-                    continue
-                payload.append(
-                    {
-                        "question_id": gate_id,
-                        "run_id": str(entry.get("run_id", "")),
-                        "node_id": str(entry.get("node_id", "")),
-                        "flow_name": str(entry.get("flow_name", "")),
-                        "prompt": str(entry.get("prompt", "")),
-                        "options": list(entry.get("options") or []),
-                    }
-                )
-            return payload
-
-
 HUMAN_BROKER = HumanGateBroker()
-
-
-class WebInterviewer(Interviewer):
-    def __init__(
-        self,
-        broker: HumanGateBroker,
-        emit: Callable[[dict], None],
-        flow_name: str,
-        run_id: str,
-    ):
-        self._broker = broker
-        self._emit = emit
-        self._flow_name = flow_name
-        self._run_id = run_id
-
-    def ask(self, question: Question) -> Answer:
-        node_id = str(question.metadata.get("node_id", "")).strip()
-        if not node_id and question.title.lower().startswith("human gate:"):
-            node_id = question.title.split(":", 1)[1].strip()
-        return self._broker.request(question, self._run_id, node_id, self._flow_name, self._emit)
-
-
-class PipelineEventHub:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._history: Dict[str, List[dict]] = {}
-        self._subscribers: Dict[str, List[asyncio.Queue[dict]]] = {}
-        self._max_history = 500
-
-    async def publish(self, run_id: str, event: dict) -> None:
-        queues: List[asyncio.Queue[dict]] = []
-        with self._lock:
-            history = self._history.setdefault(run_id, [])
-            history.append(event)
-            if len(history) > self._max_history:
-                del history[:-self._max_history]
-            queues = list(self._subscribers.get(run_id, []))
-        for queue in queues:
-            try:
-                queue.put_nowait(event)
-            except asyncio.QueueFull:
-                try:
-                    queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    continue
-                try:
-                    queue.put_nowait(event)
-                except asyncio.QueueFull:
-                    continue
-
-    def history(self, run_id: str) -> List[dict]:
-        with self._lock:
-            return list(self._history.get(run_id, []))
-
-    def subscribe(self, run_id: str) -> asyncio.Queue[dict]:
-        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
-        with self._lock:
-            self._subscribers.setdefault(run_id, []).append(queue)
-        return queue
-
-    def subscribe_with_history(self, run_id: str) -> tuple[asyncio.Queue[dict], List[dict]]:
-        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
-        with self._lock:
-            history = list(self._history.get(run_id, []))
-            self._subscribers.setdefault(run_id, []).append(queue)
-        return queue, history
-
-    def unsubscribe(self, run_id: str, queue: asyncio.Queue[dict]) -> None:
-        with self._lock:
-            listeners = self._subscribers.get(run_id)
-            if not listeners:
-                return
-            if queue in listeners:
-                listeners.remove(queue)
-            if not listeners:
-                self._subscribers.pop(run_id, None)
-
-
 EVENT_HUB = PipelineEventHub()
-
-
-@dataclass
-class ActiveRun:
-    run_id: str
-    flow_name: str
-    working_directory: str
-    model: str
-    status: str = "running"
-    last_error: str = ""
-    completed_nodes: List[str] = field(default_factory=list)
-    control: ExecutionControl = field(default_factory=ExecutionControl)
-
-
-@dataclass
-class RuntimeState:
-    status: str = "idle"
-    last_error: str = ""
-    last_working_directory: str = ""
-    last_model: str = ""
-    last_completed_nodes: list[str] = None
-    last_flow_name: str = ""
-    last_run_id: str = ""
-
-
 RUNTIME = RuntimeState(last_completed_nodes=[])
 ACTIVE_RUNS_LOCK = threading.Lock()
 ACTIVE_RUNS: Dict[str, ActiveRun] = {}
-
-
-@dataclass
-class RunRecord:
-    run_id: str
-    flow_name: str
-    status: str
-    result: Optional[str]
-    working_directory: str
-    model: str
-    started_at: str
-    ended_at: Optional[str] = None
-    project_path: str = ""
-    git_branch: Optional[str] = None
-    git_commit: Optional[str] = None
-    spec_id: Optional[str] = None
-    plan_id: Optional[str] = None
-    last_error: str = ""
-    token_usage: Optional[int] = None
-
-    def to_dict(self) -> Dict[str, object]:
-        return {
-            "run_id": self.run_id,
-            "flow_name": self.flow_name,
-            "status": self.status,
-            "result": self.result,
-            "working_directory": self.working_directory,
-            "model": self.model,
-            "started_at": self.started_at,
-            "ended_at": self.ended_at,
-            "project_path": self.project_path,
-            "git_branch": self.git_branch,
-            "git_commit": self.git_commit,
-            "spec_id": self.spec_id,
-            "plan_id": self.plan_id,
-            "last_error": self.last_error,
-            "token_usage": self.token_usage,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, object]) -> "RunRecord":
-        return cls(
-            run_id=str(data.get("run_id", "")),
-            flow_name=str(data.get("flow_name", "")),
-            status=str(data.get("status", "unknown")),
-            result=data.get("result") if data.get("result") is not None else None,
-            working_directory=str(data.get("working_directory", "")),
-            model=str(data.get("model", "")),
-            started_at=str(data.get("started_at", "")),
-            ended_at=data.get("ended_at") if data.get("ended_at") is not None else None,
-            project_path=str(data.get("project_path", "")),
-            git_branch=str(data.get("git_branch")) if data.get("git_branch") is not None else None,
-            git_commit=str(data.get("git_commit")) if data.get("git_commit") is not None else None,
-            spec_id=str(data.get("spec_id")) if data.get("spec_id") is not None else None,
-            plan_id=str(data.get("plan_id")) if data.get("plan_id") is not None else None,
-            last_error=str(data.get("last_error", "")),
-            token_usage=int(data["token_usage"]) if data.get("token_usage") is not None else None,
-        )
 
 
 RUN_HISTORY_LOCK = threading.Lock()
@@ -456,165 +186,47 @@ PIPELINE_LIFECYCLE_PHASES = ("PARSE", "VALIDATE", "INITIALIZE", "EXECUTE", "FINA
 
 
 def _runs_root() -> Path:
-    root = get_settings().projects_dir
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return pipeline_runs.runs_root(get_settings)
 
 
 def _project_runs_dir(project_path: str) -> Optional[Path]:
-    normalized_project_path = normalize_project_path(project_path)
-    if not normalized_project_path:
-        return None
-    project_id = build_project_id(normalized_project_path)
-    project_paths = read_project_paths_by_id(get_settings().data_dir, project_id)
-    if project_paths is None:
-        return None
-    return project_paths.runs_dir
+    return pipeline_runs.project_runs_dir(get_settings, project_path)
 
 
 def _iter_run_roots(*, project_path: Optional[str] = None) -> list[Path]:
-    if project_path:
-        runs_dir = _project_runs_dir(project_path)
-        if runs_dir is None or not runs_dir.exists():
-            return []
-        return sorted((path for path in runs_dir.iterdir() if path.is_dir()), key=lambda item: item.name)
-
-    run_roots: list[Path] = []
-    projects_root = _runs_root()
-    if not projects_root.exists():
-        return run_roots
-    for runs_dir in sorted(projects_root.glob("*/runs")):
-        if not runs_dir.is_dir():
-            continue
-        run_roots.extend(sorted((path for path in runs_dir.iterdir() if path.is_dir()), key=lambda item: item.name))
-    return run_roots
+    return pipeline_runs.iter_run_roots(get_settings, project_path=project_path)
 
 
 def _find_run_root(run_id: str) -> Optional[Path]:
-    for run_root in _iter_run_roots():
-        if run_root.name == run_id:
-            return run_root
-    return None
+    return pipeline_runs.find_run_root(get_settings, run_id)
 
 
 def _ensure_run_root_for_project(run_id: str, project_path: str) -> Path:
-    normalized_project_path = normalize_project_path(project_path)
-    if not normalized_project_path:
-        raise ValueError("Run storage requires a project path.")
-    project_paths = ensure_project_paths(get_settings().data_dir, normalized_project_path)
-    run_root = project_paths.runs_dir / run_id
-    run_root.mkdir(parents=True, exist_ok=True)
-    return run_root
+    return pipeline_runs.ensure_run_root_for_project(get_settings, run_id, project_path)
 
 
 def _run_root(run_id: str) -> Path:
-    run_root = _find_run_root(run_id)
-    if run_root is not None:
-        return run_root
-    return get_settings().runtime_dir / "_missing-runs" / run_id
+    return pipeline_runs.run_root(get_settings, run_id)
 
 
 def _resolve_start_node_id(graph) -> str:
-    shape_starts = []
-    for node in graph.nodes.values():
-        shape_attr = node.attrs.get("shape")
-        shape_value = str(shape_attr.value) if shape_attr is not None else ""
-        if shape_value == "Mdiamond":
-            shape_starts.append(node.node_id)
-
-    candidates = shape_starts or [node_id for node_id in graph.nodes if node_id in {"start", "Start"}]
-    if len(candidates) != 1:
-        raise RuntimeError(f"Expected exactly one start node, found {len(candidates)}")
-    return candidates[0]
+    return pipeline_runs.resolve_start_node_id(graph)
 
 
 def _graph_attr_context_seed(graph) -> Dict[str, object]:
-    seeded: Dict[str, object] = {}
-    for key, attr in graph.graph_attrs.items():
-        value = getattr(attr, "value", "")
-        if hasattr(value, "raw"):
-            value = value.raw
-        seeded[f"graph.{key}"] = value
-    seeded.setdefault("graph.goal", "")
-    return seeded
+    return pipeline_runs.graph_attr_context_seed(graph)
 
 
 def _run_meta_path(run_id: str) -> Path:
-    return _run_root(run_id) / "run.json"
+    return pipeline_runs.run_meta_path(get_settings, run_id)
 
 
 def _write_run_meta(record: RunRecord) -> None:
-    try:
-        if record.project_path or record.working_directory:
-            _ensure_run_root_for_project(record.run_id, record.project_path or record.working_directory)
-        run_meta_path = _run_meta_path(record.run_id)
-        run_meta_path.parent.mkdir(parents=True, exist_ok=True)
-        with run_meta_path.open("w", encoding="utf-8") as f:
-            json.dump(record.to_dict(), f, indent=2, sort_keys=True)
-    except Exception:
-        pass
+    pipeline_runs.write_run_meta(get_settings, record)
 
 
 def _read_run_meta(path: Path) -> Optional[RunRecord]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return RunRecord.from_dict(payload)
-    except Exception:
-        return None
-
-
-def _normalize_run_status(status: str) -> str:
-    if status == "fail":
-        return "failed"
-    if status in {"aborted", "abort_requested"}:
-        return {"aborted": "canceled", "abort_requested": "cancel_requested"}[status]
-    if status == "cancelled":
-        return "canceled"
-    return status
-
-
-def _normalize_scope_path(value: str) -> str:
-    trimmed = value.strip()
-    if not trimmed:
-        return ""
-    slash_normalized = re.sub(r"/{2,}", "/", trimmed.replace("\\", "/"))
-    prefix = "/" if slash_normalized.startswith("/") else ""
-    raw_body = slash_normalized[1:] if prefix else slash_normalized
-    parts = [part for part in raw_body.split("/") if part]
-    segments: List[str] = []
-    for part in parts:
-        if part == ".":
-            continue
-        if part == "..":
-            if segments:
-                segments.pop()
-            continue
-        segments.append(part)
-    normalized_body = "/".join(segments)
-    if not normalized_body and prefix:
-        return prefix
-    return f"{prefix}{normalized_body}"
-
-
-def _path_in_scope(candidate_path: str, project_scope_path: str) -> bool:
-    if not candidate_path or not project_scope_path:
-        return False
-    if candidate_path == project_scope_path:
-        return True
-    if project_scope_path == "/":
-        return candidate_path.startswith("/")
-    return candidate_path.startswith(f"{project_scope_path}/")
-
-
-def _run_matches_project_scope(record: RunRecord, project_path: str) -> bool:
-    normalized_scope = _normalize_scope_path(project_path)
-    if not normalized_scope:
-        return True
-    candidate_paths = [
-        _normalize_scope_path(record.project_path),
-        _normalize_scope_path(record.working_directory),
-    ]
-    return any(_path_in_scope(candidate_path, normalized_scope) for candidate_path in candidate_paths)
+    return pipeline_runs.read_run_meta(path)
 
 
 def _record_run_start(
@@ -625,222 +237,62 @@ def _record_run_start(
     spec_id: Optional[str] = None,
     plan_id: Optional[str] = None,
 ) -> None:
-    project_path, git_branch, git_commit = _resolve_run_project_git_metadata(working_directory)
-    record = RunRecord(
+    pipeline_runs.record_run_start(
+        get_settings,
+        RUN_HISTORY_LOCK,
         run_id=run_id,
         flow_name=flow_name,
-        status="running",
-        result=None,
         working_directory=working_directory,
         model=model,
-        started_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        project_path=project_path,
-        git_branch=git_branch,
-        git_commit=git_commit,
+        resolve_runtime_workspace_path=resolve_runtime_workspace_path,
         spec_id=spec_id,
         plan_id=plan_id,
     )
-    with RUN_HISTORY_LOCK:
-        _write_run_meta(record)
-
-
-TOKEN_LINE_RE = re.compile(r"tokens used\\s*[:=]?\\s*(\\d[\\d,]*)", re.IGNORECASE)
-TOKEN_NUMBER_ONLY_RE = re.compile(r"^\\d[\\d,]*$")
-
-
-def _extract_token_usage(run_id: str) -> Optional[int]:
-    run_log_path = _run_root(run_id) / "run.log"
-    if not run_log_path.exists():
-        return None
-    try:
-        lines = run_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    except Exception:
-        return None
-    total = 0
-    index = 0
-    while index < len(lines):
-        line = lines[index].strip()
-        match = TOKEN_LINE_RE.search(line)
-        if match:
-            total += int(match.group(1).replace(",", ""))
-        elif line.lower() == "tokens used" and index + 1 < len(lines):
-            next_line = lines[index + 1].strip()
-            if TOKEN_NUMBER_ONLY_RE.match(next_line):
-                total += int(next_line.replace(",", ""))
-                index += 1
-        index += 1
-    return total if total > 0 else None
-
-
-RUN_LOG_TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC\]")
-
-
-def _hydrate_run_record_from_log(record: RunRecord, run_log_path: Path) -> None:
-    if not run_log_path.exists():
-        return
-    record.token_usage = _extract_token_usage(record.run_id)
-    try:
-        lines = run_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    except Exception:
-        return
-    if not lines:
-        return
-
-    first_timestamp = RUN_LOG_TIMESTAMP_RE.search(lines[0])
-    if first_timestamp and not record.started_at:
-        record.started_at = f"{first_timestamp.group(1).replace(' ', 'T')}Z"
-
-    log_status = None
-    for line in reversed(lines):
-        status_match = re.search(r"Pipeline\s+(\w+)", line)
-        if status_match:
-            log_status = _normalize_run_status(status_match.group(1))
-            break
-        if "Pipeline Aborted" in line:
-            log_status = "canceled"
-            break
-
-    if log_status and record.status in {"", "unknown", "running"}:
-        record.status = log_status
-    if log_status and record.result is None:
-        record.result = log_status
-    if log_status and not record.ended_at:
-        last_timestamp = RUN_LOG_TIMESTAMP_RE.search(lines[-1])
-        if last_timestamp:
-            record.ended_at = f"{last_timestamp.group(1).replace(' ', 'T')}Z"
-    if not log_status and record.status == "unknown":
-        record.status = "running"
 
 
 def _ensure_known_pipeline(pipeline_id: str) -> None:
-    active = _get_active_run(pipeline_id)
-    if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
-        raise HTTPException(status_code=404, detail="Unknown pipeline")
+    pipeline_runs.ensure_known_pipeline(get_settings, _get_active_run(pipeline_id), pipeline_id)
 
 
 def _artifact_media_type(path: Path) -> str:
-    guessed, _ = mimetypes.guess_type(path.name)
-    return guessed or "application/octet-stream"
+    return pipeline_runs.artifact_media_type(path)
 
 
 def _artifact_is_viewable(*, media_type: str, path: Path) -> bool:
-    if media_type.startswith("text/"):
-        return True
-    if media_type in {"application/json", "application/xml", "image/svg+xml"}:
-        return True
-    return path.suffix.lower() in {".json", ".txt", ".md", ".log", ".dot", ".yaml", ".yml", ".csv"}
+    return pipeline_runs.artifact_is_viewable(media_type=media_type, path=path)
 
 
 def _resolve_artifact_path(run_root: Path, artifact_path: str) -> Path:
-    normalized = artifact_path.strip()
-    if not normalized:
-        raise HTTPException(status_code=400, detail="Invalid artifact path")
-
-    candidate = Path(normalized)
-    if candidate.is_absolute():
-        raise HTTPException(status_code=400, detail="Invalid artifact path")
-
-    resolved_run_root = run_root.resolve()
-    resolved_target = (resolved_run_root / candidate).resolve()
-    try:
-        resolved_target.relative_to(resolved_run_root)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid artifact path") from exc
-    return resolved_target
+    return pipeline_runs.resolve_artifact_path(run_root, artifact_path)
 
 
 def _list_run_output_artifacts(run_root: Path) -> List[Dict[str, object]]:
-    files: Dict[str, Path] = {}
-
-    def _add_file(path: Path) -> None:
-        if not path.is_file():
-            return
-        try:
-            relative_path = path.relative_to(run_root).as_posix()
-        except ValueError:
-            return
-        files[relative_path] = path
-
-    _add_file(run_root / "manifest.json")
-    _add_file(run_root / "checkpoint.json")
-
-    logs_root = run_root / "logs"
-    if logs_root.exists():
-        for file_path in logs_root.rglob("*"):
-            _add_file(file_path)
-    if run_root.exists():
-        for child in run_root.iterdir():
-            if not child.is_dir() or child.name in {"artifacts", "logs"}:
-                continue
-            _add_file(child / "prompt.md")
-            _add_file(child / "response.md")
-            _add_file(child / "status.json")
-
-    artifacts_root = run_root / "artifacts"
-    if artifacts_root.exists():
-        for file_path in artifacts_root.rglob("*"):
-            _add_file(file_path)
-
-    entries: List[Dict[str, object]] = []
-    for relative_path in sorted(files):
-        absolute_path = files[relative_path]
-        media_type = _artifact_media_type(absolute_path)
-        entries.append(
-            {
-                "path": relative_path,
-                "size_bytes": absolute_path.stat().st_size,
-                "media_type": media_type,
-                "viewable": _artifact_is_viewable(media_type=media_type, path=absolute_path),
-            }
-        )
-    return entries
+    return pipeline_runs.list_run_output_artifacts(run_root)
 
 
 def _record_run_end(run_id: str, working_directory: str, status: str, last_error: str = "") -> None:
-    normalized_status = _normalize_run_status(status)
-    with RUN_HISTORY_LOCK:
-        record = _read_run_meta(_run_meta_path(run_id))
-        if not record:
-            record = RunRecord(
-                run_id=run_id,
-                flow_name="",
-                status=normalized_status,
-                result=normalized_status,
-                working_directory=working_directory,
-                model="",
-                started_at="",
-                project_path=working_directory,
-            )
-        record.status = normalized_status
-        record.result = normalized_status
-        record.ended_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
-        record.last_error = last_error
-        record.token_usage = _extract_token_usage(run_id)
-        _write_run_meta(record)
+    pipeline_runs.record_run_end(
+        get_settings,
+        RUN_HISTORY_LOCK,
+        run_id=run_id,
+        working_directory=working_directory,
+        status=status,
+        last_error=last_error,
+    )
 
 
 def _record_run_status(run_id: str, status: str, last_error: str = "") -> None:
-    normalized_status = _normalize_run_status(status)
-    with RUN_HISTORY_LOCK:
-        record = _read_run_meta(_run_meta_path(run_id))
-        if not record:
-            return
-        record.status = normalized_status
-        record.result = normalized_status
-        if last_error:
-            record.last_error = last_error
-        _write_run_meta(record)
+    pipeline_runs.record_run_status(
+        get_settings,
+        RUN_HISTORY_LOCK,
+        run_id=run_id,
+        status=status,
+        last_error=last_error,
+    )
 
 
 def _append_run_log(run_id: str, message: str) -> None:
-    run_log_path = _run_root(run_id) / "run.log"
-    try:
-        run_log_path.parent.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        with run_log_path.open("a", encoding="utf-8") as f:
-            f.write(f"[{timestamp} UTC] {message}\n")
-    except Exception:
-        pass
+    pipeline_runs.append_run_log(get_settings, run_id, message)
 
 
 async def _publish_run_event(run_id: str, message: dict) -> None:
@@ -880,17 +332,11 @@ def _get_active_run(run_id: str) -> Optional[ActiveRun]:
 
 
 def _read_checkpoint_progress(run_id: str) -> tuple[str, List[str]]:
-    checkpoint = load_checkpoint(_run_root(run_id) / "state.json")
-    if checkpoint is None:
-        return "", []
-    return checkpoint.current_node, list(checkpoint.completed_nodes)
+    return pipeline_runs.read_checkpoint_progress(get_settings, run_id)
 
 
 def _pipeline_progress_payload(current_node: str, completed_nodes: List[str]) -> Dict[str, object]:
-    return {
-        "current_node": current_node,
-        "completed_count": len(completed_nodes),
-    }
+    return pipeline_runs.pipeline_progress_payload(current_node, completed_nodes)
 
 
 def _pop_active_run(run_id: str) -> Optional[ActiveRun]:
@@ -946,323 +392,6 @@ DEFAULT_EXECUTION_DISPATCH_FLOW = "implement-spec.dot"
 EXECUTION_PLANNING_STAGE_ID = "generate_execution_card"
 
 
-class LocalCodexCliBackend(CodergenBackend):
-    def __init__(self, working_dir: str, emit, model: Optional[str] = None):
-        self.requested_working_dir = str(Path(working_dir).expanduser().resolve(strict=False))
-        self.working_dir = resolve_runtime_workspace_path(working_dir)
-        self.emit = emit
-        self.model = model
-
-    def run(
-        self,
-        node_id: str,
-        prompt: str,
-        context: Context,
-        *,
-        timeout: Optional[float] = None,
-    ) -> str | Outcome:
-        cmd = [
-            "codex",
-            "exec",
-            "-C",
-            self.working_dir,
-            "-s",
-            "danger-full-access",
-        ]
-        if self.model:
-            cmd.extend(["-m", self.model])
-        cmd.append(prompt)
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=self.working_dir,
-                env=build_codex_runtime_environment(),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                start_new_session=True,
-            )
-        except FileNotFoundError:
-            if not Path(self.working_dir).exists():
-                failure_reason = (
-                    "codex working directory is unavailable in the runtime: "
-                    f"requested {self.requested_working_dir}, resolved {self.working_dir}"
-                )
-            else:
-                failure_reason = "codex executable not found on PATH"
-            self.emit({"type": "log", "msg": f"[{node_id}] {failure_reason}"})
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=failure_reason)
-        except subprocess.TimeoutExpired:
-            failure_reason = f"timeout after {timeout}s"
-            self.emit({"type": "log", "msg": f"[{node_id}] {failure_reason}"})
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=failure_reason)
-        if proc.stdout.strip():
-            self.emit({"type": "log", "msg": f"[{node_id}] {proc.stdout.strip()}"})
-        if proc.stderr.strip():
-            self.emit({"type": "log", "msg": f"[{node_id}] {proc.stderr.strip()}"})
-        if proc.returncode != 0:
-            failure_reason = proc.stderr.strip() or f"codex cli exited with code {proc.returncode}"
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=failure_reason)
-        output = proc.stdout.strip()
-        return output if output else "codex cli completed successfully"
-
-
-class LocalCodexAppServerBackend(CodergenBackend):
-    RUNTIME_THREAD_ID_KEY = "_attractor.runtime.thread_id"
-
-    def __init__(self, working_dir: str, emit, model: Optional[str] = None):
-        self.requested_working_dir = str(Path(working_dir).expanduser().resolve(strict=False))
-        self.working_dir = resolve_runtime_workspace_path(working_dir)
-        self.emit = emit
-        self.model = model
-        self._session_threads_by_key: dict[str, str] = {}
-        self._session_threads_lock = threading.Lock()
-
-    def _runtime_thread_key(self, context: Context) -> str:
-        value = context.get(self.RUNTIME_THREAD_ID_KEY, "")
-        if value is None:
-            return ""
-        return str(value).strip()
-
-    def _resolve_session_thread_id(
-        self,
-        thread_key: str,
-        start_thread: Callable[[], str | None],
-    ) -> str | None:
-        normalized_key = thread_key.strip()
-        if not normalized_key:
-            return start_thread()
-
-        with self._session_threads_lock:
-            cached = self._session_threads_by_key.get(normalized_key)
-            if cached:
-                return cached
-            created = start_thread()
-            if not created:
-                return None
-            self._session_threads_by_key[normalized_key] = created
-            return created
-
-    def run(
-        self,
-        node_id: str,
-        prompt: str,
-        context: Context,
-        *,
-        timeout: Optional[float] = None,
-    ) -> str | Outcome:
-        cmd = ["codex", "app-server"]
-        deadline = time.monotonic() + timeout if timeout else None
-        last_activity_at = time.monotonic()
-        stream_state = codex_app_server.CodexAppServerTurnState()
-
-        def log_line(message: str) -> None:
-            if message:
-                self.emit({"type": "log", "msg": f"[{node_id}] {message}"})
-
-        def fail(reason: str) -> Outcome:
-            log_line(reason)
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=reason)
-
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                cwd=self.working_dir,
-                env=build_codex_runtime_environment(),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                start_new_session=True,
-            )
-        except FileNotFoundError:
-            if not Path(self.working_dir).exists():
-                return fail(
-                    "codex app-server working directory is unavailable in the runtime: "
-                    f"requested {self.requested_working_dir}, resolved {self.working_dir}"
-                )
-            return fail("codex app-server not found on PATH")
-
-        selector = selectors.DefaultSelector()
-        if proc.stdout is not None:
-            selector.register(proc.stdout, selectors.EVENT_READ)
-
-        def send_json(payload: dict) -> None:
-            if proc.stdin is None:
-                return
-            proc.stdin.write(json.dumps(payload) + "\n")
-            proc.stdin.flush()
-
-        request_id = 0
-
-        def send_request(method: str, params: Optional[dict]) -> int:
-            nonlocal request_id
-            request_id += 1
-            payload = {"jsonrpc": "2.0", "id": request_id, "method": method}
-            if params is not None:
-                payload["params"] = params
-            send_json(payload)
-            return request_id
-
-        def send_response(req_id: object, result: Optional[dict] = None, error: Optional[dict] = None) -> None:
-            payload = {"jsonrpc": "2.0", "id": req_id}
-            if error is not None:
-                payload["error"] = error
-            else:
-                payload["result"] = result or {}
-            send_json(payload)
-
-        def read_line(wait: float) -> Optional[str]:
-            if proc.stdout is None:
-                return None
-            if wait < 0:
-                wait = 0
-            events = selector.select(timeout=wait)
-            if not events:
-                return None
-            line = proc.stdout.readline()
-            if not line:
-                return None
-            return line.rstrip("\n")
-
-        def handle_server_request(message: dict) -> None:
-            method = message.get("method")
-            req_id = message.get("id")
-            if method == "item/commandExecution/requestApproval":
-                send_response(req_id, {"decision": "acceptForSession"})
-                return
-            if method == "item/fileChange/requestApproval":
-                send_response(req_id, {"decision": "acceptForSession"})
-                return
-            send_response(req_id, error={"code": -32000, "message": f"Unsupported request: {method}"})
-
-        def wait_for_response(target_id: int) -> Optional[dict]:
-            while True:
-                if deadline is not None and time.monotonic() > deadline:
-                    return None
-                line = read_line(0.1)
-                if line is None:
-                    if proc.poll() is not None:
-                        return None
-                    continue
-                message = codex_app_server.parse_jsonrpc_line(line)
-                if message is None:
-                    log_line(line)
-                    continue
-                if "id" in message and "method" in message:
-                    handle_server_request(message)
-                    continue
-                if message.get("id") == target_id:
-                    return message
-                if "method" in message:
-                    codex_app_server.process_turn_message(message, stream_state)
-
-        try:
-            init_id = send_request(
-                "initialize",
-                {"clientInfo": {"name": "sparkspawn", "version": "0.1"}},
-            )
-            init_response = wait_for_response(init_id)
-            if not init_response or init_response.get("error"):
-                return fail("app-server initialize failed")
-
-            def start_thread() -> str | None:
-                thread_params = {
-                    "cwd": self.working_dir,
-                    "sandbox": "danger-full-access",
-                    "ephemeral": True,
-                }
-                if self.model:
-                    thread_params["model"] = self.model
-                thread_request_id = send_request("thread/start", thread_params)
-                thread_response = wait_for_response(thread_request_id)
-                if not thread_response or thread_response.get("error"):
-                    return None
-                thread = (thread_response.get("result") or {}).get("thread") or {}
-                thread_uuid = thread.get("id")
-                if not thread_uuid:
-                    return None
-                return str(thread_uuid)
-
-            thread_key = self._runtime_thread_key(context)
-            thread_uuid = self._resolve_session_thread_id(thread_key, start_thread)
-            if not thread_uuid:
-                return fail("app-server thread/start failed")
-
-            turn_params = {
-                "threadId": thread_uuid,
-                "input": [{"type": "text", "text": prompt}],
-                "approvalPolicy": "never",
-                "sandboxPolicy": {"type": "dangerFullAccess"},
-                "cwd": self.working_dir,
-            }
-            if self.model:
-                turn_params["model"] = self.model
-            turn_request_id = send_request("turn/start", turn_params)
-            turn_response = wait_for_response(turn_request_id)
-            if not turn_response or turn_response.get("error"):
-                return fail("app-server turn/start failed")
-
-            while True:
-                if deadline is not None and time.monotonic() > deadline:
-                    return fail(f"app-server turn timed out after {timeout:g}s")
-                line = read_line(0.1)
-                if line is None:
-                    idle_for = time.monotonic() - last_activity_at
-                    if idle_for >= codex_app_server.APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS:
-                        if stream_state.can_finalize_without_turn_completed():
-                            break
-                        return fail("app-server turn timed out waiting for activity")
-                    if proc.poll() is not None:
-                        if stream_state.can_finalize_without_turn_completed():
-                            break
-                        return fail("app-server turn exited before completion")
-                    continue
-                last_activity_at = time.monotonic()
-                message = codex_app_server.parse_jsonrpc_line(line)
-                if message is None:
-                    log_line(line)
-                    continue
-                if "id" in message and "method" in message:
-                    handle_server_request(message)
-                    continue
-                if "method" not in message:
-                    continue
-                normalized_events = codex_app_server.process_turn_message(message, stream_state)
-                if any(event.kind == "turn_completed" for event in normalized_events):
-                    break
-
-            if stream_state.turn_status and stream_state.turn_status != "completed":
-                return fail(stream_state.turn_error or f"app-server turn ended with status '{stream_state.turn_status}'")
-            if stream_state.last_error:
-                return fail(stream_state.last_error)
-
-            agent_text = stream_state.resolved_agent_text()
-            if agent_text:
-                log_line(agent_text)
-            command_text = stream_state.resolved_command_text()
-            if command_text:
-                log_line(command_text)
-            if stream_state.last_token_total is not None:
-                log_line(f"tokens used: {stream_state.last_token_total}")
-            if agent_text:
-                return agent_text
-            if command_text:
-                return command_text
-            return "codex app-server completed successfully"
-        finally:
-            try:
-                if proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-            except Exception:
-                pass
-
-
 def _build_codergen_backend(
     backend_name: str,
     working_dir: str,
@@ -1270,41 +399,12 @@ def _build_codergen_backend(
     *,
     model: Optional[str],
 ) -> CodergenBackend:
-    normalized = backend_name.strip().lower().replace("_", "-")
-    if normalized in {"codex", "codex-app-server"}:
-        return LocalCodexAppServerBackend(working_dir, emit, model=model)
-    if normalized == "codex-cli":
-        return LocalCodexCliBackend(working_dir, emit, model=model)
-    raise ValueError(
-        "Unsupported backend. Supported backends: codex, codex-app-server, codex-cli."
+    return _build_codergen_backend_impl(
+        backend_name,
+        working_dir,
+        emit,
+        model=model,
     )
-
-
-class BroadcastingRunner:
-    def __init__(self, delegate, emit):
-        self.delegate = delegate
-        self.emit = emit
-
-    def set_logs_root(self, logs_root):
-        setter = getattr(self.delegate, "set_logs_root", None)
-        if callable(setter):
-            setter(logs_root)
-
-    def __call__(self, node_id: str, prompt: str, context: Context):
-        self.emit({"type": "state", "node": node_id, "status": "running"})
-        self.emit({"type": "log", "msg": f"[{node_id}] running"})
-        outcome = self.delegate(node_id, prompt, context)
-        status_map = {
-            "success": "success",
-            "partial_success": "success",
-            "retry": "running",
-            "fail": "failed",
-        }
-        mapped = status_map.get(outcome.status.value, "failed")
-        self.emit({"type": "state", "node": node_id, "status": mapped})
-        if outcome.failure_reason:
-            self.emit({"type": "log", "msg": f"[{node_id}] {outcome.failure_reason}"})
-        return outcome
 
 
 @app.get("/")
@@ -1331,7 +431,7 @@ async def get_frontend_vite_icon():
     return FileResponse(file_path)
 
 
-@app.websocket("/ws")
+@attractor_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
@@ -1341,7 +441,7 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
-@app.get("/status")
+@attractor_router.get("/status")
 async def get_status():
     return {
         "status": RUNTIME.status,
@@ -1354,17 +454,16 @@ async def get_status():
     }
 
 
-@app.get("/runs")
+@attractor_router.get("/runs")
 async def list_runs(project_path: Optional[str] = None):
     records: List[RunRecord] = []
     for run_dir in _iter_run_roots():
         if not run_dir.is_dir():
             continue
         meta_path = run_dir / "run.json"
-        run_log_path = run_dir / "run.log"
         record = _read_run_meta(meta_path)
         if record:
-            _hydrate_run_record_from_log(record, run_log_path)
+            hydrate_run_record_from_log(record, run_dir)
             records.append(record)
             continue
 
@@ -1378,14 +477,14 @@ async def list_runs(project_path: Optional[str] = None):
             model="",
             started_at="",
         )
-        _hydrate_run_record_from_log(record, run_log_path)
+        hydrate_run_record_from_log(record, run_dir)
         records.append(record)
 
     def _sort_key(item: RunRecord) -> str:
         return item.started_at or item.ended_at or ""
 
     if project_path:
-        records = [record for record in records if _run_matches_project_scope(record, project_path)]
+        records = [record for record in records if run_matches_project_scope(record, project_path)]
 
     records.sort(key=_sort_key, reverse=True)
     return {"runs": [record.to_dict() for record in records]}
@@ -1521,7 +620,7 @@ def _build_transform_pipeline() -> TransformPipeline:
     return pipeline
 
 
-@app.post("/preview")
+@attractor_router.post("/preview")
 async def preview_pipeline(req: PreviewRequest):
     try:
         graph = parse_dot(req.flow_content)
@@ -1745,7 +844,7 @@ async def _start_pipeline(
                 context,
                 resume=True,
             )
-            final_status = _normalize_run_status(result.status)
+            final_status = normalize_run_status(result.status)
             _set_active_run_status(run_id, final_status)
             _set_active_run_completed_nodes(run_id, result.completed_nodes)
             RUNTIME.status = final_status
@@ -1787,17 +886,17 @@ async def _start_pipeline(
     }
 
 
-@app.post("/pipelines")
+@attractor_router.post("/pipelines")
 async def create_pipeline(req: PipelineStartRequest):
     return await _start_pipeline(req)
 
 
-@app.post("/run")
+@attractor_router.post("/run")
 async def run_pipeline(req: PipelineStartRequest):
     return await _start_pipeline(req)
 
 
-@app.get("/pipelines/{pipeline_id}")
+@attractor_router.get("/pipelines/{pipeline_id}")
 async def get_pipeline(pipeline_id: str):
     checkpoint_current_node, checkpoint_completed_nodes = _read_checkpoint_progress(pipeline_id)
     active = _get_active_run(pipeline_id)
@@ -1832,7 +931,7 @@ async def get_pipeline(pipeline_id: str):
     }
 
 
-@app.get("/pipelines/{pipeline_id}/checkpoint")
+@attractor_router.get("/pipelines/{pipeline_id}/checkpoint")
 async def get_pipeline_checkpoint(pipeline_id: str):
     _ensure_known_pipeline(pipeline_id)
 
@@ -1846,7 +945,7 @@ async def get_pipeline_checkpoint(pipeline_id: str):
     }
 
 
-@app.get("/pipelines/{pipeline_id}/context")
+@attractor_router.get("/pipelines/{pipeline_id}/context")
 async def get_pipeline_context(pipeline_id: str):
     _ensure_known_pipeline(pipeline_id)
 
@@ -1860,7 +959,7 @@ async def get_pipeline_context(pipeline_id: str):
     }
 
 
-@app.get("/pipelines/{pipeline_id}/artifacts")
+@attractor_router.get("/pipelines/{pipeline_id}/artifacts")
 async def list_pipeline_artifacts(pipeline_id: str):
     _ensure_known_pipeline(pipeline_id)
     run_root = _run_root(pipeline_id)
@@ -1870,7 +969,7 @@ async def list_pipeline_artifacts(pipeline_id: str):
     }
 
 
-@app.get("/pipelines/{pipeline_id}/artifacts/{artifact_path:path}")
+@attractor_router.get("/pipelines/{pipeline_id}/artifacts/{artifact_path:path}")
 async def get_pipeline_artifact_file(pipeline_id: str, artifact_path: str, download: bool = False):
     _ensure_known_pipeline(pipeline_id)
     run_root = _run_root(pipeline_id)
@@ -1888,7 +987,7 @@ async def get_pipeline_artifact_file(pipeline_id: str, artifact_path: str, downl
     return FileResponse(resolved_artifact_path, media_type=media_type)
 
 
-@app.get("/pipelines/{pipeline_id}/events")
+@attractor_router.get("/pipelines/{pipeline_id}/events")
 async def pipeline_events(pipeline_id: str, request: Request):
     active = _get_active_run(pipeline_id)
     existing = _read_run_meta(_run_meta_path(pipeline_id))
@@ -1923,7 +1022,7 @@ async def pipeline_events(pipeline_id: str, request: Request):
     )
 
 
-@app.post("/pipelines/{pipeline_id}/cancel")
+@attractor_router.post("/pipelines/{pipeline_id}/cancel")
 async def cancel_pipeline(pipeline_id: str):
     active = _get_active_run(pipeline_id)
     if not active:
@@ -1943,7 +1042,7 @@ async def cancel_pipeline(pipeline_id: str):
     return {"status": "cancel_requested", "pipeline_id": pipeline_id}
 
 
-@app.get("/pipelines/{pipeline_id}/graph")
+@attractor_router.get("/pipelines/{pipeline_id}/graph")
 async def get_pipeline_graph(pipeline_id: str):
     active = _get_active_run(pipeline_id)
     if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
@@ -1956,7 +1055,7 @@ async def get_pipeline_graph(pipeline_id: str):
     return FileResponse(graph_svg_path, media_type="image/svg+xml")
 
 
-@app.get("/pipelines/{pipeline_id}/questions")
+@attractor_router.get("/pipelines/{pipeline_id}/questions")
 async def list_pipeline_questions(pipeline_id: str):
     active = _get_active_run(pipeline_id)
     if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
@@ -1964,7 +1063,7 @@ async def list_pipeline_questions(pipeline_id: str):
     return {"questions": HUMAN_BROKER.list_for_run(pipeline_id)}
 
 
-@app.post("/pipelines/{pipeline_id}/questions/{question_id}/answer")
+@attractor_router.post("/pipelines/{pipeline_id}/questions/{question_id}/answer")
 async def submit_pipeline_answer(pipeline_id: str, question_id: str, req: HumanAnswerRequest):
     active = _get_active_run(pipeline_id)
     if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
@@ -1975,7 +1074,7 @@ async def submit_pipeline_answer(pipeline_id: str, question_id: str, req: HumanA
     return {"status": "accepted", "pipeline_id": pipeline_id, "question_id": question_id}
 
 
-@app.post("/answer")
+@attractor_router.post("/answer")
 async def answer_pipeline(req: LegacyHumanAnswerRequest):
     return await submit_pipeline_answer(
         req.pipeline_id,
@@ -1984,7 +1083,7 @@ async def answer_pipeline(req: LegacyHumanAnswerRequest):
     )
 
 
-@app.post("/reset")
+@attractor_router.post("/reset")
 async def reset_checkpoint(req: ResetRequest):
     projects_root = get_settings().projects_dir
     if projects_root.exists():
@@ -1994,53 +1093,17 @@ async def reset_checkpoint(req: ResetRequest):
 
 
 def _resolve_project_git_branch(directory_path: Path) -> Optional[str]:
-    try:
-        completed = subprocess.run(
-            ["git", "-C", str(directory_path), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-    branch = completed.stdout.strip()
-    return branch or None
+    return pipeline_runs.resolve_project_git_branch(directory_path)
 
 
 def _resolve_project_git_commit(directory_path: Path) -> Optional[str]:
-    try:
-        completed = subprocess.run(
-            ["git", "-C", str(directory_path), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-    commit = completed.stdout.strip()
-    return commit or None
+    return pipeline_runs.resolve_project_git_commit(directory_path)
 
 
 def _resolve_run_project_git_metadata(working_directory: str) -> tuple[str, Optional[str], Optional[str]]:
-    normalized_working_dir = resolve_runtime_workspace_path(working_directory)
-    try:
-        completed = subprocess.run(
-            ["git", "-C", normalized_working_dir, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return normalized_working_dir, None, None
-
-    project_path = completed.stdout.strip() or normalized_working_dir
-    project_directory = Path(project_path)
-    return (
-        project_path,
-        _resolve_project_git_branch(project_directory),
-        _resolve_project_git_commit(project_directory),
+    return pipeline_runs.resolve_run_project_git_metadata(
+        working_directory,
+        resolve_runtime_workspace_path=resolve_runtime_workspace_path,
     )
 
 
@@ -2109,50 +1172,20 @@ def _pick_project_directory(prompt: str = "Select Spark Spawn project directory"
     raise RuntimeError(picker_errors[-1] if picker_errors else "No native directory picker is available in this runtime.")
 
 
-def _inject_pipeline_goal(flow_content: str, goal: str) -> str:
-    graph = parse_dot(flow_content)
-    existing = graph.graph_attrs.get("goal")
-    graph.graph_attrs["goal"] = DotAttribute(
-        key="goal",
-        value=goal,
-        value_type=DotValueType.STRING,
-        line=existing.line if existing is not None else 0,
-    )
-    return format_dot(graph)
-
-
 def _load_flow_content(flow_source: str) -> str:
-    flow_path = _resolve_flow_path(flow_source)
-    if not flow_path.exists():
-        raise HTTPException(status_code=404, detail=f"Flow not found: {flow_path.name}")
-    return flow_path.read_text(encoding="utf-8")
+    return _load_flow_content_impl(_flows_dir(), flow_source)
 
 
 def _load_execution_planning_flow_content(flow_source: str, prompt: str) -> str:
-    return _inject_pipeline_goal(_load_flow_content(flow_source), prompt)
+    return _load_execution_planning_flow_content_impl(_flows_dir(), flow_source, prompt)
 
 
 def _read_pipeline_stage_response(run_id: str, stage_id: str) -> str:
-    candidate_paths = [
-        _run_root(run_id) / "logs" / stage_id / "response.md",
-        _run_root(run_id) / stage_id / "response.md",
-    ]
-    for path in candidate_paths:
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8")
-        if text.strip():
-            return text
-    raise RuntimeError(f"Run {run_id} completed without a response artifact for stage {stage_id}.")
+    return pipeline_runs.read_pipeline_stage_response(get_settings, run_id, stage_id)
 
 
 def _record_run_plan_id(run_id: str, plan_id: str) -> None:
-    with RUN_HISTORY_LOCK:
-        record = _read_run_meta(_run_meta_path(run_id))
-        if record is None:
-            return
-        record.plan_id = plan_id
-        _write_run_meta(record)
+    pipeline_runs.record_run_plan_id(get_settings, RUN_HISTORY_LOCK, run_id, plan_id)
 
 
 async def _launch_execution_planning_pipeline(
@@ -2300,56 +1333,39 @@ async def _launch_execution_card_pipeline(
     return run_id
 
 
-app.include_router(
-    create_workspace_router(
-        WorkspaceApiDependencies(
-            get_settings=get_settings,
-            get_project_chat=lambda: PROJECT_CHAT,
-            resolve_project_git_branch=lambda runtime_path: _resolve_project_git_branch(runtime_path),
-            resolve_project_git_commit=lambda runtime_path: _resolve_project_git_commit(runtime_path),
-            pick_project_directory=lambda: _pick_project_directory(),
-            default_execution_planning_flow=DEFAULT_EXECUTION_PLANNING_FLOW,
-            default_execution_dispatch_flow=DEFAULT_EXECUTION_DISPATCH_FLOW,
-            launch_execution_planning_pipeline=lambda **kwargs: _launch_execution_planning_pipeline(
-                execution_flow_source=DEFAULT_EXECUTION_DISPATCH_FLOW,
-                **kwargs,
-            ),
-            launch_execution_card_pipeline=lambda **kwargs: _launch_execution_card_pipeline(**kwargs),
-        )
+WORKSPACE_ROUTER = create_workspace_router(
+    WorkspaceApiDependencies(
+        get_settings=get_settings,
+        get_project_chat=lambda: PROJECT_CHAT,
+        resolve_project_git_branch=lambda runtime_path: _resolve_project_git_branch(runtime_path),
+        resolve_project_git_commit=lambda runtime_path: _resolve_project_git_commit(runtime_path),
+        pick_project_directory=lambda: _pick_project_directory(),
+        default_execution_planning_flow=DEFAULT_EXECUTION_PLANNING_FLOW,
+        default_execution_dispatch_flow=DEFAULT_EXECUTION_DISPATCH_FLOW,
+        launch_execution_planning_pipeline=lambda **kwargs: _launch_execution_planning_pipeline(
+            execution_flow_source=DEFAULT_EXECUTION_DISPATCH_FLOW,
+            **kwargs,
+        ),
+        launch_execution_card_pipeline=lambda **kwargs: _launch_execution_card_pipeline(**kwargs),
     )
 )
 
 
-@app.get("/api/flows")
+@attractor_router.get("/api/flows")
 async def list_flows():
     flows_dir = _flows_dir()
     return [f.name for f in flows_dir.glob("*.dot")]
 
 
 def _flows_dir() -> Path:
-    flows_dir = get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    return flows_dir
+    return _ensure_flows_dir_impl(get_settings().flows_dir)
 
 
 def _resolve_flow_path(flow_name: str) -> Path:
-    raw_name = flow_name.strip()
-    if not raw_name:
-        raise HTTPException(status_code=400, detail="Flow name is required.")
-
-    # Keep flow paths scoped to the project `flows/` directory.
-    candidate = Path(raw_name)
-    if candidate.is_absolute() or ".." in candidate.parts or len(candidate.parts) != 1:
-        raise HTTPException(status_code=400, detail="Flow name must be a single file name.")
-
-    normalized_name = candidate.name
-    if not normalized_name.endswith(".dot"):
-        normalized_name = f"{normalized_name}.dot"
-
-    return _flows_dir() / normalized_name
+    return _resolve_flow_path_impl(_flows_dir(), flow_name)
 
 
-@app.get("/api/flows/{name}")
+@attractor_router.get("/api/flows/{name}")
 async def get_flow(name: str):
     flow_path = _resolve_flow_path(name)
     if not flow_path.exists():
@@ -2358,13 +1374,10 @@ async def get_flow(name: str):
 
 
 def _semantic_signature(dot_content: str) -> str:
-    graph = _build_transform_pipeline().apply(parse_dot(dot_content))
-    normalized = normalize_graph(graph)
-    normalized.graph_id = "__semantic__"
-    return format_dot(normalized)
+    return _semantic_signature_impl(dot_content, _build_transform_pipeline)
 
 
-@app.post("/api/flows")
+@attractor_router.post("/api/flows")
 async def save_flow(req: SaveFlowRequest):
     canonical_content: str
     try:
@@ -2431,10 +1444,22 @@ async def save_flow(req: SaveFlowRequest):
     return response
 
 
-@app.delete("/api/flows/{flow_name}")
+@attractor_router.delete("/api/flows/{flow_name}")
 async def delete_flow(flow_name: str):
     filepath = _resolve_flow_path(flow_name)
     if filepath.exists():
         filepath.unlink()
         return {"status": "deleted"}
     raise HTTPException(status_code=404, detail="Flow not found.")
+
+
+attractor_app.include_router(attractor_router)
+workspace_app.include_router(WORKSPACE_ROUTER)
+
+# Legacy root paths stay available during the split so the current frontend and tests do not break.
+app.include_router(attractor_router)
+app.include_router(WORKSPACE_ROUTER)
+
+# Canonical boundary-prefixed apps for the next client/state phase.
+app.mount("/attractor", attractor_app)
+app.mount("/workspace", workspace_app)

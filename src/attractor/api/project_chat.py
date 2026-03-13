@@ -1,0 +1,877 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import selectors
+import subprocess
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+from attractor.api.project_chat_common import (
+    as_non_empty_string as _as_non_empty_string,
+    build_codex_runtime_environment,
+    iso_now as _iso_now,
+    log_project_chat_debug as _log_project_chat_debug,
+    normalize_project_path_value as _normalize_project_path,
+    parse_chat_response_payload as _parse_chat_response_payload,
+    resolve_runtime_workspace_path,
+    slugify as _slugify,
+    summarize_turns_for_debug as _summarize_turns_for_debug,
+)
+from attractor.api.project_chat_models import (
+    CHAT_SESSION_VERSION,
+    ChatTurnLiveEvent,
+    ChatTurnResult,
+    ConversationEventHub,
+    ConversationSessionState,
+    ConversationState,
+    ConversationTurn,
+    ConversationTurnEvent,
+    DynamicToolInvocationResult,
+    ExecutionCard,
+    ExecutionCardReview,
+    ExecutionCardWorkItem,
+    ExecutionWorkflowState,
+    SpecEditProposalChange,
+    ExecutionWorkflowLaunchSpec,
+    PreparedChatTurn,
+    SpecEditProposal,
+    ToolCallRecord,
+)
+from attractor.api.project_chat_reviews import ProjectChatReviewService
+from attractor.api.project_chat_session import (
+    APP_SERVER_REQUEST_TIMEOUT_SECONDS,
+    CHAT_TURN_IDLE_TIMEOUT_SECONDS,
+    CodexAppServerChatSession,
+    _extract_spec_proposal_payload,
+    _tool_call_from_item,
+)
+from attractor.api.project_chat_storage import ProjectChatRepository
+from attractor.prompt_templates import load_prompt_templates, render_prompt_template
+from attractor.storage import ProjectPaths
+
+
+CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
+LOGGER = logging.getLogger(__name__)
+
+
+class ProjectChatService:
+    def __init__(self, data_dir: Path) -> None:
+        self._data_dir = data_dir
+        self._prompt_templates = load_prompt_templates(data_dir / "config")
+        self._lock = threading.Lock()
+        self._repository = ProjectChatRepository(data_dir, self._lock)
+        self._reviews = ProjectChatReviewService(self._repository)
+        self._event_hub = ConversationEventHub()
+        self._sessions_lock = threading.Lock()
+        self._sessions: dict[str, CodexAppServerChatSession] = {}
+
+    def events(self) -> ConversationEventHub:
+        return self._event_hub
+
+    def _projects_root(self) -> Path:
+        return self._repository.projects_root()
+
+    def _project_paths(self, project_path: str) -> ProjectPaths:
+        return self._repository.project_paths(project_path)
+
+    def _project_paths_for_conversation(
+        self,
+        conversation_id: str,
+        project_path: Optional[str] = None,
+    ) -> ProjectPaths:
+        return self._repository.project_paths_for_conversation(conversation_id, project_path)
+
+    def _conversation_root(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        return self._repository.conversation_root(conversation_id, project_path)
+
+    def _conversation_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        return self._repository.conversation_state_path(conversation_id, project_path)
+
+    def _conversation_session_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        return self._repository.conversation_session_path(conversation_id, project_path)
+
+    def _conversation_raw_log_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        return self._repository.conversation_raw_log_path(conversation_id, project_path)
+
+    def _workflow_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        return self._repository.workflow_state_path(conversation_id, project_path)
+
+    def _proposals_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        return self._repository.proposals_state_path(conversation_id, project_path)
+
+    def _execution_cards_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        return self._repository.execution_cards_state_path(conversation_id, project_path)
+
+    def _touch_conversation_state(self, state: ConversationState, *, title_hint: Optional[str] = None) -> None:
+        self._repository.touch_conversation_state(state, title_hint=title_hint)
+
+    def _read_state(self, conversation_id: str, project_path: Optional[str] = None) -> Optional[ConversationState]:
+        return self._repository.read_state(conversation_id, project_path)
+
+    def _write_state(self, state: ConversationState) -> None:
+        self._repository.write_state(state)
+
+    def _read_json_dict(self, path: Path) -> dict[str, Any]:
+        return self._repository.read_json_dict(path)
+
+    def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
+        self._repository.write_json(path, payload)
+
+    def _append_raw_rpc_log(
+        self,
+        conversation_id: str,
+        project_path: str,
+        *,
+        direction: str,
+        line: str,
+    ) -> None:
+        self._repository.append_raw_rpc_log(
+            conversation_id,
+            project_path,
+            direction=direction,
+            line=line,
+        )
+
+    def _read_session_state(self, conversation_id: str, project_path: Optional[str] = None) -> Optional[ConversationSessionState]:
+        return self._repository.read_session_state(conversation_id, project_path)
+
+    def _write_session_state(self, state: ConversationSessionState) -> None:
+        self._repository.write_session_state(state)
+
+    def _persist_session_thread(
+        self,
+        conversation_id: str,
+        project_path: str,
+        thread_id: str,
+    ) -> None:
+        self._repository.persist_session_thread(conversation_id, project_path, thread_id)
+
+    async def publish_snapshot(self, conversation_id: str) -> None:
+        snapshot = self.get_snapshot(conversation_id)
+        await self._event_hub.publish(conversation_id, {"type": "conversation_snapshot", "state": snapshot})
+
+    def list_conversations(self, project_path: str) -> list[dict[str, Any]]:
+        return self._repository.list_conversations(project_path)
+
+    def get_snapshot(self, conversation_id: str, project_path: Optional[str] = None) -> dict[str, Any]:
+        return self._repository.get_snapshot(conversation_id, project_path)
+
+    def delete_conversation(self, conversation_id: str, project_path: str) -> dict[str, Any]:
+        snapshot = self._repository.delete_conversation(conversation_id, project_path)
+        with self._sessions_lock:
+            session = self._sessions.pop(conversation_id, None)
+        if session is not None:
+            session.close()
+        return snapshot
+
+    def _append_event(self, state: ConversationState, message: str) -> None:
+        self._repository.append_event(state, message)
+
+    def _persist_spec_edit_proposal(
+        self,
+        state: ConversationState,
+        parent_turn: ConversationTurn,
+        spec_proposal_payload: dict[str, Any],
+        *,
+        sequence: Optional[int] = None,
+        assistant_message_fallback: str = "",
+    ) -> Optional[ConversationTurnEvent]:
+        return self._reviews.persist_spec_edit_proposal(
+            state,
+            parent_turn,
+            spec_proposal_payload,
+            sequence=sequence,
+            assistant_message_fallback=assistant_message_fallback,
+        )
+
+    def _next_turn_event_sequence(self, state: ConversationState, turn_id: str) -> int:
+        return self._repository.next_turn_event_sequence(state, turn_id)
+
+    def _append_turn_event(
+        self,
+        state: ConversationState,
+        turn_id: str,
+        kind: str,
+        *,
+        sequence: Optional[int] = None,
+        content_delta: Optional[str] = None,
+        message: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
+        tool_call: Optional[ToolCallRecord] = None,
+        artifact_id: Optional[str] = None,
+        timestamp: Optional[str] = None,
+    ) -> ConversationTurnEvent:
+        return self._repository.append_turn_event(
+            state,
+            turn_id,
+            kind,
+            sequence=sequence,
+            content_delta=content_delta,
+            message=message,
+            tool_call_id=tool_call_id,
+            tool_call=tool_call,
+            artifact_id=artifact_id,
+            timestamp=timestamp,
+        )
+
+    def _upsert_turn(self, state: ConversationState, turn: ConversationTurn) -> None:
+        self._repository.upsert_turn(state, turn)
+
+    def _get_turn(self, state: ConversationState, turn_id: str) -> Optional[ConversationTurn]:
+        return self._repository.get_turn(state, turn_id)
+
+    def _publish_progress_payload(
+        self,
+        progress_callback: Optional[Callable[[dict[str, Any]], None]],
+        payload: dict[str, Any],
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(payload)
+
+    def _build_turn_upsert_payload(
+        self,
+        state: ConversationState,
+        turn: ConversationTurn,
+    ) -> dict[str, Any]:
+        return self._repository.build_turn_upsert_payload(state, turn)
+
+    def _build_turn_event_payload(
+        self,
+        state: ConversationState,
+        event: ConversationTurnEvent,
+    ) -> dict[str, Any]:
+        return self._repository.build_turn_event_payload(state, event)
+
+    def _build_chat_prompt(self, state: ConversationState, message: str) -> str:
+        recent_turns = state.turns[-10:]
+        history_lines = []
+        for turn in recent_turns:
+            if turn.kind != "message":
+                continue
+            history_lines.append(f"{turn.role.upper()}: {turn.content}")
+        history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
+        return render_prompt_template(
+            self._prompt_templates.chat,
+            {
+                "project_path": state.project_path,
+                "recent_conversation": history_text,
+                "latest_user_message": message,
+            },
+        )
+
+    def _build_execution_planning_prompt(
+        self,
+        state: ConversationState,
+        proposal: SpecEditProposal,
+        review_feedback: Optional[str],
+    ) -> str:
+        recent_turns = state.turns[-12:]
+        history_lines = []
+        for turn in recent_turns:
+            if turn.kind != "message":
+                continue
+            history_lines.append(f"{turn.role.upper()}: {turn.content}")
+        history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
+        review_text = review_feedback or "None."
+        proposal_payload = json.dumps(proposal.to_dict(), indent=2, sort_keys=True)
+        return render_prompt_template(
+            self._prompt_templates.execution_planning,
+            {
+                "project_path": state.project_path,
+                "approved_spec_edit_proposal": proposal_payload,
+                "recent_conversation": history_text,
+                "review_feedback": review_text,
+            },
+        )
+
+    def _handle_dynamic_tool_call(
+        self,
+        tool_name: str,
+        arguments: Any,
+        call_id: str,
+    ) -> DynamicToolInvocationResult:
+        if tool_name != "draft_spec_proposal":
+            raise ValueError(f"Unsupported dynamic tool: {tool_name}")
+        payload = _extract_spec_proposal_payload(arguments)
+        summary = _as_non_empty_string(payload.get("summary")) or "Draft spec edit proposal"
+        return DynamicToolInvocationResult(
+            tool_call=ToolCallRecord(
+                id=call_id,
+                kind="dynamic_tool",
+                status="completed",
+                title="Draft spec edit proposal",
+                output=summary,
+            ),
+            response={
+                "success": True,
+                "contentItems": [{"type": "inputText", "text": f"Drafted spec edit proposal: {summary}"}],
+            },
+            spec_proposal_payload=payload,
+        )
+
+    def _assistant_turn_has_completed_message(self, state: ConversationState, turn_id: str) -> bool:
+        return any(
+            event.turn_id == turn_id and event.kind == "assistant_completed"
+            for event in state.turn_events
+        )
+
+    def _prepare_turn(
+        self,
+        conversation_id: str,
+        project_path: str,
+        message: str,
+        model: Optional[str],
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> tuple[PreparedChatTurn, dict[str, Any]]:
+        normalized_project_path = _normalize_project_path(project_path)
+        if not normalized_project_path:
+            raise ValueError("Project path is required.")
+        trimmed_message = message.strip()
+        if not trimmed_message:
+            raise ValueError("Message is required.")
+        with self._lock:
+            state = self._read_state(conversation_id, normalized_project_path)
+            if state is None:
+                state = ConversationState(conversation_id=conversation_id, project_path=normalized_project_path)
+            elif state.project_path != normalized_project_path:
+                raise ValueError("Conversation is already bound to a different project path.")
+            user_turn = ConversationTurn(
+                id=f"turn-{uuid.uuid4().hex}",
+                role="user",
+                content=trimmed_message,
+                timestamp=_iso_now(),
+                status="complete",
+            )
+            assistant_turn = ConversationTurn(
+                id=f"turn-{uuid.uuid4().hex}",
+                role="assistant",
+                content="",
+                timestamp=_iso_now(),
+                status="pending",
+                parent_turn_id=user_turn.id,
+            )
+            state.turns.append(user_turn)
+            state.turns.append(assistant_turn)
+            self._touch_conversation_state(state, title_hint=trimmed_message)
+            prompt = self._build_chat_prompt(state, trimmed_message)
+            self._write_state(state)
+            snapshot = state.to_dict()
+            _log_project_chat_debug(
+                "appended user and assistant turns",
+                conversation_id=conversation_id,
+                project_path=normalized_project_path,
+                turns=_summarize_turns_for_debug(state.turns),
+            )
+            self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, user_turn))
+            self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, assistant_turn))
+        normalized_model = model.strip() if model else None
+        return (
+            PreparedChatTurn(
+                conversation_id=conversation_id,
+                project_path=normalized_project_path,
+                prompt=prompt,
+                model=normalized_model,
+                user_turn=user_turn,
+                assistant_turn=assistant_turn,
+            ),
+            snapshot,
+        )
+
+    def _persist_assistant_turn_failure(
+        self,
+        prepared: PreparedChatTurn,
+        error_message: str,
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> None:
+        with self._lock:
+            current_state = self._read_state(prepared.conversation_id, prepared.project_path)
+            if current_state is None:
+                return
+            current_assistant_turn = self._get_turn(current_state, prepared.assistant_turn.id)
+            if current_assistant_turn is not None and self._assistant_turn_has_completed_message(current_state, current_assistant_turn.id):
+                _log_project_chat_debug(
+                    "suppressing assistant failure after completed message",
+                    conversation_id=prepared.conversation_id,
+                    assistant_turn_id=prepared.assistant_turn.id,
+                    error=error_message,
+                )
+                return
+            if current_assistant_turn is None:
+                current_assistant_turn = ConversationTurn(
+                    id=prepared.assistant_turn.id,
+                    role="assistant",
+                    content="",
+                    timestamp=prepared.assistant_turn.timestamp,
+                    status="pending",
+                    parent_turn_id=prepared.user_turn.id,
+                )
+            current_assistant_turn.status = "failed"
+            current_assistant_turn.error = error_message
+            self._upsert_turn(current_state, current_assistant_turn)
+            assistant_failed_event = self._append_turn_event(
+                current_state,
+                current_assistant_turn.id,
+                "assistant_failed",
+                message=error_message,
+            )
+            self._touch_conversation_state(current_state)
+            self._write_state(current_state)
+            assistant_failed_payload = self._build_turn_event_payload(current_state, assistant_failed_event)
+            assistant_upsert_payload = self._build_turn_upsert_payload(current_state, current_assistant_turn)
+        self._publish_progress_payload(progress_callback, assistant_failed_payload)
+        self._publish_progress_payload(progress_callback, assistant_upsert_payload)
+
+    def _execute_turn_with_retry(
+        self,
+        prepared: PreparedChatTurn,
+        persist_live_event: Callable[[ChatTurnLiveEvent], None],
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> ChatTurnResult:
+        def bind_raw_rpc_logger(target_session: Any) -> None:
+            if hasattr(target_session, "set_raw_rpc_logger"):
+                target_session.set_raw_rpc_logger(
+                    lambda direction, line: self._append_raw_rpc_log(
+                        prepared.conversation_id,
+                        prepared.project_path,
+                        direction=direction,
+                        line=line,
+                    )
+                )
+
+        def clear_raw_rpc_logger(target_session: Any) -> None:
+            if hasattr(target_session, "clear_raw_rpc_logger"):
+                target_session.clear_raw_rpc_logger()
+
+        def run_session(target_session: Any) -> ChatTurnResult:
+            bind_raw_rpc_logger(target_session)
+            try:
+                return target_session.turn(
+                    prepared.prompt,
+                    prepared.model,
+                    on_event=persist_live_event,
+                    on_dynamic_tool_call=self._handle_dynamic_tool_call,
+                )
+            finally:
+                clear_raw_rpc_logger(target_session)
+
+        session = self._build_session(prepared.conversation_id, prepared.project_path)
+        try:
+            return run_session(session)
+        except RuntimeError as exc:
+            if "timed out" not in str(exc).lower():
+                raise
+            with self._lock:
+                current_state = self._read_state(prepared.conversation_id, prepared.project_path)
+                retry_payload: Optional[dict[str, Any]] = None
+                if current_state is not None:
+                    current_assistant_turn = self._get_turn(current_state, prepared.assistant_turn.id)
+                    if current_assistant_turn is not None:
+                        retry_event = self._append_turn_event(
+                            current_state,
+                            current_assistant_turn.id,
+                            "retry_started",
+                            message="Retrying turn after timeout.",
+                        )
+                        retry_payload = self._build_turn_event_payload(current_state, retry_event)
+                    self._touch_conversation_state(current_state)
+                    self._write_state(current_state)
+                    _log_project_chat_debug(
+                        "retrying turn after timeout",
+                        conversation_id=prepared.conversation_id,
+                        turns=_summarize_turns_for_debug(current_state.turns),
+                    )
+            if retry_payload is not None:
+                self._publish_progress_payload(progress_callback, retry_payload)
+            retry_session = self._replace_session(
+                prepared.conversation_id,
+                prepared.project_path,
+                persisted_thread_id=None,
+            )
+            return run_session(retry_session)
+
+    def _run_prepared_turn(
+        self,
+        prepared: PreparedChatTurn,
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            state = self._read_state(prepared.conversation_id, prepared.project_path)
+            if state is None:
+                raise RuntimeError("Conversation state disappeared before the turn started.")
+            live_event_sequence = max(
+                (event.sequence for event in state.turn_events if event.turn_id == prepared.assistant_turn.id),
+                default=0,
+            )
+
+        def allocate_event_sequence() -> int:
+            nonlocal live_event_sequence
+            live_event_sequence += 1
+            return live_event_sequence
+
+        def persist_live_event(event: ChatTurnLiveEvent) -> None:
+            with self._lock:
+                current_state = self._read_state(prepared.conversation_id, prepared.project_path) or state
+                current_assistant_turn = self._get_turn(current_state, prepared.assistant_turn.id)
+                if current_assistant_turn is None:
+                    current_assistant_turn = ConversationTurn(
+                        id=prepared.assistant_turn.id,
+                        role="assistant",
+                        content="",
+                        timestamp=prepared.assistant_turn.timestamp,
+                        status="pending",
+                        parent_turn_id=prepared.user_turn.id,
+                    )
+                    self._upsert_turn(current_state, current_assistant_turn)
+
+                emitted_payloads: list[dict[str, Any]] = []
+                should_publish_snapshot = False
+                if current_assistant_turn.status == "pending" and event.kind != "assistant_completed":
+                    current_assistant_turn.status = "streaming"
+                    self._upsert_turn(current_state, current_assistant_turn)
+                    emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
+
+                if event.kind == "assistant_delta":
+                    if event.content_delta:
+                        live_event = ConversationTurnEvent(
+                            id=f"event-{uuid.uuid4().hex}",
+                            turn_id=current_assistant_turn.id,
+                            sequence=allocate_event_sequence(),
+                            timestamp=_iso_now(),
+                            kind=event.kind,
+                            content_delta=event.content_delta,
+                        )
+                        emitted_payloads.append(self._build_turn_event_payload(current_state, live_event))
+                elif event.kind == "reasoning_summary":
+                    if event.content_delta:
+                        reasoning_event = self._append_turn_event(
+                            current_state,
+                            current_assistant_turn.id,
+                            "reasoning_summary",
+                            sequence=allocate_event_sequence(),
+                            content_delta=event.content_delta,
+                        )
+                        emitted_payloads.append(self._build_turn_event_payload(current_state, reasoning_event))
+                elif event.kind == "assistant_completed":
+                    assistant_message = _as_non_empty_string(event.content_delta)
+                    if assistant_message:
+                        current_assistant_turn.content = assistant_message
+                    current_assistant_turn.status = "streaming"
+                    current_assistant_turn.error = None
+                    self._upsert_turn(current_state, current_assistant_turn)
+                    emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
+                    if not self._assistant_turn_has_completed_message(current_state, current_assistant_turn.id):
+                        assistant_completed_event = self._append_turn_event(
+                            current_state,
+                            current_assistant_turn.id,
+                            "assistant_completed",
+                            sequence=allocate_event_sequence(),
+                            message=event.message or "Assistant message completed.",
+                        )
+                        emitted_payloads.append(self._build_turn_event_payload(current_state, assistant_completed_event))
+                elif event.kind in {"tool_call_started", "tool_call_updated", "tool_call_completed", "tool_call_failed"} and event.tool_call is not None:
+                    tool_event = self._append_turn_event(
+                        current_state,
+                        current_assistant_turn.id,
+                        event.kind,
+                        sequence=allocate_event_sequence(),
+                        tool_call_id=event.tool_call_id or event.tool_call.id,
+                        tool_call=event.tool_call,
+                    )
+                    emitted_payloads.append(self._build_turn_event_payload(current_state, tool_event))
+                    if event.kind == "tool_call_completed" and event.spec_proposal_payload is not None:
+                        proposal_event = self._persist_spec_edit_proposal(
+                            current_state,
+                            current_assistant_turn,
+                            event.spec_proposal_payload,
+                            sequence=allocate_event_sequence(),
+                            assistant_message_fallback=current_assistant_turn.content,
+                        )
+                        if proposal_event is not None:
+                            emitted_payloads.append(self._build_turn_event_payload(current_state, proposal_event))
+                            should_publish_snapshot = True
+                else:
+                    return
+
+                self._touch_conversation_state(current_state)
+                self._write_state(current_state)
+                snapshot_payload = current_state.to_dict() if should_publish_snapshot else None
+                _log_project_chat_debug(
+                    "persisted progress events",
+                    conversation_id=prepared.conversation_id,
+                    event_kind=event.kind,
+                    turns=_summarize_turns_for_debug(current_state.turns),
+                )
+            for payload in emitted_payloads:
+                self._publish_progress_payload(progress_callback, payload)
+            if should_publish_snapshot and snapshot_payload is not None:
+                self._publish_progress_payload(progress_callback, {"type": "conversation_snapshot", "state": snapshot_payload})
+
+        try:
+            turn_result = self._execute_turn_with_retry(prepared, persist_live_event, progress_callback)
+        except RuntimeError as exc:
+            self._persist_assistant_turn_failure(prepared, str(exc), progress_callback)
+            raise
+
+        assistant_message, _ = _parse_chat_response_payload(turn_result.assistant_message)
+        if not assistant_message:
+            assistant_message = "I reviewed that request."
+        with self._lock:
+            state = self._read_state(prepared.conversation_id, prepared.project_path) or state
+            current_assistant_turn = self._get_turn(state, prepared.assistant_turn.id)
+            if current_assistant_turn is None:
+                current_assistant_turn = ConversationTurn(
+                    id=prepared.assistant_turn.id,
+                    role="assistant",
+                    content="",
+                    timestamp=prepared.assistant_turn.timestamp,
+                    status="pending",
+                    parent_turn_id=prepared.user_turn.id,
+                )
+            emitted_payloads: list[dict[str, Any]] = []
+            should_publish_snapshot = False
+            assistant_completion_recorded = self._assistant_turn_has_completed_message(state, current_assistant_turn.id)
+            turn_changed = (
+                current_assistant_turn.content != assistant_message
+                or current_assistant_turn.status != "complete"
+                or current_assistant_turn.error is not None
+            )
+            current_assistant_turn.content = assistant_message
+            current_assistant_turn.status = "complete"
+            current_assistant_turn.error = None
+            self._upsert_turn(state, current_assistant_turn)
+            if turn_changed:
+                emitted_payloads.append(self._build_turn_upsert_payload(state, current_assistant_turn))
+            if not assistant_completion_recorded:
+                assistant_completed_event = self._append_turn_event(
+                    state,
+                    current_assistant_turn.id,
+                    "assistant_completed",
+                    sequence=allocate_event_sequence(),
+                    message="Assistant turn completed.",
+                )
+                emitted_payloads.append(self._build_turn_event_payload(state, assistant_completed_event))
+            for spec_proposal_payload in turn_result.spec_proposal_payloads:
+                proposal_event = self._persist_spec_edit_proposal(
+                    state,
+                    current_assistant_turn,
+                    spec_proposal_payload,
+                    sequence=allocate_event_sequence(),
+                    assistant_message_fallback=assistant_message,
+                )
+                if proposal_event is not None:
+                    emitted_payloads.append(self._build_turn_event_payload(state, proposal_event))
+                    should_publish_snapshot = True
+            self._touch_conversation_state(state)
+            self._write_state(state)
+            snapshot_payload = state.to_dict() if should_publish_snapshot else None
+            _log_project_chat_debug(
+                "persisted final assistant turn",
+                conversation_id=prepared.conversation_id,
+                assistant_message=assistant_message,
+                turns=_summarize_turns_for_debug(state.turns),
+            )
+            snapshot = state.to_dict()
+        for payload in emitted_payloads:
+            self._publish_progress_payload(progress_callback, payload)
+        if should_publish_snapshot and snapshot_payload is not None:
+            self._publish_progress_payload(progress_callback, {"type": "conversation_snapshot", "state": snapshot_payload})
+        return snapshot
+
+    def _run_prepared_turn_background(
+        self,
+        prepared: PreparedChatTurn,
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> None:
+        try:
+            self._run_prepared_turn(prepared, progress_callback)
+        except RuntimeError as exc:
+            LOGGER.warning(
+                "project chat background turn ended with runtime error for conversation %s: %s",
+                prepared.conversation_id,
+                exc,
+            )
+        except Exception:
+            LOGGER.exception(
+                "project chat background turn failed for conversation %s",
+                prepared.conversation_id,
+            )
+
+    def _build_session(self, conversation_id: str, project_path: str) -> CodexAppServerChatSession:
+        with self._sessions_lock:
+            session = self._sessions.get(conversation_id)
+            if session is not None:
+                return session
+            persisted_session = self._read_session_state(conversation_id, project_path)
+            persisted_thread_id: Optional[str] = None
+            if (
+                persisted_session is not None
+                and persisted_session.session_version >= CHAT_SESSION_VERSION
+            ):
+                persisted_thread_id = persisted_session.thread_id
+            session = CodexAppServerChatSession(
+                project_path,
+                persisted_thread_id=persisted_thread_id,
+                on_thread_id_updated=lambda thread_id: self._persist_session_thread(
+                    conversation_id,
+                    project_path,
+                    thread_id,
+                ),
+            )
+            self._sessions[conversation_id] = session
+            return session
+
+    def _replace_session(
+        self,
+        conversation_id: str,
+        project_path: str,
+        *,
+        persisted_thread_id: Optional[str] = None,
+    ) -> CodexAppServerChatSession:
+        with self._sessions_lock:
+            existing = self._sessions.pop(conversation_id, None)
+            if existing is not None:
+                existing._close()
+            session = CodexAppServerChatSession(
+                project_path,
+                persisted_thread_id=persisted_thread_id,
+                on_thread_id_updated=lambda thread_id: self._persist_session_thread(
+                    conversation_id,
+                    project_path,
+                    thread_id,
+                ),
+            )
+            self._sessions[conversation_id] = session
+            return session
+
+    def start_turn(
+        self,
+        conversation_id: str,
+        project_path: str,
+        message: str,
+        model: Optional[str],
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> dict[str, Any]:
+        prepared, snapshot = self._prepare_turn(
+            conversation_id,
+            project_path,
+            message,
+            model,
+            progress_callback,
+        )
+        worker = threading.Thread(
+            target=self._run_prepared_turn_background,
+            args=(prepared, progress_callback),
+            daemon=True,
+            name=f"project-chat-{conversation_id[-8:]}",
+        )
+        worker.start()
+        return snapshot
+
+    def send_turn(
+        self,
+        conversation_id: str,
+        project_path: str,
+        message: str,
+        model: Optional[str],
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> dict[str, Any]:
+        prepared, _ = self._prepare_turn(
+            conversation_id,
+            project_path,
+            message,
+            model,
+            progress_callback,
+        )
+        return self._run_prepared_turn(prepared, progress_callback)
+
+    def reject_spec_edit(self, conversation_id: str, project_path: str, proposal_id: str) -> dict[str, Any]:
+        return self._reviews.reject_spec_edit(conversation_id, project_path, proposal_id)
+
+    def approve_spec_edit(
+        self,
+        conversation_id: str,
+        project_path: str,
+        proposal_id: str,
+    ) -> tuple[dict[str, Any], SpecEditProposal]:
+        return self._reviews.approve_spec_edit(conversation_id, project_path, proposal_id)
+
+    def mark_execution_workflow_started(
+        self,
+        conversation_id: str,
+        workflow_run_id: str,
+        flow_source: Optional[str],
+    ) -> dict[str, Any]:
+        return self._reviews.mark_execution_workflow_started(conversation_id, workflow_run_id, flow_source)
+
+    def prepare_execution_workflow_launch(
+        self,
+        conversation_id: str,
+        proposal_id: str,
+        review_feedback: Optional[str],
+    ) -> ExecutionWorkflowLaunchSpec:
+        return self._reviews.prepare_execution_workflow_launch(
+            conversation_id,
+            proposal_id,
+            review_feedback,
+            build_execution_planning_prompt=self._build_execution_planning_prompt,
+        )
+
+    def complete_execution_workflow(
+        self,
+        conversation_id: str,
+        proposal_id: str,
+        flow_source: Optional[str],
+        execution_flow_source: Optional[str],
+        workflow_run_id: str,
+        raw_response: str,
+    ) -> ExecutionCard:
+        return self._reviews.complete_execution_workflow(
+            conversation_id,
+            proposal_id,
+            flow_source,
+            execution_flow_source,
+            workflow_run_id,
+            raw_response,
+        )
+
+    def fail_execution_workflow(
+        self,
+        conversation_id: str,
+        workflow_run_id: str,
+        flow_source: Optional[str],
+        error: str,
+    ) -> dict[str, Any]:
+        return self._reviews.fail_execution_workflow(conversation_id, workflow_run_id, flow_source, error)
+
+    def note_execution_card_dispatched(
+        self,
+        conversation_id: str,
+        execution_card_id: str,
+        run_id: str,
+        flow_source: Optional[str],
+    ) -> dict[str, Any]:
+        return self._reviews.note_execution_card_dispatched(conversation_id, execution_card_id, run_id, flow_source)
+
+    def review_execution_card(
+        self,
+        conversation_id: str,
+        project_path: str,
+        execution_card_id: str,
+        disposition: str,
+        message: str,
+        flow_source: Optional[str],
+    ) -> tuple[dict[str, Any], ExecutionCard, Optional[str], Optional[str]]:
+        return self._reviews.review_execution_card(
+            conversation_id,
+            project_path,
+            execution_card_id,
+            disposition,
+            message,
+            flow_source,
+        )

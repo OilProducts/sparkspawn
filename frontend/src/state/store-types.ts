@@ -1,0 +1,218 @@
+export type ViewMode = 'home' | 'projects' | 'editor' | 'execution' | 'settings' | 'runs'
+export type NodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'waiting'
+export type DiagnosticSeverity = 'error' | 'warning' | 'info'
+export type RuntimeStatus =
+    | 'idle'
+    | 'running'
+    | 'abort_requested'
+    | 'cancel_requested'
+    | 'aborted'
+    | 'canceled'
+    | 'failed'
+    | 'validation_error'
+    | 'success'
+export type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict'
+export type SaveErrorKind = 'parse_error' | 'validation_error' | 'conflict' | 'network' | 'http' | 'unknown'
+export type PlanStatus = 'draft' | 'approved' | 'rejected' | 'revision-requested'
+
+export interface HumanGateOption {
+    label: string
+    value: string
+}
+
+export interface HumanGateState {
+    id: string
+    runId: string
+    nodeId: string
+    prompt: string
+    options: HumanGateOption[]
+    flowName?: string
+}
+
+export interface LogEntry {
+    time: string
+    msg: string
+    type: 'info' | 'success' | 'error'
+}
+
+export interface GraphAttrs {
+    goal?: string
+    label?: string
+    model_stylesheet?: string
+    default_max_retry?: number | string
+    retry_target?: string
+    fallback_retry_target?: string
+    default_fidelity?: string
+    'stack.child_dotfile'?: string
+    'stack.child_workdir'?: string
+    'tool_hooks.pre'?: string
+    'tool_hooks.post'?: string
+    ui_default_llm_model?: string
+    ui_default_llm_provider?: string
+    ui_default_reasoning_effort?: string
+}
+
+export type GraphAttrErrors = Partial<Record<keyof GraphAttrs, string>>
+
+export interface RegisteredProject {
+    directoryPath: string
+    isFavorite: boolean
+    lastAccessedAt: string | null
+    flowBindings?: Record<string, string>
+}
+
+export interface ProjectRegistrationResult {
+    ok: boolean
+    normalizedPath?: string
+    error?: string
+}
+
+export interface ProjectEventLogEntry {
+    message: string
+    timestamp: string
+}
+
+export interface ArtifactProvenanceReference {
+    source: string
+    referenceId: string
+    capturedAt: string
+    runId?: string | null
+    gitBranch?: string | null
+    gitCommit?: string | null
+}
+
+export interface DiagnosticEntry {
+    rule_id: string
+    severity: DiagnosticSeverity
+    message: string
+    line?: number
+    node_id?: string | null
+    edge?: [string, string] | null
+    fix?: string | null
+}
+
+export interface UiDefaults {
+    llm_model: string
+    llm_provider: string
+    reasoning_effort: string
+}
+
+export interface RouteState {
+    viewMode: ViewMode
+    activeProjectPath: string | null
+}
+
+export interface ProjectScopedWorkspace {
+    activeFlow: string | null
+    workingDir: string
+    conversationId: string | null
+    projectEventLog: ProjectEventLogEntry[]
+    specId: string | null
+    specStatus: 'draft' | 'approved'
+    specProvenance?: ArtifactProvenanceReference | null
+    planId: string | null
+    planStatus: PlanStatus
+    planProvenance?: ArtifactProvenanceReference | null
+}
+
+export type ProjectScopedWorkspacePatch = Partial<ProjectScopedWorkspace>
+
+export interface ProjectScopedArtifactState {
+    conversationId: string | null
+    specId: string | null
+    specStatus: 'draft' | 'approved'
+    planId: string | null
+    planStatus: PlanStatus
+}
+
+export interface HydratedProjectRecord {
+    directoryPath: string
+    isFavorite: boolean
+    lastAccessedAt: string | null
+    activeConversationId?: string | null
+    flowBindings?: Record<string, string>
+}
+
+export interface WorkspaceSlice {
+    viewMode: ViewMode
+    setViewMode: (mode: ViewMode) => void
+    activeProjectPath: string | null
+    setActiveProjectPath: (projectPath: string | null) => void
+    projectRegistry: Record<string, RegisteredProject>
+    hydrateProjectRegistry: (projects: HydratedProjectRecord[]) => void
+    upsertProjectRegistryEntry: (project: HydratedProjectRecord) => void
+    removeProject: (directoryPath: string, nextActiveProjectPath?: string | null) => void
+    recentProjectPaths: string[]
+    projectScopedWorkspaces: Record<string, ProjectScopedWorkspace>
+    projectRegistrationError: string | null
+    registerProject: (directoryPath: string) => ProjectRegistrationResult
+    updateProjectPath: (currentDirectoryPath: string, nextDirectoryPath: string) => ProjectRegistrationResult
+    toggleProjectFavorite: (projectPath: string) => void
+    setProjectRegistrationError: (error: string | null) => void
+    clearProjectRegistrationError: () => void
+    activeFlow: string | null
+    setActiveFlow: (flow: string | null) => void
+    setConversationId: (id: string | null) => void
+    appendProjectEventEntry: (entry: ProjectEventLogEntry) => void
+    updateProjectScopedWorkspace: (projectPath: string, patch: ProjectScopedWorkspacePatch) => void
+    setSpecId: (id: string | null) => void
+    setSpecStatus: (status: 'draft' | 'approved') => void
+    setSpecProvenance: (provenance: ArtifactProvenanceReference | null) => void
+    setPlanId: (id: string | null) => void
+    setPlanStatus: (status: PlanStatus) => void
+    setPlanProvenance: (provenance: ArtifactProvenanceReference | null) => void
+    getProjectScopedArtifactState: (projectPath: string | null) => ProjectScopedArtifactState | null
+}
+
+export interface RunInspectorSlice {
+    executionFlow: string | null
+    setExecutionFlow: (flow: string | null) => void
+    selectedRunId: string | null
+    setSelectedRunId: (id: string | null) => void
+    logs: LogEntry[]
+    addLog: (entry: LogEntry) => void
+    clearLogs: () => void
+    runtimeStatus: RuntimeStatus
+    setRuntimeStatus: (status: RuntimeStatus) => void
+    nodeStatuses: Record<string, NodeStatus>
+    setNodeStatus: (nodeId: string, status: NodeStatus) => void
+    resetNodeStatuses: () => void
+    humanGate: HumanGateState | null
+    setHumanGate: (gate: HumanGateState | null) => void
+    clearHumanGate: () => void
+}
+
+export interface EditorSlice {
+    selectedNodeId: string | null
+    setSelectedNodeId: (id: string | null) => void
+    selectedEdgeId: string | null
+    setSelectedEdgeId: (id: string | null) => void
+    workingDir: string
+    setWorkingDir: (value: string) => void
+    model: string
+    setModel: (value: string) => void
+    graphAttrs: GraphAttrs
+    graphAttrErrors: GraphAttrErrors
+    setGraphAttrs: (attrs: GraphAttrs) => void
+    updateGraphAttr: (key: keyof GraphAttrs, value: string) => void
+    diagnostics: DiagnosticEntry[]
+    setDiagnostics: (diagnostics: DiagnosticEntry[]) => void
+    clearDiagnostics: () => void
+    nodeDiagnostics: Record<string, DiagnosticEntry[]>
+    edgeDiagnostics: Record<string, DiagnosticEntry[]>
+    hasValidationErrors: boolean
+    suppressPreview: boolean
+    setSuppressPreview: (value: boolean) => void
+    uiDefaults: UiDefaults
+    setUiDefaults: (values: Partial<UiDefaults>) => void
+    setUiDefault: (key: keyof UiDefaults, value: string) => void
+    saveState: SaveState
+    saveErrorMessage: string | null
+    saveErrorKind: SaveErrorKind | null
+    markSaveInFlight: () => void
+    markSaveSuccess: () => void
+    markSaveConflict: (message: string) => void
+    markSaveFailure: (message: string, kind?: SaveErrorKind) => void
+}
+
+export type AppState = WorkspaceSlice & RunInspectorSlice & EditorSlice
