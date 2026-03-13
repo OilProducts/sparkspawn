@@ -1606,7 +1606,6 @@ describe('Frontend contract behavior', () => {
         disposition: 'revision_requested',
         message: 'Split frontend and backend work items.',
         model: null,
-        flow_source: 'contract-behavior.dot',
       },
     ])
     expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Split frontend and backend work items.')
@@ -5179,7 +5178,6 @@ digraph contract_behavior {
       directoryPath: '/tmp/persisted-project',
       isFavorite: true,
       lastAccessedAt: '2026-03-04T00:00:00.000Z',
-      activeFlowName: null,
     })
     expect(restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']?.conversationId).toBe(
       'conversation-persisted-project',

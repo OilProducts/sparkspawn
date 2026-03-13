@@ -2652,6 +2652,7 @@ class ProjectChatService:
         conversation_id: str,
         proposal_id: str,
         flow_source: Optional[str],
+        execution_flow_source: Optional[str],
         workflow_run_id: str,
         raw_response: str,
     ) -> ExecutionCard:
@@ -2682,7 +2683,7 @@ class ProjectChatService:
                 created_at=now,
                 updated_at=now,
                 status="draft",
-                flow_source=flow_source,
+                flow_source=execution_flow_source,
                 work_items=work_items,
             )
             state.execution_cards.append(execution_card)

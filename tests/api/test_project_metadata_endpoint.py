@@ -146,7 +146,6 @@ def test_project_registry_endpoints_persist_project_metadata(
     assert register_payload["display_name"] == "registered-project"
     assert register_payload["is_favorite"] is False
     assert register_payload["active_conversation_id"] is None
-    assert register_payload["active_flow_name"] is None
 
     list_response = api_client.get("/api/projects")
 
@@ -159,7 +158,7 @@ def test_project_registry_endpoints_persist_project_metadata(
     assert f'project_path = "{project_dir}"' in project_text
 
 
-def test_project_state_endpoint_updates_favorite_conversation_and_flow_reference(
+def test_project_state_endpoint_updates_favorite_and_conversation_metadata(
     api_client: TestClient,
     tmp_path: Path,
 ) -> None:
@@ -175,7 +174,6 @@ def test_project_state_endpoint_updates_favorite_conversation_and_flow_reference
             "is_favorite": True,
             "last_accessed_at": "2026-03-08T12:00:00Z",
             "active_conversation_id": "conversation-tracked-project",
-            "active_flow_name": "implement-spec.dot",
         },
     )
 
@@ -184,7 +182,6 @@ def test_project_state_endpoint_updates_favorite_conversation_and_flow_reference
     assert payload["is_favorite"] is True
     assert payload["last_accessed_at"] == "2026-03-08T12:00:00Z"
     assert payload["active_conversation_id"] == "conversation-tracked-project"
-    assert payload["active_flow_name"] == "implement-spec.dot"
 
 
 def test_project_delete_endpoint_removes_registered_project_storage(

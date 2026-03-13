@@ -942,6 +942,7 @@ DEFAULT_FLOW = """digraph SoftwareFactory {
 }"""
 
 DEFAULT_EXECUTION_PLANNING_FLOW = "plan-generation.dot"
+DEFAULT_EXECUTION_DISPATCH_FLOW = "implement-spec.dot"
 EXECUTION_PLANNING_STAGE_ID = "generate_execution_card"
 
 
@@ -2160,6 +2161,7 @@ async def _launch_execution_planning_pipeline(
     proposal_id: str,
     workflow_run_id: str,
     flow_source: str,
+    execution_flow_source: str,
     model: Optional[str],
     review_feedback: Optional[str],
 ) -> None:
@@ -2199,6 +2201,7 @@ async def _launch_execution_planning_pipeline(
                 conversation_id,
                 proposal_id,
                 flow_source,
+                execution_flow_source,
                 completed_run_id,
                 raw_response,
             )
@@ -2306,7 +2309,11 @@ app.include_router(
             resolve_project_git_commit=lambda runtime_path: _resolve_project_git_commit(runtime_path),
             pick_project_directory=lambda: _pick_project_directory(),
             default_execution_planning_flow=DEFAULT_EXECUTION_PLANNING_FLOW,
-            launch_execution_planning_pipeline=lambda **kwargs: _launch_execution_planning_pipeline(**kwargs),
+            default_execution_dispatch_flow=DEFAULT_EXECUTION_DISPATCH_FLOW,
+            launch_execution_planning_pipeline=lambda **kwargs: _launch_execution_planning_pipeline(
+                execution_flow_source=DEFAULT_EXECUTION_DISPATCH_FLOW,
+                **kwargs,
+            ),
             launch_execution_card_pipeline=lambda **kwargs: _launch_execution_card_pipeline(**kwargs),
         )
     )

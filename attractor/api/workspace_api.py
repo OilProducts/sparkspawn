@@ -38,7 +38,6 @@ class ProjectStateUpdateRequest(BaseModel):
     is_favorite: Optional[bool] = None
     last_accessed_at: Optional[str] = None
     active_conversation_id: Optional[str] = None
-    active_flow_name: Optional[str] = None
 
 
 class SpecEditApprovalRequest(BaseModel):
@@ -67,6 +66,7 @@ class WorkspaceApiDependencies:
     resolve_project_git_commit: Callable[[Path], Optional[str]]
     pick_project_directory: Callable[[], Optional[Path]]
     default_execution_planning_flow: str
+    default_execution_dispatch_flow: str
     launch_execution_planning_pipeline: Callable[..., Awaitable[None]]
     launch_execution_card_pipeline: Callable[..., Awaitable[str]]
 
@@ -84,7 +84,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             "last_accessed_at": project.last_accessed_at,
             "is_favorite": project.is_favorite,
             "active_conversation_id": project.active_conversation_id,
-            "active_flow_name": project.active_flow_name,
         }
 
     def _serialize_deleted_project_record(project: Any) -> dict[str, object]:
@@ -144,7 +143,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 last_accessed_at=req.last_accessed_at,
                 is_favorite=req.is_favorite,
                 active_conversation_id=req.active_conversation_id,
-                active_flow_name=req.active_flow_name,
             )
             return _serialize_project_record(project)
         except ValueError as exc:
@@ -300,7 +298,11 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
     ):
         if req.disposition not in {"approved", "rejected", "revision_requested"}:
             raise HTTPException(status_code=400, detail="Execution card disposition must be approved, rejected, or revision_requested.")
-        effective_flow_source = (req.flow_source or "").strip()
+        review_flow_source = (
+            ((req.flow_source or "").strip() or deps.default_execution_dispatch_flow)
+            if req.disposition == "approved"
+            else deps.default_execution_planning_flow
+        )
         try:
             snapshot, execution_card, proposal_id, workflow_run_id = await asyncio.to_thread(
                 deps.get_project_chat().review_execution_card,
@@ -309,14 +311,20 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 execution_card_id,
                 req.disposition,
                 req.message,
-                effective_flow_source or None,
+                review_flow_source,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await deps.get_project_chat().publish_snapshot(conversation_id)
         if req.disposition == "approved":
-            if not effective_flow_source:
-                raise HTTPException(status_code=400, detail="An execution flow must be selected before approving an execution card.")
+            persisted_execution_flow = (execution_card.flow_source or "").strip()
+            if not persisted_execution_flow or persisted_execution_flow == deps.default_execution_planning_flow:
+                persisted_execution_flow = deps.default_execution_dispatch_flow
+            effective_flow_source = (
+                (req.flow_source or "").strip()
+                or persisted_execution_flow
+                or deps.default_execution_dispatch_flow
+            )
             await deps.launch_execution_card_pipeline(
                 conversation_id=conversation_id,
                 execution_card_id=execution_card.id,
@@ -331,7 +339,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 conversation_id=conversation_id,
                 proposal_id=proposal_id,
                 workflow_run_id=workflow_run_id,
-                flow_source=effective_flow_source or execution_card.flow_source or deps.default_execution_planning_flow,
+                flow_source=deps.default_execution_planning_flow,
                 model=req.model,
                 review_feedback=req.message,
             )

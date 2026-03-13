@@ -240,7 +240,6 @@ export interface ProjectRecordResponse {
     last_accessed_at?: string | null
     is_favorite: boolean
     active_conversation_id?: string | null
-    active_flow_name?: string | null
 }
 
 export type ProjectDirectoryPickResponse =
@@ -903,7 +902,6 @@ function parseProjectRecordResponse(value: unknown, endpoint: string): ProjectRe
         last_accessed_at: asOptionalNullableString(record.last_accessed_at),
         is_favorite: record.is_favorite === true,
         active_conversation_id: asOptionalNullableString(record.active_conversation_id),
-        active_flow_name: asOptionalNullableString(record.active_flow_name),
     }
 }
 
@@ -1246,7 +1244,6 @@ export async function updateProjectStateValidated(payload: {
     is_favorite?: boolean | null
     last_accessed_at?: string | null
     active_conversation_id?: string | null
-    active_flow_name?: string | null
 }): Promise<ProjectRecordResponse> {
     return fetchJsonWithValidation(
         '/api/projects/state',

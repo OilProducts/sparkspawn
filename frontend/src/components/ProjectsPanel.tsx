@@ -247,13 +247,11 @@ const toHydratedProjectRecord = (project: {
     is_favorite: boolean
     last_accessed_at?: string | null
     active_conversation_id?: string | null
-    active_flow_name?: string | null
 }) => ({
     directoryPath: project.project_path,
     isFavorite: project.is_favorite === true,
     lastAccessedAt: typeof project.last_accessed_at === "string" ? project.last_accessed_at : null,
     activeConversationId: typeof project.active_conversation_id === "string" ? project.active_conversation_id : null,
-    activeFlowName: typeof project.active_flow_name === "string" ? project.active_flow_name : null,
 })
 
 const formatConversationAgeShort = (value: string) => {
@@ -1061,7 +1059,6 @@ export function HomePanel() {
             last_accessed_at?: string | null
             active_conversation_id?: string | null
             is_favorite?: boolean | null
-            active_flow_name?: string | null
         },
     ) => {
         try {
@@ -2036,7 +2033,6 @@ export function HomePanel() {
             const snapshot = await approveSpecEditProposalValidated(activeConversationId, proposal.id, {
                 project_path: activeProjectPath,
                 model: model.trim() || null,
-                flow_source: activeFlow || null,
             })
             applyConversationSnapshot(activeProjectPath, snapshot, "spec-approve")
         } catch (error) {
@@ -2090,17 +2086,6 @@ export function HomePanel() {
             return
         }
 
-        const reviewFlowSource = disposition === "approved"
-            ? activeFlow || null
-            : activeFlow || executionCard.flow_source || null
-
-        if (disposition === "approved" && !reviewFlowSource) {
-            const message = "Select an execution flow before approving the execution card."
-            setPanelError(message)
-            appendLocalProjectEvent(`Execution card review failed: ${message}`)
-            return
-        }
-
         setPendingExecutionCardId(executionCard.id)
         setPanelError(null)
         try {
@@ -2109,7 +2094,6 @@ export function HomePanel() {
                 disposition,
                 message: reviewMessage,
                 model: model.trim() || null,
-                flow_source: reviewFlowSource,
             })
             applyConversationSnapshot(activeProjectPath, snapshot, "execution-review")
         } catch (error) {

@@ -61,7 +61,6 @@ export interface RegisteredProject {
     directoryPath: string
     isFavorite: boolean
     lastAccessedAt: string | null
-    activeFlowName?: string | null
 }
 
 export interface ProjectRegistrationResult {
@@ -283,7 +282,6 @@ interface HydratedProjectRecord {
     isFavorite: boolean
     lastAccessedAt: string | null
     activeConversationId?: string | null
-    activeFlowName?: string | null
 }
 
 const DEFAULT_PROJECT_SCOPED_WORKSPACE: ProjectScopedWorkspace = {
@@ -535,12 +533,10 @@ export const useStore = create<AppState>((set, get) => ({
                     directoryPath: normalizedPath,
                     isFavorite: project.isFavorite === true,
                     lastAccessedAt: typeof project.lastAccessedAt === 'string' ? project.lastAccessedAt : null,
-                    activeFlowName: project.activeFlowName ?? null,
                 }
                 nextProjectScopedWorkspaces[normalizedPath] = resolveProjectScopedWorkspace(
                     {
                         ...nextProjectScopedWorkspaces[normalizedPath],
-                        activeFlow: project.activeFlowName ?? null,
                         conversationId: typeof project.activeConversationId === 'string'
                             ? project.activeConversationId
                             : nextProjectScopedWorkspaces[normalizedPath]?.conversationId ?? null,
@@ -582,7 +578,6 @@ export const useStore = create<AppState>((set, get) => ({
                     directoryPath: normalizedPath,
                     isFavorite: project.isFavorite === true,
                     lastAccessedAt: typeof project.lastAccessedAt === 'string' ? project.lastAccessedAt : null,
-                    activeFlowName: project.activeFlowName ?? null,
                 },
             }
             const nextProjectScopedWorkspaces = {
@@ -590,7 +585,6 @@ export const useStore = create<AppState>((set, get) => ({
                 [normalizedPath]: resolveProjectScopedWorkspace(
                     {
                         ...state.projectScopedWorkspaces[normalizedPath],
-                        activeFlow: project.activeFlowName ?? null,
                         conversationId: typeof project.activeConversationId === 'string'
                             ? project.activeConversationId
                             : state.projectScopedWorkspaces[normalizedPath]?.conversationId ?? null,
@@ -757,7 +751,6 @@ export const useStore = create<AppState>((set, get) => ({
                     directoryPath: normalizedPath,
                     isFavorite: false,
                     lastAccessedAt: nowIso,
-                    activeFlowName: null,
                 },
             }
             nextProjectScopedWorkspaces[normalizedPath] = resolveProjectScopedWorkspace(

@@ -144,7 +144,6 @@ Spark Spawn does not own the flow definition itself, even when Spark Spawn creat
 
 Spark Spawn does own:
 - which flows are associated with a project
-- which flow is currently recorded as the project's preferred workspace flow reference
 - which flow a workspace artifact references
 - which triggers are bound to which flows for a project
 

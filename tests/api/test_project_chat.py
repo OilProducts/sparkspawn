@@ -1252,6 +1252,7 @@ def test_complete_execution_workflow_creates_execution_card_and_clears_matching_
         "conversation-test",
         "proposal-1",
         "plan-generation.dot",
+        "implement-spec.dot",
         "workflow-123",
         json.dumps(
             {
@@ -1272,6 +1273,7 @@ def test_complete_execution_workflow_creates_execution_card_and_clears_matching_
     )
 
     assert execution_card.source_workflow_run_id == "workflow-123"
+    assert execution_card.flow_source == "implement-spec.dot"
     snapshot = service.get_snapshot("conversation-test", str(tmp_path))
     assert snapshot["execution_workflow"]["status"] == "idle"
     assert snapshot["execution_cards"][0]["id"] == execution_card.id

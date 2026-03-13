@@ -455,12 +455,43 @@ def test_approved_execution_card_launches_selected_flow_run(
     )
 
 
-def test_approved_execution_card_requires_explicit_execution_flow(
+def test_approved_execution_card_defaults_legacy_planning_flow_to_dispatch_flow(
     api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     project_path = str(tmp_path / "project")
     Path(project_path).mkdir(parents=True, exist_ok=True)
+    flows_dir = server.get_settings().flows_dir
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    (flows_dir / "implement-spec.dot").write_text(
+        "\n".join(
+            [
+                "digraph implement_spec {",
+                '  graph [goal="Implement the approved execution card."];',
+                '  start [shape="Mdiamond"];',
+                '  implement [prompt="Implement card", shape="box"];',
+                '  done [shape="Msquare"];',
+                "  start -> implement;",
+                "  implement -> done;",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class _Backend:
+        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
+            del node_id, prompt, context, timeout
+            return "implemented"
+
+    monkeypatch.setattr(
+        server,
+        "_build_codergen_backend",
+        lambda backend_name, working_dir, emit, model=None: _Backend(),
+    )
+
     server.PROJECT_CHAT._write_state(
         project_chat.ConversationState(
             conversation_id="conversation-test",
@@ -496,5 +527,12 @@ def test_approved_execution_card_requires_explicit_execution_flow(
         },
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "An execution flow must be selected before approving an execution card."
+    assert response.status_code == 200
+
+    runs_response = api_client.get("/runs", params={"project_path": project_path})
+    assert runs_response.status_code == 200
+    runs_payload = runs_response.json()["runs"]
+    matching_runs = [run for run in runs_payload if run["plan_id"] == "execution-card-1"]
+    assert len(matching_runs) == 1
+    launched_run = matching_runs[0]
+    assert launched_run["flow_name"] == "implement-spec.dot"

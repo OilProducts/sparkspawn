@@ -99,7 +99,7 @@ describe('project scope store behavior', () => {
     expect(useStore.getState().projectScopedWorkspaces['/tmp/project-a']).toBeDefined()
   })
 
-  it('keeps the inspected execution flow separate from the project preferred flow', () => {
+  it('keeps the inspected execution flow separate from the current editor flow', () => {
     const store = useStore.getState()
     store.registerProject('/tmp/project-a')
 
@@ -112,7 +112,7 @@ describe('project scope store behavior', () => {
     expect(next.projectScopedWorkspaces['/tmp/project-a']?.activeFlow).toBe('preferred.dot')
   })
 
-  it('hydrates the project flow reference from backend project metadata', () => {
+  it('hydrates backend project metadata without deriving a project flow preference', () => {
     const store = useStore.getState()
     store.hydrateProjectRegistry([
       {
@@ -120,13 +120,16 @@ describe('project scope store behavior', () => {
         isFavorite: false,
         lastAccessedAt: null,
         activeConversationId: null,
-        activeFlowName: 'implement-spec.dot',
       },
     ])
 
     const next = useStore.getState()
-    expect(next.projectRegistry['/tmp/project-a']?.activeFlowName).toBe('implement-spec.dot')
-    expect(next.projectScopedWorkspaces['/tmp/project-a']?.activeFlow).toBe('implement-spec.dot')
+    expect(next.projectRegistry['/tmp/project-a']).toEqual({
+      directoryPath: '/tmp/project-a',
+      isFavorite: false,
+      lastAccessedAt: null,
+    })
+    expect(next.projectScopedWorkspaces['/tmp/project-a']?.activeFlow).toBeNull()
     expect(next.activeFlow).toBeNull()
   })
 

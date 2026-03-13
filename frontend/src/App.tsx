@@ -33,7 +33,6 @@ function App() {
               isFavorite: project.is_favorite,
               lastAccessedAt: project.last_accessed_at ?? null,
               activeConversationId: project.active_conversation_id ?? null,
-              activeFlowName: project.active_flow_name ?? null,
             })),
           )
         }
