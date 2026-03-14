@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional, Protocol
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from sparkspawn_common.runtime import normalize_project_path, resolve_runtime_workspace_path
 from workspace.attractor_client import AttractorApiClient, AttractorApiError
@@ -45,6 +45,19 @@ class SpecEditApprovalRequest(BaseModel):
     project_path: str
     model: Optional[str] = None
     flow_source: Optional[str] = None
+
+
+class SpecEditProposalChangeRequest(BaseModel):
+    path: str
+    before: str
+    after: str
+
+
+class SpecEditProposalCreateByHandleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    summary: str
+    changes: list[SpecEditProposalChangeRequest]
+    rationale: Optional[str] = None
 
 
 class SpecEditRejectionRequest(BaseModel):
@@ -472,6 +485,35 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return snapshot
+
+    @router.post("/api/conversations/by-handle/{conversation_handle}/spec-edit-proposals")
+    async def create_project_spec_edit_proposal_by_handle(
+        conversation_handle: str,
+        req: SpecEditProposalCreateByHandleRequest,
+    ):
+        try:
+            result = await asyncio.to_thread(
+                deps.get_project_chat().create_spec_edit_proposal_by_handle,
+                conversation_handle,
+                req.model_dump(),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Unknown conversation handle: {conversation_handle}. "
+                    "Verify the handle shown in the thread UI and try again."
+                ),
+            ) from exc
+        except ValueError as exc:
+            detail = str(exc)
+            status_code = 409 if "identical proposal already exists" in detail else 400
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+        await deps.get_project_chat().publish_snapshot(str(result["conversation_id"]))
+        return {
+            "ok": True,
+            **result,
+        }
 
     @router.post("/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/approve")
     async def approve_project_spec_edit_proposal(

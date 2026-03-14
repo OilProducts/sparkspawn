@@ -64,6 +64,9 @@ For each conversation, Spark Spawn persists:
 - `state.json`
 - `raw-log.jsonl`
 
+The workspace also persists a global active conversation-handle index at:
+- `SPARKSPAWN_HOME/workspace/conversation-handles.json`
+
 Spark Spawn MUST NOT require any additional per-conversation durable file to reconstruct the conversation UI.
 
 ### 3.1 `raw-log.jsonl`
@@ -143,6 +146,7 @@ Contains durable metadata for the thread itself.
 
 Required fields:
 - `id`
+- `handle`
 - `project_path`
 - `title`
 - `created_at`
@@ -362,7 +366,7 @@ For command/file items:
 - `app_turn_id`
 - `item_id`
 
-For dynamic tools or MCP requests:
+For call-id keyed tool requests such as MCP:
 - `app_turn_id`
 - `call_id`
 

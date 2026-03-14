@@ -107,6 +107,45 @@ class ProjectChatReviewService:
         self._repository.append_event(state, f"Drafted spec edit proposal {proposal.id}.")
         return proposal_event
 
+    def create_spec_edit_proposal(
+        self,
+        conversation_id: str,
+        project_path: str,
+        spec_proposal_payload: dict[str, object],
+    ) -> dict[str, object]:
+        normalized_project_path = normalize_project_path_value(project_path)
+        with self._repository._lock:
+            state = self._repository.read_state(conversation_id, normalized_project_path)
+            if state is None or state.project_path != normalized_project_path:
+                raise FileNotFoundError(conversation_id)
+            parent_turn = next(
+                (
+                    turn
+                    for turn in reversed(state.turns)
+                    if turn.role == "assistant" and turn.kind == "message"
+                ),
+                None,
+            )
+            if parent_turn is None:
+                raise ValueError("Conversation has no assistant turn that can own a spec proposal.")
+            proposal_event = self.persist_spec_edit_proposal(
+                state,
+                parent_turn,
+                spec_proposal_payload,
+                assistant_message_fallback=parent_turn.content,
+            )
+            if proposal_event is None or proposal_event.artifact_id is None or proposal_event.segment_id is None:
+                raise ValueError("Spec proposal was not created because an identical proposal already exists on the latest assistant turn.")
+            self._repository.touch_conversation_state(state)
+            self._repository.write_state(state)
+            return {
+                "conversation_id": conversation_id,
+                "project_path": normalized_project_path,
+                "turn_id": parent_turn.id,
+                "proposal_id": proposal_event.artifact_id,
+                "segment_id": proposal_event.segment_id,
+            }
+
     def reject_spec_edit(self, conversation_id: str, project_path: str, proposal_id: str) -> dict[str, object]:
         normalized_project_path = normalize_project_path_value(project_path)
         with self._repository._lock:

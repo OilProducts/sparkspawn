@@ -7,3 +7,4 @@ codex-app-server.schema/
 artifacts/
 frontend/.tmp-*/
 attractor/ui_dist/
+.idea/

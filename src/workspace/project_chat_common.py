@@ -50,6 +50,41 @@ def as_non_empty_string(value: Any) -> Optional[str]:
     return None
 
 
+def normalize_spec_edit_proposal_payload(
+    arguments: Any,
+    *,
+    source_name: str,
+) -> dict[str, Any]:
+    if not isinstance(arguments, dict):
+        raise ValueError(f"{source_name} requires an object argument payload.")
+    summary = as_non_empty_string(arguments.get("summary"))
+    raw_changes = arguments.get("changes")
+    if not summary:
+        raise ValueError(f"{source_name} requires a non-empty summary.")
+    if not isinstance(raw_changes, list):
+        raise ValueError(f"{source_name} requires a changes array.")
+    changes: list[dict[str, str]] = []
+    for raw_change in raw_changes:
+        if not isinstance(raw_change, dict):
+            continue
+        path = as_non_empty_string(raw_change.get("path"))
+        before = as_non_empty_string(raw_change.get("before"))
+        after = as_non_empty_string(raw_change.get("after"))
+        if not path or before is None or after is None:
+            continue
+        changes.append({"path": path, "before": before, "after": after})
+    if not changes:
+        raise ValueError(f"{source_name} requires at least one valid change.")
+    payload: dict[str, Any] = {
+        "summary": summary,
+        "changes": changes,
+    }
+    rationale = as_non_empty_string(arguments.get("rationale"))
+    if rationale:
+        payload["rationale"] = rationale
+    return payload
+
+
 def extract_json_object(raw: str) -> dict[str, Any]:
     text = raw.strip()
     if not text:

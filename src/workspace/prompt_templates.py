@@ -10,6 +10,39 @@ PROMPTS_FILE_NAME = "prompts.toml"
 CHAT_TEMPLATE_KEY = "chat"
 EXECUTION_PLANNING_TEMPLATE_KEY = "execution_planning"
 
+CHAT_PROMPT_RUNTIME_VARIABLES = (
+    "conversation_handle",
+    "project_path",
+    "recent_conversation",
+    "latest_user_message",
+)
+
+EXECUTION_PLANNING_RUNTIME_VARIABLES = (
+    "project_path",
+    "approved_spec_edit_proposal",
+    "recent_conversation",
+    "review_feedback",
+)
+
+FIXED_CHAT_SYSTEM_FRAME = """You are the Spark Spawn workspace assistant for the active project conversation.
+You must ground your responses in the current repository, project specifications, and tool results.
+Be concise, concrete, and practical. When something is inferred rather than directly observed, say so plainly.
+When the user asks for a concrete specification change, prefer the smallest grounded edit over inventing a broad feature.
+When the exact change is agreed, create a pending spec proposal with `sparkspawn spec-proposal create --conversation {{conversation_handle}} --json -`.
+If you need the exact payload contract, read `sparkspawn spec-proposal create --help` before invoking it.
+Never approve, reject, or apply proposals yourself.
+
+Conversation handle: {{conversation_handle}}
+Project path: {{project_path}}"""
+
+FIXED_EXECUTION_PLANNING_SYSTEM_FRAME = """You are generating a tracker-ready execution card from an approved spec edit proposal.
+Respond with JSON only.
+Schema: {"title": string, "summary": string, "objective": string, "work_items": [{"id": string, "title": string, "description": string, "acceptance_criteria": [string], "depends_on": [string]}]}.
+Return 1-6 concrete work items.
+Do not include markdown fences.
+
+Project path: {{project_path}}"""
+
 
 @dataclass(frozen=True)
 class PromptTemplates:
@@ -18,31 +51,13 @@ class PromptTemplates:
 
 
 DEFAULT_PROMPT_TEMPLATES = PromptTemplates(
-    chat="""You are the Spark Spawn assistant for the active project.
-Help the user understand the project, refine user stories and specification changes, and plan implementation work.
-Base your answers on the available project context and tool results.
-When something is inferred rather than directly observed, say so plainly.
-Keep replies concise, concrete, and practical.
-When the user asks for a spec change, ground it in the current spec and repository context.
-Prefer precise edits to existing spec text over speculative new features.
-If the user has not specified a concrete change yet, propose at most a small grounded clarification rather than inventing a broad feature.
-Once the exact change is agreed, call the draft_spec_proposal tool to capture the minimal spec edit proposal.
-
-Project path: {{project_path}}
-Recent conversation:
+    chat="""Recent conversation:
 {{recent_conversation}}
 
 Latest user message:
 {{latest_user_message}}
 """,
-    execution_planning="""You are generating a tracker-ready execution card from an approved spec edit.
-Respond with JSON only.
-Schema: {"title": string, "summary": string, "objective": string, "work_items": [{"id": string, "title": string, "description": string, "acceptance_criteria": [string], "depends_on": [string]}]}.
-Return 1-6 concrete work items.
-Do not include markdown fences.
-
-Project path: {{project_path}}
-Approved spec edit proposal:
+    execution_planning="""Approved spec edit proposal:
 {{approved_spec_edit_proposal}}
 
 Recent conversation:
@@ -90,6 +105,24 @@ def render_prompt_template(template: str, values: dict[str, str]) -> str:
     for key, value in values.items():
         rendered = rendered.replace(f"{{{{{key}}}}}", value)
     return rendered
+
+
+def render_chat_prompt(guidance_template: str, values: dict[str, str]) -> str:
+    return "\n\n".join(
+        [
+            render_prompt_template(FIXED_CHAT_SYSTEM_FRAME, values).strip(),
+            render_prompt_template(guidance_template, values).strip(),
+        ]
+    ).strip()
+
+
+def render_execution_planning_prompt(guidance_template: str, values: dict[str, str]) -> str:
+    return "\n\n".join(
+        [
+            render_prompt_template(FIXED_EXECUTION_PLANNING_SYSTEM_FRAME, values).strip(),
+            render_prompt_template(guidance_template, values).strip(),
+        ]
+    ).strip()
 
 
 def _read_template(section: dict[object, object], key: str) -> str:

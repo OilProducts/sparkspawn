@@ -19,7 +19,6 @@ from workspace.project_chat_common import (
 from workspace.project_chat_models import (
     ChatTurnLiveEvent,
     ChatTurnResult,
-    DynamicToolInvocationResult,
     ToolCallRecord,
 )
 
@@ -63,37 +62,6 @@ def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
             file_paths=codex_app_server.extract_file_paths(item),
         )
     return None
-
-
-def _extract_spec_proposal_payload(arguments: Any) -> dict[str, Any]:
-    if not isinstance(arguments, dict):
-        raise ValueError("draft_spec_proposal requires an object argument payload.")
-    summary = as_non_empty_string(arguments.get("summary"))
-    raw_changes = arguments.get("changes")
-    if not summary:
-        raise ValueError("draft_spec_proposal requires a non-empty summary.")
-    if not isinstance(raw_changes, list):
-        raise ValueError("draft_spec_proposal requires a changes array.")
-    changes: list[dict[str, str]] = []
-    for raw_change in raw_changes:
-        if not isinstance(raw_change, dict):
-            continue
-        path = as_non_empty_string(raw_change.get("path"))
-        before = as_non_empty_string(raw_change.get("before"))
-        after = as_non_empty_string(raw_change.get("after"))
-        if not path or before is None or after is None:
-            continue
-        changes.append({"path": path, "before": before, "after": after})
-    if not changes:
-        raise ValueError("draft_spec_proposal requires at least one valid change.")
-    payload: dict[str, Any] = {
-        "summary": summary,
-        "changes": changes,
-    }
-    rationale = as_non_empty_string(arguments.get("rationale"))
-    if rationale:
-        payload["rationale"] = rationale
-    return payload
 
 
 def _extract_app_turn_id(message: dict[str, Any]) -> Optional[str]:
@@ -250,63 +218,6 @@ class CodexAppServerChatSession:
             "error": {"code": -32000, "message": f"Unsupported request: {method}"},
         })
 
-    def _dynamic_tool_specs(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "name": "draft_spec_proposal",
-                "title": "Draft spec edit proposal",
-                "description": (
-                    "Capture a concrete spec edit proposal for an existing spec file. Prefer the smallest "
-                    "grounded before/after spans that express the agreed change. Do not replace the whole "
-                    "file unless the entire file is intentionally changing, and do not invent speculative "
-                    "new features without user direction."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "required": ["summary", "changes"],
-                    "properties": {
-                        "summary": {
-                            "type": "string",
-                            "description": "Short description of the exact spec edit being proposed.",
-                        },
-                        "rationale": {
-                            "type": "string",
-                            "description": (
-                                "Why this edit is needed, grounded in the user's request or observed repository context."
-                            ),
-                        },
-                        "changes": {
-                            "type": "array",
-                            "description": "One or more minimal-span edits to existing spec text.",
-                            "items": {
-                                "type": "object",
-                                "required": ["path", "before", "after"],
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Absolute or project-relative path of the spec file being edited.",
-                                    },
-                                    "before": {
-                                        "type": "string",
-                                        "description": (
-                                            "The smallest existing text span to replace. Do not send the whole file unless "
-                                            "the whole file is intentionally being rewritten."
-                                        ),
-                                    },
-                                    "after": {
-                                        "type": "string",
-                                        "description": (
-                                            "Replacement text for the selected span. Keep the edit as narrow and local as possible."
-                                        ),
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            }
-        ]
-
     def _wait_for_response(self, target_id: int) -> dict[str, Any]:
         started_at = time.monotonic()
         while True:
@@ -374,7 +285,6 @@ class CodexAppServerChatSession:
             "sandbox": "danger-full-access",
             "approvalPolicy": "never",
             "ephemeral": False,
-            "dynamicTools": self._dynamic_tool_specs(),
         }
         if model:
             params["model"] = model
@@ -413,14 +323,12 @@ class CodexAppServerChatSession:
         model: Optional[str],
         *,
         on_event: Optional[Callable[[ChatTurnLiveEvent], None]] = None,
-        on_dynamic_tool_call: Optional[Callable[[str, Any, str], DynamicToolInvocationResult]] = None,
     ) -> ChatTurnResult:
         with self._lock:
             self._ensure_process()
             self._ensure_thread(model)
             stream_state = codex_app_server.CodexAppServerTurnState()
             last_activity_at = time.monotonic()
-            spec_proposal_payloads: list[dict[str, Any]] = []
             tool_calls_by_id: dict[str, ToolCallRecord] = {}
             current_app_turn_id: Optional[str] = None
             params: dict[str, Any] = {
@@ -505,96 +413,6 @@ class CodexAppServerChatSession:
                                 item_id=item_id,
                             ),
                         )
-                    elif request_method == "item/tool/call":
-                        tool_name = as_non_empty_string(request_params.get("tool")) or "unknown_tool"
-                        call_id = as_non_empty_string(request_params.get("callId")) or f"tool-{uuid.uuid4().hex}"
-                        initial_tool_call = ToolCallRecord(
-                            id=call_id,
-                            kind="dynamic_tool",
-                            status="running",
-                            title=tool_name,
-                        )
-                        tool_calls_by_id[call_id] = initial_tool_call
-                        self._emit_live_event(
-                            on_event,
-                            ChatTurnLiveEvent(
-                                kind="tool_call_started",
-                                tool_call_id=call_id,
-                                tool_call=ToolCallRecord.from_dict(initial_tool_call.to_dict()),
-                                app_turn_id=current_app_turn_id,
-                            ),
-                        )
-                        if on_dynamic_tool_call is None:
-                            failed_tool_call = ToolCallRecord(
-                                id=call_id,
-                                kind="dynamic_tool",
-                                status="failed",
-                                title=tool_name,
-                                output="Dynamic tools are not available in this session.",
-                            )
-                            tool_calls_by_id[call_id] = failed_tool_call
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(
-                                    kind="tool_call_failed",
-                                    tool_call_id=call_id,
-                                    tool_call=ToolCallRecord.from_dict(failed_tool_call.to_dict()),
-                                    app_turn_id=current_app_turn_id,
-                                ),
-                            )
-                            self._send_response(
-                                message.get("id"),
-                                {
-                                    "success": False,
-                                    "contentItems": [
-                                        {"type": "inputText", "text": "Dynamic tools are not available in this session."}
-                                    ],
-                                },
-                            )
-                            continue
-                        try:
-                            tool_result = on_dynamic_tool_call(tool_name, request_params.get("arguments"), call_id)
-                            tool_result.tool_call.id = call_id
-                            tool_calls_by_id[call_id] = tool_result.tool_call
-                            if tool_result.spec_proposal_payload is not None:
-                                spec_proposal_payloads.append(tool_result.spec_proposal_payload)
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(
-                                    kind="tool_call_completed",
-                                    tool_call_id=call_id,
-                                    tool_call=ToolCallRecord.from_dict(tool_result.tool_call.to_dict()),
-                                    spec_proposal_payload=tool_result.spec_proposal_payload,
-                                    app_turn_id=current_app_turn_id,
-                                ),
-                            )
-                            self._send_response(message.get("id"), tool_result.response)
-                        except Exception as exc:
-                            failed_tool_call = ToolCallRecord(
-                                id=call_id,
-                                kind="dynamic_tool",
-                                status="failed",
-                                title=tool_name,
-                                output=str(exc),
-                            )
-                            tool_calls_by_id[call_id] = failed_tool_call
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(
-                                    kind="tool_call_failed",
-                                    tool_call_id=call_id,
-                                    tool_call=ToolCallRecord.from_dict(failed_tool_call.to_dict()),
-                                    app_turn_id=current_app_turn_id,
-                                ),
-                            )
-                            self._send_response(
-                                message.get("id"),
-                                {
-                                    "success": False,
-                                    "contentItems": [{"type": "inputText", "text": f"Tool call failed: {exc}"}],
-                                },
-                            )
-                        continue
                     self._handle_server_request(message)
                     continue
                 normalized_events = codex_app_server.process_turn_message(message, stream_state)
@@ -706,7 +524,4 @@ class CodexAppServerChatSession:
             response_text = stream_state.resolved_agent_text()
             if not response_text:
                 raise RuntimeError("codex app-server returned an empty chat response")
-            return ChatTurnResult(
-                assistant_message=response_text,
-                spec_proposal_payloads=spec_proposal_payloads,
-            )
+            return ChatTurnResult(assistant_message=response_text)

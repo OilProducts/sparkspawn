@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+import secrets
 import shutil
 import tomllib
 from typing import Any
@@ -16,6 +18,36 @@ def _iso_now() -> str:
 
 
 _UNSET = object()
+_CONVERSATION_HANDLE_SCHEMA_VERSION = 1
+_CONVERSATION_HANDLE_PATTERN = "adjective-noun"
+
+_HANDLE_ADJECTIVES = (
+    "amber", "ancient", "autumn", "bold", "brisk", "calm", "cedar", "clear", "cloudy", "cobalt",
+    "crisp", "curious", "daily", "daring", "deep", "delicate", "eager", "early", "electric", "ember",
+    "faint", "fancy", "fast", "fern", "fierce", "final", "forest", "fresh", "gentle", "glossy",
+    "golden", "grand", "graphic", "green", "hidden", "hollow", "honest", "icy", "jagged", "juniper",
+    "keen", "kind", "lattice", "light", "lively", "lunar", "mellow", "midnight", "misty", "modern",
+    "mossy", "navy", "nimble", "noble", "north", "odd", "olive", "open", "orange", "patient",
+    "pearl", "pine", "plain", "polished", "prairie", "proud", "quick", "quiet", "rapid", "rare",
+    "red", "remote", "river", "robust", "rocky", "royal", "rustic", "sage", "scarlet", "shadow",
+    "sharp", "silver", "simple", "sky", "small", "smoky", "solar", "solid", "spring", "steady",
+    "stone", "stormy", "summer", "sunny", "swift", "tidy", "timber", "tiny", "topaz", "tranquil",
+    "true", "urban", "vivid", "warm", "western", "white", "wild", "winter", "wise", "wooden",
+)
+
+_HANDLE_NOUNS = (
+    "anchor", "antler", "arch", "arrow", "ash", "badger", "bank", "barley", "bay", "beacon",
+    "berry", "bird", "blossom", "bridge", "brook", "brush", "cabin", "canyon", "cardinal", "cedar",
+    "circle", "cliff", "cloud", "coast", "comet", "creek", "crest", "crow", "delta", "dove",
+    "drift", "dune", "echo", "falcon", "field", "finch", "firefly", "fjord", "flower", "forest",
+    "forge", "fox", "garden", "glade", "grain", "grove", "harbor", "hawk", "hazel", "hill",
+    "hollow", "island", "jet", "juniper", "kingfisher", "lake", "lantern", "leaf", "line", "lily",
+    "meadow", "mesa", "moon", "mountain", "otter", "owl", "peak", "pebble", "pine", "planet",
+    "pond", "prairie", "quartz", "raven", "reef", "ridge", "river", "robin", "sail", "sandpiper",
+    "shadow", "shore", "signal", "sky", "snowflake", "sparrow", "spring", "spruce", "star", "stone",
+    "stream", "summit", "sunrise", "swallow", "thicket", "thistle", "timber", "trail", "valley", "wave",
+    "willow", "wind", "wren", "yard", "zephyr",
+)
 
 
 @dataclass(frozen=True)
@@ -194,6 +226,149 @@ def workspace_projects_root(home_dir: Path) -> Path:
     return root
 
 
+def workspace_root(home_dir: Path) -> Path:
+    root = home_dir / "workspace"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def conversation_handles_path(home_dir: Path) -> Path:
+    return workspace_root(home_dir) / "conversation-handles.json"
+
+
+def load_conversation_handle_index(home_dir: Path) -> dict[str, Any]:
+    path = conversation_handles_path(home_dir)
+    if not path.exists():
+        return {
+            "schema_version": _CONVERSATION_HANDLE_SCHEMA_VERSION,
+            "pattern": _CONVERSATION_HANDLE_PATTERN,
+            "handles": {},
+            "conversation_ids": {},
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    handles = payload.get("handles")
+    conversation_ids = payload.get("conversation_ids")
+    return {
+        "schema_version": _CONVERSATION_HANDLE_SCHEMA_VERSION,
+        "pattern": _CONVERSATION_HANDLE_PATTERN,
+        "handles": handles if isinstance(handles, dict) else {},
+        "conversation_ids": conversation_ids if isinstance(conversation_ids, dict) else {},
+    }
+
+
+def write_conversation_handle_index(home_dir: Path, payload: dict[str, Any]) -> None:
+    path = conversation_handles_path(home_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def ensure_conversation_handle(
+    home_dir: Path,
+    *,
+    conversation_id: str,
+    project_id: str,
+    project_path: str,
+    created_at: str,
+    preferred_handle: str | None = None,
+) -> str:
+    payload = load_conversation_handle_index(home_dir)
+    conversation_ids = payload["conversation_ids"]
+    handles = payload["handles"]
+    existing_handle = conversation_ids.get(conversation_id)
+    if isinstance(existing_handle, str):
+        existing_entry = handles.get(existing_handle)
+        if isinstance(existing_entry, dict):
+            return existing_handle
+    normalized_preferred_handle = normalize_conversation_handle(preferred_handle or "")
+    if normalized_preferred_handle and normalized_preferred_handle not in handles:
+        handles[normalized_preferred_handle] = {
+            "conversation_id": conversation_id,
+            "project_id": project_id,
+            "project_path": project_path,
+            "created_at": created_at,
+        }
+        conversation_ids[conversation_id] = normalized_preferred_handle
+        write_conversation_handle_index(home_dir, payload)
+        return normalized_preferred_handle
+    for _ in range(2048):
+        candidate = _generate_conversation_handle()
+        if candidate in handles:
+            continue
+        handles[candidate] = {
+            "conversation_id": conversation_id,
+            "project_id": project_id,
+            "project_path": project_path,
+            "created_at": created_at,
+        }
+        conversation_ids[conversation_id] = candidate
+        write_conversation_handle_index(home_dir, payload)
+        return candidate
+    raise RuntimeError("Could not allocate a unique conversation handle.")
+
+
+def find_conversation_by_handle(home_dir: Path, handle: str) -> dict[str, str] | None:
+    normalized_handle = normalize_conversation_handle(handle)
+    if not normalized_handle:
+        return None
+    payload = load_conversation_handle_index(home_dir)
+    entry = payload["handles"].get(normalized_handle)
+    if not isinstance(entry, dict):
+        return None
+    conversation_id = entry.get("conversation_id")
+    project_id = entry.get("project_id")
+    project_path = entry.get("project_path")
+    if not isinstance(conversation_id, str) or not isinstance(project_id, str) or not isinstance(project_path, str):
+        return None
+    return {
+        "conversation_id": conversation_id,
+        "project_id": project_id,
+        "project_path": project_path,
+        "conversation_handle": normalized_handle,
+    }
+
+
+def remove_conversation_handle(home_dir: Path, conversation_id: str) -> None:
+    payload = load_conversation_handle_index(home_dir)
+    conversation_ids = payload["conversation_ids"]
+    handles = payload["handles"]
+    existing_handle = conversation_ids.pop(conversation_id, None)
+    if isinstance(existing_handle, str):
+        handles.pop(existing_handle, None)
+        write_conversation_handle_index(home_dir, payload)
+
+
+def remove_project_conversation_handles(home_dir: Path, project_id: str) -> None:
+    payload = load_conversation_handle_index(home_dir)
+    handles = payload["handles"]
+    conversation_ids = payload["conversation_ids"]
+    removed = False
+    for handle, record in list(handles.items()):
+        if not isinstance(record, dict) or record.get("project_id") != project_id:
+            continue
+        conversation_id = record.get("conversation_id")
+        if isinstance(conversation_id, str):
+            conversation_ids.pop(conversation_id, None)
+        handles.pop(handle, None)
+        removed = True
+    if removed:
+        write_conversation_handle_index(home_dir, payload)
+
+
+def normalize_conversation_handle(value: str) -> str:
+    trimmed = value.strip().lower()
+    if not trimmed:
+        return ""
+    left, separator, right = trimmed.partition("-")
+    if separator != "-" or not left.isalpha() or not right.isalpha():
+        return ""
+    return f"{left}-{right}"
+
+
 def delete_project_record(home_dir: Path, project_path: str) -> DeletedProjectRecord:
     normalized_project_path = normalize_project_path(project_path)
     if not normalized_project_path:
@@ -210,6 +385,7 @@ def delete_project_record(home_dir: Path, project_path: str) -> DeletedProjectRe
         display_name=project_paths.display_name,
     )
     shutil.rmtree(project_paths.root, ignore_errors=False)
+    remove_project_conversation_handles(home_dir, project_paths.project_id)
     return deleted
 
 
@@ -348,3 +524,7 @@ def _write_project_record(path: Path, payload: dict[str, Any]) -> None:
             lines.append(f"{trigger} = {_toml_string(flow_name)}")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _generate_conversation_handle() -> str:
+    return f"{secrets.choice(_HANDLE_ADJECTIVES)}-{secrets.choice(_HANDLE_NOUNS)}"

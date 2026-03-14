@@ -203,9 +203,16 @@ export function ProjectsSidebar({
                                                                             >
                                                                                 <div className="flex items-center gap-2">
                                                                                     <FileText className={`h-3.5 w-3.5 shrink-0 ${isActiveConversation ? "text-foreground" : "text-muted-foreground"}`} />
-                                                                                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                                                                                        {conversation.title}
-                                                                                    </span>
+                                                                                    <div className="min-w-0 flex-1">
+                                                                                        <span className="block truncate text-[13px] font-medium">
+                                                                                            {conversation.title}
+                                                                                        </span>
+                                                                                        {conversation.conversation_handle ? (
+                                                                                            <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                                                                                                {conversation.conversation_handle}
+                                                                                            </span>
+                                                                                        ) : null}
+                                                                                    </div>
                                                                                     <span className="shrink-0 text-[11px] text-muted-foreground transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">
                                                                                         {ageLabel}
                                                                                     </span>

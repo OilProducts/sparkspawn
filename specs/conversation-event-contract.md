@@ -122,7 +122,7 @@ Rules:
 Raw inputs may include:
 - command execution lifecycle
 - file change lifecycle
-- dynamic tool call lifecycle
+- tool-call lifecycle for any runtime that emits explicit tool requests
 
 Normalized outputs:
 - `tool_call_started`

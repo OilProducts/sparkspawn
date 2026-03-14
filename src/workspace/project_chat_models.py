@@ -145,7 +145,6 @@ class ChatTurnLiveEvent:
     message: Optional[str] = None
     tool_call_id: Optional[str] = None
     tool_call: Optional[ToolCallRecord] = None
-    spec_proposal_payload: Optional[dict[str, Any]] = None
     app_turn_id: Optional[str] = None
     item_id: Optional[str] = None
     summary_index: Optional[int] = None
@@ -154,7 +153,6 @@ class ChatTurnLiveEvent:
 @dataclass
 class ChatTurnResult:
     assistant_message: str
-    spec_proposal_payloads: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -165,13 +163,6 @@ class PreparedChatTurn:
     model: Optional[str]
     user_turn: "ConversationTurn"
     assistant_turn: "ConversationTurn"
-
-
-@dataclass
-class DynamicToolInvocationResult:
-    tool_call: ToolCallRecord
-    response: dict[str, Any]
-    spec_proposal_payload: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -881,6 +872,7 @@ class ExecutionWorkflowLaunchSpec:
 class ConversationState:
     conversation_id: str
     project_path: str
+    conversation_handle: str = ""
     title: str = "New thread"
     created_at: str = ""
     updated_at: str = ""
@@ -895,6 +887,7 @@ class ConversationState:
     def to_dict(self) -> dict[str, Any]:
         return {
             "conversation_id": self.conversation_id,
+            "conversation_handle": self.conversation_handle,
             "project_path": self.project_path,
             "title": self.title,
             "created_at": self.created_at,
@@ -936,6 +929,7 @@ class ConversationState:
             updated_at = turns[-1].timestamp if turns else created_at
         return cls(
             conversation_id=str(payload.get("conversation_id", "")),
+            conversation_handle=str(payload.get("conversation_handle", "") or ""),
             project_path=_normalize_project_path(str(payload.get("project_path", ""))),
             title=_as_non_empty_string(payload.get("title")) or _derive_conversation_title(turns),
             created_at=created_at or _iso_now(),
@@ -971,6 +965,7 @@ class ConversationState:
 @dataclass
 class ConversationSummary:
     conversation_id: str
+    conversation_handle: str
     project_path: str
     title: str
     created_at: str
@@ -980,6 +975,7 @@ class ConversationSummary:
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "conversation_id": self.conversation_id,
+            "conversation_handle": self.conversation_handle,
             "project_path": self.project_path,
             "title": self.title,
             "created_at": self.created_at,

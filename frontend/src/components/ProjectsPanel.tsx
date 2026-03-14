@@ -324,6 +324,7 @@ const ensureConversationSnapshotShell = (
     title = "New thread",
 ): ConversationSnapshotResponse => ({
     conversation_id: conversationId,
+    conversation_handle: "",
     project_path: projectPath,
     title,
     created_at: "",
@@ -913,6 +914,7 @@ export function HomePanel() {
             ...current,
             [projectPath]: upsertConversationSummary(current[projectPath] || [], {
                 conversation_id: snapshot.conversation_id,
+                conversation_handle: snapshot.conversation_handle,
                 project_path: snapshot.project_path,
                 title: snapshot.title,
                 created_at: snapshot.created_at,
@@ -1023,6 +1025,7 @@ export function HomePanel() {
             ...current,
             [projectPath]: upsertConversationSummary(current[projectPath] || [], {
                 conversation_id: updatedSnapshot.conversation_id,
+                conversation_handle: updatedSnapshot.conversation_handle,
                 project_path: updatedSnapshot.project_path,
                 title: updatedSnapshot.title,
                 created_at: updatedSnapshot.created_at,
@@ -1517,6 +1520,7 @@ export function HomePanel() {
             projectConversationSummaries[activeProjectPath] || [],
             {
                 conversation_id: conversationId,
+                conversation_handle: "",
                 project_path: activeProjectPath,
                 title: "New thread",
                 created_at: now,
@@ -1624,15 +1628,6 @@ export function HomePanel() {
                 Object.entries(current).forEach(([conversationId, snapshot]) => {
                     if (snapshot.project_path !== projectPath) {
                         next[conversationId] = snapshot
-                    }
-                })
-                return next
-            })
-            setProjectConversationLiveEvents((current) => {
-                const next = { ...current }
-                Object.entries(projectConversationSnapshots).forEach(([conversationId, snapshot]) => {
-                    if (snapshot.project_path === projectPath) {
-                        delete next[conversationId]
                     }
                 })
                 return next

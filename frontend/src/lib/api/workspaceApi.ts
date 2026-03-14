@@ -147,6 +147,7 @@ export interface ExecutionCardResponse {
 
 export interface ConversationSnapshotResponse {
     conversation_id: string
+    conversation_handle?: string | null
     project_path: string
     title: string
     created_at: string
@@ -166,6 +167,7 @@ export interface ConversationSnapshotResponse {
 
 export interface ConversationSummaryResponse {
     conversation_id: string
+    conversation_handle?: string | null
     project_path: string
     title: string
     created_at: string
@@ -176,6 +178,7 @@ export interface ConversationSummaryResponse {
 export interface ConversationDeleteResponse {
     status: 'deleted'
     conversation_id: string
+    conversation_handle?: string | null
     project_path: string
 }
 
@@ -522,6 +525,7 @@ function parseConversationSummaryResponse(value: unknown, _endpoint: string): Co
     }
     return {
         conversation_id: record.conversation_id,
+        conversation_handle: asOptionalNullableString(record.conversation_handle),
         project_path: record.project_path,
         title: record.title,
         created_at: record.created_at,
@@ -601,6 +605,7 @@ export function parseConversationDeleteResponse(
     return {
         status: expectString(record.status, endpoint, 'status') === 'deleted' ? 'deleted' : 'deleted',
         conversation_id: expectString(record.conversation_id, endpoint, 'conversation_id'),
+        conversation_handle: asOptionalNullableString(record.conversation_handle),
         project_path: expectString(record.project_path, endpoint, 'project_path'),
     }
 }

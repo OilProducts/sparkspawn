@@ -12,7 +12,7 @@ import sparkspawn_common.codex_app_server as codex_app_server
 import workspace.project_chat as project_chat
 import workspace.project_chat_session as project_chat_session
 from workspace.prompt_templates import PROMPTS_FILE_NAME
-from workspace.storage import ensure_project_paths
+from workspace.storage import conversation_handles_path, ensure_project_paths
 
 
 def test_extract_command_text_handles_list_and_string_payloads() -> None:
@@ -45,10 +45,8 @@ def test_project_chat_service_creates_default_prompt_templates_file(tmp_path: Pa
     assert prompts_path.exists()
     prompt_text = prompts_path.read_text(encoding="utf-8")
     assert "[project_chat]" in prompt_text
-    assert "Help the user understand the project" in prompt_text
-    assert "Prefer precise edits to existing spec text over speculative new features." in prompt_text
-    assert "call the draft_spec_proposal tool to capture the minimal spec edit proposal." in prompt_text
     assert service._prompt_templates.chat
+    assert service._prompt_templates.execution_planning
 
 
 def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> None:
@@ -69,6 +67,7 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
     state = project_chat.ConversationState(
         conversation_id="conversation-test",
         project_path="/tmp/project",
+        conversation_handle="amber-otter",
         turns=[
             project_chat.ConversationTurn(
                 id="turn-user-1",
@@ -92,7 +91,8 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
         "Needs refinement",
     )
 
-    assert chat_prompt == "CHAT /tmp/project :: Latest message :: USER: Older message"
+    assert "Conversation handle: amber-otter" in chat_prompt
+    assert "CHAT /tmp/project :: Latest message :: USER: Older message" in chat_prompt
     assert '"id": "proposal-1"' in execution_prompt
     assert execution_prompt.endswith(":: Needs refinement")
 
@@ -122,38 +122,6 @@ def test_project_chat_service_rejects_prompt_templates_missing_required_keys(tmp
 
     with pytest.raises(RuntimeError, match="missing required templates"):
         project_chat.ProjectChatService(tmp_path)
-
-
-def test_extract_spec_proposal_payload_requires_summary_and_changes() -> None:
-    payload = project_chat._extract_spec_proposal_payload(
-        {
-            "summary": "Tighten the top bar.",
-            "changes": [
-                {
-                    "path": "specs/sparkspawn-frontend.md",
-                    "before": "Header includes runtime metadata.",
-                    "after": "Header includes only navigation and active project context.",
-                }
-            ],
-            "rationale": "Reduce chrome noise.",
-        }
-    )
-
-    assert payload["summary"] == "Tighten the top bar."
-    assert payload["rationale"] == "Reduce chrome noise."
-    assert payload["changes"][0]["path"] == "specs/sparkspawn-frontend.md"
-
-
-def test_dynamic_tool_spec_emphasizes_minimal_grounded_spec_edits() -> None:
-    session = project_chat.CodexAppServerChatSession("/tmp/project")
-
-    spec = session._dynamic_tool_specs()[0]
-
-    assert spec["title"] == "Draft spec edit proposal"
-    assert "smallest grounded before/after spans" in spec["description"]
-    assert "do not invent speculative new features" in spec["description"]
-    assert spec["inputSchema"]["properties"]["changes"]["description"] == "One or more minimal-span edits to existing spec text."
-    assert "Do not send the whole file" in spec["inputSchema"]["properties"]["changes"]["items"]["properties"]["before"]["description"]
 
 
 def test_extract_file_paths_deduplicates_nested_entries() -> None:
@@ -640,103 +608,6 @@ def test_chat_session_raw_rpc_logger_records_transport_lines(monkeypatch) -> Non
     ]
 
 
-def test_chat_session_handles_dynamic_tool_call(monkeypatch) -> None:
-    session = project_chat.CodexAppServerChatSession("/tmp/project")
-    lines = iter(
-        [
-            json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 99,
-                    "method": "item/tool/call",
-                    "params": {
-                        "tool": "draft_spec_proposal",
-                        "callId": "call-1",
-                        "turnId": "turn-123",
-                        "threadId": "thread-123",
-                        "arguments": {
-                            "summary": "Reduce header chrome.",
-                            "changes": [
-                                {
-                                    "path": "specs/sparkspawn-frontend.md",
-                                    "before": "Header contains extra metadata.",
-                                    "after": "Header contains only navigation and active project context.",
-                                }
-                            ],
-                        },
-                    },
-                }
-            ),
-            json.dumps(
-                {
-                    "method": "codex/event/task_complete",
-                    "params": {
-                        "msg": {
-                            "last_agent_message": "I drafted the spec proposal for review.",
-                        }
-                    },
-                }
-            ),
-            json.dumps(
-                {
-                    "method": "turn/completed",
-                    "params": {
-                        "turn": {
-                            "id": "turn-123",
-                            "status": "completed",
-                        }
-                    },
-                }
-            ),
-        ]
-    )
-    responses: list[dict[str, object]] = []
-    live_events: list[project_chat.ChatTurnLiveEvent] = []
-
-    monkeypatch.setattr(session, "_ensure_process", lambda: None)
-
-    def fake_ensure_thread(model: str | None) -> None:
-        session._thread_id = "thread-123"
-        session._thread_initialized = True
-
-    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
-    monkeypatch.setattr(
-        session,
-        "_send_request",
-        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
-    )
-    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
-    monkeypatch.setattr(session, "_send_response", lambda request_id, result=None: responses.append({"id": request_id, "result": result or {}}))
-
-    result = session.turn(
-        "hello",
-        None,
-        on_event=live_events.append,
-        on_dynamic_tool_call=lambda tool, arguments, call_id: project_chat.DynamicToolInvocationResult(
-            tool_call=project_chat.ToolCallRecord(
-                id=call_id,
-                kind="dynamic_tool",
-                status="completed",
-                title="Draft spec proposal",
-                output="Reduce header chrome.",
-            ),
-            response={
-                "success": True,
-                "contentItems": [{"type": "inputText", "text": "Drafted spec proposal."}],
-            },
-            spec_proposal_payload=project_chat._extract_spec_proposal_payload(arguments),
-        ),
-    )
-
-    assert result.assistant_message == "I drafted the spec proposal for review."
-    assert result.spec_proposal_payloads[0]["summary"] == "Reduce header chrome."
-    assert [event.kind for event in live_events] == ["tool_call_started", "tool_call_completed"]
-    assert responses[0]["result"] == {
-        "success": True,
-        "contentItems": [{"type": "inputText", "text": "Drafted spec proposal."}],
-    }
-
-
 def test_chat_session_surfaces_reasoning_summary_progress(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     lines = iter(
@@ -1137,166 +1008,128 @@ def test_send_turn_accepts_plain_text_final_response(tmp_path: Path, monkeypatch
     assert snapshot["turns"][-1]["content"] == "This looks like a Collatz implementation project."
 
 
-def test_send_turn_persists_spec_proposal_from_dynamic_tool_call(tmp_path: Path, monkeypatch) -> None:
+def test_create_spec_edit_proposal_places_artifact_on_latest_assistant_turn(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
-
-    class ToolCallingSession:
-        def turn(
-            self,
-            prompt: str,
-            model: str | None,
-            *,
-            on_event=None,
-            on_dynamic_tool_call=None,
-        ) -> project_chat.ChatTurnResult:
-            assert on_dynamic_tool_call is not None
-            tool_result = on_dynamic_tool_call(
-                "draft_spec_proposal",
-                {
-                    "summary": "Reduce top-bar chrome and keep only project context.",
-                    "changes": [
-                        {
-                            "path": "specs/sparkspawn-frontend.md#home-header",
-                            "before": "The home header surfaces execution controls and runtime metadata.",
-                            "after": "The home header shows only navigation and active project context.",
-                        }
-                    ],
-                },
-                "call-1",
-            )
-            return project_chat.ChatTurnResult(
-                assistant_message="I can tighten the top bar and relocate the overflow metadata.",
-                spec_proposal_payloads=[tool_result.spec_proposal_payload] if tool_result.spec_proposal_payload else [],
-            )
-
-        def _close(self) -> None:
-            return None
-
-    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: ToolCallingSession())
-
-    snapshot = service.send_turn(
-        "conversation-test",
-        str(tmp_path),
-        "Let's clean up the top bar.",
-        None,
+    conversation_id = "conversation-test"
+    project_path = str(tmp_path.resolve())
+    assistant_turn_older = project_chat.ConversationTurn(
+        id="turn-assistant-older",
+        role="assistant",
+        content="Older assistant reply.",
+        timestamp="2026-03-13T10:00:00Z",
+        status="complete",
+    )
+    assistant_turn_newer = project_chat.ConversationTurn(
+        id="turn-assistant-newer",
+        role="assistant",
+        content="Latest assistant reply.",
+        timestamp="2026-03-13T10:02:00Z",
+        status="complete",
+    )
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=conversation_id,
+            project_path=project_path,
+            title="Proposal placement",
+            created_at="2026-03-13T10:00:00Z",
+            updated_at="2026-03-13T10:02:00Z",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="First request",
+                    timestamp="2026-03-13T09:59:00Z",
+                ),
+                assistant_turn_older,
+                project_chat.ConversationTurn(
+                    id="turn-user-2",
+                    role="user",
+                    content="Second request",
+                    timestamp="2026-03-13T10:01:00Z",
+                ),
+                assistant_turn_newer,
+            ],
+        )
     )
 
-    assert snapshot["turns"][-1]["role"] == "assistant"
-    assert snapshot["turns"][-1]["content"] == "I can tighten the top bar and relocate the overflow metadata."
-    assert snapshot["spec_edit_proposals"][0]["summary"] == "Reduce top-bar chrome and keep only project context."
-    proposal_segment = next((segment for segment in snapshot["segments"] if segment["kind"] == "spec_edit_proposal"), None)
-    assert proposal_segment is not None
-    assert proposal_segment["artifact_id"] == snapshot["spec_edit_proposals"][0]["id"]
-    assert proposal_segment["id"].startswith("segment-artifact-")
-
-
-def test_run_prepared_turn_persists_spec_proposal_before_turn_completion(tmp_path: Path, monkeypatch) -> None:
-    service = project_chat.ProjectChatService(tmp_path)
-    prepared, _ = service._prepare_turn("conversation-test", str(tmp_path), "Use the proposal tool.", None)
-
-    def fake_execute_turn_with_retry(
-        prepared_turn: project_chat.PreparedChatTurn,
-        persist_live_event,
-        progress_callback=None,
-    ) -> project_chat.ChatTurnResult:
-        proposal_payload = {
-            "summary": "Document the proposal workflow smoke test.",
+    result = service.create_spec_edit_proposal(
+        conversation_id,
+        project_path,
+        {
+            "summary": "Clarify the approval gate.",
             "changes": [
                 {
-                    "path": "docs/spec-proposals/README.md",
-                    "before": "There is no documented proposal smoke test.",
-                    "after": "Add a note that proposal smoke tests may draft a placeholder spec proposal.",
+                    "path": "specs/sparkspawn-workspace.md#proposal-review",
+                    "before": "Planning begins immediately.",
+                    "after": "Planning begins only after approval.",
                 }
             ],
-        }
-        persist_live_event(
-            project_chat.ChatTurnLiveEvent(
-                kind="tool_call_started",
-                tool_call_id="call-1",
-                tool_call=project_chat.ToolCallRecord(
-                    id="call-1",
-                    kind="dynamic_tool",
-                    status="running",
-                    title="draft_spec_proposal",
-                ),
-            )
-        )
-        persist_live_event(
-            project_chat.ChatTurnLiveEvent(
-                kind="tool_call_completed",
-                tool_call_id="call-1",
-                tool_call=project_chat.ToolCallRecord(
-                    id="call-1",
-                    kind="dynamic_tool",
-                    status="completed",
-                    title="Draft spec proposal",
-                    output="Document the proposal workflow smoke test.",
-                ),
-                spec_proposal_payload=proposal_payload,
-            )
-        )
-        raise RuntimeError("codex app-server turn timed out waiting for activity")
-
-    monkeypatch.setattr(service, "_execute_turn_with_retry", fake_execute_turn_with_retry)
-
-    with pytest.raises(RuntimeError, match="timed out waiting for activity"):
-        service._run_prepared_turn(prepared)
-
-    snapshot = service.get_snapshot("conversation-test", str(tmp_path))
-
-    assert snapshot["spec_edit_proposals"][0]["summary"] == "Document the proposal workflow smoke test."
-    assert any(
-        segment["kind"] == "spec_edit_proposal"
-        and segment["artifact_id"] == snapshot["spec_edit_proposals"][0]["id"]
-        for segment in snapshot["segments"]
+        },
     )
 
+    assert result["turn_id"] == "turn-assistant-newer"
 
-def test_run_prepared_turn_does_not_duplicate_live_persisted_spec_proposal(tmp_path: Path, monkeypatch) -> None:
-    service = project_chat.ProjectChatService(tmp_path)
-    prepared, _ = service._prepare_turn("conversation-test", str(tmp_path), "Use the proposal tool.", None)
+    snapshot = service.get_snapshot(conversation_id, project_path)
+    proposal_segment = next(
+        segment for segment in snapshot["segments"] if segment["id"] == result["segment_id"]
+    )
+    assert proposal_segment["turn_id"] == "turn-assistant-newer"
+    assert proposal_segment["artifact_id"] == result["proposal_id"]
+    assert snapshot["spec_edit_proposals"][0]["summary"] == "Clarify the approval gate."
 
-    proposal_payload = {
-        "summary": "Reduce header chrome.",
-        "changes": [
-            {
-                "path": "specs/sparkspawn-frontend.md",
-                "before": "Header contains extra metadata.",
-                "after": "Header contains only navigation and active project context.",
-            }
+
+def test_create_spec_edit_proposal_by_handle_route_resolves_conversation(
+    api_client,
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path.resolve()
+    conversation_id = "conversation-by-handle"
+    state = project_chat.ConversationState(
+        conversation_id=conversation_id,
+        project_path=str(project_dir),
+        title="Handle placement",
+        created_at="2026-03-13T10:00:00Z",
+        updated_at="2026-03-13T10:01:00Z",
+        turns=[
+            project_chat.ConversationTurn(
+                id="turn-user-1",
+                role="user",
+                content="Please propose a spec change.",
+                timestamp="2026-03-13T10:00:00Z",
+            ),
+            project_chat.ConversationTurn(
+                id="turn-assistant-1",
+                role="assistant",
+                content="I can capture that proposal.",
+                timestamp="2026-03-13T10:01:00Z",
+                status="complete",
+            ),
         ],
-    }
+    )
+    server.PROJECT_CHAT._write_state(state)
+    snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
 
-    def fake_execute_turn_with_retry(
-        prepared_turn: project_chat.PreparedChatTurn,
-        persist_live_event,
-        progress_callback=None,
-    ) -> project_chat.ChatTurnResult:
-        persist_live_event(
-            project_chat.ChatTurnLiveEvent(
-                kind="tool_call_completed",
-                tool_call_id="call-1",
-                tool_call=project_chat.ToolCallRecord(
-                    id="call-1",
-                    kind="dynamic_tool",
-                    status="completed",
-                    title="Draft spec proposal",
-                    output="Reduce header chrome.",
-                ),
-                spec_proposal_payload=proposal_payload,
-            )
-        )
-        return project_chat.ChatTurnResult(
-            assistant_message="I drafted the spec proposal for review.",
-            spec_proposal_payloads=[proposal_payload],
-        )
+    response = api_client.post(
+        f"/workspace/api/conversations/by-handle/{snapshot['conversation_handle']}/spec-edit-proposals",
+        json={
+            "summary": "Capture the approved spec gate.",
+            "changes": [
+                {
+                    "path": "specs/sparkspawn-workspace.md#proposal-review",
+                    "before": "Planning begins immediately.",
+                    "after": "Planning begins only after the proposal is approved.",
+                }
+            ],
+            "rationale": "Keep the workflow human-approved.",
+        },
+    )
 
-    monkeypatch.setattr(service, "_execute_turn_with_retry", fake_execute_turn_with_retry)
-
-    snapshot = service._run_prepared_turn(prepared)
-
-    assert len(snapshot["spec_edit_proposals"]) == 1
-    assert len([segment for segment in snapshot["segments"] if segment["kind"] == "spec_edit_proposal"]) == 1
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["conversation_id"] == conversation_id
+    assert payload["conversation_handle"] == snapshot["conversation_handle"]
+    assert payload["turn_id"] == "turn-assistant-1"
 
 
 def test_mark_execution_workflow_started_loads_conversation_without_project_argument(tmp_path: Path) -> None:
@@ -2108,6 +1941,7 @@ def test_list_project_conversations_endpoint_returns_project_threads(api_client,
     assert response.status_code == 200
     payload = response.json()
     assert [entry["conversation_id"] for entry in payload] == ["conversation-a"]
+    assert payload[0]["conversation_handle"]
     assert payload[0]["title"] == "Design thread"
     assert payload[0]["last_message_preview"] == "Design thread preview"
 
@@ -2147,6 +1981,8 @@ def test_delete_project_conversation_endpoint_removes_thread_state(api_client, t
         "project_path": str(tmp_path.resolve()),
     }
     assert not (project_paths.conversations_dir / conversation_id).exists()
+    handle_index = json.loads(conversation_handles_path(tmp_path / ".sparkspawn").read_text(encoding="utf-8"))
+    assert conversation_id not in handle_index["conversation_ids"]
 
     list_response = api_client.get("/workspace/api/projects/conversations", params={"project_path": str(tmp_path)})
     assert list_response.status_code == 200

@@ -16,6 +16,7 @@ from workspace.project_chat_common import (
     build_codex_runtime_environment,
     iso_now as _iso_now,
     log_project_chat_debug as _log_project_chat_debug,
+    normalize_spec_edit_proposal_payload as _normalize_spec_edit_proposal_payload,
     normalize_project_path_value as _normalize_project_path,
     parse_chat_response_payload as _parse_chat_response_payload,
     resolve_runtime_workspace_path,
@@ -33,7 +34,6 @@ from workspace.project_chat_models import (
     ConversationState,
     ConversationTurn,
     ConversationTurnEvent,
-    DynamicToolInvocationResult,
     ExecutionCard,
     ExecutionCardReview,
     ExecutionCardWorkItem,
@@ -49,11 +49,14 @@ from workspace.project_chat_session import (
     APP_SERVER_REQUEST_TIMEOUT_SECONDS,
     CHAT_TURN_IDLE_TIMEOUT_SECONDS,
     CodexAppServerChatSession,
-    _extract_spec_proposal_payload,
     _tool_call_from_item,
 )
 from workspace.project_chat_storage import ProjectChatRepository
-from workspace.prompt_templates import load_prompt_templates, render_prompt_template
+from workspace.prompt_templates import (
+    load_prompt_templates,
+    render_chat_prompt,
+    render_execution_planning_prompt,
+)
 from workspace.storage import ProjectPaths
 
 
@@ -162,6 +165,10 @@ class ProjectChatService:
 
     def get_snapshot(self, conversation_id: str, project_path: Optional[str] = None) -> dict[str, Any]:
         return self._repository.get_snapshot(conversation_id, project_path)
+
+    def get_snapshot_by_handle(self, conversation_handle: str) -> dict[str, Any]:
+        conversation_id, project_path = self._repository.resolve_conversation_handle(conversation_handle)
+        return self.get_snapshot(conversation_id, project_path)
 
     def delete_conversation(self, conversation_id: str, project_path: str) -> dict[str, Any]:
         snapshot = self._repository.delete_conversation(conversation_id, project_path)
@@ -417,9 +424,10 @@ class ProjectChatService:
                 continue
             history_lines.append(f"{turn.role.upper()}: {turn.content}")
         history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
-        return render_prompt_template(
+        return render_chat_prompt(
             self._prompt_templates.chat,
             {
+                "conversation_handle": state.conversation_handle,
                 "project_path": state.project_path,
                 "recent_conversation": history_text,
                 "latest_user_message": message,
@@ -441,7 +449,7 @@ class ProjectChatService:
         history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
         review_text = review_feedback or "None."
         proposal_payload = json.dumps(proposal.to_dict(), indent=2, sort_keys=True)
-        return render_prompt_template(
+        return render_execution_planning_prompt(
             self._prompt_templates.execution_planning,
             {
                 "project_path": state.project_path,
@@ -449,31 +457,6 @@ class ProjectChatService:
                 "recent_conversation": history_text,
                 "review_feedback": review_text,
             },
-        )
-
-    def _handle_dynamic_tool_call(
-        self,
-        tool_name: str,
-        arguments: Any,
-        call_id: str,
-    ) -> DynamicToolInvocationResult:
-        if tool_name != "draft_spec_proposal":
-            raise ValueError(f"Unsupported dynamic tool: {tool_name}")
-        payload = _extract_spec_proposal_payload(arguments)
-        summary = _as_non_empty_string(payload.get("summary")) or "Draft spec edit proposal"
-        return DynamicToolInvocationResult(
-            tool_call=ToolCallRecord(
-                id=call_id,
-                kind="dynamic_tool",
-                status="completed",
-                title="Draft spec edit proposal",
-                output=summary,
-            ),
-            response={
-                "success": True,
-                "contentItems": [{"type": "inputText", "text": f"Drafted spec edit proposal: {summary}"}],
-            },
-            spec_proposal_payload=payload,
         )
 
     def _assistant_turn_has_completed_message(self, state: ConversationState, turn_id: str) -> bool:
@@ -625,7 +608,6 @@ class ProjectChatService:
                     prepared.prompt,
                     prepared.model,
                     on_event=persist_live_event,
-                    on_dynamic_tool_call=self._handle_dynamic_tool_call,
                 )
             finally:
                 clear_raw_rpc_logger(target_session)
@@ -766,17 +748,6 @@ class ProjectChatService:
                         segment=segment,
                     )
                     emitted_payloads.append(self._build_turn_event_payload(current_state, tool_event))
-                    if event.kind == "tool_call_completed" and event.spec_proposal_payload is not None:
-                        proposal_event = self._persist_spec_edit_proposal(
-                            current_state,
-                            current_assistant_turn,
-                            event.spec_proposal_payload,
-                            sequence=allocate_event_sequence(),
-                            assistant_message_fallback=current_assistant_turn.content,
-                        )
-                        if proposal_event is not None:
-                            emitted_payloads.append(self._build_turn_event_payload(current_state, proposal_event))
-                            should_publish_snapshot = True
                 else:
                     return
 
@@ -845,17 +816,6 @@ class ProjectChatService:
                     segment=segment,
                 )
                 emitted_payloads.append(self._build_turn_event_payload(state, assistant_completed_event))
-            for spec_proposal_payload in turn_result.spec_proposal_payloads:
-                proposal_event = self._persist_spec_edit_proposal(
-                    state,
-                    current_assistant_turn,
-                    spec_proposal_payload,
-                    sequence=allocate_event_sequence(),
-                    assistant_message_fallback=assistant_message,
-                )
-                if proposal_event is not None:
-                    emitted_payloads.append(self._build_turn_event_payload(state, proposal_event))
-                    should_publish_snapshot = True
             self._touch_conversation_state(state)
             self._write_state(state)
             snapshot_payload = state.to_dict() if should_publish_snapshot else None
@@ -981,6 +941,37 @@ class ProjectChatService:
 
     def reject_spec_edit(self, conversation_id: str, project_path: str, proposal_id: str) -> dict[str, Any]:
         return self._reviews.reject_spec_edit(conversation_id, project_path, proposal_id)
+
+    def create_spec_edit_proposal(
+        self,
+        conversation_id: str,
+        project_path: str,
+        payload: dict[str, Any],
+    ) -> dict[str, object]:
+        normalized_project_path = _normalize_project_path(project_path)
+        if not normalized_project_path:
+            raise ValueError("Project path is required.")
+        normalized_payload = _normalize_spec_edit_proposal_payload(
+            payload,
+            source_name="sparkspawn spec-proposal create",
+        )
+        return self._reviews.create_spec_edit_proposal(
+            conversation_id,
+            normalized_project_path,
+            normalized_payload,
+        )
+
+    def create_spec_edit_proposal_by_handle(
+        self,
+        conversation_handle: str,
+        payload: dict[str, Any],
+    ) -> dict[str, object]:
+        conversation_id, project_path = self._repository.resolve_conversation_handle(conversation_handle)
+        result = self.create_spec_edit_proposal(conversation_id, project_path, payload)
+        return {
+            **result,
+            "conversation_handle": conversation_handle,
+        }
 
     def approve_spec_edit(
         self,

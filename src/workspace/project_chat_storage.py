@@ -29,8 +29,12 @@ from workspace.project_chat_models import (
 )
 from workspace.storage import (
     ProjectPaths,
+    ensure_conversation_handle,
     ensure_project_paths,
+    find_conversation_by_handle,
+    normalize_conversation_handle,
     read_project_paths_by_id,
+    remove_conversation_handle,
     workspace_projects_root,
 )
 
@@ -68,6 +72,20 @@ class ProjectChatRepository:
             raise FileNotFoundError(conversation_id)
         raise RuntimeError(f"Conversation id is ambiguous across projects: {conversation_id}")
 
+    def resolve_conversation_handle(self, conversation_handle: str) -> tuple[str, str]:
+        normalized_handle = normalize_conversation_handle(conversation_handle)
+        if not normalized_handle:
+            raise ValueError(
+                "Conversation handle must use the adjective-noun form, for example 'amber-otter'."
+            )
+        match = find_conversation_by_handle(self._data_dir, normalized_handle)
+        if match is None:
+            raise FileNotFoundError(normalized_handle)
+        project_path = normalize_project_path_value(match["project_path"])
+        if not project_path:
+            raise FileNotFoundError(normalized_handle)
+        return match["conversation_id"], project_path
+
     def conversation_root(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         project_paths = self.project_paths_for_conversation(conversation_id, project_path)
         root = project_paths.conversations_dir / conversation_id
@@ -96,6 +114,7 @@ class ProjectChatRepository:
         return project_paths.execution_cards_dir / f"{conversation_id}.json"
 
     def touch_conversation_state(self, state: ConversationState, *, title_hint: Optional[str] = None) -> None:
+        self.ensure_state_handle(state)
         if not state.created_at:
             state.created_at = iso_now()
         if title_hint:
@@ -111,8 +130,10 @@ class ProjectChatRepository:
         state.updated_at = iso_now()
 
     def build_conversation_summary(self, state: ConversationState) -> ConversationSummary:
+        self.ensure_state_handle(state)
         return ConversationSummary(
             conversation_id=state.conversation_id,
+            conversation_handle=state.conversation_handle,
             project_path=state.project_path,
             title=as_non_empty_string(state.title) or derive_conversation_title(state.turns),
             created_at=state.created_at or iso_now(),
@@ -145,14 +166,19 @@ class ProjectChatRepository:
         state = ConversationState.from_dict(payload)
         if not state.conversation_id:
             state.conversation_id = conversation_id
+        self.ensure_state_handle(state)
+        if payload.get("conversation_handle") != state.conversation_handle:
+            self.write_state(state)
         return state
 
     def write_state(self, state: ConversationState) -> None:
         project_paths = self.project_paths(state.project_path)
+        self.ensure_state_handle(state)
         path = self.conversation_state_path(state.conversation_id, state.project_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         conversation_payload = {
             "conversation_id": state.conversation_id,
+            "conversation_handle": state.conversation_handle,
             "project_path": state.project_path,
             "title": state.title,
             "created_at": state.created_at,
@@ -273,13 +299,9 @@ class ProjectChatRepository:
         with self._lock:
             summaries: list[ConversationSummary] = []
             for state_path in project_paths.conversations_dir.glob("*/state.json"):
-                try:
-                    payload = json.loads(state_path.read_text(encoding="utf-8"))
-                except Exception:
+                state = self.read_state(state_path.parent.name, normalized_project_path)
+                if state is None:
                     continue
-                if not isinstance(payload, dict):
-                    continue
-                state = ConversationState.from_dict(payload)
                 if state.project_path != normalized_project_path:
                     continue
                 summaries.append(self.build_conversation_summary(state))
@@ -347,12 +369,32 @@ class ProjectChatRepository:
             project_paths.execution_cards_dir / f"{conversation_id}.json",
         ):
             sidecar.unlink(missing_ok=True)
+        remove_conversation_handle(self._data_dir, conversation_id)
 
         return {
             "status": "deleted",
             "conversation_id": conversation_id,
             "project_path": normalized_project_path,
         }
+
+    def ensure_state_handle(self, state: ConversationState) -> str:
+        normalized_project_path = normalize_project_path_value(state.project_path)
+        if not normalized_project_path:
+            raise ValueError("Project path is required.")
+        project_paths = self.project_paths(normalized_project_path)
+        if not state.created_at:
+            state.created_at = iso_now()
+        handle = ensure_conversation_handle(
+            self._data_dir,
+            conversation_id=state.conversation_id,
+            project_id=project_paths.project_id,
+            project_path=normalized_project_path,
+            created_at=state.created_at,
+            preferred_handle=state.conversation_handle,
+        )
+        state.project_path = normalized_project_path
+        state.conversation_handle = handle
+        return handle
 
     def append_event(self, state: ConversationState, message: str) -> None:
         state.event_log.append(WorkflowEvent(message=message, timestamp=iso_now()))
