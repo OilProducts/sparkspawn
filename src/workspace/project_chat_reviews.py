@@ -15,7 +15,6 @@ from workspace.project_chat_models import (
     ConversationSegmentSource,
     ConversationState,
     ConversationTurn,
-    ConversationTurnEvent,
     ExecutionCard,
     ExecutionCardReview,
     ExecutionCardWorkItem,
@@ -37,9 +36,8 @@ class ProjectChatReviewService:
         parent_turn: ConversationTurn,
         spec_proposal_payload: dict[str, object],
         *,
-        sequence: Optional[int] = None,
         assistant_message_fallback: str = "",
-    ) -> Optional[ConversationTurnEvent]:
+    ) -> Optional[tuple[SpecEditProposal, ConversationSegment]]:
         raw_changes = spec_proposal_payload.get("changes")
         changes = [
             SpecEditProposalChange.from_dict(change)
@@ -93,19 +91,8 @@ class ProjectChatReviewService:
             source=ConversationSegmentSource(),
         )
         self._repository.upsert_segment(state, proposal_segment)
-        proposal_event = self._repository.append_turn_event(
-            state,
-            parent_turn.id,
-            "spec_edit_proposal_created",
-            sequence=sequence,
-            artifact_id=proposal.id,
-            segment_id=proposal_segment.id,
-            segment=proposal_segment,
-            message=f"Drafted spec edit proposal {proposal.id}.",
-            timestamp=proposal.created_at,
-        )
         self._repository.append_event(state, f"Drafted spec edit proposal {proposal.id}.")
-        return proposal_event
+        return proposal, proposal_segment
 
     def create_spec_edit_proposal(
         self,
@@ -128,22 +115,23 @@ class ProjectChatReviewService:
             )
             if parent_turn is None:
                 raise ValueError("Conversation has no assistant turn that can own a spec proposal.")
-            proposal_event = self.persist_spec_edit_proposal(
+            persisted = self.persist_spec_edit_proposal(
                 state,
                 parent_turn,
                 spec_proposal_payload,
                 assistant_message_fallback=parent_turn.content,
             )
-            if proposal_event is None or proposal_event.artifact_id is None or proposal_event.segment_id is None:
+            if persisted is None:
                 raise ValueError("Spec proposal was not created because an identical proposal already exists on the latest assistant turn.")
+            proposal, proposal_segment = persisted
             self._repository.touch_conversation_state(state)
             self._repository.write_state(state)
             return {
                 "conversation_id": conversation_id,
                 "project_path": normalized_project_path,
                 "turn_id": parent_turn.id,
-                "proposal_id": proposal_event.artifact_id,
-                "segment_id": proposal_event.segment_id,
+                "proposal_id": proposal.id,
+                "segment_id": proposal_segment.id,
             }
 
     def reject_spec_edit(self, conversation_id: str, project_path: str, proposal_id: str) -> dict[str, object]:

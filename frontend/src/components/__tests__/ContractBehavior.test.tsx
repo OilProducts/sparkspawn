@@ -60,6 +60,11 @@ const jsonResponse = (payload: unknown, init?: ResponseInit) =>
     ...init,
   })
 
+const conversationSnapshot = <T extends Record<string, unknown>>(payload: T) => ({
+  schema_version: 4,
+  ...payload,
+})
+
 const requestUrl = (input: RequestInfo | URL): string => {
   if (typeof input === 'string') {
     return input
@@ -470,7 +475,7 @@ describe('Frontend contract behavior', () => {
     expect(() => parsePipelineStatusResponse({ status: 'running' })).toThrow(ApiSchemaError)
     expect(parseRuntimeStatusResponse({ status: 'idle' }).status).toBe('idle')
     expect(() => parseRuntimeStatusResponse({})).toThrow(ApiSchemaError)
-    expect(parseConversationSnapshotResponse({
+    expect(parseConversationSnapshotResponse(conversationSnapshot({
       conversation_id: 'conversation-1',
       project_path: '/tmp/project',
       turns: [
@@ -493,7 +498,7 @@ describe('Frontend contract behavior', () => {
       execution_workflow: {
         status: 'idle',
       },
-    }).conversation_id).toBe('conversation-1')
+    })).conversation_id).toBe('conversation-1')
     expect(() => parseConversationSnapshotResponse({ conversation_id: 'conversation-1' })).toThrow(ApiSchemaError)
     expect(parseProjectDirectoryPickResponse({ status: 'selected', directory_path: '/tmp/project' })).toEqual({
       status: 'selected',
@@ -554,7 +559,7 @@ describe('Frontend contract behavior', () => {
         name: 'conversation snapshot',
         invoke: () => fetchConversationSnapshotValidated('conversation 1', '/tmp/project one'),
         expectedUrl: '/workspace/api/conversations/conversation%201?project_path=%2Ftmp%2Fproject%20one',
-        response: jsonResponse({
+        response: jsonResponse(conversationSnapshot({
           conversation_id: 'conversation 1',
           project_path: '/tmp/project one',
           turns: [],
@@ -562,7 +567,7 @@ describe('Frontend contract behavior', () => {
           spec_edit_proposals: [],
           execution_cards: [],
           execution_workflow: { status: 'idle' },
-        }),
+        })),
         assertResult: (result) =>
           expect(result).toMatchObject({
             conversation_id: 'conversation 1',
@@ -578,7 +583,7 @@ describe('Frontend contract behavior', () => {
         }),
         expectedUrl: '/workspace/api/conversations/conversation%201/turns',
         expectedMethod: 'POST',
-        response: jsonResponse({
+        response: jsonResponse(conversationSnapshot({
           conversation_id: 'conversation 1',
           project_path: '/tmp/project one',
           turns: [],
@@ -586,7 +591,7 @@ describe('Frontend contract behavior', () => {
           spec_edit_proposals: [],
           execution_cards: [],
           execution_workflow: { status: 'idle' },
-        }),
+        })),
         assertResult: (result) => expect(result).toMatchObject({ conversation_id: 'conversation 1' }),
         assertBody: (init) => {
           expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
@@ -622,7 +627,7 @@ describe('Frontend contract behavior', () => {
         }),
         expectedUrl: '/workspace/api/conversations/conversation%201/spec-edit-proposals/proposal%201/approve',
         expectedMethod: 'POST',
-        response: jsonResponse({
+        response: jsonResponse(conversationSnapshot({
           conversation_id: 'conversation 1',
           project_path: '/tmp/project one',
           turns: [],
@@ -630,7 +635,7 @@ describe('Frontend contract behavior', () => {
           spec_edit_proposals: [],
           execution_cards: [],
           execution_workflow: { status: 'running', run_id: 'workflow-1', flow_source: 'contract-behavior.dot' },
-        }),
+        })),
         assertResult: (result) => expect(result).toMatchObject({ conversation_id: 'conversation 1' }),
         assertBody: (init) => {
           expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
@@ -648,7 +653,7 @@ describe('Frontend contract behavior', () => {
         }),
         expectedUrl: '/workspace/api/conversations/conversation%201/spec-edit-proposals/proposal%201/reject',
         expectedMethod: 'POST',
-        response: jsonResponse({
+        response: jsonResponse(conversationSnapshot({
           conversation_id: 'conversation 1',
           project_path: '/tmp/project one',
           turns: [],
@@ -656,7 +661,7 @@ describe('Frontend contract behavior', () => {
           spec_edit_proposals: [],
           execution_cards: [],
           execution_workflow: { status: 'idle' },
-        }),
+        })),
         assertResult: (result) => expect(result).toMatchObject({ conversation_id: 'conversation 1' }),
         assertBody: (init) => {
           expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
@@ -676,7 +681,7 @@ describe('Frontend contract behavior', () => {
         }),
         expectedUrl: '/workspace/api/conversations/conversation%201/execution-cards/execution%201/review',
         expectedMethod: 'POST',
-        response: jsonResponse({
+        response: jsonResponse(conversationSnapshot({
           conversation_id: 'conversation 1',
           project_path: '/tmp/project one',
           turns: [],
@@ -684,7 +689,7 @@ describe('Frontend contract behavior', () => {
           spec_edit_proposals: [],
           execution_cards: [],
           execution_workflow: { status: 'running', run_id: 'workflow-2', flow_source: 'contract-behavior.dot' },
-        }),
+        })),
         assertResult: (result) => expect(result).toMatchObject({ conversation_id: 'conversation 1' }),
         assertBody: (init) => {
           expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
@@ -1266,7 +1271,7 @@ describe('Frontend contract behavior', () => {
           execution_cards: [],
           execution_workflow: { status: 'idle' },
         }
-        return jsonResponse(snapshot)
+        return jsonResponse(conversationSnapshot(snapshot))
       }
       if (conversationId && endpoint.pathname.endsWith('/turns') && init?.method === 'POST') {
         const snapshot = {
@@ -1347,7 +1352,7 @@ describe('Frontend contract behavior', () => {
           execution_workflow: { status: 'idle' },
         }
         conversationSnapshots[conversationId] = snapshot
-        return jsonResponse(snapshot)
+        return jsonResponse(conversationSnapshot(snapshot))
       }
       if (conversationId && endpoint.pathname.endsWith('/approve') && init?.method === 'POST') {
         const snapshot = {
@@ -1393,7 +1398,7 @@ describe('Frontend contract behavior', () => {
           },
         }
         conversationSnapshots[conversationId] = snapshot
-        return jsonResponse(snapshot)
+        return jsonResponse(conversationSnapshot(snapshot))
       }
       return jsonResponse({})
     })
@@ -1435,7 +1440,7 @@ describe('Frontend contract behavior', () => {
     const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.conversationId
     expect(conversationId).toBeTruthy()
 
-    const failureSnapshot = {
+    const failureSnapshot = conversationSnapshot({
       ...(conversationSnapshots[conversationId!] as Record<string, unknown>),
       event_log: [
         ...(conversationSnapshots[conversationId!]?.event_log as Record<string, unknown>[]),
@@ -1450,7 +1455,7 @@ describe('Frontend contract behavior', () => {
         error: 'plan status endpoint unavailable.',
         flow_source: 'contract-behavior.dot',
       },
-    }
+    })
     conversationSnapshots[conversationId!] = failureSnapshot
     act(() => {
       MockConversationEventSource.instances
@@ -1477,7 +1482,7 @@ describe('Frontend contract behavior', () => {
   it('[CID:12.4.04] integrates execution-card review contract with required revision feedback', async () => {
     const reviewBodies: Array<Record<string, unknown>> = []
     const conversationId = 'conversation-contract-review'
-    const reviewSnapshot = {
+    const reviewSnapshot = conversationSnapshot({
       conversation_id: conversationId,
       project_path: '/tmp/project-contract-behavior',
       turns: [
@@ -1552,7 +1557,7 @@ describe('Frontend contract behavior', () => {
         error: null,
         flow_source: 'contract-behavior.dot',
       },
-    }
+    })
 
     vi.stubGlobal(
       'fetch',
@@ -1572,7 +1577,7 @@ describe('Frontend contract behavior', () => {
         if (url.includes('/execution-cards/') && url.endsWith('/review') && init?.method === 'POST') {
           const body = JSON.parse(String(init.body)) as Record<string, unknown>
           reviewBodies.push(body)
-          return jsonResponse({
+          return jsonResponse(conversationSnapshot({
             ...reviewSnapshot,
             turns: [
               ...reviewSnapshot.turns,
@@ -1612,7 +1617,7 @@ describe('Frontend contract behavior', () => {
                 timestamp: '2026-03-06T15:03:00Z',
               },
             ],
-          })
+          }))
         }
         return jsonResponse({})
       }),
@@ -2022,7 +2027,9 @@ describe('Frontend contract behavior', () => {
       })
       expect(screen.getByTestId('run-event-timeline-panel')).toHaveAttribute('data-responsive-layout', 'stacked')
     } finally {
-      setViewportWidth(originalViewportWidth)
+      act(() => {
+        setViewportWidth(originalViewportWidth)
+      })
     }
   })
 

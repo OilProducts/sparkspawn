@@ -71,6 +71,13 @@ const TERMINAL_RUNTIME_STATUSES = new Set<RuntimeStatus>([
     'aborted',
 ])
 
+const logUnexpectedExecutionError = (error: unknown) => {
+    if (error instanceof ApiHttpError) {
+        return
+    }
+    console.error(error)
+}
+
 export function ExecutionControls() {
     const viewMode = useStore((state) => state.viewMode)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
@@ -200,7 +207,7 @@ export function ExecutionControls() {
 
             setLastBuildWorkflowFailure(null)
         } catch (error) {
-            console.error(error)
+            logUnexpectedExecutionError(error)
             const errorMessage = error instanceof ApiHttpError && error.detail
                 ? error.detail
                 : error instanceof Error
@@ -227,7 +234,7 @@ export function ExecutionControls() {
         try {
             await fetchPipelineCancelValidated(selectedRunId)
         } catch (error) {
-            console.error(error)
+            logUnexpectedExecutionError(error)
             setRuntimeStatus('running')
             window.alert('Failed to request cancel. Check backend logs for details.')
         }

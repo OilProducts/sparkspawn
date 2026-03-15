@@ -44,6 +44,7 @@ const createConversationSnapshot = (
   projectPath: string,
   overrides?: Partial<ConversationSnapshotResponse>,
 ): ConversationSnapshotResponse => ({
+  schema_version: 4,
   conversation_id: conversationId,
   project_path: projectPath,
   title: overrides?.title ?? 'New thread',

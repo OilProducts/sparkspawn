@@ -25,6 +25,17 @@ from workspace.project_chat_models import (
 
 CHAT_TURN_IDLE_TIMEOUT_SECONDS = codex_app_server.APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS
 APP_SERVER_REQUEST_TIMEOUT_SECONDS = 15.0
+LEGACY_OPT_OUT_NOTIFICATION_METHODS = [
+    "codex/event/agent_message",
+    "codex/event/agent_message_delta",
+    "codex/event/agent_message_content_delta",
+    "codex/event/agent_reasoning_delta",
+    "codex/event/reasoning_content_delta",
+    "codex/event/item_started",
+    "codex/event/item_completed",
+    "codex/event/task_complete",
+    "codex/event/token_count",
+]
 
 
 def _normalize_tool_call_status(value: Any) -> str:
@@ -172,12 +183,16 @@ class CodexAppServerChatSession:
             "initialize",
             {
                 "clientInfo": {"name": "sparkspawn", "version": "0.1"},
-                "capabilities": {"experimentalApi": True},
+                "capabilities": {
+                    "experimentalApi": True,
+                    "optOutNotificationMethods": LEGACY_OPT_OUT_NOTIFICATION_METHODS,
+                },
             },
         )
         if init_response.get("error"):
             self._close()
             raise RuntimeError("codex app-server initialize failed")
+        self._send_json({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 
     def _send_json(self, payload: dict[str, Any]) -> None:
         if self._proc is None or self._proc.stdin is None:
@@ -425,6 +440,7 @@ class CodexAppServerChatSession:
                                 content_delta=normalized_event.text,
                                 app_turn_id=current_app_turn_id,
                                 item_id=normalized_event.item_id,
+                                phase=normalized_event.phase,
                             ),
                         )
                         continue
@@ -441,17 +457,17 @@ class CodexAppServerChatSession:
                         )
                         continue
                     if normalized_event.kind == "assistant_message_completed" and normalized_event.text:
-                        if codex_app_server.is_final_answer_phase(normalized_event.phase):
-                            self._emit_live_event(
-                                on_event,
-                                ChatTurnLiveEvent(
-                                    kind="assistant_completed",
-                                    content_delta=normalized_event.text,
-                                    message="Assistant message completed.",
-                                    app_turn_id=current_app_turn_id,
-                                    item_id=normalized_event.item_id,
-                                ),
-                            )
+                        self._emit_live_event(
+                            on_event,
+                            ChatTurnLiveEvent(
+                                kind="assistant_completed",
+                                content_delta=normalized_event.text,
+                                message="Assistant message completed.",
+                                app_turn_id=current_app_turn_id,
+                                item_id=normalized_event.item_id,
+                                phase=normalized_event.phase,
+                            ),
+                        )
                         continue
                     if normalized_event.kind == "tool_item_started" and isinstance(normalized_event.item, dict):
                         tool_call = _tool_call_from_item(normalized_event.item)

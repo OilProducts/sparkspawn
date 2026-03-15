@@ -3,9 +3,9 @@ import { type ChangeEvent, type FormEvent, type KeyboardEvent, type PointerEvent
 import {
     ApiHttpError,
     type ConversationSegmentResponse,
+    type ConversationSegmentUpsertEventResponse,
     type ConversationSummaryResponse,
     type ConversationSnapshotResponse,
-    type ConversationTurnEventStreamResponse,
     type ConversationTurnUpsertEventResponse,
     type ConversationTurnResponse,
     deleteConversationValidated,
@@ -318,11 +318,24 @@ type OptimisticSendState = {
     createdAt: string
 }
 
+const hasAcknowledgedAssistantTurn = (
+    snapshot: ConversationSnapshotResponse,
+    optimisticSend: OptimisticSendState | null,
+) => {
+    if (!optimisticSend || snapshot.conversation_id !== optimisticSend.conversationId) {
+        return false
+    }
+    return snapshot.turns.some((turn) => (
+        turn.role === "assistant" && turn.timestamp >= optimisticSend.createdAt
+    ))
+}
+
 const ensureConversationSnapshotShell = (
     conversationId: string,
     projectPath: string,
     title = "New thread",
 ): ConversationSnapshotResponse => ({
+    schema_version: 4,
     conversation_id: conversationId,
     conversation_handle: "",
     project_path: projectPath,
@@ -704,7 +717,7 @@ export function HomePanel() {
     const homeSidebarResizeRef = useRef<{ startY: number; startHeight: number } | null>(null)
     const conversationBodyRef = useRef<HTMLDivElement | null>(null)
     const applyConversationSnapshotRef = useRef<((projectPath: string, snapshot: ConversationSnapshotResponse, source?: string) => void) | null>(null)
-    const applyConversationStreamEventRef = useRef<((projectPath: string, event: ConversationTurnUpsertEventResponse | ConversationTurnEventStreamResponse, source?: string) => void) | null>(null)
+    const applyConversationStreamEventRef = useRef<((projectPath: string, event: ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse, source?: string) => void) | null>(null)
 
     const isNarrowViewport = useNarrowViewport()
     const activeProjectScope = activeProjectPath ? projectScopedWorkspaces[activeProjectPath] : null
@@ -740,15 +753,15 @@ export function HomePanel() {
         || entry.role === "user"
         || entry.role === "assistant"
     ))
-    const hasAssistantConversationActivity = activeConversationHistory.some((entry) => (
-        entry.kind === "message"
-        && entry.role === "assistant"
+    const hasActiveAssistantTurn = (activeConversationSnapshot?.turns || []).some((turn) => (
+        turn.role === "assistant" && (turn.status === "pending" || turn.status === "streaming")
     ))
-    const chatSendButtonLabel = !isSendingChat
-        ? "Send"
-        : hasAssistantConversationActivity
-            ? "Thinking..."
-            : "Sending..."
+    const isChatInputDisabled = isSendingChat || hasActiveAssistantTurn
+    const chatSendButtonLabel = hasActiveAssistantTurn
+        ? "Thinking..."
+        : isSendingChat
+            ? "Sending..."
+            : "Send"
 
     const orderedProjects = (() => {
         const seenProjectPaths = new Set<string>()
@@ -905,6 +918,10 @@ export function HomePanel() {
             turnCount: snapshot.turns.length,
             turns: summarizeConversationTurnsForDebug(snapshot.turns),
         })
+        if (hasAcknowledgedAssistantTurn(snapshot, optimisticSend)) {
+            setIsSendingChat(false)
+            setOptimisticSend(null)
+        }
 
         setProjectConversationSnapshots((current) => ({
             ...current,
@@ -978,7 +995,7 @@ export function HomePanel() {
 
     const applyConversationStreamEvent = (
         projectPath: string,
-        event: ConversationTurnUpsertEventResponse | ConversationTurnEventStreamResponse,
+        event: ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse,
         source = "unknown",
     ) => {
         debugProjectChat("apply conversation stream event", {
@@ -1008,8 +1025,8 @@ export function HomePanel() {
                     updated_at: event.updated_at,
                 }
             }
-            if (event.type === "turn_event" && event.event.segment) {
-                mergedSnapshot = upsertConversationSegment(mergedSnapshot, event.event.segment)
+            if (event.type === "segment_upsert") {
+                mergedSnapshot = upsertConversationSegment(mergedSnapshot, event.segment)
             }
             nextSnapshot = mergedSnapshot
             return {
@@ -1020,6 +1037,10 @@ export function HomePanel() {
         const updatedSnapshot = nextSnapshot as ConversationSnapshotResponse | null
         if (updatedSnapshot === null) {
             return
+        }
+        if (hasAcknowledgedAssistantTurn(updatedSnapshot, optimisticSend)) {
+            setIsSendingChat(false)
+            setOptimisticSend(null)
         }
         setProjectConversationSummaries((current) => ({
             ...current,
@@ -1662,6 +1683,9 @@ export function HomePanel() {
         if (!activeProjectPath) {
             return
         }
+        if (isChatInputDisabled) {
+            return
+        }
         const trimmed = chatDraft.trim()
         if (!trimmed) {
             return
@@ -1901,7 +1925,7 @@ export function HomePanel() {
                         isNarrowViewport={isNarrowViewport}
                         chatDraft={chatDraft}
                         chatSendButtonLabel={chatSendButtonLabel}
-                        isSendingChat={isSendingChat}
+                        isChatInputDisabled={isChatInputDisabled}
                         panelError={panelError}
                         conversationBodyRef={conversationBodyRef}
                         historyContent={conversationHistoryContent}

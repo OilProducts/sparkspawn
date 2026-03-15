@@ -126,33 +126,32 @@ The canonical top-level shape is:
 
 ```json
 {
-  "schema_version": 3,
-  "conversation": {},
+  "schema_version": 4,
+  "conversation_id": "conversation-...",
+  "conversation_handle": "amber-otter",
+  "project_path": "/abs/project/path",
+  "title": "New thread",
+  "created_at": "2026-03-13T13:42:05Z",
+  "updated_at": "2026-03-13T13:43:53Z",
   "turns": [],
   "segments": [],
-  "artifacts": {
-    "spec_edit_proposals": [],
-    "execution_cards": []
-  },
-  "workflow": {},
-  "provenance": {},
-  "event_log": []
+  "event_log": [],
+  "spec_edit_proposals": [],
+  "execution_cards": [],
+  "execution_workflow": {}
 }
 ```
 
-### 5.1 `conversation`
-
-Contains durable metadata for the thread itself.
-
-Required fields:
-- `id`
-- `handle`
+Required top-level metadata fields:
+- `schema_version`
+- `conversation_id`
+- `conversation_handle`
 - `project_path`
 - `title`
 - `created_at`
 - `updated_at`
 
-### 5.2 `turns`
+### 5.1 `turns`
 
 Turns are durable conversational containers.
 
@@ -163,7 +162,7 @@ Turns answer questions like:
 
 Turns are not the primary render unit for detailed streaming reconstruction.
 
-### 5.3 `segments`
+### 5.2 `segments`
 
 Segments are the primary render unit.
 
@@ -176,7 +175,7 @@ Examples:
 - one system separator
 - one inline artifact anchor
 
-### 5.4 `artifacts`
+### 5.3 `spec_edit_proposals` and `execution_cards`
 
 Artifacts are durable workspace objects.
 
@@ -186,20 +185,11 @@ Initial artifact collections:
 - `spec_edit_proposals`
 - `execution_cards`
 
-### 5.5 `workflow`
+### 5.4 `execution_workflow`
 
 Stores workspace-level workflow status relevant to the conversation, not the full Attractor run model.
 
-### 5.6 `provenance`
-
-Stores explicit durable links among:
-- turns
-- segments
-- artifacts
-- Attractor flows
-- Attractor runs
-
-### 5.7 `event_log`
+### 5.5 `event_log`
 
 Stores coarse durable workflow/conversation events that matter at the workspace level.
 
@@ -245,6 +235,16 @@ Example:
 }
 ```
 
+## 6.1 Unsupported Historical Shapes
+
+Historical `state.json` payloads without:
+- `schema_version: 4`
+- `segments`
+
+are unsupported.
+
+Spark Spawn does not reconstruct the current timeline from historical `turn_events` payloads anymore. Old local conversations may be deleted instead of migrated.
+
 Turn identity remains the durable grouping for user intent and assistant response, but the detailed visual structure lives in segments.
 
 ---
@@ -260,7 +260,8 @@ Each segment represents exactly one renderable timeline block.
 That means:
 - multiple reasoning sections in one assistant turn become multiple reasoning segments
 - a tool call remains one stable segment as it updates
-- an assistant message remains one stable segment as its text grows
+- one assistant message item remains one stable segment as its text grows
+- one assistant turn may contain multiple assistant message segments, including multiple `commentary` items and one `final_answer`
 - inline artifacts are attached to the segment that produced them or represented by a dedicated artifact segment
 
 ### 7.2 Required Segment Fields
@@ -279,6 +280,7 @@ Each segment MUST include:
 Optional:
 - `completed_at`
 - `artifact_id`
+- `phase`
 - `metadata`
 
 Example:
@@ -360,6 +362,19 @@ An assistant message segment MUST be keyed from:
 
 This distinguishes separate message items in one turn.
 
+Assistant message segments MUST also persist a `phase` field when known.
+
+Initial canonical assistant phases:
+- `commentary`
+- `final_answer`
+- `unknown`
+
+The phase does not affect segment identity. It affects presentation and durable meaning.
+
+Examples:
+- multiple deltas for one `commentary` item update the same assistant segment
+- a later `final_answer` item creates a second assistant segment rather than replacing the commentary segment
+
 ### 8.3 Tool-Call Segments
 
 For command/file items:
@@ -400,7 +415,7 @@ Once a segment has enough identity and content to be meaningful, `state.json` SH
 
 Examples:
 - reasoning summary deltas collapse into one `reasoning` segment text field
-- assistant text deltas collapse into one `assistant_message` segment text field
+- assistant text deltas collapse into one `assistant_message` segment text field per assistant message item
 - tool output deltas collapse into the current tool-call output field
 
 This is intentional.

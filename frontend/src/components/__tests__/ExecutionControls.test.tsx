@@ -249,7 +249,7 @@ describe('Execution controls behavior', () => {
     await waitFor(() => {
       expect(useStore.getState().runtimeStatus).toBe('running')
     })
-    expect(consoleErrorSpy).toHaveBeenCalled()
+    expect(consoleErrorSpy).not.toHaveBeenCalled()
     expect(alertSpy).toHaveBeenCalledWith('Failed to request cancel. Check backend logs for details.')
   })
 

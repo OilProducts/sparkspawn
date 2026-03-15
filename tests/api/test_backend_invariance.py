@@ -370,7 +370,7 @@ def test_local_codex_app_server_backend_does_not_cache_empty_thread_key(tmp_path
     assert created == ["thread-1", "thread-2"]
 
 
-def test_local_codex_app_server_backend_accepts_task_complete_without_turn_completed_after_idle(
+def test_local_codex_app_server_backend_accepts_item_completed_without_turn_completed_after_idle(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -427,7 +427,7 @@ def test_local_codex_app_server_backend_accepts_task_complete_without_turn_compl
         '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-123"}}}',
         '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-123","status":"inProgress","items":[]}}}',
         '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Ack"}}',
-        '{"jsonrpc":"2.0","method":"codex/event/task_complete","params":{"msg":{"last_agent_message":"Ack"}}}',
+        '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"Ack"}],"phase":"final_answer"}}}',
     ]
     monotonic_values = iter([0.0, 0.1, 0.2, 0.3, 0.4, 1.6])
 

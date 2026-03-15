@@ -142,18 +142,16 @@ class CodexAppServerTurnState:
     turn_status: Optional[str] = None
     turn_error: Optional[str] = None
     last_error: Optional[str] = None
-    saw_task_complete: bool = False
     saw_final_answer_completion: bool = False
-    saw_item_agent_message_delta: bool = False
-    saw_item_reasoning_delta: bool = False
     reasoning_summary_buffer: str = ""
+    agent_message_phases: dict[str, str] = field(default_factory=dict)
 
     def has_terminal_message(self) -> bool:
         response_text = self.final_agent_message if self.final_agent_message is not None else "".join(self.agent_chunks)
         return bool(response_text.strip())
 
     def can_finalize_without_turn_completed(self) -> bool:
-        return (self.saw_task_complete or self.saw_final_answer_completion) and self.has_terminal_message()
+        return self.saw_final_answer_completion and self.has_terminal_message()
 
     def resolved_agent_text(self) -> str:
         response_text = self.final_agent_message if self.final_agent_message is not None else "".join(self.agent_chunks)
@@ -170,24 +168,37 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
     params = message.get("params") or {}
     events: list[CodexAppServerTurnEvent] = []
 
+    def remember_agent_message_phase(item: dict[str, Any]) -> Optional[str]:
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type not in {"agentmessage", "agent_message"}:
+            return None
+        item_id = as_non_empty_string(item.get("id"))
+        phase = extract_agent_message_phase(item)
+        if item_id and phase:
+            state.agent_message_phases[item_id] = phase
+        return phase
+
     if method == "item/started":
         item = params.get("item")
-        if isinstance(item, dict) and is_tool_item(item):
-            events.append(
-                CodexAppServerTurnEvent(
-                    kind="tool_item_started",
-                    item=item,
-                    item_id=as_non_empty_string(item.get("id")),
+        if isinstance(item, dict):
+            remember_agent_message_phase(item)
+            if is_tool_item(item):
+                events.append(
+                    CodexAppServerTurnEvent(
+                        kind="tool_item_started",
+                        item=item,
+                        item_id=as_non_empty_string(item.get("id")),
+                    )
                 )
-            )
         return events
 
     if method == "item/completed":
         item = params.get("item")
         if isinstance(item, dict):
+            item_id = as_non_empty_string(item.get("id"))
             agent_message_text = extract_agent_message_text_from_item(item)
             if agent_message_text:
-                phase = extract_agent_message_phase(item)
+                phase = remember_agent_message_phase(item) or extract_agent_message_phase(item)
                 state.final_agent_message = agent_message_text
                 if is_final_answer_phase(phase):
                     state.saw_final_answer_completion = True
@@ -196,6 +207,7 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
                         kind="assistant_message_completed",
                         text=agent_message_text,
                         item=item,
+                        item_id=item_id,
                         phase=phase,
                     )
                 )
@@ -213,23 +225,31 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
     if method == "item/agentMessage/delta":
         delta = params.get("delta") or ""
         if delta:
-            state.saw_item_agent_message_delta = True
             state.agent_chunks.append(str(delta))
-            events.append(CodexAppServerTurnEvent(kind="assistant_delta", text=str(delta)))
+            item_id = as_non_empty_string(params.get("itemId"))
+            events.append(
+                CodexAppServerTurnEvent(
+                    kind="assistant_delta",
+                    text=str(delta),
+                    item_id=item_id,
+                    phase=state.agent_message_phases.get(item_id or ""),
+                )
+            )
         return events
 
     if method == "item/reasoning/summaryTextDelta":
         delta = params.get("delta") or ""
-        state.saw_item_reasoning_delta = True
         if delta:
-            state.reasoning_summary_buffer = f"{state.reasoning_summary_buffer}{delta}"
             summary_index = params.get("summaryIndex")
+            item_id = as_non_empty_string(params.get("itemId"))
+            normalized_summary_index = int(summary_index) if isinstance(summary_index, int) else None
+            state.reasoning_summary_buffer = f"{state.reasoning_summary_buffer}{delta}"
             events.append(
                 CodexAppServerTurnEvent(
                     kind="reasoning_delta",
                     text=str(delta),
-                    item_id=as_non_empty_string(params.get("itemId")),
-                    summary_index=int(summary_index) if isinstance(summary_index, int) else None,
+                    item_id=item_id,
+                    summary_index=normalized_summary_index,
                 )
             )
         return events
@@ -269,42 +289,8 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
                 )
         return events
 
-    if method == "codex/event/agent_message_delta":
-        if state.saw_item_agent_message_delta:
-            return events
-        delta = (params.get("msg") or {}).get("delta") or ""
-        if delta:
-            state.agent_chunks.append(str(delta))
-            events.append(CodexAppServerTurnEvent(kind="assistant_delta", text=str(delta)))
-        return events
-
-    if method == "codex/event/agent_message":
-        msg = (params.get("msg") or {}).get("message")
-        if msg:
-            state.final_agent_message = str(msg)
-        return events
-
-    if method == "codex/event/item_completed":
-        msg = params.get("msg") or {}
-        item = msg.get("item")
-        if isinstance(item, dict):
-            agent_message_text = extract_agent_message_text_from_item(item)
-            if agent_message_text:
-                phase = extract_agent_message_phase(item)
-                state.final_agent_message = agent_message_text
-                if is_final_answer_phase(phase):
-                    state.saw_final_answer_completion = True
-                events.append(
-                    CodexAppServerTurnEvent(
-                        kind="assistant_message_completed",
-                        text=agent_message_text,
-                        item=item,
-                        phase=phase,
-                    )
-                )
-        return events
-
     if method == "item/commandExecution/outputDelta":
+        events.extend(drain_pending_reasoning_fallback())
         delta = as_non_empty_string(params.get("delta"))
         if delta:
             state.command_chunks.append(delta)
@@ -320,13 +306,6 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
     if method == "thread/tokenUsage/updated":
         token_usage = params.get("tokenUsage") or {}
         total_tokens = (token_usage.get("total") or {}).get("totalTokens")
-        if isinstance(total_tokens, int):
-            state.last_token_total = total_tokens
-        return events
-
-    if method == "codex/event/token_count":
-        info = (params.get("msg") or {}).get("info") or {}
-        total_tokens = (info.get("total_token_usage") or {}).get("total_tokens")
         if isinstance(total_tokens, int):
             state.last_token_total = total_tokens
         return events
@@ -354,33 +333,6 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
             )
         )
         return events
-
-    if method == "codex/event/task_complete":
-        msg = params.get("msg") or {}
-        last_agent_message = as_non_empty_string(msg.get("last_agent_message"))
-        state.saw_task_complete = True
-        if last_agent_message:
-            state.final_agent_message = last_agent_message
-        events.append(CodexAppServerTurnEvent(kind="task_completed", text=last_agent_message))
-        return events
-
-    if method in {"codex/event/reasoning_content_delta", "codex/event/agent_reasoning_delta"}:
-        if state.saw_item_reasoning_delta:
-            return events
-        msg = params.get("msg") or {}
-        delta = as_non_empty_string(msg.get("delta"))
-        if delta:
-            summary_index = msg.get("summary_index")
-            events.append(
-                CodexAppServerTurnEvent(
-                    kind="reasoning_delta",
-                    text=delta,
-                    item_id=as_non_empty_string(msg.get("item_id")),
-                    summary_index=int(summary_index) if isinstance(summary_index, int) else None,
-                )
-            )
-        return events
-
     return events
 
 

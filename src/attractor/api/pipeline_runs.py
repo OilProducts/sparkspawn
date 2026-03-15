@@ -4,7 +4,7 @@ import json
 import mimetypes
 import subprocess
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -200,7 +200,7 @@ def record_run_start(
         result=None,
         working_directory=working_directory,
         model=model,
-        started_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        started_at=datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         project_path=project_path,
         git_branch=git_branch,
         git_commit=git_commit,
@@ -323,7 +323,7 @@ def record_run_end(
             )
         record.status = normalized_status
         record.result = normalized_status
-        record.ended_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        record.ended_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         record.last_error = last_error
         record.token_usage = extract_token_usage(run_root(get_settings, run_id), run_id)
         write_run_meta(get_settings, record)
@@ -353,7 +353,7 @@ def append_run_log(get_settings: Callable[[], Settings], run_id: str, message: s
     log_path = run_root(get_settings, run_id) / "run.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(f"[{timestamp} UTC] {message}\n")
     except Exception:

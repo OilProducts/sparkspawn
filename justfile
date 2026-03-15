@@ -32,6 +32,7 @@ parser-unsupported-grammar:
 
 test:
   uv run pytest -q
+  npm --prefix frontend run test:unit
 
 frontend-unit:
   npm --prefix frontend run test:unit

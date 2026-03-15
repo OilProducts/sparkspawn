@@ -33,7 +33,6 @@ from workspace.project_chat_models import (
     ConversationSessionState,
     ConversationState,
     ConversationTurn,
-    ConversationTurnEvent,
     ExecutionCard,
     ExecutionCardReview,
     ExecutionCardWorkItem,
@@ -62,6 +61,23 @@ from workspace.storage import ProjectPaths
 
 CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
 LOGGER = logging.getLogger(__name__)
+
+
+class TurnInProgressError(RuntimeError):
+    """Raised when a conversation already has an active assistant turn."""
+
+
+def _normalize_assistant_phase(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"finalanswer", "final_answer"}:
+        return "final_answer"
+    if normalized == "commentary":
+        return "commentary"
+    return normalized
 
 
 class ProjectChatService:
@@ -187,53 +203,17 @@ class ProjectChatService:
         parent_turn: ConversationTurn,
         spec_proposal_payload: dict[str, Any],
         *,
-        sequence: Optional[int] = None,
         assistant_message_fallback: str = "",
-    ) -> Optional[ConversationTurnEvent]:
+    ) -> Optional[tuple[SpecEditProposal, ConversationSegment]]:
         return self._reviews.persist_spec_edit_proposal(
             state,
             parent_turn,
             spec_proposal_payload,
-            sequence=sequence,
             assistant_message_fallback=assistant_message_fallback,
         )
 
-    def _next_turn_event_sequence(self, state: ConversationState, turn_id: str) -> int:
-        return self._repository.next_turn_event_sequence(state, turn_id)
-
     def _next_turn_segment_order(self, state: ConversationState, turn_id: str) -> int:
         return self._repository.next_turn_segment_order(state, turn_id)
-
-    def _append_turn_event(
-        self,
-        state: ConversationState,
-        turn_id: str,
-        kind: str,
-        *,
-        sequence: Optional[int] = None,
-        content_delta: Optional[str] = None,
-        message: Optional[str] = None,
-        tool_call_id: Optional[str] = None,
-        tool_call: Optional[ToolCallRecord] = None,
-        artifact_id: Optional[str] = None,
-        segment_id: Optional[str] = None,
-        segment: Optional[ConversationSegment] = None,
-        timestamp: Optional[str] = None,
-    ) -> ConversationTurnEvent:
-        return self._repository.append_turn_event(
-            state,
-            turn_id,
-            kind,
-            sequence=sequence,
-            content_delta=content_delta,
-            message=message,
-            tool_call_id=tool_call_id,
-            tool_call=tool_call,
-            artifact_id=artifact_id,
-            segment_id=segment_id,
-            segment=segment,
-            timestamp=timestamp,
-        )
 
     def _upsert_segment(self, state: ConversationState, segment: ConversationSegment) -> None:
         self._repository.upsert_segment(state, segment)
@@ -269,6 +249,27 @@ class ProjectChatService:
         app_turn_id = event.app_turn_id or turn_id
         call_id = event.tool_call_id or event.item_id or "tool"
         return f"segment-tool-{app_turn_id}-{call_id}"
+
+    def _assistant_segment_phase(self, event: ChatTurnLiveEvent, segment: Optional[ConversationSegment] = None) -> Optional[str]:
+        if event.phase is not None:
+            return _normalize_assistant_phase(event.phase)
+        if segment is not None:
+            return _normalize_assistant_phase(segment.phase)
+        return None
+
+    def _is_final_answer_phase(self, phase: Optional[str]) -> bool:
+        normalized = _normalize_assistant_phase(phase)
+        return normalized in {None, "final_answer"}
+
+    def _completed_final_answer_segment(self, state: ConversationState, turn_id: str) -> Optional[ConversationSegment]:
+        for segment in state.segments:
+            if segment.turn_id != turn_id or segment.kind != "assistant_message":
+                continue
+            if segment.status != "complete":
+                continue
+            if self._is_final_answer_phase(segment.phase):
+                return segment
+        return None
 
     def _materialize_segment_for_live_event(
         self,
@@ -306,12 +307,14 @@ class ProjectChatService:
                 status="streaming",
                 timestamp=timestamp,
                 updated_at=timestamp,
+                phase=self._assistant_segment_phase(event),
                 source=self._build_segment_source(event),
             )
             segment.content = f"{segment.content}{event.content_delta or ''}"
             segment.status = "streaming"
             segment.updated_at = timestamp
             segment.error = None
+            segment.phase = self._assistant_segment_phase(event, segment)
             self._upsert_segment(state, segment)
             return segment
         if event.kind in {"tool_call_started", "tool_call_updated", "tool_call_completed", "tool_call_failed"} and event.tool_call is not None:
@@ -337,12 +340,9 @@ class ProjectChatService:
             self._upsert_segment(state, segment)
             return segment
         if event.kind == "assistant_completed":
-            assistant_segments = [
-                segment for segment in state.segments
-                if segment.turn_id == turn.id and segment.kind == "assistant_message"
-            ]
-            segment = assistant_segments[-1] if assistant_segments else ConversationSegment(
-                id=self._build_assistant_segment_id(turn.id, event),
+            segment_id = self._build_assistant_segment_id(turn.id, event)
+            segment = self._get_segment(state, segment_id) or ConversationSegment(
+                id=segment_id,
                 turn_id=turn.id,
                 order=self._next_turn_segment_order(state, turn.id),
                 kind="assistant_message",
@@ -350,6 +350,7 @@ class ProjectChatService:
                 status="complete",
                 timestamp=timestamp,
                 updated_at=timestamp,
+                phase=self._assistant_segment_phase(event),
                 source=self._build_segment_source(event),
             )
             if event.content_delta:
@@ -360,15 +361,13 @@ class ProjectChatService:
             segment.updated_at = timestamp
             segment.completed_at = timestamp
             segment.error = None
+            segment.phase = self._assistant_segment_phase(event, segment)
             self._upsert_segment(state, segment)
             return segment
         if event.kind == "assistant_failed":
-            assistant_segments = [
-                segment for segment in state.segments
-                if segment.turn_id == turn.id and segment.kind == "assistant_message"
-            ]
-            segment = assistant_segments[-1] if assistant_segments else ConversationSegment(
-                id=self._build_assistant_segment_id(turn.id, event),
+            segment_id = self._build_assistant_segment_id(turn.id, event)
+            segment = self._get_segment(state, segment_id) or ConversationSegment(
+                id=segment_id,
                 turn_id=turn.id,
                 order=self._next_turn_segment_order(state, turn.id),
                 kind="assistant_message",
@@ -376,13 +375,15 @@ class ProjectChatService:
                 status="failed",
                 timestamp=timestamp,
                 updated_at=timestamp,
+                phase=self._assistant_segment_phase(event),
                 source=self._build_segment_source(event),
             )
-            segment.content = turn.content or event.message or segment.content
+            segment.content = event.content_delta or turn.content or event.message or segment.content
             segment.status = "failed"
             segment.error = turn.error or event.message
             segment.updated_at = timestamp
             segment.completed_at = timestamp
+            segment.phase = self._assistant_segment_phase(event, segment)
             self._upsert_segment(state, segment)
             return segment
         return None
@@ -409,12 +410,12 @@ class ProjectChatService:
     ) -> dict[str, Any]:
         return self._repository.build_turn_upsert_payload(state, turn)
 
-    def _build_turn_event_payload(
+    def _build_segment_upsert_payload(
         self,
         state: ConversationState,
-        event: ConversationTurnEvent,
+        segment: ConversationSegment,
     ) -> dict[str, Any]:
-        return self._repository.build_turn_event_payload(state, event)
+        return self._repository.build_segment_upsert_payload(state, segment)
 
     def _build_chat_prompt(self, state: ConversationState, message: str) -> str:
         recent_turns = state.turns[-10:]
@@ -459,14 +460,6 @@ class ProjectChatService:
             },
         )
 
-    def _assistant_turn_has_completed_message(self, state: ConversationState, turn_id: str) -> bool:
-        return any(
-            segment.turn_id == turn_id
-            and segment.kind == "assistant_message"
-            and segment.status == "complete"
-            for segment in state.segments
-        )
-
     def _prepare_turn(
         self,
         conversation_id: str,
@@ -487,6 +480,18 @@ class ProjectChatService:
                 state = ConversationState(conversation_id=conversation_id, project_path=normalized_project_path)
             elif state.project_path != normalized_project_path:
                 raise ValueError("Conversation is already bound to a different project path.")
+            active_assistant_turn = next(
+                (
+                    turn
+                    for turn in state.turns
+                    if turn.role == "assistant" and turn.status in {"pending", "streaming"}
+                ),
+                None,
+            )
+            if active_assistant_turn is not None:
+                raise TurnInProgressError(
+                    "An assistant turn is still in progress for this conversation. Wait for it to finish before sending another message."
+                )
             user_turn = ConversationTurn(
                 id=f"turn-{uuid.uuid4().hex}",
                 role="user",
@@ -540,7 +545,7 @@ class ProjectChatService:
             if current_state is None:
                 return
             current_assistant_turn = self._get_turn(current_state, prepared.assistant_turn.id)
-            if current_assistant_turn is not None and self._assistant_turn_has_completed_message(current_state, current_assistant_turn.id):
+            if current_assistant_turn is not None and self._completed_final_answer_segment(current_state, current_assistant_turn.id) is not None:
                 _log_project_chat_debug(
                     "suppressing assistant failure after completed message",
                     conversation_id=prepared.conversation_id,
@@ -560,24 +565,23 @@ class ProjectChatService:
             current_assistant_turn.status = "failed"
             current_assistant_turn.error = error_message
             self._upsert_turn(current_state, current_assistant_turn)
-            failed_segment = self._materialize_segment_for_live_event(
-                current_state,
-                current_assistant_turn,
-                ChatTurnLiveEvent(kind="assistant_failed", message=error_message),
-            )
-            assistant_failed_event = self._append_turn_event(
-                current_state,
-                current_assistant_turn.id,
-                "assistant_failed",
-                message=error_message,
-                segment_id=failed_segment.id if failed_segment is not None else None,
-                segment=failed_segment,
-            )
+            emitted_payloads: list[dict[str, Any]] = []
+            for segment in current_state.segments:
+                if segment.turn_id != current_assistant_turn.id or segment.kind != "assistant_message":
+                    continue
+                if segment.status == "complete":
+                    continue
+                segment.status = "failed"
+                segment.error = error_message
+                segment.updated_at = _iso_now()
+                segment.completed_at = segment.updated_at
+                self._upsert_segment(current_state, segment)
+                emitted_payloads.append(self._build_segment_upsert_payload(current_state, segment))
             self._touch_conversation_state(current_state)
             self._write_state(current_state)
-            assistant_failed_payload = self._build_turn_event_payload(current_state, assistant_failed_event)
             assistant_upsert_payload = self._build_turn_upsert_payload(current_state, current_assistant_turn)
-        self._publish_progress_payload(progress_callback, assistant_failed_payload)
+        for payload in emitted_payloads:
+            self._publish_progress_payload(progress_callback, payload)
         self._publish_progress_payload(progress_callback, assistant_upsert_payload)
 
     def _execute_turn_with_retry(
@@ -620,17 +624,7 @@ class ProjectChatService:
                 raise
             with self._lock:
                 current_state = self._read_state(prepared.conversation_id, prepared.project_path)
-                retry_payload: Optional[dict[str, Any]] = None
                 if current_state is not None:
-                    current_assistant_turn = self._get_turn(current_state, prepared.assistant_turn.id)
-                    if current_assistant_turn is not None:
-                        retry_event = self._append_turn_event(
-                            current_state,
-                            current_assistant_turn.id,
-                            "retry_started",
-                            message="Retrying turn after timeout.",
-                        )
-                        retry_payload = self._build_turn_event_payload(current_state, retry_event)
                     self._touch_conversation_state(current_state)
                     self._write_state(current_state)
                     _log_project_chat_debug(
@@ -638,8 +632,6 @@ class ProjectChatService:
                         conversation_id=prepared.conversation_id,
                         turns=_summarize_turns_for_debug(current_state.turns),
                     )
-            if retry_payload is not None:
-                self._publish_progress_payload(progress_callback, retry_payload)
             retry_session = self._replace_session(
                 prepared.conversation_id,
                 prepared.project_path,
@@ -656,15 +648,6 @@ class ProjectChatService:
             state = self._read_state(prepared.conversation_id, prepared.project_path)
             if state is None:
                 raise RuntimeError("Conversation state disappeared before the turn started.")
-            live_event_sequence = max(
-                (event.sequence for event in state.turn_events if event.turn_id == prepared.assistant_turn.id),
-                default=0,
-            )
-
-        def allocate_event_sequence() -> int:
-            nonlocal live_event_sequence
-            live_event_sequence += 1
-            return live_event_sequence
 
         def persist_live_event(event: ChatTurnLiveEvent) -> None:
             with self._lock:
@@ -682,8 +665,7 @@ class ProjectChatService:
                     self._upsert_turn(current_state, current_assistant_turn)
 
                 emitted_payloads: list[dict[str, Any]] = []
-                should_publish_snapshot = False
-                if current_assistant_turn.status == "pending" and event.kind != "assistant_completed":
+                if current_assistant_turn.status == "pending":
                     current_assistant_turn.status = "streaming"
                     self._upsert_turn(current_state, current_assistant_turn)
                     emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
@@ -691,69 +673,33 @@ class ProjectChatService:
                 if event.kind == "assistant_delta":
                     if event.content_delta:
                         segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
-                        live_event = ConversationTurnEvent(
-                            id=f"event-{uuid.uuid4().hex}",
-                            turn_id=current_assistant_turn.id,
-                            sequence=allocate_event_sequence(),
-                            timestamp=_iso_now(),
-                            kind=event.kind,
-                            content_delta=event.content_delta,
-                            segment_id=segment.id if segment is not None else None,
-                            segment=segment,
-                        )
-                        emitted_payloads.append(self._build_turn_event_payload(current_state, live_event))
+                        if segment is not None:
+                            emitted_payloads.append(self._build_segment_upsert_payload(current_state, segment))
                 elif event.kind == "reasoning_summary":
                     if event.content_delta:
                         segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
-                        reasoning_event = self._append_turn_event(
-                            current_state,
-                            current_assistant_turn.id,
-                            "reasoning_summary",
-                            sequence=allocate_event_sequence(),
-                            content_delta=event.content_delta,
-                            segment_id=segment.id if segment is not None else None,
-                            segment=segment,
-                        )
-                        emitted_payloads.append(self._build_turn_event_payload(current_state, reasoning_event))
+                        if segment is not None:
+                            emitted_payloads.append(self._build_segment_upsert_payload(current_state, segment))
                 elif event.kind == "assistant_completed":
                     assistant_message = _as_non_empty_string(event.content_delta)
-                    if assistant_message:
+                    if assistant_message and self._is_final_answer_phase(event.phase):
                         current_assistant_turn.content = assistant_message
                     current_assistant_turn.status = "streaming"
                     current_assistant_turn.error = None
                     self._upsert_turn(current_state, current_assistant_turn)
                     segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
                     emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
-                    if not self._assistant_turn_has_completed_message(current_state, current_assistant_turn.id):
-                        assistant_completed_event = self._append_turn_event(
-                            current_state,
-                            current_assistant_turn.id,
-                            "assistant_completed",
-                            sequence=allocate_event_sequence(),
-                            message=event.message or "Assistant message completed.",
-                            segment_id=segment.id if segment is not None else None,
-                            segment=segment,
-                        )
-                        emitted_payloads.append(self._build_turn_event_payload(current_state, assistant_completed_event))
+                    if segment is not None:
+                        emitted_payloads.append(self._build_segment_upsert_payload(current_state, segment))
                 elif event.kind in {"tool_call_started", "tool_call_updated", "tool_call_completed", "tool_call_failed"} and event.tool_call is not None:
                     segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
-                    tool_event = self._append_turn_event(
-                        current_state,
-                        current_assistant_turn.id,
-                        event.kind,
-                        sequence=allocate_event_sequence(),
-                        tool_call_id=event.tool_call_id or event.tool_call.id,
-                        tool_call=event.tool_call,
-                        segment_id=segment.id if segment is not None else None,
-                        segment=segment,
-                    )
-                    emitted_payloads.append(self._build_turn_event_payload(current_state, tool_event))
+                    if segment is not None:
+                        emitted_payloads.append(self._build_segment_upsert_payload(current_state, segment))
                 else:
                     return
 
                 self._touch_conversation_state(current_state)
                 self._write_state(current_state)
-                snapshot_payload = current_state.to_dict() if should_publish_snapshot else None
                 _log_project_chat_debug(
                     "persisted progress events",
                     conversation_id=prepared.conversation_id,
@@ -762,8 +708,6 @@ class ProjectChatService:
                 )
             for payload in emitted_payloads:
                 self._publish_progress_payload(progress_callback, payload)
-            if should_publish_snapshot and snapshot_payload is not None:
-                self._publish_progress_payload(progress_callback, {"type": "conversation_snapshot", "state": snapshot_payload})
 
         try:
             turn_result = self._execute_turn_with_retry(prepared, persist_live_event, progress_callback)
@@ -786,50 +730,38 @@ class ProjectChatService:
                     status="pending",
                     parent_turn_id=prepared.user_turn.id,
                 )
-            emitted_payloads: list[dict[str, Any]] = []
-            should_publish_snapshot = False
-            assistant_completion_recorded = self._assistant_turn_has_completed_message(state, current_assistant_turn.id)
-            turn_changed = (
-                current_assistant_turn.content != assistant_message
-                or current_assistant_turn.status != "complete"
-                or current_assistant_turn.error is not None
-            )
-            current_assistant_turn.content = assistant_message
-            current_assistant_turn.status = "complete"
-            current_assistant_turn.error = None
-            self._upsert_turn(state, current_assistant_turn)
-            final_segment_event = ChatTurnLiveEvent(
-                kind="assistant_completed",
-                content_delta=assistant_message,
-            )
-            segment = self._materialize_segment_for_live_event(state, current_assistant_turn, final_segment_event)
-            if turn_changed:
-                emitted_payloads.append(self._build_turn_upsert_payload(state, current_assistant_turn))
-            if not assistant_completion_recorded:
-                assistant_completed_event = self._append_turn_event(
-                    state,
-                    current_assistant_turn.id,
-                    "assistant_completed",
-                    sequence=allocate_event_sequence(),
-                    message="Assistant turn completed.",
-                    segment_id=segment.id if segment is not None else None,
-                    segment=segment,
+            final_answer_segment = self._completed_final_answer_segment(state, current_assistant_turn.id)
+            if final_answer_segment is None:
+                error_message = "codex app-server completed the turn without a final answer item."
+                failure = RuntimeError(error_message)
+            else:
+                failure = None
+                emitted_payloads: list[dict[str, Any]] = []
+                turn_changed = (
+                    current_assistant_turn.content != final_answer_segment.content
+                    or current_assistant_turn.status != "complete"
+                    or current_assistant_turn.error is not None
                 )
-                emitted_payloads.append(self._build_turn_event_payload(state, assistant_completed_event))
-            self._touch_conversation_state(state)
-            self._write_state(state)
-            snapshot_payload = state.to_dict() if should_publish_snapshot else None
-            _log_project_chat_debug(
-                "persisted final assistant turn",
-                conversation_id=prepared.conversation_id,
-                assistant_message=assistant_message,
-                turns=_summarize_turns_for_debug(state.turns),
-            )
-            snapshot = state.to_dict()
+                current_assistant_turn.content = final_answer_segment.content or assistant_message
+                current_assistant_turn.status = "complete"
+                current_assistant_turn.error = None
+                self._upsert_turn(state, current_assistant_turn)
+                if turn_changed:
+                    emitted_payloads.append(self._build_turn_upsert_payload(state, current_assistant_turn))
+                self._touch_conversation_state(state)
+                self._write_state(state)
+                _log_project_chat_debug(
+                    "persisted final assistant turn",
+                    conversation_id=prepared.conversation_id,
+                    assistant_message=current_assistant_turn.content,
+                    turns=_summarize_turns_for_debug(state.turns),
+                )
+                snapshot = state.to_dict()
+        if failure is not None:
+            self._persist_assistant_turn_failure(prepared, str(failure), progress_callback)
+            raise failure
         for payload in emitted_payloads:
             self._publish_progress_payload(progress_callback, payload)
-        if should_publish_snapshot and snapshot_payload is not None:
-            self._publish_progress_payload(progress_callback, {"type": "conversation_snapshot", "state": snapshot_payload})
         return snapshot
 
     def _run_prepared_turn_background(

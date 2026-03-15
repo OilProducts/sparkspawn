@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from sparkspawn_common.runtime import normalize_project_path, resolve_runtime_workspace_path
 from workspace.attractor_client import AttractorApiClient, AttractorApiError
-from workspace.project_chat import ProjectChatService
+from workspace.project_chat import ProjectChatService, TurnInProgressError
 from workspace.storage import (
     delete_project_flow_binding,
     delete_project_record,
@@ -482,6 +482,8 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except TurnInProgressError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return snapshot

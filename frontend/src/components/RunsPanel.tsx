@@ -74,6 +74,13 @@ const TIMELINE_MAX_ITEMS = 200
 const RETRY_CORRELATION_EVENT_TYPES = new Set(['StageStarted', 'StageFailed', 'StageRetrying', 'StageCompleted'])
 const PENDING_GATE_FALLBACK_RECEIVED_AT = '1970-01-01T00:00:00Z'
 
+const logUnexpectedRunError = (error: unknown) => {
+    if (error instanceof ApiHttpError) {
+        return
+    }
+    console.error(error)
+}
+
 const asRecord = (value: unknown): Record<string, unknown> | null => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return null
@@ -709,7 +716,7 @@ export function RunsPanel() {
             setRuns(data.runs)
             setLastFetchedAtMs(Date.now())
         } catch (err) {
-            console.error(err)
+            logUnexpectedRunError(err)
             setError('Unable to load runs')
         } finally {
             isFetchingRef.current = false
@@ -807,7 +814,7 @@ export function RunsPanel() {
             const payload = await fetchPipelineCheckpointValidated(selectedRunSummary.run_id) as CheckpointResponse
             setCheckpointData(payload)
         } catch (err) {
-            console.error(err)
+            logUnexpectedRunError(err)
             setCheckpointData(null)
             if (err instanceof ApiHttpError) {
                 setCheckpointError(checkpointErrorFromResponse(err.status, err.detail))
@@ -835,7 +842,7 @@ export function RunsPanel() {
             const payload = await fetchPipelineContextValidated(selectedRunSummary.run_id) as ContextResponse
             setContextData(payload)
         } catch (err) {
-            console.error(err)
+            logUnexpectedRunError(err)
             setContextData(null)
             if (err instanceof ApiHttpError) {
                 setContextError(contextErrorFromResponse(err.status, err.detail))
@@ -863,7 +870,7 @@ export function RunsPanel() {
             const payload = await fetchPipelineArtifactsValidated(selectedRunSummary.run_id)
             setArtifactData(payload)
         } catch (err) {
-            console.error(err)
+            logUnexpectedRunError(err)
             setArtifactData(null)
             if (err instanceof ApiHttpError) {
                 setArtifactError(artifactErrorFromResponse(err.status, err.detail))
@@ -891,7 +898,7 @@ export function RunsPanel() {
             const svgMarkup = await fetchPipelineGraphValidated(selectedRunSummary.run_id)
             setGraphvizMarkup(svgMarkup)
         } catch (err) {
-            console.error(err)
+            logUnexpectedRunError(err)
             setGraphvizMarkup('')
             if (err instanceof ApiHttpError) {
                 setGraphvizError(graphvizErrorFromResponse(err.status, err.detail))
@@ -919,7 +926,7 @@ export function RunsPanel() {
                 .filter((question): question is PendingQuestionSnapshot => question !== null)
             setPendingQuestionSnapshots(parsedQuestions)
         } catch (err) {
-            console.error(err)
+            logUnexpectedRunError(err)
             setPendingQuestionSnapshots([])
         }
     }, [selectedRunSummary])
@@ -1144,7 +1151,7 @@ export function RunsPanel() {
             const payload = await fetchPipelineArtifactPreviewValidated(selectedRunSummary.run_id, entry.path)
             setArtifactViewerPayload(payload)
         } catch (error) {
-            console.error(error)
+            logUnexpectedRunError(error)
             if (error instanceof ApiHttpError) {
                 setArtifactViewerError(artifactPreviewErrorFromResponse(error.status, error.detail))
                 return
@@ -1369,7 +1376,7 @@ export function RunsPanel() {
                 return next
             })
         } catch (err) {
-            console.error(err)
+            logUnexpectedRunError(err)
             if (err instanceof ApiHttpError) {
                 const detailSuffix = err.detail ? `: ${err.detail}` : ''
                 setPendingGateActionError(`Unable to submit answer (HTTP ${err.status})${detailSuffix}.`)
@@ -1425,7 +1432,7 @@ export function RunsPanel() {
             await fetchPipelineCancelValidated(runId)
             void fetchRuns()
         } catch (err) {
-            console.error(err)
+            logUnexpectedRunError(err)
             setRuns((current) =>
                 current.map((run) => (
                     run.run_id === runId

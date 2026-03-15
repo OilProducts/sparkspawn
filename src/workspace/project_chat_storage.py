@@ -18,13 +18,12 @@ from workspace.project_chat_common import (
 )
 from workspace.project_chat_models import (
     CHAT_SESSION_VERSION,
+    CONVERSATION_STATE_SCHEMA_VERSION,
     ConversationSegment,
     ConversationSessionState,
     ConversationState,
     ConversationSummary,
     ConversationTurn,
-    ConversationTurnEvent,
-    ToolCallRecord,
     WorkflowEvent,
 )
 from workspace.storage import (
@@ -177,6 +176,7 @@ class ProjectChatRepository:
         path = self.conversation_state_path(state.conversation_id, state.project_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         conversation_payload = {
+            "schema_version": CONVERSATION_STATE_SCHEMA_VERSION,
             "conversation_id": state.conversation_id,
             "conversation_handle": state.conversation_handle,
             "project_path": state.project_path,
@@ -311,15 +311,6 @@ class ProjectChatRepository:
     def get_snapshot(self, conversation_id: str, project_path: Optional[str] = None) -> dict[str, Any]:
         with self._lock:
             should_write_state = False
-            legacy_state_requires_rewrite = False
-            state_path_for_rewrite: Optional[Path] = None
-            try:
-                state_path_for_rewrite = self.conversation_state_path(conversation_id, project_path)
-            except (FileNotFoundError, RuntimeError):
-                state_path_for_rewrite = None
-            if state_path_for_rewrite is not None and state_path_for_rewrite.exists():
-                raw_payload = self.read_json_dict(state_path_for_rewrite)
-                legacy_state_requires_rewrite = "turn_events" in raw_payload or "segments" not in raw_payload
             state = self.read_state(conversation_id, project_path)
             if state is None:
                 normalized_project_path = normalize_project_path_value(project_path or "")
@@ -342,8 +333,6 @@ class ProjectChatRepository:
                     state.updated_at = state.created_at
                 if not as_non_empty_string(state.title):
                     state.title = derive_conversation_title(state.turns)
-                should_write_state = True
-            if legacy_state_requires_rewrite:
                 should_write_state = True
             if should_write_state:
                 self.write_state(state)
@@ -406,46 +395,6 @@ class ProjectChatRepository:
                 max_order = segment.order
         return max_order + 1
 
-    def next_turn_event_sequence(self, state: ConversationState, turn_id: str) -> int:
-        max_sequence = 0
-        for event in state.turn_events:
-            if event.turn_id == turn_id and event.sequence > max_sequence:
-                max_sequence = event.sequence
-        return max_sequence + 1
-
-    def append_turn_event(
-        self,
-        state: ConversationState,
-        turn_id: str,
-        kind: str,
-        *,
-        sequence: Optional[int] = None,
-        content_delta: Optional[str] = None,
-        message: Optional[str] = None,
-        tool_call_id: Optional[str] = None,
-        tool_call: Optional[ToolCallRecord] = None,
-        artifact_id: Optional[str] = None,
-        segment_id: Optional[str] = None,
-        segment: Optional[ConversationSegment] = None,
-        timestamp: Optional[str] = None,
-    ) -> ConversationTurnEvent:
-        event = ConversationTurnEvent(
-            id=f"event-{uuid.uuid4().hex}",
-            turn_id=turn_id,
-            sequence=sequence if sequence is not None else self.next_turn_event_sequence(state, turn_id),
-            timestamp=timestamp or iso_now(),
-            kind=kind,
-            content_delta=content_delta,
-            message=message,
-            tool_call_id=tool_call_id,
-            tool_call=ToolCallRecord.from_dict(tool_call.to_dict()) if tool_call is not None else None,
-            artifact_id=artifact_id,
-            segment_id=segment_id,
-            segment=ConversationSegment.from_dict(segment.to_dict()) if segment is not None else None,
-        )
-        state.turn_events.append(event)
-        return event
-
     def upsert_segment(self, state: ConversationState, segment: ConversationSegment) -> None:
         for index, existing_segment in enumerate(state.segments):
             if existing_segment.id != segment.id:
@@ -495,16 +444,16 @@ class ProjectChatRepository:
             "turn": serialized_turn,
         }
 
-    def build_turn_event_payload(
+    def build_segment_upsert_payload(
         self,
         state: ConversationState,
-        event: ConversationTurnEvent,
+        segment: ConversationSegment,
     ) -> dict[str, Any]:
         return {
-            "type": "turn_event",
+            "type": "segment_upsert",
             "conversation_id": state.conversation_id,
             "project_path": state.project_path,
             "title": state.title,
             "updated_at": state.updated_at,
-            "event": event.to_dict(),
+            "segment": segment.to_dict(),
         }

@@ -9,7 +9,7 @@ interface ProjectConversationSurfaceProps {
     isNarrowViewport: boolean
     chatDraft: string
     chatSendButtonLabel: string
-    isSendingChat: boolean
+    isChatInputDisabled: boolean
     panelError: string | null
     conversationBodyRef: RefObject<HTMLDivElement | null>
     historyContent: ReactNode
@@ -28,7 +28,7 @@ export function ProjectConversationSurface({
     isNarrowViewport,
     chatDraft,
     chatSendButtonLabel,
-    isSendingChat,
+    isChatInputDisabled,
     panelError,
     conversationBodyRef,
     historyContent,
@@ -96,7 +96,7 @@ export function ProjectConversationSurface({
                                 <button
                                     data-testid="project-ai-conversation-send-button"
                                     type="submit"
-                                    disabled={chatDraft.trim().length === 0 || isSendingChat}
+                                    disabled={chatDraft.trim().length === 0 || isChatInputDisabled}
                                     className="rounded border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {chatSendButtonLabel}

@@ -1,281 +1,181 @@
 # Conversation Event Contract
 
-This document defines the strict event-driven contract for Spark Spawn project chat.
+This document defines the live conversation contract between the workspace backend and the frontend.
 
-It exists to prevent ambiguity between:
+It exists to keep four layers distinct:
 - raw Codex app-server JSON-RPC notifications
-- Spark Spawn normalized conversation events
-- persisted conversation history
-- live UI rendering
+- workspace normalization
+- durable `state.json`
+- rendered chat cards
 
-Source of truth for broader conversation lifecycle and storage:
-- `conversation-paradigm.md`
-- `storage-boundaries.md`
-- `conversation-state-model.md`
+Related specs:
+- [conversation-state-model.md](/Users/chris/tinker/sparkspawn/specs/conversation-state-model.md)
+- [conversation-paradigm.md](/Users/chris/tinker/sparkspawn/specs/conversation-paradigm.md)
+- [storage-boundaries.md](/Users/chris/tinker/sparkspawn/specs/storage-boundaries.md)
 
 ## Purpose
 
-Spark Spawn chat must follow a disciplined event model:
-- raw app-server events are backend input
-- normalized Spark Spawn events are the only UI event surface
-- persisted history is durable and compact
-- live rendering must not infer behavior from incidental snapshot fields
+Spark Spawn chat follows this pipeline:
 
-This contract is based on the official Codex model:
-- normalize protocol events first
-- maintain stable turn identity
-- stream live output into dedicated UI surfaces
-- commit durable history only when semantically complete
+1. app-server raw notifications are captured in `raw-log.jsonl`
+2. workspace normalizes only the documented `item/*` and `turn/*` notifications it needs
+3. normalized item identity is materialized into canonical conversation segments
+4. the frontend renders directly from those segments
 
-## Event Layers
+The frontend must not reconstruct chat cards from raw protocol messages or turn-level fallback text.
 
-### Layer 1: Raw Codex App-Server Notifications
+## Layer 1: Raw App-Server Notifications
 
-These are backend-internal protocol inputs.
-
-Examples:
+Raw notifications are backend-internal inputs. The render-relevant ones are:
+- `item/started`
+- `item/completed`
 - `item/agentMessage/delta`
-- `codex/event/agent_message`
 - `item/reasoning/summaryPartAdded`
 - `item/reasoning/summaryTextDelta`
 - `item/commandExecution/outputDelta`
-- `item/started`
-- `item/completed`
+- approval-request notifications when present
+- `turn/started`
 - `turn/completed`
-- `codex/event/task_complete`
 - `error`
 
-Raw notifications MUST NOT be rendered directly by the frontend.
+Legacy `codex/event/*` item mirrors are not part of Spark Spawn’s render contract. The app-server session should opt out of them where supported, and the workspace must not treat them as a second render source.
 
-The backend MUST normalize them into Spark Spawn conversation events before they are exposed over the conversation SSE/API surface.
+## Layer 2: Workspace Live Events
 
-### Layer 2: Spark Spawn Normalized Conversation Events
-
-These are the only live events the frontend may consume for chat rendering.
-
-Allowed normalized event kinds:
+The frontend may consume only these workspace SSE events for chat rendering:
 - `turn_upsert`
-- `assistant_delta`
-- `reasoning_summary`
-- `tool_call_started`
-- `tool_call_updated`
-- `tool_call_completed`
-- `tool_call_failed`
-- `assistant_completed`
-- `assistant_failed`
-- `retry_started`
+- `segment_upsert`
+- `conversation_snapshot`
 
-### Layer 3: Durable Conversation State
+### `turn_upsert`
 
-Durable conversation state consists of:
-- conversations
-- turns
-- materialized render segments
-- workspace artifacts and provenance
+`turn_upsert` carries turn lifecycle metadata:
+- turn identity
+- role
+- status
+- parent linkage
+- summary content for turn-level previews
 
-The canonical durable state model is defined in:
-- `conversation-state-model.md`
+`turn_upsert` is not a primary content stream. The frontend must not use it to create or extend assistant/reasoning/tool cards while a turn is active.
 
-It MUST live under:
-- `SPARKSPAWN_HOME/workspace/projects/<project-id>/conversations/`
+### `segment_upsert`
 
-Live-only transient state may exist in memory during a turn, but it MUST NOT become the durable source of truth unless explicitly materialized as a durable event or finalized turn state.
+`segment_upsert` is the only granular live chat update contract.
+
+Each `segment_upsert` carries the full current snapshot of one canonical segment. The frontend must upsert by `segment.id`.
+
+Segment kinds:
+- `assistant_message`
+- `reasoning`
+- `tool_call`
+- `spec_edit_proposal`
+- `execution_card`
+
+One upstream item becomes one segment.
+
+Identity rules:
+- assistant segments are keyed by `app_turn_id + item_id` when upstream identity exists
+- reasoning segments are keyed by `app_turn_id + item_id + summary_index`
+- tool segments are keyed by stable tool/item identity for that call
+
+Rules:
+- a new item creates a new segment
+- later deltas update the matching segment
+- completion updates the same segment instead of creating another one
+- multiple assistant commentary items in one turn remain distinct cards
+- the final answer remains its own distinct assistant card
+
+### `conversation_snapshot`
+
+Snapshots are used for:
+- initial load
+- reconnect recovery
+- durable refresh after mutations
+
+Snapshots are not a second live event grammar. They contain the same canonical turn and segment model that the live stream updates incrementally.
 
 ## Normalization Rules
 
-### Assistant Text
+### Authoritative Render Source
+
+Renderable chat artifacts come from `item/*` notifications, not from turn-completion fallbacks.
+
+That means:
+- assistant cards come from assistant message items
+- reasoning cards come from reasoning items/summaries
+- tool rows come from tool/command items
+
+`turn/completed` may finalize turn status and error metadata, but it must never create or repeat a renderable assistant segment.
+
+### Assistant Messages
 
 Raw inputs:
 - `item/agentMessage/delta`
-- fallback `codex/event/agent_message_delta`
-- completion-time whole-message signals such as `codex/event/agent_message` or `codex/event/task_complete`
-
-Normalized outputs:
-- `assistant_delta`
-- `assistant_completed`
-- `assistant_failed`
+- `item/completed` for `AgentMessage`
 
 Rules:
-- `assistant_delta` is the only live event allowed to update visible assistant response text during an active turn.
-- `turn_upsert.content` MUST NOT be used to render live assistant prose while the assistant turn is `pending` or `streaming`.
-- whole-message completion payloads may finalize the assistant turn and may backfill missing final text, but they MUST NOT create a duplicate visible assistant response.
+- assistant text is accumulated into an `assistant_message` segment
+- the segment keeps `phase` when known, including `commentary` and `final_answer`
+- one assistant turn may contain multiple assistant message segments
+- no turn-level synthetic assistant segment may be created after the fact if an item-backed segment already exists
 
-### Reasoning Summaries
+If a turn finishes without a final-answer assistant item, Spark Spawn must treat that as an incomplete/failed turn condition rather than synthesizing a visible final assistant card from backup text.
+
+### Reasoning
 
 Raw inputs:
 - `item/reasoning/summaryPartAdded`
 - `item/reasoning/summaryTextDelta`
 
-Normalized outputs:
-- `reasoning_summary`
-
 Rules:
-- `summaryPartAdded` is the preferred source for coherent safe reasoning summaries.
-- `summaryTextDelta` MUST NOT be rendered directly to users.
-- `reasoning_summary` events are for the dedicated thinking surface only.
-- `reasoning_summary` MUST NOT append or overwrite assistant response text.
-- live reasoning summaries are not ordinary assistant messages.
-- durable reasoning reconstruction is defined by `conversation-state-model.md`, which requires reasoning content to collapse into stable render segments rather than remain raw delta history.
+- reasoning renders as `reasoning` segments only
+- reasoning never overwrites assistant text
+- if multiple reasoning notifications refer to the same `app_turn_id + item_id + summary_index`, they update the same segment
+- normalization may dedupe mirrored reasoning updates by stable reasoning identity, not by arrival order
 
 ### Tool Calls
 
-Raw inputs may include:
-- command execution lifecycle
-- file change lifecycle
-- tool-call lifecycle for any runtime that emits explicit tool requests
-
-Normalized outputs:
-- `tool_call_started`
-- `tool_call_updated`
-- `tool_call_completed`
-- `tool_call_failed`
-
-Rules:
-- tool activity MUST remain attached to the active assistant turn
-- tool output deltas MUST mutate the existing tool-call item for that call id
-- a tool call MUST have one stable `tool_call_id`
-- repeated output for the same tool call updates the existing tool item; it does not create a new call
-
-### Turn Lifecycle
-
 Raw inputs:
-- assistant-turn start and completion signals
-- terminal error conditions
-
-Normalized outputs:
-- `turn_upsert`
-- `assistant_completed`
-- `assistant_failed`
-- `retry_started`
+- command/tool item deltas and completion
+- approval lifecycle events when exposed as item-scoped tool work
 
 Rules:
-- `turn_upsert` establishes turn identity and turn status
-- `turn_upsert` is metadata, not a primary live-content stream
-- `assistant_completed` finalizes the assistant turn
-- `assistant_failed` finalizes a visible failure state
-- `retry_started` is required for visible retry behavior; retries MUST NOT be silent
-
-## Persistence Rules
-
-### Persisted
-
-The following are durable:
-- conversation records
-- turn records
-- materialized render segments
-- workspace artifacts and provenance
-- coarse workflow/event log entries
-
-### Not Persisted As Raw Live Stream
-
-The following MUST NOT be treated as durable append-only transcript facts by default:
-- raw protocol notifications
-- token-like reasoning deltas
-- partial assistant content snapshots
-
-Assistant streaming deltas may be compacted into the final assistant turn content rather than retained forever as raw deltas.
-
-Reasoning summaries MUST NOT be persisted as raw append-only delta history in `state.json`.
-
-Instead, reasoning content MUST be compacted into durable render segments as defined by `conversation-state-model.md`, and those segments MUST remain distinct from assistant message content.
+- tool output mutates the existing `tool_call` segment for that item/call
+- repeated output updates the same segment
+- completion/failure updates the same segment instead of creating a new row
 
 ## Frontend Rendering Contract
 
-### `turn_upsert`
-
-The frontend may use `turn_upsert` to:
-- create a missing turn shell
-- update turn metadata
-- update turn status
-- finalize completed or failed turn content
-
-The frontend MUST NOT use `turn_upsert.content` as the primary source of live assistant text while a turn is active.
-
-### `assistant_delta`
-
-The frontend MUST use `assistant_delta` to drive the live assistant response block.
+The frontend renders from canonical segments.
 
 Rules:
-- one active assistant response block per assistant turn
-- additional `assistant_delta` content extends that block
-- tool activity may appear before, between, or after assistant deltas
-- completion finalizes the same assistant response block rather than creating a second one
+- initial timeline comes from `conversation_snapshot.segments`
+- live updates patch that timeline through `segment_upsert`
+- ordering is determined by durable segment order inside a turn, not by reinterpreting raw event sequences on the client
+- the temporary “Thinking...” placeholder is ephemeral UI state only and disappears once the first real segment for that assistant turn exists
 
-### `reasoning_summary`
+The frontend must not:
+- reconstruct cards from raw protocol messages
+- reconstruct cards from historical `turn_events`
+- invent assistant cards from `turn_upsert.content`
 
-The frontend MUST use `reasoning_summary` only for the thinking block.
+## Snapshot Requirements
 
-Rules:
-- one active thinking block per assistant turn
-- additional `reasoning_summary` content extends that block
-- the thinking block is separate from the assistant response block
-- assistant deltas and thinking summaries must never overwrite each other
+Every conversation snapshot must include:
+- `schema_version`
+- `conversation_id`
+- `project_path`
+- `turns`
+- `segments`
+- workflow/artifact state as defined by the state-model spec
 
-### `tool_call_*`
+Historical `turn_events`-only snapshot shapes are unsupported. Spark Spawn may reject them instead of attempting reconstruction.
 
-The frontend MUST render tool-call items as their own timeline entries or live cells.
+## Failure Semantics
 
-Rules:
-- tool-call updates mutate the matching tool-call item by `tool_call_id`
-- tool output extends the existing item
-- completion/failure updates the same item
+If the app-server produces malformed or incomplete item lifecycles:
+- the raw transcript remains in `raw-log.jsonl`
+- the turn may fail or remain incomplete
+- Spark Spawn must not manufacture extra assistant cards just to “complete” the transcript visually
 
-### Completion
-
-When `assistant_completed` arrives:
-- the active assistant response block becomes final
-- the thinking block remains separate
-- no duplicate assistant message may be inserted
-
-When `assistant_failed` arrives:
-- the assistant response block enters a visible failed state
-- any active tool items remain visible as part of the turn record
-
-## Ordering Rules
-
-Ordering MUST be determined by normalized event order within a stable assistant turn.
-
-The system MUST NOT reorder transcript items by opportunistically replacing the entire conversation snapshot.
-
-Within a single assistant turn:
-- event order defines render order
-- reasoning and assistant text are separate streams
-- tool-call items occupy their own position in that order
-
-Snapshot reloads may restore durable state, but they MUST reconcile with stable turn identity and stable event identity rather than re-deriving a different order from scratch.
-
-## Snapshot Rules
-
-Snapshots are allowed for:
-- initial thread load
-- reconnect recovery
-- durable persistence checkpoints
-
-Snapshots are not the live event stream.
-
-Rules:
-- live rendering MUST be event-driven
-- snapshots MUST NOT invent live assistant text that was never emitted as `assistant_delta`
-- snapshots MAY provide finalized completed turn content
-- snapshots MAY omit compacted transient deltas as long as the resulting durable turn remains semantically correct
-
-## Strict Prohibitions
-
-Spark Spawn chat MUST NOT:
-- render raw app-server reasoning text deltas directly
-- render live assistant text from `turn_upsert.content` while the turn is active
-- allow thinking summaries to overwrite assistant text
-- allow assistant text to overwrite the thinking block
-- create duplicate visible assistant replies for one completed turn
-- silently retry a turn without emitting `retry_started`
-- rebuild visible ordering from whole-snapshot replacement alone
-
-## Implementation Target
-
-The intended steady-state model is:
-- backend consumes raw Codex app-server notifications
-- backend emits only normalized Spark Spawn conversation events
-- frontend renders live chat from normalized events
-- durable snapshots remain compact and semantically complete
-
-This document is the source of truth when event normalization, persistence, or live rendering behavior is ambiguous.
+This is intentional. The render model should be simpler and stricter than the raw transport, not more synthetic.

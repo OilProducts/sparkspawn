@@ -150,6 +150,46 @@ def test_append_tool_output_keeps_latest_tail() -> None:
     assert output == "cdef"
 
 
+def test_process_turn_message_normalizes_item_reasoning_delta_by_item_and_summary_index() -> None:
+    state = codex_app_server.CodexAppServerTurnState()
+    events = codex_app_server.process_turn_message(
+        {
+            "method": "item/reasoning/summaryTextDelta",
+            "params": {
+                "itemId": "rs-1",
+                "summaryIndex": 0,
+                "delta": "**Summ",
+            },
+        },
+        state,
+    )
+
+    assert len(events) == 1
+    assert events[0].kind == "reasoning_delta"
+    assert events[0].text == "**Summ"
+    assert events[0].item_id == "rs-1"
+    assert events[0].summary_index == 0
+
+
+def test_process_turn_message_ignores_legacy_reasoning_event_family() -> None:
+    state = codex_app_server.CodexAppServerTurnState()
+
+    events = codex_app_server.process_turn_message(
+        {
+            "method": "codex/event/reasoning_content_delta",
+            "params": {
+                "msg": {
+                    "item_id": "rs-1",
+                    "summary_index": 0,
+                    "delta": "Planning",
+                }
+            },
+        },
+        state,
+    )
+    assert events == []
+
+
 def test_tool_call_from_command_execution_item_uses_completed_payload() -> None:
     tool_call = project_chat._tool_call_from_item(
         {
@@ -192,7 +232,7 @@ def test_tool_call_from_file_change_item_collects_paths() -> None:
     ]
 
 
-def test_append_turn_event_records_tool_call_against_assistant_turn(tmp_path: Path) -> None:
+def test_build_segment_upsert_payload_serializes_segment(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     state = project_chat.ConversationState(
         conversation_id="conversation-test",
@@ -214,26 +254,16 @@ def test_append_turn_event_records_tool_call_against_assistant_turn(tmp_path: Pa
             ),
         ],
     )
-
-    started_event = service._append_turn_event(
-        state,
-        "turn-assistant-1",
-        "tool_call_started",
-        tool_call_id="call-1",
-        tool_call=project_chat.ToolCallRecord(
-            id="call-1",
-            kind="command_execution",
-            status="running",
-            title="Run command",
-            command="ls -1 /app",
-            output=None,
-        ),
-    )
-    completed_event = service._append_turn_event(
-        state,
-        "turn-assistant-1",
-        "tool_call_completed",
-        tool_call_id="call-1",
+    segment = project_chat.ConversationSegment(
+        id="segment-tool-app-turn-1-call-1",
+        turn_id="turn-assistant-1",
+        order=1,
+        kind="tool_call",
+        role="system",
+        status="completed",
+        timestamp="2026-03-06T23:00:02Z",
+        updated_at="2026-03-06T23:00:03Z",
+        completed_at="2026-03-06T23:00:03Z",
         tool_call=project_chat.ToolCallRecord(
             id="call-1",
             kind="command_execution",
@@ -242,142 +272,101 @@ def test_append_turn_event_records_tool_call_against_assistant_turn(tmp_path: Pa
             command="ls -1 /app",
             output="AGENTS.md\n",
         ),
+        source=project_chat.ConversationSegmentSource(app_turn_id="app-turn-1", item_id="call-1"),
+    )
+    payload = service._build_segment_upsert_payload(state, segment)
+
+    assert payload["type"] == "segment_upsert"
+    assert payload["conversation_id"] == "conversation-test"
+    assert payload["segment"]["id"] == "segment-tool-app-turn-1-call-1"
+    assert payload["segment"]["tool_call"]["output"] == "AGENTS.md\n"
+
+
+def test_conversation_state_rejects_legacy_event_only_snapshot_shape() -> None:
+    with pytest.raises(ValueError, match="Unsupported conversation state schema"):
+        project_chat.ConversationState.from_dict(
+            {
+                "conversation_id": "conversation-test",
+                "project_path": "/tmp/project",
+                "title": "Legacy reasoning stream",
+                "turns": [],
+                "turn_events": [],
+            }
+        )
+
+
+def test_materialize_segment_for_live_event_completes_matching_assistant_item_by_item_id(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    state = project_chat.ConversationState(
+        conversation_id="conversation-test",
+        project_path="/tmp/project",
+        turns=[
+            project_chat.ConversationTurn(
+                id="turn-user-1",
+                role="user",
+                content="Walk me through it.",
+                timestamp="2026-03-13T10:00:00Z",
+            ),
+            project_chat.ConversationTurn(
+                id="turn-assistant-1",
+                role="assistant",
+                content="",
+                timestamp="2026-03-13T10:00:01Z",
+                status="streaming",
+                parent_turn_id="turn-user-1",
+            ),
+        ],
+    )
+    assistant_turn = state.turns[-1]
+
+    commentary_delta = project_chat.ChatTurnLiveEvent(
+        kind="assistant_delta",
+        content_delta="I’m checking the prompt template path.",
+        app_turn_id="app-turn-1",
+        item_id="item-msg-1",
+        phase="commentary",
+    )
+    final_delta = project_chat.ChatTurnLiveEvent(
+        kind="assistant_delta",
+        content_delta="Here is the final grounded answer.",
+        app_turn_id="app-turn-1",
+        item_id="item-msg-2",
+        phase="final_answer",
     )
 
-    assert [event.kind for event in state.turn_events] == ["tool_call_started", "tool_call_completed"]
-    assert started_event.turn_id == "turn-assistant-1"
-    assert started_event.sequence == 1
-    assert completed_event.sequence == 2
-    assert completed_event.tool_call is not None
-    assert completed_event.tool_call.output == "AGENTS.md\n"
+    service._materialize_segment_for_live_event(state, assistant_turn, commentary_delta)
+    service._materialize_segment_for_live_event(state, assistant_turn, final_delta)
 
-
-def test_conversation_state_materializes_reasoning_segments_from_legacy_events_by_summary_index() -> None:
-    state = project_chat.ConversationState.from_dict(
-        {
-            "conversation_id": "conversation-test",
-            "project_path": "/tmp/project",
-            "title": "Legacy reasoning stream",
-            "created_at": "2026-03-13T10:00:00Z",
-            "updated_at": "2026-03-13T10:00:05Z",
-            "turns": [
-                {
-                    "id": "turn-user-1",
-                    "role": "user",
-                    "content": "Explain your plan.",
-                    "timestamp": "2026-03-13T10:00:00Z",
-                    "status": "complete",
-                    "kind": "message",
-                },
-                {
-                    "id": "turn-assistant-1",
-                    "role": "assistant",
-                    "content": "Here is the grounded plan.",
-                    "timestamp": "2026-03-13T10:00:01Z",
-                    "status": "complete",
-                    "kind": "message",
-                    "parent_turn_id": "turn-user-1",
-                },
-            ],
-            "turn_events": [
-                {
-                    "id": "event-reasoning-1a",
-                    "turn_id": "turn-assistant-1",
-                    "sequence": 1,
-                    "timestamp": "2026-03-13T10:00:01Z",
-                    "kind": "reasoning_summary",
-                    "content_delta": "**Reviewing repo** Looking through the project layout. ",
-                    "segment": {
-                        "id": "segment-reasoning-app-turn-1-item-rs-1-0",
-                        "turn_id": "turn-assistant-1",
-                        "order": 1,
-                        "kind": "reasoning",
-                        "role": "assistant",
-                        "status": "streaming",
-                        "timestamp": "2026-03-13T10:00:01Z",
-                        "updated_at": "2026-03-13T10:00:01Z",
-                        "content": "**Reviewing repo** Looking through the project layout. ",
-                        "source": {
-                            "app_turn_id": "app-turn-1",
-                            "item_id": "item-rs-1",
-                            "summary_index": 0,
-                        },
-                    },
-                },
-                {
-                    "id": "event-reasoning-1b",
-                    "turn_id": "turn-assistant-1",
-                    "sequence": 2,
-                    "timestamp": "2026-03-13T10:00:02Z",
-                    "kind": "reasoning_summary",
-                    "content_delta": "Checking README and specs.",
-                    "segment": {
-                        "id": "segment-reasoning-app-turn-1-item-rs-1-0",
-                        "turn_id": "turn-assistant-1",
-                        "order": 1,
-                        "kind": "reasoning",
-                        "role": "assistant",
-                        "status": "streaming",
-                        "timestamp": "2026-03-13T10:00:01Z",
-                        "updated_at": "2026-03-13T10:00:02Z",
-                        "content": "**Reviewing repo** Looking through the project layout. Checking README and specs.",
-                        "source": {
-                            "app_turn_id": "app-turn-1",
-                            "item_id": "item-rs-1",
-                            "summary_index": 0,
-                        },
-                    },
-                },
-                {
-                    "id": "event-reasoning-2",
-                    "turn_id": "turn-assistant-1",
-                    "sequence": 3,
-                    "timestamp": "2026-03-13T10:00:03Z",
-                    "kind": "reasoning_summary",
-                    "content_delta": "**Considering proposal** Mapping the change to a minimal spec edit.",
-                    "segment": {
-                        "id": "segment-reasoning-app-turn-1-item-rs-1-1",
-                        "turn_id": "turn-assistant-1",
-                        "order": 2,
-                        "kind": "reasoning",
-                        "role": "assistant",
-                        "status": "streaming",
-                        "timestamp": "2026-03-13T10:00:03Z",
-                        "updated_at": "2026-03-13T10:00:03Z",
-                        "content": "**Considering proposal** Mapping the change to a minimal spec edit.",
-                        "source": {
-                            "app_turn_id": "app-turn-1",
-                            "item_id": "item-rs-1",
-                            "summary_index": 1,
-                        },
-                    },
-                },
-                {
-                    "id": "event-assistant-complete",
-                    "turn_id": "turn-assistant-1",
-                    "sequence": 4,
-                    "timestamp": "2026-03-13T10:00:05Z",
-                    "kind": "assistant_completed",
-                    "message": "Assistant turn completed.",
-                },
-            ],
-            "event_log": [],
-            "spec_edit_proposals": [],
-            "execution_cards": [],
-            "execution_workflow": {"status": "idle", "run_id": None, "error": None, "flow_source": None},
-        }
+    commentary_complete = project_chat.ChatTurnLiveEvent(
+        kind="assistant_completed",
+        content_delta="I’m checking the prompt template path.",
+        app_turn_id="app-turn-1",
+        item_id="item-msg-1",
+        phase="commentary",
+    )
+    final_complete = project_chat.ChatTurnLiveEvent(
+        kind="assistant_completed",
+        content_delta="Here is the final grounded answer.",
+        app_turn_id="app-turn-1",
+        item_id="item-msg-2",
+        phase="final_answer",
     )
 
-    reasoning_segments = [segment for segment in state.segments if segment.kind == "reasoning"]
+    service._materialize_segment_for_live_event(state, assistant_turn, commentary_complete)
+    service._materialize_segment_for_live_event(state, assistant_turn, final_complete)
+
     assistant_segments = [segment for segment in state.segments if segment.kind == "assistant_message"]
 
-    assert len(reasoning_segments) == 2
-    assert [segment.source.summary_index for segment in reasoning_segments] == [0, 1]
-    assert reasoning_segments[0].content.endswith("Checking README and specs.")
-    assert reasoning_segments[1].content == "**Considering proposal** Mapping the change to a minimal spec edit."
-    assert len(assistant_segments) == 1
-    assert assistant_segments[0].status == "complete"
-    assert assistant_segments[0].content == "Here is the grounded plan."
+    assert [segment.id for segment in assistant_segments] == [
+        "segment-assistant-app-turn-1-item-msg-1",
+        "segment-assistant-app-turn-1-item-msg-2",
+    ]
+    assert [segment.phase for segment in assistant_segments] == ["commentary", "final_answer"]
+    assert [segment.status for segment in assistant_segments] == ["complete", "complete"]
+    assert [segment.content for segment in assistant_segments] == [
+        "I’m checking the prompt template path.",
+        "Here is the final grounded answer.",
+    ]
 
 
 def test_conversation_session_state_round_trips(tmp_path: Path) -> None:
@@ -473,7 +462,7 @@ def test_chat_session_starts_new_durable_thread_when_resume_fails(monkeypatch) -
     assert updated_thread_ids == ["thread-fresh"]
 
 
-def test_chat_session_turn_uses_task_complete_message_but_waits_for_turn_completed(monkeypatch) -> None:
+def test_chat_session_turn_uses_final_answer_item_but_waits_for_turn_completed(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     lines = iter(
         [
@@ -485,11 +474,13 @@ def test_chat_session_turn_uses_task_complete_message_but_waits_for_turn_complet
             ),
             json.dumps(
                 {
-                    "method": "codex/event/task_complete",
+                    "method": "item/completed",
                     "params": {
-                        "msg": {
-                            "type": "task_complete",
-                            "last_agent_message": '{"assistant_message":"Ack"}',
+                        "item": {
+                            "type": "agentMessage",
+                            "id": "msg-123",
+                            "phase": "final_answer",
+                            "text": '{"assistant_message":"Ack"}',
                         }
                     },
                 }
@@ -527,23 +518,25 @@ def test_chat_session_turn_uses_task_complete_message_but_waits_for_turn_complet
     assert result.assistant_message == '{"assistant_message":"Ack"}'
 
 
-def test_chat_session_turn_accepts_task_complete_without_turn_completed_after_idle(monkeypatch) -> None:
+def test_chat_session_turn_accepts_final_answer_item_without_turn_completed_after_idle(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     lines = iter(
         [
             json.dumps(
                 {
                     "method": "item/agentMessage/delta",
-                    "params": {"delta": "Ack"},
+                    "params": {"delta": "Ack", "itemId": "msg-1"},
                 }
             ),
             json.dumps(
                 {
-                    "method": "codex/event/task_complete",
+                    "method": "item/completed",
                     "params": {
-                        "msg": {
-                            "type": "task_complete",
-                            "last_agent_message": "Ack",
+                        "item": {
+                            "type": "agentMessage",
+                            "id": "msg-1",
+                            "phase": "final_answer",
+                            "text": "Ack",
                         }
                     },
                 }
@@ -632,10 +625,13 @@ def test_chat_session_surfaces_reasoning_summary_progress(monkeypatch) -> None:
             ),
             json.dumps(
                 {
-                    "method": "codex/event/task_complete",
+                    "method": "item/completed",
                     "params": {
-                        "msg": {
-                            "last_agent_message": "I found the main entry points.",
+                        "item": {
+                            "type": "agentMessage",
+                            "id": "msg-123",
+                            "phase": "final_answer",
+                            "text": "I found the main entry points.",
                         }
                     },
                 }
@@ -700,10 +696,13 @@ def test_chat_session_surfaces_reasoning_summary_text_deltas(monkeypatch) -> Non
             ),
             json.dumps(
                 {
-                    "method": "codex/event/task_complete",
+                    "method": "item/completed",
                     "params": {
-                        "msg": {
-                            "last_agent_message": "I’m checking the project structure first.",
+                        "item": {
+                            "type": "agentMessage",
+                            "id": "msg-123",
+                            "phase": "final_answer",
+                            "text": "I’m checking the project structure first.",
                         }
                     },
                 }
@@ -750,12 +749,14 @@ def test_chat_session_surfaces_reasoning_summary_text_deltas(monkeypatch) -> Non
 def test_chat_session_initialize_enables_experimental_api(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     requests: list[tuple[str, dict[str, object] | None]] = []
+    notifications: list[dict[str, object]] = []
 
     class DummyStdout:
         pass
 
     class DummyProc:
         stdout = DummyStdout()
+        stdin = object()
 
         def poll(self) -> int | None:
             return None
@@ -766,6 +767,7 @@ def test_chat_session_initialize_enables_experimental_api(monkeypatch) -> None:
 
     monkeypatch.setattr(project_chat.subprocess, "Popen", lambda *args, **kwargs: DummyProc())
     monkeypatch.setattr(project_chat.selectors, "DefaultSelector", lambda: DummySelector())
+    monkeypatch.setattr(session, "_send_json", lambda payload: notifications.append(payload))
 
     def fake_send_request(method: str, params: dict[str, object] | None) -> dict[str, object]:
         requests.append((method, params))
@@ -781,10 +783,14 @@ def test_chat_session_initialize_enables_experimental_api(monkeypatch) -> None:
             "initialize",
             {
                 "clientInfo": {"name": "sparkspawn", "version": "0.1"},
-                "capabilities": {"experimentalApi": True},
+                "capabilities": {
+                    "experimentalApi": True,
+                    "optOutNotificationMethods": project_chat_session.LEGACY_OPT_OUT_NOTIFICATION_METHODS,
+                },
             },
         )
     ]
+    assert notifications == [{"jsonrpc": "2.0", "method": "initialized", "params": {}}]
 
 
 def test_chat_session_turn_completes_on_turn_completed_after_final_answer(monkeypatch) -> None:
@@ -959,6 +965,16 @@ def test_send_turn_retries_when_app_server_request_times_out_before_progress(tmp
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="hi",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"hi"}',
             )
@@ -992,6 +1008,16 @@ def test_send_turn_accepts_plain_text_final_response(tmp_path: Path, monkeypatch
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="This looks like a Collatz implementation project.",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
             return project_chat.ChatTurnResult(
                 assistant_message="This looks like a Collatz implementation project.",
             )
@@ -1310,7 +1336,7 @@ def test_note_execution_card_dispatched_records_event(tmp_path: Path) -> None:
     assert snapshot["event_log"][-1]["message"] == "Dispatched execution card execution-card-1 as run run-123 using implement-spec.dot."
 
 
-def test_chat_session_ignores_duplicate_codex_agent_delta_channel(monkeypatch) -> None:
+def test_chat_session_ignores_legacy_codex_agent_delta_channel(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     lines = iter(
         [
@@ -1334,11 +1360,13 @@ def test_chat_session_ignores_duplicate_codex_agent_delta_channel(monkeypatch) -
             ),
             json.dumps(
                 {
-                    "method": "codex/event/task_complete",
+                    "method": "item/completed",
                     "params": {
-                        "msg": {
-                            "type": "task_complete",
-                            "last_agent_message": '{"assistant_message":"Ack"}',
+                        "item": {
+                            "type": "AgentMessage",
+                            "id": "msg-1",
+                            "phase": "final_answer",
+                            "text": '{"assistant_message":"Ack"}',
                         }
                     },
                 }
@@ -1395,15 +1423,13 @@ def test_chat_session_emits_assistant_completed_from_item_completed(monkeypatch)
             ),
             json.dumps(
                 {
-                    "method": "codex/event/item_completed",
+                    "method": "item/completed",
                     "params": {
-                        "msg": {
-                            "item": {
-                                "type": "AgentMessage",
-                                "id": "msg-1",
-                                "content": [{"type": "Text", "text": "Ack"}],
-                                "phase": "final_answer",
-                            }
+                        "item": {
+                            "type": "AgentMessage",
+                            "id": "msg-1",
+                            "content": [{"type": "Text", "text": "Ack"}],
+                            "phase": "final_answer",
                         }
                     },
                 }
@@ -1445,40 +1471,52 @@ def test_chat_session_emits_assistant_completed_from_item_completed(monkeypatch)
 
     assert result.assistant_message == "Ack"
     assert [event.kind for event in captured_events] == ["assistant_delta", "assistant_completed"]
+    assert captured_events[1].item_id == "msg-1"
+    assert captured_events[1].phase == "final_answer"
     assert captured_events[-1].content_delta == "Ack"
 
 
-def test_chat_session_does_not_emit_assistant_completed_for_commentary_item(monkeypatch) -> None:
+def test_chat_session_emits_assistant_completed_for_commentary_item(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     lines = iter(
         [
             json.dumps(
                 {
                     "method": "item/agentMessage/delta",
-                    "params": {"delta": "I’m drafting the proposal now."},
+                    "params": {"delta": "I’m drafting the proposal now.", "itemId": "msg-1"},
                 }
             ),
             json.dumps(
                 {
-                    "method": "codex/event/item_completed",
+                    "method": "item/completed",
                     "params": {
-                        "msg": {
-                            "item": {
-                                "type": "AgentMessage",
-                                "id": "msg-1",
-                                "content": [{"type": "Text", "text": "I’m drafting the proposal now."}],
-                                "phase": "commentary",
-                            }
+                        "item": {
+                            "type": "AgentMessage",
+                            "id": "msg-1",
+                            "content": [{"type": "Text", "text": "I’m drafting the proposal now."}],
+                            "phase": "commentary",
                         }
                     },
                 }
             ),
             json.dumps(
                 {
-                    "method": "codex/event/task_complete",
+                    "method": "item/agentMessage/delta",
                     "params": {
-                        "msg": {
-                            "last_agent_message": "Done.",
+                        "delta": "Done.",
+                        "itemId": "msg-2",
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "method": "item/completed",
+                    "params": {
+                        "item": {
+                            "type": "AgentMessage",
+                            "id": "msg-2",
+                            "content": [{"type": "Text", "text": "Done."}],
+                            "phase": "final_answer",
                         }
                     },
                 }
@@ -1515,7 +1553,16 @@ def test_chat_session_does_not_emit_assistant_completed_for_commentary_item(monk
     result = session.turn("hello", None, on_event=captured_events.append)
 
     assert result.assistant_message == "Done."
-    assert [event.kind for event in captured_events] == ["assistant_delta"]
+    assert [event.kind for event in captured_events] == [
+        "assistant_delta",
+        "assistant_completed",
+        "assistant_delta",
+        "assistant_completed",
+    ]
+    assert captured_events[0].item_id == "msg-1"
+    assert captured_events[1].phase == "commentary"
+    assert captured_events[2].item_id == "msg-2"
+    assert captured_events[3].phase == "final_answer"
 
 
 def test_build_session_ignores_legacy_persisted_thread_without_session_version(tmp_path: Path, monkeypatch) -> None:
@@ -1578,6 +1625,16 @@ def test_send_turn_retries_with_fresh_session_after_timeout(tmp_path: Path, monk
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="Recovered.",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"Recovered."}',
             )
@@ -1623,6 +1680,16 @@ def test_send_turn_writes_raw_jsonrpc_log(tmp_path: Path, monkeypatch) -> None:
             assert self.raw_logger is not None
             self.raw_logger("outgoing", '{"jsonrpc":"2.0","id":1,"method":"turn/start"}')
             self.raw_logger("incoming", '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed"}}}')
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="Logged.",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"Logged."}',
             )
@@ -1663,6 +1730,15 @@ def test_start_turn_returns_initial_snapshot_before_background_completion(tmp_pa
                         content_delta="Checking the repository.",
                     )
                 )
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="ACK",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
             return project_chat.ChatTurnResult(
                 assistant_message='{"assistant_message":"ACK"}',
             )
@@ -1692,6 +1768,39 @@ def test_start_turn_returns_initial_snapshot_before_background_completion(tmp_pa
         "reasoning",
         "assistant_message",
     ]
+
+
+def test_start_turn_rejects_overlapping_active_assistant_turn(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-test",
+            project_path=str(tmp_path),
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="First request",
+                    timestamp="2026-03-15T14:00:00Z",
+                    status="complete",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-1",
+                    role="assistant",
+                    content="",
+                    timestamp="2026-03-15T14:00:01Z",
+                    status="streaming",
+                    parent_turn_id="turn-user-1",
+                ),
+            ],
+        )
+    )
+
+    with pytest.raises(
+        project_chat.TurnInProgressError,
+        match="assistant turn is still in progress",
+    ):
+        service.start_turn("conversation-test", str(tmp_path), "Second request", None)
 
 
 def test_list_conversations_filters_by_project_and_sorts_latest_first(tmp_path: Path) -> None:
@@ -1778,7 +1887,24 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
                         content_delta="Checking whether a spec proposal makes sense.",
                     )
                 )
-                on_event(project_chat.ChatTurnLiveEvent(kind="assistant_delta", content_delta="Working on it"))
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_delta",
+                        content_delta="Working on it",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="Working on it",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
                 on_event(
                     project_chat.ChatTurnLiveEvent(
                         kind="tool_call_started",
@@ -1828,7 +1954,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
 
     assert final_snapshot is not None
     assert [turn["role"] for turn in final_snapshot["turns"]] == ["user", "assistant"]
-    assert final_snapshot["turns"][1]["content"] == "ACK"
+    assert final_snapshot["turns"][1]["content"] == "Working on it"
     assert final_snapshot["turns"][1]["status"] == "complete"
     assert [segment["kind"] for segment in final_snapshot["segments"]] == [
         "reasoning",
@@ -1837,7 +1963,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     ]
 
 
-def test_snapshot_compacts_streamed_assistant_deltas(tmp_path: Path) -> None:
+def test_snapshot_rejects_legacy_turn_event_only_payload(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     project_paths = ensure_project_paths(tmp_path, str(tmp_path))
     legacy_payload = {
@@ -1906,14 +2032,8 @@ def test_snapshot_compacts_streamed_assistant_deltas(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    snapshot = service.get_snapshot("conversation-compact", str(tmp_path))
-
-    assert [segment["kind"] for segment in snapshot["segments"]] == ["assistant_message", "reasoning"]
-    persisted = json.loads(
-        (project_paths.conversations_dir / "conversation-compact" / "state.json").read_text(encoding="utf-8")
-    )
-    assert "turn_events" not in persisted
-    assert [segment["kind"] for segment in persisted["segments"]] == ["assistant_message", "reasoning"]
+    with pytest.raises(ValueError, match="Unsupported conversation state schema"):
+        service.get_snapshot("conversation-compact", str(tmp_path))
 
 
 def test_list_project_conversations_endpoint_returns_project_threads(api_client, tmp_path: Path) -> None:

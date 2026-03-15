@@ -34,39 +34,6 @@ export interface ConversationTurnResponse {
     error?: string | null
 }
 
-export interface ConversationTurnEventResponse {
-    id: string
-    turn_id: string
-    sequence: number
-    timestamp: string
-    kind:
-        | 'assistant_delta'
-        | 'reasoning_summary'
-        | 'assistant_completed'
-        | 'assistant_failed'
-        | 'tool_call_started'
-        | 'tool_call_updated'
-        | 'tool_call_completed'
-        | 'tool_call_failed'
-        | 'spec_edit_proposal_created'
-        | 'retry_started'
-    content_delta?: string | null
-    message?: string | null
-    tool_call_id?: string | null
-    artifact_id?: string | null
-    segment_id?: string | null
-    segment?: ConversationSegmentResponse | null
-    tool_call?: {
-        kind: 'command_execution' | 'file_change' | 'dynamic_tool'
-        status: 'running' | 'completed' | 'failed'
-        id: string
-        title: string
-        command?: string | null
-        output?: string | null
-        file_paths: string[]
-    } | null
-}
-
 export interface ConversationSegmentResponse {
     id: string
     turn_id: string
@@ -80,6 +47,7 @@ export interface ConversationSegmentResponse {
     completed_at?: string | null
     error?: string | null
     artifact_id?: string | null
+    phase?: string | null
     tool_call?: {
         kind: 'command_execution' | 'file_change' | 'dynamic_tool'
         status: 'running' | 'completed' | 'failed'
@@ -146,6 +114,7 @@ export interface ExecutionCardResponse {
 }
 
 export interface ConversationSnapshotResponse {
+    schema_version: number
     conversation_id: string
     conversation_handle?: string | null
     project_path: string
@@ -231,13 +200,13 @@ export interface ConversationTurnUpsertEventResponse {
     turn: ConversationTurnResponse
 }
 
-export interface ConversationTurnEventStreamResponse {
-    type: 'turn_event'
+export interface ConversationSegmentUpsertEventResponse {
+    type: 'segment_upsert'
     conversation_id: string
     project_path: string
     title: string
     updated_at: string
-    event: ConversationTurnEventResponse
+    segment: ConversationSegmentResponse
 }
 
 function parseConversationTurnResponse(value: unknown, _endpoint: string): ConversationTurnResponse | null {
@@ -270,64 +239,6 @@ function parseConversationTurnResponse(value: unknown, _endpoint: string): Conve
         artifact_id: asOptionalNullableString(record.artifact_id),
         parent_turn_id: asOptionalNullableString(record.parent_turn_id),
         error: asOptionalNullableString(record.error),
-    }
-}
-
-function parseConversationTurnEventResponse(value: unknown, _endpoint: string): ConversationTurnEventResponse | null {
-    const record = asUnknownRecord(value)
-    if (
-        !record
-        || typeof record.id !== 'string'
-        || typeof record.turn_id !== 'string'
-        || typeof record.sequence !== 'number'
-        || typeof record.timestamp !== 'string'
-        || typeof record.kind !== 'string'
-    ) {
-        return null
-    }
-    const kind = record.kind === 'assistant_delta'
-        || record.kind === 'reasoning_summary'
-        || record.kind === 'assistant_completed'
-        || record.kind === 'assistant_failed'
-        || record.kind === 'tool_call_started'
-        || record.kind === 'tool_call_updated'
-        || record.kind === 'tool_call_completed'
-        || record.kind === 'tool_call_failed'
-        || record.kind === 'spec_edit_proposal_created'
-        || record.kind === 'retry_started'
-        ? record.kind
-        : null
-    if (!kind) {
-        return null
-    }
-    const toolCall = asUnknownRecord(record.tool_call)
-    return {
-        id: record.id,
-        turn_id: record.turn_id,
-        sequence: record.sequence,
-        timestamp: record.timestamp,
-        kind,
-        content_delta: asOptionalNullableString(record.content_delta),
-        message: asOptionalNullableString(record.message),
-        tool_call_id: asOptionalNullableString(record.tool_call_id),
-        artifact_id: asOptionalNullableString(record.artifact_id),
-        segment_id: asOptionalNullableString(record.segment_id),
-        segment: parseConversationSegmentResponse(record.segment),
-        tool_call: toolCall && typeof toolCall.title === 'string' && typeof toolCall.id === 'string'
-            ? {
-                id: toolCall.id,
-                kind: toolCall.kind === 'file_change'
-                    ? 'file_change'
-                    : toolCall.kind === 'dynamic_tool'
-                        ? 'dynamic_tool'
-                        : 'command_execution',
-                status: toolCall.status === 'running' || toolCall.status === 'failed' ? toolCall.status : 'completed',
-                title: toolCall.title,
-                command: asOptionalNullableString(toolCall.command),
-                output: asOptionalNullableString(toolCall.output),
-                file_paths: Array.isArray(toolCall.file_paths) ? toolCall.file_paths.map((entry) => String(entry)) : [],
-            }
-            : null,
     }
 }
 
@@ -379,6 +290,7 @@ function parseConversationSegmentResponse(value: unknown): ConversationSegmentRe
         completed_at: asOptionalNullableString(record.completed_at),
         error: asOptionalNullableString(record.error),
         artifact_id: asOptionalNullableString(record.artifact_id),
+        phase: asOptionalNullableString(record.phase),
         tool_call: toolCall && typeof toolCall.title === 'string' && typeof toolCall.id === 'string'
             ? {
                 id: toolCall.id,
@@ -659,6 +571,10 @@ export function parseConversationSnapshotResponse(
     endpoint = '/workspace/api/conversations/{id}',
 ): ConversationSnapshotResponse {
     const record = expectObjectRecord(payload, endpoint)
+    const schemaVersion = record.schema_version
+    if (typeof schemaVersion !== 'number') {
+        throw new ApiSchemaError(endpoint, 'Expected conversation snapshot schema_version.')
+    }
     const turns = Array.isArray(record.turns)
         ? record.turns
             .map((entry) => parseConversationTurnResponse(entry, endpoint))
@@ -686,6 +602,7 @@ export function parseConversationSnapshotResponse(
         : []
     const executionWorkflowRecord = asUnknownRecord(record.execution_workflow) || {}
     return {
+        schema_version: schemaVersion,
         conversation_id: expectString(record.conversation_id, endpoint, 'conversation_id'),
         project_path: expectString(record.project_path, endpoint, 'project_path'),
         title: asOptionalString(record.title) || 'New thread',
@@ -710,7 +627,7 @@ export function parseConversationSnapshotResponse(
 export function parseConversationStreamEventResponse(
     payload: unknown,
     endpoint = '/workspace/api/conversations/{id}/events',
-): ConversationTurnUpsertEventResponse | ConversationTurnEventStreamResponse | null {
+): ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse | null {
     const record = expectObjectRecord(payload, endpoint)
     const type = typeof record.type === 'string' ? record.type : ''
     if (type === 'turn_upsert') {
@@ -733,10 +650,10 @@ export function parseConversationStreamEventResponse(
             turn,
         }
     }
-    if (type === 'turn_event') {
-        const event = parseConversationTurnEventResponse(record.event, endpoint)
+    if (type === 'segment_upsert') {
+        const segment = parseConversationSegmentResponse(record.segment)
         if (
-            !event
+            !segment
             || typeof record.conversation_id !== 'string'
             || typeof record.project_path !== 'string'
             || typeof record.title !== 'string'
@@ -745,12 +662,12 @@ export function parseConversationStreamEventResponse(
             return null
         }
         return {
-            type: 'turn_event',
+            type: 'segment_upsert',
             conversation_id: record.conversation_id,
             project_path: record.project_path,
             title: record.title,
             updated_at: record.updated_at,
-            event,
+            segment,
         }
     }
     return null
