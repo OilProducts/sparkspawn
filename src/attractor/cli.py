@@ -9,7 +9,10 @@ from typing import Sequence
 
 import httpx
 
-from workspace.project_chat_common import normalize_spec_edit_proposal_payload
+from workspace.project_chat_common import (
+    normalize_flow_run_request_payload,
+    normalize_spec_edit_proposal_payload,
+)
 
 
 DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
@@ -24,7 +27,7 @@ SPEC_PROPOSAL_CREATE_EXAMPLE = """{
   ],
   "rationale": "Ground the workflow in an explicit user approval step."
 }"""
-SPEC_PROPOSAL_CREATE_STDIN_EXAMPLE = """cat <<'EOF' | sparkspawn spec-proposal create --json -
+SPEC_PROPOSAL_CREATE_STDIN_EXAMPLE = """cat <<'EOF' | sparkspawn-workspace spec-proposal --json -
 {
   "summary": "Clarify the approval gate before planning begins.",
   "changes": [
@@ -50,13 +53,21 @@ cat >"$payload_file" <<'EOF'
   ]
 }
 EOF
-sparkspawn spec-proposal create --conversation amber-otter --json "$payload_file"'''
+sparkspawn-workspace spec-proposal --conversation amber-otter --json "$payload_file"'''
+FLOW_RUN_STDIN_EXAMPLE = """cat <<'EOF' | sparkspawn-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --goal -
+Implement the approved work items from the current conversation state.
+EOF"""
+FLOW_RUN_TEMPFILE_EXAMPLE = '''goal_file=$(mktemp)
+cat >"$goal_file" <<'EOF'
+Implement the approved work items from the current conversation state.
+EOF
+sparkspawn-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --goal-file "$goal_file"'''
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_runtime_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sparkspawn",
-        description="Sparkspawn runtime CLI",
+        description="Spark Spawn operator CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -72,15 +83,19 @@ def _build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--flows-dir", type=Path, default=None, help="Flow storage directory")
     serve.add_argument("--ui-dir", type=Path, default=None, help="Built UI directory (contains index.html)")
 
-    spec_proposal = subparsers.add_parser(
-        "spec-proposal",
-        help="Create or inspect spec proposal artifacts",
+    return parser
+
+
+def _build_workspace_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="sparkspawn-workspace",
+        description="Spark Spawn workspace agent CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    spec_proposal_subparsers = spec_proposal.add_subparsers(dest="spec_proposal_command")
+    subparsers = parser.add_subparsers(dest="command")
 
-    spec_proposal_create = spec_proposal_subparsers.add_parser(
-        "create",
+    spec_proposal = subparsers.add_parser(
+        "spec-proposal",
         help="Create a pending spec proposal artifact in a conversation",
         description=(
             "Create a pending spec proposal artifact and inline conversation segment.\n\n"
@@ -105,18 +120,74 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    spec_proposal_create.add_argument(
+    spec_proposal.add_argument(
         "--json",
         dest="json_path",
         required=True,
         help="Path to a JSON payload file, or '-' to read the payload from stdin.",
     )
-    spec_proposal_create.add_argument(
+    spec_proposal.add_argument(
         "--conversation",
         required=True,
         help="Conversation handle in adjective-noun form, for example 'amber-otter'.",
     )
-    spec_proposal_create.add_argument(
+    spec_proposal.add_argument(
+        "--base-url",
+        default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
+    )
+
+    flow_run = subparsers.add_parser(
+        "flow-run",
+        help="Create a pending flow-run request artifact in a conversation",
+        description=(
+            "Create a pending flow-run request artifact and inline conversation segment.\n\n"
+            "The command requires:\n"
+            "  --flow: the Attractor flow name to request\n"
+            "  --summary: short explanation for why the run should start\n"
+            "  --conversation: the target conversation handle\n\n"
+            "Use --goal-file or --goal - when the flow needs launch context.\n"
+            "The command does not approve the request or start the run immediately."
+        ),
+        epilog=(
+            "Preferred stdin example:\n"
+            + FLOW_RUN_STDIN_EXAMPLE
+            + "\n\nFallback temp-file example:\n"
+            + FLOW_RUN_TEMPFILE_EXAMPLE
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    flow_run.add_argument(
+        "--conversation",
+        required=True,
+        help="Conversation handle in adjective-noun form, for example 'amber-otter'.",
+    )
+    flow_run.add_argument(
+        "--flow",
+        required=True,
+        help="Attractor flow name to request, for example 'implement-spec.dot'.",
+    )
+    flow_run.add_argument(
+        "--summary",
+        required=True,
+        help="Short human-readable reason for the requested run.",
+    )
+    goal_group = flow_run.add_mutually_exclusive_group()
+    goal_group.add_argument(
+        "--goal",
+        dest="goal_text",
+        help="Inline goal text, or '-' to read the goal from stdin.",
+    )
+    goal_group.add_argument(
+        "--goal-file",
+        dest="goal_file",
+        help="Path to a text file containing the optional run goal.",
+    )
+    flow_run.add_argument(
+        "--model",
+        help="Optional model override to request if the run is approved.",
+    )
+    flow_run.add_argument(
         "--base-url",
         default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
         help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
@@ -126,7 +197,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = _build_parser()
+    parser = _build_runtime_parser()
     args = parser.parse_args(argv)
 
     if not getattr(args, "command", None):
@@ -135,26 +206,29 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "serve":
         return _run_serve(args)
+
+    parser.error(f"Unknown command: {args.command}")
+    return 2
+
+
+def workspace_main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_workspace_parser()
+    args = parser.parse_args(argv)
+
+    if not getattr(args, "command", None):
+        parser.print_help()
+        return 0
+
     if args.command == "spec-proposal":
         return _run_spec_proposal(args)
+    if args.command == "flow-run":
+        return _run_flow_run(args)
 
     parser.error(f"Unknown command: {args.command}")
     return 2
 
 
 def _run_spec_proposal(args: argparse.Namespace) -> int:
-    if not getattr(args, "spec_proposal_command", None):
-        print("Usage: sparkspawn spec-proposal <command>\n")
-        print("Commands:")
-        print("  create   Create a pending spec proposal artifact in a conversation")
-        print("\nRun `sparkspawn spec-proposal create --help` for the full payload contract.")
-        return 0
-    if args.spec_proposal_command == "create":
-        return _run_spec_proposal_create(args)
-    raise ValueError(f"Unknown spec-proposal command: {args.spec_proposal_command}")
-
-
-def _run_spec_proposal_create(args: argparse.Namespace) -> int:
     try:
         raw_payload = _read_json_input(str(args.json_path))
         payload = json.loads(raw_payload)
@@ -222,7 +296,7 @@ def _run_spec_proposal_create(args: argparse.Namespace) -> int:
     try:
         payload = normalize_spec_edit_proposal_payload(
             payload,
-            source_name="sparkspawn spec-proposal create",
+            source_name="sparkspawn-workspace spec-proposal",
         )
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)
@@ -283,6 +357,88 @@ def _read_json_input(json_path: str) -> str:
     if json_path == "-":
         return sys.stdin.read()
     return Path(json_path).read_text(encoding="utf-8")
+
+
+def _read_optional_goal(args: argparse.Namespace) -> str | None:
+    goal_text = str(getattr(args, "goal_text", "") or "").strip()
+    goal_file = str(getattr(args, "goal_file", "") or "").strip()
+    if goal_text:
+        if goal_text == "-":
+            text = sys.stdin.read().strip()
+            return text or None
+        return goal_text
+    if goal_file:
+        return Path(goal_file).read_text(encoding="utf-8").strip() or None
+    return None
+
+
+def _run_flow_run(args: argparse.Namespace) -> int:
+    conversation_handle = str(args.conversation or "").strip()
+    if not conversation_handle:
+        print(json.dumps({"ok": False, "error": "Missing required --conversation handle."}), file=sys.stderr)
+        return 1
+
+    try:
+        goal = _read_optional_goal(args)
+    except FileNotFoundError:
+        print(json.dumps({"ok": False, "error": f"Goal file not found: {args.goal_file}"}), file=sys.stderr)
+        return 1
+
+    try:
+        payload = normalize_flow_run_request_payload(
+            {
+                "flow_name": args.flow,
+                "summary": args.summary,
+                "goal": goal,
+                "model": args.model,
+            },
+            source_name="sparkspawn-workspace flow-run",
+        )
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)
+        return 1
+
+    base_url = str(args.base_url).rstrip("/")
+    request_url = f"{base_url}/workspace/api/conversations/by-handle/{conversation_handle}/flow-run-requests"
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(request_url, json=payload)
+    except httpx.HTTPError as exc:
+        print(json.dumps({"ok": False, "error": f"Request failed: {exc}"}), file=sys.stderr)
+        return 1
+
+    try:
+        response_payload = response.json()
+    except ValueError:
+        response_payload = {"detail": response.text}
+
+    if response.is_error:
+        error_detail: object
+        if isinstance(response_payload, dict):
+            error_detail = response_payload.get("detail")
+        else:
+            error_detail = response.text
+        if isinstance(error_detail, list):
+            message = "; ".join(_format_validation_error(entry) for entry in error_detail)
+        elif isinstance(error_detail, str):
+            message = error_detail
+        else:
+            message = response.text
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "status_code": response.status_code,
+                    "error": message,
+                }
+            ),
+            file=sys.stderr,
+        )
+        return 1
+
+    print(json.dumps(response_payload, indent=2, sort_keys=True))
+    return 0
 
 
 def _format_validation_error(value: object) -> str:

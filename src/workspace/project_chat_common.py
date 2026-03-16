@@ -85,6 +85,32 @@ def normalize_spec_edit_proposal_payload(
     return payload
 
 
+def normalize_flow_run_request_payload(
+    arguments: Any,
+    *,
+    source_name: str,
+) -> dict[str, Any]:
+    if not isinstance(arguments, dict):
+        raise ValueError(f"{source_name} requires an object argument payload.")
+    flow_name = as_non_empty_string(arguments.get("flow_name"))
+    summary = as_non_empty_string(arguments.get("summary"))
+    if not flow_name:
+        raise ValueError(f"{source_name} requires a non-empty flow_name.")
+    if not summary:
+        raise ValueError(f"{source_name} requires a non-empty summary.")
+    payload: dict[str, Any] = {
+        "flow_name": flow_name,
+        "summary": summary,
+    }
+    goal = as_non_empty_string(arguments.get("goal"))
+    if goal:
+        payload["goal"] = goal
+    model = as_non_empty_string(arguments.get("model"))
+    if model:
+        payload["model"] = model
+    return payload
+
+
 def extract_json_object(raw: str) -> dict[str, Any]:
     text = raw.strip()
     if not text:

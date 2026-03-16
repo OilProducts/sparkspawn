@@ -67,7 +67,7 @@ def test_run_serve_preserves_runtime_path_env_for_reload(monkeypatch, tmp_path: 
     assert cli.os.environ["SPARKSPAWN_UI_DIR"] == str(ui_dir.resolve(strict=False))
 
 
-def test_run_spec_proposal_create_posts_payload_and_prints_response(
+def test_run_workspace_spec_proposal_posts_payload_and_prints_response(
     monkeypatch,
     tmp_path: Path,
     capsys,
@@ -120,10 +120,9 @@ def test_run_spec_proposal_create_posts_payload_and_prints_response(
 
     monkeypatch.setattr(cli.httpx, "Client", FakeClient)
 
-    result = cli.main(
+    result = cli.workspace_main(
         [
             "spec-proposal",
-            "create",
             "--conversation",
             "amber-otter",
             "--json",
@@ -152,7 +151,7 @@ def test_run_spec_proposal_create_posts_payload_and_prints_response(
     assert json.loads(capsys.readouterr().out)["proposal_id"] == "proposal-123"
 
 
-def test_run_spec_proposal_create_rejects_payload_context_fields(
+def test_run_workspace_spec_proposal_rejects_payload_context_fields(
     tmp_path: Path,
     capsys,
 ) -> None:
@@ -168,7 +167,7 @@ def test_run_spec_proposal_create_rejects_payload_context_fields(
         encoding="utf-8",
     )
 
-    result = cli.main(["spec-proposal", "create", "--conversation", "amber-otter", "--json", str(payload_path)])
+    result = cli.workspace_main(["spec-proposal", "--conversation", "amber-otter", "--json", str(payload_path)])
 
     assert result == 1
     stderr = json.loads(capsys.readouterr().err)
@@ -176,7 +175,7 @@ def test_run_spec_proposal_create_rejects_payload_context_fields(
     assert "--conversation" in stderr["error"]
 
 
-def test_run_spec_proposal_create_reads_payload_from_stdin(
+def test_run_workspace_spec_proposal_reads_payload_from_stdin(
     monkeypatch,
     capsys,
 ) -> None:
@@ -229,7 +228,7 @@ def test_run_spec_proposal_create_reads_payload_from_stdin(
         ),
     )
 
-    result = cli.main(["spec-proposal", "create", "--conversation", "quiet-river", "--json", "-"])
+    result = cli.workspace_main(["spec-proposal", "--conversation", "quiet-river", "--json", "-"])
 
     assert result == 0
     assert calls == [
@@ -248,3 +247,75 @@ def test_run_spec_proposal_create_reads_payload_from_stdin(
         )
     ]
     assert json.loads(capsys.readouterr().out)["proposal_id"] == "proposal-stdin"
+
+
+def test_run_workspace_flow_run_posts_payload_and_prints_response(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    goal_path = tmp_path / "goal.txt"
+    goal_path.write_text("Implement the approved scope.", encoding="utf-8")
+
+    class FakeResponse:
+        status_code = 200
+        is_error = False
+
+        def json(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "conversation_id": "conversation-123",
+                "conversation_handle": "amber-otter",
+                "flow_run_request_id": "flow-run-request-123",
+                "segment_id": "segment-artifact-flow-run-request-123",
+            }
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeClient:
+        def __init__(self, timeout: float) -> None:
+            assert timeout == 30.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, json: dict[str, object]) -> FakeResponse:
+            calls.append((url, json))
+            return FakeResponse()
+
+    monkeypatch.setattr(cli.httpx, "Client", FakeClient)
+
+    result = cli.workspace_main(
+        [
+            "flow-run",
+            "--conversation",
+            "amber-otter",
+            "--flow",
+            "implement-spec.dot",
+            "--summary",
+            "Run implementation for the approved scope",
+            "--goal-file",
+            str(goal_path),
+            "--model",
+            "gpt-5.4",
+            "--base-url",
+            "http://127.0.0.1:8000",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [
+        (
+            "http://127.0.0.1:8000/workspace/api/conversations/by-handle/amber-otter/flow-run-requests",
+            {
+                "flow_name": "implement-spec.dot",
+                "summary": "Run implementation for the approved scope",
+                "goal": "Implement the approved scope.",
+                "model": "gpt-5.4",
+            },
+        )
+    ]
+    assert json.loads(capsys.readouterr().out)["flow_run_request_id"] == "flow-run-request-123"

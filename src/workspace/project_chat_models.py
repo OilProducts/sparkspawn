@@ -359,6 +359,71 @@ class SpecEditProposal:
 
 
 @dataclass
+class FlowRunRequest:
+    id: str
+    created_at: str
+    updated_at: str
+    flow_name: str
+    summary: str
+    project_path: str
+    conversation_id: str
+    source_turn_id: str
+    status: str = "pending"
+    source_segment_id: Optional[str] = None
+    goal: Optional[str] = None
+    model: Optional[str] = None
+    run_id: Optional[str] = None
+    launch_error: Optional[str] = None
+    review_message: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "flow_name": self.flow_name,
+            "summary": self.summary,
+            "project_path": self.project_path,
+            "conversation_id": self.conversation_id,
+            "source_turn_id": self.source_turn_id,
+            "status": self.status,
+        }
+        if self.source_segment_id:
+            payload["source_segment_id"] = self.source_segment_id
+        if self.goal:
+            payload["goal"] = self.goal
+        if self.model:
+            payload["model"] = self.model
+        if self.run_id:
+            payload["run_id"] = self.run_id
+        if self.launch_error:
+            payload["launch_error"] = self.launch_error
+        if self.review_message:
+            payload["review_message"] = self.review_message
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "FlowRunRequest":
+        return cls(
+            id=str(payload.get("id", "")),
+            created_at=str(payload.get("created_at", "")),
+            updated_at=str(payload.get("updated_at", payload.get("created_at", "")) or ""),
+            flow_name=str(payload.get("flow_name", "")),
+            summary=str(payload.get("summary", "")),
+            project_path=_normalize_project_path(str(payload.get("project_path", ""))),
+            conversation_id=str(payload.get("conversation_id", "")),
+            source_turn_id=str(payload.get("source_turn_id", "")),
+            status=str(payload.get("status", "pending") or "pending"),
+            source_segment_id=str(payload.get("source_segment_id")) if payload.get("source_segment_id") is not None else None,
+            goal=str(payload.get("goal")) if payload.get("goal") is not None else None,
+            model=str(payload.get("model")) if payload.get("model") is not None else None,
+            run_id=str(payload.get("run_id")) if payload.get("run_id") is not None else None,
+            launch_error=str(payload.get("launch_error")) if payload.get("launch_error") is not None else None,
+            review_message=str(payload.get("review_message")) if payload.get("review_message") is not None else None,
+        )
+
+
+@dataclass
 class ExecutionCardReview:
     id: str
     disposition: str
@@ -528,6 +593,7 @@ class ConversationState:
     segments: list[ConversationSegment] = field(default_factory=list)
     event_log: list[WorkflowEvent] = field(default_factory=list)
     spec_edit_proposals: list[SpecEditProposal] = field(default_factory=list)
+    flow_run_requests: list[FlowRunRequest] = field(default_factory=list)
     execution_cards: list[ExecutionCard] = field(default_factory=list)
     execution_workflow: ExecutionWorkflowState = field(default_factory=ExecutionWorkflowState)
 
@@ -544,6 +610,7 @@ class ConversationState:
             "segments": [segment.to_dict() for segment in self.segments],
             "event_log": [entry.to_dict() for entry in self.event_log],
             "spec_edit_proposals": [proposal.to_dict() for proposal in self.spec_edit_proposals],
+            "flow_run_requests": [request.to_dict() for request in self.flow_run_requests],
             "execution_cards": [card.to_dict() for card in self.execution_cards],
             "execution_workflow": self.execution_workflow.to_dict(),
         }
@@ -554,6 +621,7 @@ class ConversationState:
         raw_segments = payload.get("segments")
         raw_events = payload.get("event_log")
         raw_proposals = payload.get("spec_edit_proposals")
+        raw_flow_run_requests = payload.get("flow_run_requests")
         raw_cards = payload.get("execution_cards")
         schema_version = payload.get("schema_version")
         if not isinstance(schema_version, int) or schema_version != CONVERSATION_STATE_SCHEMA_VERSION:
@@ -599,6 +667,11 @@ class ConversationState:
                 for entry in raw_proposals
                 if isinstance(entry, dict)
             ] if isinstance(raw_proposals, list) else [],
+            flow_run_requests=[
+                FlowRunRequest.from_dict(entry)
+                for entry in raw_flow_run_requests
+                if isinstance(entry, dict)
+            ] if isinstance(raw_flow_run_requests, list) else [],
             execution_cards=[
                 ExecutionCard.from_dict(entry)
                 for entry in raw_cards

@@ -64,6 +64,22 @@ class SpecEditRejectionRequest(BaseModel):
     project_path: str
 
 
+class FlowRunRequestCreateByHandleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    flow_name: str
+    summary: str
+    goal: Optional[str] = None
+    model: Optional[str] = None
+
+
+class FlowRunRequestReviewRequest(BaseModel):
+    project_path: str
+    disposition: str
+    message: str
+    flow_name: Optional[str] = None
+    model: Optional[str] = None
+
+
 class ProjectFlowBindingUpsertRequest(BaseModel):
     project_path: str
     flow_name: str
@@ -306,6 +322,69 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         await project_chat.publish_snapshot(conversation_id)
         return run_id
 
+    async def _launch_flow_run_request_pipeline(
+        *,
+        conversation_id: str,
+        request_id: str,
+        project_path: str,
+        flow_name: str,
+        goal: Optional[str],
+        model: Optional[str],
+    ) -> str | None:
+        project_chat = deps.get_project_chat()
+        try:
+            launch_payload = await deps.get_attractor_client().start_pipeline(
+                run_id=None,
+                flow_name=flow_name,
+                working_directory=project_path,
+                model=model,
+                goal=goal,
+            )
+        except AttractorApiError as exc:
+            await asyncio.to_thread(
+                project_chat.fail_flow_run_request_launch,
+                conversation_id,
+                request_id,
+                flow_name,
+                str(exc),
+            )
+            await project_chat.publish_snapshot(conversation_id)
+            return None
+
+        if launch_payload.get("status") != "started":
+            error = str(launch_payload.get("error") or "Flow run could not be started.")
+            await asyncio.to_thread(
+                project_chat.fail_flow_run_request_launch,
+                conversation_id,
+                request_id,
+                flow_name,
+                error,
+            )
+            await project_chat.publish_snapshot(conversation_id)
+            return None
+
+        run_id = str(launch_payload.get("run_id") or "")
+        if not run_id:
+            await asyncio.to_thread(
+                project_chat.fail_flow_run_request_launch,
+                conversation_id,
+                request_id,
+                flow_name,
+                "Flow run did not return a run id.",
+            )
+            await project_chat.publish_snapshot(conversation_id)
+            return None
+
+        await asyncio.to_thread(
+            project_chat.note_flow_run_request_launched,
+            conversation_id,
+            request_id,
+            run_id,
+            flow_name,
+        )
+        await project_chat.publish_snapshot(conversation_id)
+        return run_id
+
     @router.get("/api/conversations/{conversation_id}")
     async def get_project_conversation(conversation_id: str, project_path: Optional[str] = None):
         try:
@@ -517,6 +596,36 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             **result,
         }
 
+    @router.post("/api/conversations/by-handle/{conversation_handle}/flow-run-requests")
+    async def create_flow_run_request_by_handle(
+        conversation_handle: str,
+        req: FlowRunRequestCreateByHandleRequest,
+    ):
+        await _ensure_flow_exists(req.flow_name)
+        try:
+            result = await asyncio.to_thread(
+                deps.get_project_chat().create_flow_run_request_by_handle,
+                conversation_handle,
+                req.model_dump(),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Unknown conversation handle: {conversation_handle}. "
+                    "Verify the handle shown in the thread UI and try again."
+                ),
+            ) from exc
+        except ValueError as exc:
+            detail = str(exc)
+            status_code = 409 if "identical request already exists" in detail else 400
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+        await deps.get_project_chat().publish_snapshot(str(result["conversation_id"]))
+        return {
+            "ok": True,
+            **result,
+        }
+
     @router.post("/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/approve")
     async def approve_project_spec_edit_proposal(
         conversation_id: str,
@@ -579,6 +688,68 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         await deps.get_project_chat().publish_snapshot(conversation_id)
+        return snapshot
+
+    @router.post("/api/conversations/{conversation_id}/flow-run-requests/{request_id}/review")
+    async def review_flow_run_request(
+        conversation_id: str,
+        request_id: str,
+        req: FlowRunRequestReviewRequest,
+    ):
+        if req.disposition not in {"approved", "rejected"}:
+            raise HTTPException(status_code=400, detail="Flow run request disposition must be approved or rejected.")
+        normalized_project_path = _normalize_project_path_or_400(req.project_path)
+        effective_flow_name = (req.flow_name or "").strip() or None
+        if req.disposition == "approved":
+            if effective_flow_name:
+                await _ensure_flow_exists(effective_flow_name)
+            else:
+                snapshot = await asyncio.to_thread(
+                    deps.get_project_chat().get_snapshot,
+                    conversation_id,
+                    normalized_project_path,
+                )
+                existing_request = next(
+                    (
+                        entry
+                        for entry in snapshot.get("flow_run_requests", [])
+                        if isinstance(entry, dict) and str(entry.get("id", "")) == request_id
+                    ),
+                    None,
+                )
+                if existing_request is None:
+                    raise HTTPException(status_code=404, detail="Unknown flow run request.")
+                await _ensure_flow_exists(str(existing_request.get("flow_name", "")).strip())
+        try:
+            snapshot, flow_run_request = await asyncio.to_thread(
+                deps.get_project_chat().review_flow_run_request,
+                conversation_id,
+                normalized_project_path,
+                request_id,
+                req.disposition,
+                req.message,
+                effective_flow_name,
+                req.model,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await deps.get_project_chat().publish_snapshot(conversation_id)
+        if req.disposition == "approved":
+            approved_flow_name = effective_flow_name or flow_run_request.flow_name
+            await _ensure_flow_exists(approved_flow_name)
+            await _launch_flow_run_request_pipeline(
+                conversation_id=conversation_id,
+                request_id=flow_run_request.id,
+                project_path=normalized_project_path,
+                flow_name=approved_flow_name,
+                goal=flow_run_request.goal,
+                model=req.model or flow_run_request.model,
+            )
+            return await asyncio.to_thread(
+                deps.get_project_chat().get_snapshot,
+                conversation_id,
+                normalized_project_path,
+            )
         return snapshot
 
     @router.post("/api/conversations/{conversation_id}/execution-cards/{execution_card_id}/review")

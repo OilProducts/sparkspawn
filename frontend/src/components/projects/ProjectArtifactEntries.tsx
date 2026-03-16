@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp } from "lucide-react"
 
-import type { ExecutionCardResponse, SpecEditProposalResponse } from "@/lib/workspaceClient"
+import type { ExecutionCardResponse, FlowRunRequestResponse, SpecEditProposalResponse } from "@/lib/workspaceClient"
 
 import type { ProjectGitMetadata } from "@/components/projects/presentation"
 
@@ -179,6 +179,130 @@ export function ProjectSpecEditProposalEntry({
                     This spec edit was rejected. Draft a follow-up change in chat if you want to replace it.
                 </p>
             )}
+        </div>
+    )
+}
+
+type ProjectFlowRunRequestEntryProps = {
+    flowRunRequest: FlowRunRequestResponse | null
+    isLatestFlowRunRequest: boolean
+    pendingFlowRunRequestId: string | null
+    onReviewFlowRunRequest: (request: FlowRunRequestResponse, disposition: "approved" | "rejected") => void | Promise<void>
+    onOpenFlowRun: (request: FlowRunRequestResponse) => void
+    formatConversationTimestamp: (value: string) => string
+    getFlowRunRequestStatusPresentation: (status: FlowRunRequestResponse["status"]) => { label: string; tone: SurfaceTone }
+    getSurfaceToneClassName: (tone: SurfaceTone) => string
+}
+
+export function ProjectFlowRunRequestEntry({
+    flowRunRequest,
+    isLatestFlowRunRequest,
+    pendingFlowRunRequestId,
+    onReviewFlowRunRequest,
+    onOpenFlowRun,
+    formatConversationTimestamp,
+    getFlowRunRequestStatusPresentation,
+    getSurfaceToneClassName,
+}: ProjectFlowRunRequestEntryProps) {
+    if (!flowRunRequest) {
+        return (
+            <div className="w-full rounded-md border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+                Flow run request artifact unavailable. Refresh the project chat to reload it.
+            </div>
+        )
+    }
+
+    const statusPresentation = getFlowRunRequestStatusPresentation(flowRunRequest.status)
+    const canReview = flowRunRequest.status === "pending" || flowRunRequest.status === "launch_failed"
+
+    return (
+        <div
+            data-testid={isLatestFlowRunRequest ? "project-flow-run-request-surface" : undefined}
+            className="w-full rounded-md border border-emerald-500/20 bg-emerald-500/[0.05] px-4 py-3"
+        >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                            Flow run request
+                        </p>
+                        <span className={getSurfaceToneClassName(statusPresentation.tone)}>
+                            {statusPresentation.label}
+                        </span>
+                    </div>
+                    <p className="text-sm font-medium text-foreground">{flowRunRequest.summary}</p>
+                </div>
+                <div className="space-y-1 text-right text-[11px] text-muted-foreground">
+                    <p className="font-mono text-foreground">{flowRunRequest.id}</p>
+                    <p>Updated {formatConversationTimestamp(flowRunRequest.updated_at)}</p>
+                </div>
+            </div>
+            <div className="mt-3 space-y-2 text-[11px] text-muted-foreground">
+                <p>
+                    Flow: <span className="font-mono text-foreground">{flowRunRequest.flow_name}</span>
+                </p>
+                {flowRunRequest.goal ? (
+                    <p className="whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-1 text-[11px] text-muted-foreground">
+                        {flowRunRequest.goal}
+                    </p>
+                ) : null}
+                {flowRunRequest.model ? (
+                    <p>
+                        Model override: <span className="font-mono text-foreground">{flowRunRequest.model}</span>
+                    </p>
+                ) : null}
+                {flowRunRequest.review_message ? (
+                    <p>
+                        Review note: <span className="text-foreground">{flowRunRequest.review_message}</span>
+                    </p>
+                ) : null}
+                {flowRunRequest.launch_error ? (
+                    <p className="text-destructive">
+                        Launch error: {flowRunRequest.launch_error}
+                    </p>
+                ) : null}
+                {flowRunRequest.run_id ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span>
+                            Run: <span className="font-mono text-foreground">{flowRunRequest.run_id}</span>
+                        </span>
+                        <button
+                            type="button"
+                            data-testid={isLatestFlowRunRequest ? "project-flow-run-request-open-run-button" : undefined}
+                            onClick={() => onOpenFlowRun(flowRunRequest)}
+                            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                            Open run
+                        </button>
+                    </div>
+                ) : null}
+            </div>
+            {canReview ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                        data-testid={isLatestFlowRunRequest ? "project-flow-run-request-approve-button" : undefined}
+                        type="button"
+                        onClick={() => {
+                            void onReviewFlowRunRequest(flowRunRequest, "approved")
+                        }}
+                        disabled={pendingFlowRunRequestId === flowRunRequest.id}
+                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        Approve run
+                    </button>
+                    <button
+                        data-testid={isLatestFlowRunRequest ? "project-flow-run-request-reject-button" : undefined}
+                        type="button"
+                        onClick={() => {
+                            void onReviewFlowRunRequest(flowRunRequest, "rejected")
+                        }}
+                        disabled={pendingFlowRunRequestId === flowRunRequest.id}
+                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        Reject run
+                    </button>
+                </div>
+            ) : null}
         </div>
     )
 }

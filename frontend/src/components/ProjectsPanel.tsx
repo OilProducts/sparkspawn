@@ -11,6 +11,7 @@ import {
     deleteConversationValidated,
     deleteProjectValidated,
     type ExecutionCardResponse,
+    type FlowRunRequestResponse,
     type SpecEditProposalResponse,
     approveSpecEditProposalValidated,
     conversationEventsUrl,
@@ -24,6 +25,7 @@ import {
     rejectSpecEditProposalValidated,
     registerProjectValidated,
     reviewExecutionCardValidated,
+    reviewFlowRunRequestValidated,
     sendConversationTurnValidated,
     updateProjectStateValidated,
 } from "@/lib/workspaceClient"
@@ -346,6 +348,7 @@ const ensureConversationSnapshotShell = (
     segments: [],
     event_log: [],
     spec_edit_proposals: [],
+    flow_run_requests: [],
     execution_cards: [],
     execution_workflow: {
         status: "idle",
@@ -566,6 +569,16 @@ const buildAssistantTimelineEntries = (
             })
             return
         }
+        if (segment.kind === "flow_run_request" && segment.artifact_id) {
+            entries.push({
+                id: segment.id,
+                kind: "flow_run_request",
+                role: "system",
+                artifactId: segment.artifact_id,
+                timestamp: segment.timestamp,
+            })
+            return
+        }
         if (segment.kind === "execution_card" && segment.artifact_id) {
             entries.push({
                 id: segment.id,
@@ -693,6 +706,9 @@ export function HomePanel() {
     const appendProjectEventEntry = useStore((state) => state.appendProjectEventEntry)
     const updateProjectScopedWorkspace = useStore((state) => state.updateProjectScopedWorkspace)
     const model = useStore((state) => state.model)
+    const setExecutionFlow = useStore((state) => state.setExecutionFlow)
+    const setSelectedRunId = useStore((state) => state.setSelectedRunId)
+    const setViewMode = useStore((state) => state.setViewMode)
 
     const [projectGitMetadata, setProjectGitMetadata] = useState<Record<string, ProjectGitMetadata>>({})
     const [projectConversationSnapshots, setProjectConversationSnapshots] = useState<Record<string, ConversationSnapshotResponse>>({})
@@ -702,6 +718,7 @@ export function HomePanel() {
     const [isSendingChat, setIsSendingChat] = useState(false)
     const [optimisticSend, setOptimisticSend] = useState<OptimisticSendState | null>(null)
     const [pendingSpecProposalId, setPendingSpecProposalId] = useState<string | null>(null)
+    const [pendingFlowRunRequestId, setPendingFlowRunRequestId] = useState<string | null>(null)
     const [pendingExecutionCardId, setPendingExecutionCardId] = useState<string | null>(null)
     const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
     const [pendingDeleteProjectPath, setPendingDeleteProjectPath] = useState<string | null>(null)
@@ -737,17 +754,23 @@ export function HomePanel() {
         [activeConversationId, activeConversationSnapshot, optimisticSend],
     )
     const activeSpecEditProposals = activeConversationSnapshot?.spec_edit_proposals || []
+    const activeFlowRunRequests = activeConversationSnapshot?.flow_run_requests || []
     const activeExecutionCards = activeConversationSnapshot?.execution_cards || []
     const latestSpecEditProposalId = activeSpecEditProposals.length > 0
         ? activeSpecEditProposals[activeSpecEditProposals.length - 1]?.id || null
+        : null
+    const latestFlowRunRequestId = activeFlowRunRequests.length > 0
+        ? activeFlowRunRequests[activeFlowRunRequests.length - 1]?.id || null
         : null
     const latestExecutionCardId = activeExecutionCards.length > 0
         ? activeExecutionCards[activeExecutionCards.length - 1]?.id || null
         : null
     const activeSpecEditProposalsById = new Map(activeSpecEditProposals.map((proposal) => [proposal.id, proposal]))
+    const activeFlowRunRequestsById = new Map(activeFlowRunRequests.map((request) => [request.id, request]))
     const activeExecutionCardsById = new Map(activeExecutionCards.map((executionCard) => [executionCard.id, executionCard]))
     const hasRenderableConversationHistory = activeConversationHistory.some((entry) => (
         entry.kind === "spec_edit_proposal"
+        || entry.kind === "flow_run_request"
         || entry.kind === "execution_card"
         || entry.kind === "tool_call"
         || entry.role === "user"
@@ -1824,6 +1847,53 @@ export function HomePanel() {
         }
     }
 
+    const onReviewFlowRunRequest = async (
+        flowRunRequest: FlowRunRequestResponse,
+        disposition: "approved" | "rejected",
+    ) => {
+        if (!activeProjectPath || !activeConversationId) {
+            return
+        }
+
+        const reviewMessage = disposition === "approved"
+            ? "Approved for launch."
+            : window.prompt(
+                "Describe why this flow run request should be rejected.",
+                "",
+            )?.trim() || ""
+
+        if (!reviewMessage) {
+            return
+        }
+
+        setPendingFlowRunRequestId(flowRunRequest.id)
+        setPanelError(null)
+        try {
+            const snapshot = await reviewFlowRunRequestValidated(activeConversationId, flowRunRequest.id, {
+                project_path: activeProjectPath,
+                disposition,
+                message: reviewMessage,
+                model: model.trim() || null,
+            })
+            applyConversationSnapshot(activeProjectPath, snapshot, "flow-run-request-review")
+        } catch (error) {
+            const message = extractApiErrorMessage(error, "Unable to review the flow run request.")
+            setPanelError(message)
+            appendLocalProjectEvent(`Flow run request review failed: ${message}`)
+        } finally {
+            setPendingFlowRunRequestId(null)
+        }
+    }
+
+    const onOpenFlowRun = (flowRunRequest: FlowRunRequestResponse) => {
+        if (!flowRunRequest.run_id) {
+            return
+        }
+        setSelectedRunId(flowRunRequest.run_id)
+        setExecutionFlow(flowRunRequest.flow_name || null)
+        setViewMode("execution")
+    }
+
     const formatConversationTimestamp = (value: string) => {
         const parsed = new Date(value)
         if (Number.isNaN(parsed.getTime())) {
@@ -1859,14 +1929,17 @@ export function HomePanel() {
             hasRenderableConversationHistory={hasRenderableConversationHistory}
             activeConversationHistory={activeConversationHistory}
             activeSpecEditProposalsById={activeSpecEditProposalsById}
+            activeFlowRunRequestsById={activeFlowRunRequestsById}
             activeExecutionCardsById={activeExecutionCardsById}
             latestSpecEditProposalId={latestSpecEditProposalId}
+            latestFlowRunRequestId={latestFlowRunRequestId}
             latestExecutionCardId={latestExecutionCardId}
             activeProjectGitMetadata={activeProjectGitMetadata}
             expandedToolCalls={expandedToolCalls}
             expandedThinkingEntries={expandedThinkingEntries}
             expandedProposalChanges={expandedProposalChanges}
             pendingSpecProposalId={pendingSpecProposalId}
+            pendingFlowRunRequestId={pendingFlowRunRequestId}
             pendingExecutionCardId={pendingExecutionCardId}
             formatConversationTimestamp={formatConversationTimestamp}
             onToggleToolCallExpanded={toggleToolCallExpanded}
@@ -1874,6 +1947,8 @@ export function HomePanel() {
             onToggleProposalChangeExpanded={toggleProposalChangeExpanded}
             onApproveSpecEditProposal={onApproveSpecEditProposal}
             onRejectSpecEditProposal={onRejectSpecEditProposal}
+            onReviewFlowRunRequest={onReviewFlowRunRequest}
+            onOpenFlowRun={onOpenFlowRun}
             onReviewExecutionCard={onReviewExecutionCard}
         />
     )

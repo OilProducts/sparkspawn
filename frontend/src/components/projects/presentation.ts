@@ -1,5 +1,6 @@
 import type {
     ExecutionCardResponse,
+    FlowRunRequestResponse,
     SpecEditProposalResponse,
 } from '@/lib/workspaceClient'
 import type { ConversationTimelineToolCall } from '@/components/projects/types'
@@ -46,6 +47,22 @@ export const getExecutionCardStatusPresentation = (status: ExecutionCardResponse
         return { label: 'Revision requested', tone: 'warning' as const }
     }
     return { label: 'Draft', tone: 'info' as const }
+}
+
+export const getFlowRunRequestStatusPresentation = (status: FlowRunRequestResponse['status']) => {
+    if (status === 'launched') {
+        return { label: 'Launched', tone: 'success' as const }
+    }
+    if (status === 'approved') {
+        return { label: 'Approved', tone: 'info' as const }
+    }
+    if (status === 'rejected') {
+        return { label: 'Rejected', tone: 'danger' as const }
+    }
+    if (status === 'launch_failed') {
+        return { label: 'Launch failed', tone: 'danger' as const }
+    }
+    return { label: 'Pending review', tone: 'warning' as const }
 }
 
 export const getToolCallStatusPresentation = (status: 'running' | 'completed' | 'failed') => {

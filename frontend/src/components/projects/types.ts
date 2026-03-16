@@ -39,7 +39,7 @@ export type ConversationTimelineEntry =
     }
     | {
         id: string
-        kind: 'spec_edit_proposal' | 'execution_card'
+        kind: 'spec_edit_proposal' | 'flow_run_request' | 'execution_card'
         role: 'system'
         artifactId: string
         timestamp: string

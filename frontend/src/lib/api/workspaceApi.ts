@@ -28,7 +28,7 @@ export interface ConversationTurnResponse {
     content: string
     timestamp: string
     status: 'pending' | 'streaming' | 'complete' | 'failed'
-    kind: 'message' | 'spec_edit_proposal' | 'execution_card'
+    kind: 'message' | 'spec_edit_proposal' | 'flow_run_request' | 'execution_card'
     artifact_id?: string | null
     parent_turn_id?: string | null
     error?: string | null
@@ -38,7 +38,7 @@ export interface ConversationSegmentResponse {
     id: string
     turn_id: string
     order: number
-    kind: 'assistant_message' | 'reasoning' | 'tool_call' | 'spec_edit_proposal' | 'execution_card'
+    kind: 'assistant_message' | 'reasoning' | 'tool_call' | 'spec_edit_proposal' | 'flow_run_request' | 'execution_card'
     role: 'assistant' | 'system'
     status: 'pending' | 'streaming' | 'complete' | 'failed' | 'running'
     timestamp: string
@@ -113,6 +113,24 @@ export interface ExecutionCardResponse {
     }>
 }
 
+export interface FlowRunRequestResponse {
+    id: string
+    created_at: string
+    updated_at: string
+    flow_name: string
+    summary: string
+    project_path: string
+    conversation_id: string
+    source_turn_id: string
+    status: 'pending' | 'approved' | 'rejected' | 'launch_failed' | 'launched'
+    source_segment_id?: string | null
+    goal?: string | null
+    model?: string | null
+    run_id?: string | null
+    launch_error?: string | null
+    review_message?: string | null
+}
+
 export interface ConversationSnapshotResponse {
     schema_version: number
     conversation_id: string
@@ -125,6 +143,7 @@ export interface ConversationSnapshotResponse {
     segments: ConversationSegmentResponse[]
     event_log: WorkflowEventResponse[]
     spec_edit_proposals: SpecEditProposalResponse[]
+    flow_run_requests: FlowRunRequestResponse[]
     execution_cards: ExecutionCardResponse[]
     execution_workflow: {
         run_id?: string | null
@@ -218,7 +237,7 @@ function parseConversationTurnResponse(value: unknown, _endpoint: string): Conve
     if (role !== 'user' && role !== 'assistant' && role !== 'system') {
         return null
     }
-    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'execution_card' || record.kind === 'message'
+    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'flow_run_request' || record.kind === 'execution_card' || record.kind === 'message'
         ? record.kind
         : 'message'
     if (typeof record.id !== 'string' || typeof record.content !== 'string' || typeof record.timestamp !== 'string') {
@@ -262,6 +281,7 @@ function parseConversationSegmentResponse(value: unknown): ConversationSegmentRe
         || record.kind === 'reasoning'
         || record.kind === 'tool_call'
         || record.kind === 'spec_edit_proposal'
+        || record.kind === 'flow_run_request'
         || record.kind === 'execution_card'
         ? record.kind
         : null
@@ -420,6 +440,46 @@ function parseExecutionCardResponse(value: unknown): ExecutionCardResponse | nul
         flow_source: asOptionalNullableString(record.flow_source),
         work_items,
         review_feedback,
+    }
+}
+
+function parseFlowRunRequestResponse(value: unknown): FlowRunRequestResponse | null {
+    const record = asUnknownRecord(value)
+    if (
+        !record
+        || typeof record.id !== 'string'
+        || typeof record.created_at !== 'string'
+        || typeof record.updated_at !== 'string'
+        || typeof record.flow_name !== 'string'
+        || typeof record.summary !== 'string'
+        || typeof record.project_path !== 'string'
+        || typeof record.conversation_id !== 'string'
+        || typeof record.source_turn_id !== 'string'
+    ) {
+        return null
+    }
+    const status = record.status === 'approved'
+        || record.status === 'rejected'
+        || record.status === 'launch_failed'
+        || record.status === 'launched'
+        ? record.status
+        : 'pending'
+    return {
+        id: record.id,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        flow_name: record.flow_name,
+        summary: record.summary,
+        project_path: record.project_path,
+        conversation_id: record.conversation_id,
+        source_turn_id: record.source_turn_id,
+        status,
+        source_segment_id: asOptionalNullableString(record.source_segment_id),
+        goal: asOptionalNullableString(record.goal),
+        model: asOptionalNullableString(record.model),
+        run_id: asOptionalNullableString(record.run_id),
+        launch_error: asOptionalNullableString(record.launch_error),
+        review_message: asOptionalNullableString(record.review_message),
     }
 }
 
@@ -595,6 +655,11 @@ export function parseConversationSnapshotResponse(
             .map((entry) => parseSpecEditProposalResponse(entry))
             .filter((entry): entry is SpecEditProposalResponse => entry !== null)
         : []
+    const flow_run_requests = Array.isArray(record.flow_run_requests)
+        ? record.flow_run_requests
+            .map((entry) => parseFlowRunRequestResponse(entry))
+            .filter((entry): entry is FlowRunRequestResponse => entry !== null)
+        : []
     const execution_cards = Array.isArray(record.execution_cards)
         ? record.execution_cards
             .map((entry) => parseExecutionCardResponse(entry))
@@ -612,6 +677,7 @@ export function parseConversationSnapshotResponse(
         segments,
         event_log,
         spec_edit_proposals,
+        flow_run_requests,
         execution_cards,
         execution_workflow: {
             run_id: asOptionalNullableString(executionWorkflowRecord.run_id),
@@ -885,6 +951,30 @@ export async function reviewExecutionCardValidated(
             body: JSON.stringify(payload),
         },
         '/workspace/api/conversations/{id}/execution-cards/{executionCardId}/review',
+        parseConversationSnapshotResponse,
+    )
+}
+
+export async function reviewFlowRunRequestValidated(
+    conversationId: string,
+    requestId: string,
+    payload: {
+        project_path: string
+        disposition: 'approved' | 'rejected'
+        message: string
+        flow_name?: string | null
+        model?: string | null
+    },
+): Promise<ConversationSnapshotResponse> {
+    const url = workspaceUrl(`/conversations/${encodeURIComponent(conversationId)}/flow-run-requests/${encodeURIComponent(requestId)}/review`)
+    return fetchJsonWithValidation(
+        url,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        },
+        '/workspace/api/conversations/{id}/flow-run-requests/{requestId}/review',
         parseConversationSnapshotResponse,
     )
 }

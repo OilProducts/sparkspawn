@@ -1,10 +1,12 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import type {
     ExecutionCardResponse,
+    FlowRunRequestResponse,
     SpecEditProposalResponse,
 } from '@/lib/workspaceClient'
 import {
     ProjectExecutionCardEntry,
+    ProjectFlowRunRequestEntry,
     ProjectSpecEditProposalEntry,
 } from '@/components/projects/ProjectArtifactEntries'
 import type { ConversationTimelineEntry } from '@/components/projects/types'
@@ -13,6 +15,7 @@ import {
     buildProposalChangeKey,
     buildProposalDiffLines,
     getExecutionCardStatusPresentation,
+    getFlowRunRequestStatusPresentation,
     getSpecEditStatusPresentation,
     getSurfaceToneClassName,
     getToolCallStatusPresentation,
@@ -26,14 +29,17 @@ interface ProjectConversationHistoryProps {
     hasRenderableConversationHistory: boolean
     activeConversationHistory: ConversationTimelineEntry[]
     activeSpecEditProposalsById: Map<string, SpecEditProposalResponse>
+    activeFlowRunRequestsById: Map<string, FlowRunRequestResponse>
     activeExecutionCardsById: Map<string, ExecutionCardResponse>
     latestSpecEditProposalId: string | null
+    latestFlowRunRequestId: string | null
     latestExecutionCardId: string | null
     activeProjectGitMetadata: ProjectGitMetadata
     expandedToolCalls: Record<string, boolean>
     expandedThinkingEntries: Record<string, boolean>
     expandedProposalChanges: Record<string, boolean>
     pendingSpecProposalId: string | null
+    pendingFlowRunRequestId: string | null
     pendingExecutionCardId: string | null
     formatConversationTimestamp: (value: string) => string
     onToggleToolCallExpanded: (toolCallId: string) => void
@@ -41,6 +47,11 @@ interface ProjectConversationHistoryProps {
     onToggleProposalChangeExpanded: (changeKey: string) => void
     onApproveSpecEditProposal: (proposal: SpecEditProposalResponse) => void | Promise<void>
     onRejectSpecEditProposal: (proposal: SpecEditProposalResponse) => void | Promise<void>
+    onReviewFlowRunRequest: (
+        flowRunRequest: FlowRunRequestResponse,
+        disposition: 'approved' | 'rejected',
+    ) => void | Promise<void>
+    onOpenFlowRun: (flowRunRequest: FlowRunRequestResponse) => void
     onReviewExecutionCard: (
         executionCard: ExecutionCardResponse,
         disposition: 'approved' | 'rejected' | 'revision_requested',
@@ -52,14 +63,17 @@ export function ProjectConversationHistory({
     hasRenderableConversationHistory,
     activeConversationHistory,
     activeSpecEditProposalsById,
+    activeFlowRunRequestsById,
     activeExecutionCardsById,
     latestSpecEditProposalId,
+    latestFlowRunRequestId,
     latestExecutionCardId,
     activeProjectGitMetadata,
     expandedToolCalls,
     expandedThinkingEntries,
     expandedProposalChanges,
     pendingSpecProposalId,
+    pendingFlowRunRequestId,
     pendingExecutionCardId,
     formatConversationTimestamp,
     onToggleToolCallExpanded,
@@ -67,6 +81,8 @@ export function ProjectConversationHistory({
     onToggleProposalChangeExpanded,
     onApproveSpecEditProposal,
     onRejectSpecEditProposal,
+    onReviewFlowRunRequest,
+    onOpenFlowRun,
     onReviewExecutionCard,
 }: ProjectConversationHistoryProps) {
     return (
@@ -242,6 +258,29 @@ export function ProjectConversationHistory({
                                         onReviewExecutionCard={onReviewExecutionCard}
                                         formatConversationTimestamp={formatConversationTimestamp}
                                         getExecutionCardStatusPresentation={getExecutionCardStatusPresentation}
+                                        getSurfaceToneClassName={getSurfaceToneClassName}
+                                    />
+                                </li>
+                            )
+                        }
+
+                        if (entry.kind === 'flow_run_request') {
+                            const flowRunRequest = activeFlowRunRequestsById.get(entry.artifactId) || null
+                            const isLatestFlowRunRequest = flowRunRequest?.id === latestFlowRunRequestId
+                            return (
+                                <li
+                                    key={key}
+                                    data-testid={isLatestFlowRunRequest ? 'project-flow-run-request-history-row' : undefined}
+                                    className="flex justify-start"
+                                >
+                                    <ProjectFlowRunRequestEntry
+                                        flowRunRequest={flowRunRequest}
+                                        isLatestFlowRunRequest={isLatestFlowRunRequest}
+                                        pendingFlowRunRequestId={pendingFlowRunRequestId}
+                                        onReviewFlowRunRequest={onReviewFlowRunRequest}
+                                        onOpenFlowRun={onOpenFlowRun}
+                                        formatConversationTimestamp={formatConversationTimestamp}
+                                        getFlowRunRequestStatusPresentation={getFlowRunRequestStatusPresentation}
                                         getSurfaceToneClassName={getSurfaceToneClassName}
                                     />
                                 </li>

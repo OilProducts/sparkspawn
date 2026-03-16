@@ -108,6 +108,10 @@ class ProjectChatRepository:
         project_paths = self.project_paths_for_conversation(conversation_id, project_path)
         return project_paths.proposals_dir / f"{conversation_id}.json"
 
+    def flow_run_requests_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        project_paths = self.project_paths_for_conversation(conversation_id, project_path)
+        return project_paths.flow_run_requests_dir / f"{conversation_id}.json"
+
     def execution_cards_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         project_paths = self.project_paths_for_conversation(conversation_id, project_path)
         return project_paths.execution_cards_dir / f"{conversation_id}.json"
@@ -154,12 +158,15 @@ class ProjectChatRepository:
         normalized_project_path = normalize_project_path_value(str(payload.get("project_path", "")))
         workflow_payload = self.read_json_dict(self.workflow_state_path(conversation_id, normalized_project_path))
         proposals_payload = self.read_json_dict(self.proposals_state_path(conversation_id, normalized_project_path))
+        flow_run_requests_payload = self.read_json_dict(self.flow_run_requests_state_path(conversation_id, normalized_project_path))
         execution_cards_payload = self.read_json_dict(self.execution_cards_state_path(conversation_id, normalized_project_path))
         if workflow_payload:
             payload["event_log"] = workflow_payload.get("event_log", [])
             payload["execution_workflow"] = workflow_payload.get("execution_workflow", {})
         if proposals_payload:
             payload["spec_edit_proposals"] = proposals_payload.get("spec_edit_proposals", [])
+        if flow_run_requests_payload:
+            payload["flow_run_requests"] = flow_run_requests_payload.get("flow_run_requests", [])
         if execution_cards_payload:
             payload["execution_cards"] = execution_cards_payload.get("execution_cards", [])
         state = ConversationState.from_dict(payload)
@@ -204,6 +211,15 @@ class ProjectChatRepository:
                 "project_id": project_paths.project_id,
                 "project_path": state.project_path,
                 "spec_edit_proposals": [proposal.to_dict() for proposal in state.spec_edit_proposals],
+            },
+        )
+        self.write_json(
+            self.flow_run_requests_state_path(state.conversation_id, state.project_path),
+            {
+                "conversation_id": state.conversation_id,
+                "project_id": project_paths.project_id,
+                "project_path": state.project_path,
+                "flow_run_requests": [request.to_dict() for request in state.flow_run_requests],
             },
         )
         self.write_json(
@@ -355,6 +371,7 @@ class ProjectChatRepository:
         for sidecar in (
             project_paths.workflow_dir / f"{conversation_id}.json",
             project_paths.proposals_dir / f"{conversation_id}.json",
+            project_paths.flow_run_requests_dir / f"{conversation_id}.json",
             project_paths.execution_cards_dir / f"{conversation_id}.json",
         ):
             sidecar.unlink(missing_ok=True)

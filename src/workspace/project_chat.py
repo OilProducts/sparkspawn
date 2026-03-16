@@ -16,6 +16,7 @@ from workspace.project_chat_common import (
     build_codex_runtime_environment,
     iso_now as _iso_now,
     log_project_chat_debug as _log_project_chat_debug,
+    normalize_flow_run_request_payload as _normalize_flow_run_request_payload,
     normalize_spec_edit_proposal_payload as _normalize_spec_edit_proposal_payload,
     normalize_project_path_value as _normalize_project_path,
     parse_chat_response_payload as _parse_chat_response_payload,
@@ -124,6 +125,9 @@ class ProjectChatService:
 
     def _proposals_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         return self._repository.proposals_state_path(conversation_id, project_path)
+
+    def _flow_run_requests_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        return self._repository.flow_run_requests_state_path(conversation_id, project_path)
 
     def _execution_cards_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         return self._repository.execution_cards_state_path(conversation_id, project_path)
@@ -885,7 +889,7 @@ class ProjectChatService:
             raise ValueError("Project path is required.")
         normalized_payload = _normalize_spec_edit_proposal_payload(
             payload,
-            source_name="sparkspawn spec-proposal create",
+            source_name="sparkspawn-workspace spec-proposal",
         )
         return self._reviews.create_spec_edit_proposal(
             conversation_id,
@@ -905,6 +909,37 @@ class ProjectChatService:
             "conversation_handle": conversation_handle,
         }
 
+    def create_flow_run_request(
+        self,
+        conversation_id: str,
+        project_path: str,
+        payload: dict[str, Any],
+    ) -> dict[str, object]:
+        normalized_project_path = _normalize_project_path(project_path)
+        if not normalized_project_path:
+            raise ValueError("Project path is required.")
+        normalized_payload = _normalize_flow_run_request_payload(
+            payload,
+            source_name="sparkspawn-workspace flow-run",
+        )
+        return self._reviews.create_flow_run_request(
+            conversation_id,
+            normalized_project_path,
+            normalized_payload,
+        )
+
+    def create_flow_run_request_by_handle(
+        self,
+        conversation_handle: str,
+        payload: dict[str, Any],
+    ) -> dict[str, object]:
+        conversation_id, project_path = self._repository.resolve_conversation_handle(conversation_handle)
+        result = self.create_flow_run_request(conversation_id, project_path, payload)
+        return {
+            **result,
+            "conversation_handle": conversation_handle,
+        }
+
     def approve_spec_edit(
         self,
         conversation_id: str,
@@ -912,6 +947,26 @@ class ProjectChatService:
         proposal_id: str,
     ) -> tuple[dict[str, Any], SpecEditProposal]:
         return self._reviews.approve_spec_edit(conversation_id, project_path, proposal_id)
+
+    def review_flow_run_request(
+        self,
+        conversation_id: str,
+        project_path: str,
+        request_id: str,
+        disposition: str,
+        message: str,
+        flow_name: Optional[str],
+        model: Optional[str],
+    ) -> tuple[dict[str, Any], "FlowRunRequest"]:
+        return self._reviews.review_flow_run_request(
+            conversation_id,
+            project_path,
+            request_id,
+            disposition,
+            message,
+            flow_name,
+            model,
+        )
 
     def mark_execution_workflow_started(
         self,
@@ -969,6 +1024,24 @@ class ProjectChatService:
         flow_source: Optional[str],
     ) -> dict[str, Any]:
         return self._reviews.note_execution_card_dispatched(conversation_id, execution_card_id, run_id, flow_source)
+
+    def note_flow_run_request_launched(
+        self,
+        conversation_id: str,
+        request_id: str,
+        run_id: str,
+        flow_name: str,
+    ) -> dict[str, Any]:
+        return self._reviews.note_flow_run_request_launched(conversation_id, request_id, run_id, flow_name)
+
+    def fail_flow_run_request_launch(
+        self,
+        conversation_id: str,
+        request_id: str,
+        flow_name: str,
+        error: str,
+    ) -> dict[str, Any]:
+        return self._reviews.fail_flow_run_request_launch(conversation_id, request_id, flow_name, error)
 
     def review_execution_card(
         self,

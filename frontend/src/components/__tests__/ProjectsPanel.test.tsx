@@ -1482,6 +1482,179 @@ describe('ProjectsPanel', () => {
     })
   })
 
+  it('renders flow run request cards, approves them, and opens the launched run', async () => {
+    const user = userEvent.setup()
+    const reviewCalls: Array<{ url: string; body: Record<string, unknown> }> = []
+
+    const pendingSnapshot = withSnapshotSchema({
+      conversation_id: 'conversation-flow-run',
+      conversation_handle: 'amber-otter',
+      project_path: '/tmp/chat-project',
+      title: 'Run implementation',
+      created_at: '2026-03-09T21:00:00Z',
+      updated_at: '2026-03-09T21:00:03Z',
+      turns: [
+        {
+          id: 'turn-user-flow-run',
+          role: 'user',
+          content: 'Kick off implementation.',
+          timestamp: '2026-03-09T21:00:00Z',
+          status: 'complete',
+          kind: 'message',
+          artifact_id: null,
+        },
+        {
+          id: 'turn-assistant-flow-run',
+          role: 'assistant',
+          content: 'I can request that launch.',
+          timestamp: '2026-03-09T21:00:01Z',
+          status: 'complete',
+          kind: 'message',
+          artifact_id: null,
+        },
+      ],
+      segments: [
+        {
+          id: 'segment-artifact-flow-run-request-inline',
+          turn_id: 'turn-assistant-flow-run',
+          order: 1,
+          kind: 'flow_run_request',
+          role: 'system',
+          status: 'complete',
+          timestamp: '2026-03-09T21:00:02Z',
+          updated_at: '2026-03-09T21:00:02Z',
+          completed_at: '2026-03-09T21:00:02Z',
+          content: '',
+          artifact_id: 'flow-run-request-inline',
+          error: null,
+          tool_call: null,
+          source: null,
+        },
+      ],
+      event_log: [],
+      spec_edit_proposals: [],
+      flow_run_requests: [
+        {
+          id: 'flow-run-request-inline',
+          created_at: '2026-03-09T21:00:02Z',
+          updated_at: '2026-03-09T21:00:02Z',
+          flow_name: 'implement-spec.dot',
+          summary: 'Run implementation for the approved scope.',
+          project_path: '/tmp/chat-project',
+          conversation_id: 'conversation-flow-run',
+          source_turn_id: 'turn-assistant-flow-run',
+          source_segment_id: 'segment-artifact-flow-run-request-inline',
+          status: 'pending',
+          goal: 'Implement the approved scope.',
+          model: 'gpt-5.4',
+          run_id: null,
+          launch_error: null,
+          review_message: null,
+        },
+      ],
+      execution_cards: [],
+      execution_workflow: {
+        run_id: null,
+        status: 'idle',
+        error: null,
+        flow_source: null,
+      },
+    })
+
+    const launchedSnapshot = withSnapshotSchema({
+      ...pendingSnapshot,
+      updated_at: '2026-03-09T21:00:05Z',
+      flow_run_requests: [
+        {
+          ...pendingSnapshot.flow_run_requests[0],
+          updated_at: '2026-03-09T21:00:05Z',
+          status: 'launched',
+          run_id: 'run-flow-123',
+          review_message: 'Approved for launch.',
+        },
+      ],
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify([
+            {
+              conversation_id: 'conversation-flow-run',
+              conversation_handle: 'amber-otter',
+              project_path: '/tmp/chat-project',
+              title: 'Run implementation',
+              created_at: '2026-03-09T21:00:00Z',
+              updated_at: '2026-03-09T21:00:03Z',
+              last_message_preview: 'I can request that launch.',
+            },
+          ]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/conversations/conversation-flow-run/flow-run-requests/flow-run-request-inline/review')) {
+          reviewCalls.push({
+            url,
+            body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+          })
+          return new Response(JSON.stringify(launchedSnapshot), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/conversations/conversation-flow-run') && !init?.method) {
+          return new Response(JSON.stringify(pendingSnapshot), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response('Not found', { status: 404 })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+    useStore.getState().updateProjectScopedWorkspace('/tmp/chat-project', {
+      conversationId: 'conversation-flow-run',
+    })
+
+    render(<ProjectsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-flow-run-request-approve-button')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('project-flow-run-request-approve-button'))
+
+    await waitFor(() => {
+      expect(reviewCalls).toHaveLength(1)
+      expect(screen.getByTestId('project-flow-run-request-open-run-button')).toBeVisible()
+    })
+
+    expect(reviewCalls[0]?.body).toMatchObject({
+      project_path: '/tmp/chat-project',
+      disposition: 'approved',
+      message: 'Approved for launch.',
+    })
+
+    await user.click(screen.getByTestId('project-flow-run-request-open-run-button'))
+
+    await waitFor(() => {
+      expect(useStore.getState().selectedRunId).toBe('run-flow-123')
+      expect(useStore.getState().executionFlow).toBe('implement-spec.dot')
+      expect(useStore.getState().viewMode).toBe('execution')
+    })
+  })
+
   it('returns the send button to Send once the assistant turn completes even if the original POST is still pending', async () => {
     class MockEventSource {
       static instances: MockEventSource[] = []
@@ -2154,7 +2327,7 @@ describe('ProjectsPanel', () => {
           turn: {
             id: 'turn-assistant-1',
             role: 'assistant',
-            content: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+            content: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
             timestamp: '2026-03-08T19:28:40Z',
             status: 'streaming',
             kind: 'message',
@@ -2208,7 +2381,7 @@ describe('ProjectsPanel', () => {
             sequence: 1,
             timestamp: '2026-03-08T19:28:40Z',
             kind: 'assistant_delta',
-            content_delta: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+            content_delta: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
             segment_id: 'segment-assistant-1',
             segment: {
               id: 'segment-assistant-1',
@@ -2220,7 +2393,7 @@ describe('ProjectsPanel', () => {
               timestamp: '2026-03-08T19:28:40Z',
               updated_at: '2026-03-08T19:28:40Z',
               completed_at: null,
-              content: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+              content: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
               artifact_id: null,
               error: null,
               tool_call: null,
@@ -2252,7 +2425,7 @@ describe('ProjectsPanel', () => {
             {
               id: 'turn-assistant-1',
               role: 'assistant',
-              content: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+              content: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
               timestamp: '2026-03-08T19:28:30Z',
               status: 'complete',
               kind: 'message',
@@ -2287,7 +2460,7 @@ describe('ProjectsPanel', () => {
               timestamp: '2026-03-08T19:28:40Z',
               updated_at: '2026-03-08T19:28:43Z',
               completed_at: '2026-03-08T19:28:43Z',
-              content: 'Yes. Once you give me a concrete user story or spec change, I can call `draft_spec_proposal`.',
+              content: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
               artifact_id: null,
               error: null,
               tool_call: null,
@@ -2314,11 +2487,14 @@ describe('ProjectsPanel', () => {
     const history = await screen.findByTestId('project-ai-conversation-history-list')
     await waitFor(() => {
       const text = history.textContent ?? ''
-      const firstResponse = text.indexOf('Yes. Once you give me a concrete user story or spec change')
-      expect(firstResponse).toBeGreaterThan(-1)
-      expect(text.indexOf('Considering the spec proposal.')).toBeGreaterThan(-1)
-      expect(text.indexOf('Considering the spec proposal.')).toBeLessThan(firstResponse)
-      expect(text.lastIndexOf('Yes. Once you give me a concrete user story or spec change')).toBe(firstResponse)
+      expect(history).toHaveTextContent(/Considering the spec proposal\./)
+      expect(history).toHaveTextContent(/pending spec proposal\./)
+      const reasoningIndex = text.indexOf('Considering the spec proposal.')
+      const responseIndex = text.indexOf('pending spec proposal.')
+      expect(reasoningIndex).toBeGreaterThan(-1)
+      expect(responseIndex).toBeGreaterThan(-1)
+      expect(reasoningIndex).toBeLessThan(responseIndex)
+      expect(text.lastIndexOf('pending spec proposal.')).toBe(responseIndex)
     })
   })
 
@@ -2465,7 +2641,7 @@ describe('ProjectsPanel', () => {
             {
               id: 'turn-assistant-1',
               role: 'assistant',
-              content: 'I can use `draft_spec_proposal`, but there is not yet a concrete project change to draft.',
+              content: 'I can create a pending spec proposal, but there is not yet a concrete project change to draft.',
               timestamp: '2026-03-08T21:18:16Z',
               status: 'complete',
               kind: 'message',
@@ -2500,7 +2676,7 @@ describe('ProjectsPanel', () => {
               timestamp: '2026-03-08T21:18:33Z',
               updated_at: '2026-03-08T21:18:33Z',
               completed_at: '2026-03-08T21:18:33Z',
-              content: 'I can use `draft_spec_proposal`, but there is not yet a concrete project change to draft.',
+              content: 'I can create a pending spec proposal, but there is not yet a concrete project change to draft.',
               artifact_id: null,
               error: null,
               tool_call: null,
@@ -2528,7 +2704,7 @@ describe('ProjectsPanel', () => {
     await waitFor(() => {
       const text = history.textContent ?? ''
       expect(text).toContain('Checking the repo before drafting.')
-      expect(text).toContain('I can use `draft_spec_proposal`, but there is not yet a concrete project change to draft.')
+      expect(text).toContain('I can create a pending spec proposal, but there is not yet a concrete project change to draft.')
       expect(text.match(/Checking the repo before drafting\./g)?.length ?? 0).toBe(1)
     })
   })

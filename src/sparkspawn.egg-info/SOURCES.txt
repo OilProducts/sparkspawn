@@ -7,6 +7,7 @@ src/attractor/graphviz_export.py
 src/attractor/parity_matrix.py
 src/attractor/release_gate_checks.py
 src/attractor/release_gate_traceability.py
+src/attractor/storage.py
 src/attractor/ui_release_gate.py
 src/attractor/api/__init__.py
 src/attractor/api/codex_backends.py
