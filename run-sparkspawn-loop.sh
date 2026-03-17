@@ -266,7 +266,7 @@ Workflow:
    - Only mark the item checked (`[x]`) if evaluator verdict is `pass`.
    - If evaluator verdict is `fail` or `needs-human`, keep item unchecked and add/update a one-sentence blocker note.
    - If you marked `[x]` before evaluation, revert it back to `[ ]` before commit unless verdict is `pass`.
-5) After implementation, spawn a sub-agent to evaluate whether the item is tested and implemented in the spirit of sparkspawn-frontend.md and sparkspawn-workspace.md.
+5) After implementation, spawn a sub-agent to evaluate whether the item is tested and implemented in the spirit of sparkspawn-ui-ux.md and sparkspawn-workspace.md.
    - If your changes touched `frontend/`, you MUST provide screenshot paths from `frontend/artifacts/ui-smoke/` to the sub-agent and ask for visual QA findings from those images.
    - Include sub-agent verdict and evidence in your report.
 6) Commit your changes with a clear message. If there are unrelated untracked files, do not include them.
@@ -290,7 +290,7 @@ Use ui-implementation-checklist.md and reassess the next unchecked item under th
 Workflow:
 1) Reassess readiness by scanning code/tests/spec.
 2) Choose one action:
-   - If already implemented/tested in spirit of sparkspawn-frontend.md and sparkspawn-workspace.md, mark that Deferred item as `[x]` with a short verification note.
+   - If already implemented/tested in spirit of sparkspawn-ui-ux.md and sparkspawn-workspace.md, mark that Deferred item as `[x]` with a short verification note.
    - If now ready and missing, do strict test-first for only that item (red -> minimal green), then mark it `[x]`.
    - If still blocked, keep it unchecked and tighten its one-sentence defer reason.
    - If your changes touch `frontend/`, run `just ui-smoke` to generate screenshots in `frontend/artifacts/ui-smoke/`.
@@ -300,7 +300,7 @@ Workflow:
    - Only mark the item checked (`[x]`) if evaluator verdict is `pass`.
    - If evaluator verdict is `fail` or `needs-human`, keep item unchecked and tighten the defer blocker reason.
    - If you marked `[x]` before evaluation, revert it back to `[ ]` before commit unless verdict is `pass`.
-5) Spawn a sub-agent to evaluate whether your action is correct in spirit of sparkspawn-frontend.md and sparkspawn-workspace.md.
+5) Spawn a sub-agent to evaluate whether your action is correct in spirit of sparkspawn-ui-ux.md and sparkspawn-workspace.md.
    - If your changes touched `frontend/`, you MUST provide screenshot paths from `frontend/artifacts/ui-smoke/` to the sub-agent and ask for visual QA findings from those images.
    - Include verdict and evidence.
 6) Commit changes with a clear message. If there are unrelated untracked files, do not include them.

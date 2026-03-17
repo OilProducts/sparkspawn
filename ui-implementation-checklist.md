@@ -1,6 +1,6 @@
 # Spark Spawn UI Implementation Checklist
 
-Companion to `/Users/chris/tinker/sparkspawn/specs/sparkspawn-frontend.md` and `/Users/chris/tinker/sparkspawn/specs/sparkspawn-workspace.md`.
+Companion to `/Users/chris/tinker/sparkspawn/specs/sparkspawn-ui-ux.md` and `/Users/chris/tinker/sparkspawn/specs/sparkspawn-workspace.md`.
 
 Use this as the execution plan and verification ledger for full UI spec coverage. Tasks are ordered to match the UI spec section/subsection sequence.
 
@@ -23,7 +23,7 @@ Status key:
 - [x] [1.2-03] Add release criteria that fail when any required spec feature is unavailable in UI.
 
 ### 1.3 Non-Goals
-- [x] [1.3-01] Define the UI/runtime semantic boundary in `specs/sparkspawn-frontend.md` and `specs/sparkspawn-workspace.md` so UI work does not alter engine semantics.
+- [x] [1.3-01] Define the UI/runtime semantic boundary in `specs/sparkspawn-ui-ux.md` and `specs/sparkspawn-workspace.md` so UI work does not alter engine semantics.
 - [x] [1.3-02] Add safeguards that prevent invalid DOT synthesis from form states.
 - [x] [1.3-03] Keep advanced feature access enabled (no simplified mode removing required spec controls).
 
@@ -31,7 +31,7 @@ Status key:
 
 ## 2. Design Principles
 
-- [x] [2-01] Implement spec-first behavior mapping for UI controls and tests with direct references back to `specs/sparkspawn-frontend.md`, `specs/sparkspawn-workspace.md`, and `specs/attractor-spec.md`.
+- [x] [2-01] Implement spec-first behavior mapping for UI controls and tests with direct references back to `specs/sparkspawn-ui-ux.md`, `specs/sparkspawn-workspace.md`, and `specs/attractor-spec.md`.
 - [x] [2-02] Add no-silent-loss save protections and user-visible failure states.
 - [x] [2-03] Ensure progressive disclosure for advanced fields while preserving full editability.
 - [x] [2-04] Add explainability views for routing, retry, and failure decisions.
@@ -350,7 +350,7 @@ Status key:
 
 ### 12.1 Required Endpoints
 - [x] [12.1-01] Verify UI coverage for all required endpoints listed in UI spec section 12.1.
-  - Evidence (2026-03-04): Evaluator `pass`; added frontend contract `CID:12.1.01` that asserts runtime coverage for every `sparkspawn-frontend.md` section 12.1 endpoint in `frontend/src/components/__tests__/ContractBehavior.test.tsx`, bridged by `tests/contracts/frontend/test_api_integration_contracts.py`, plus runtime `GET /pipelines/{id}/questions` integration in `frontend/src/components/RunsPanel.tsx` with screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-editor-shell.png`, `frontend/artifacts/ui-smoke/06-execution-panel.png`, `frontend/artifacts/ui-smoke/08-runs-panel.png`, `frontend/artifacts/ui-smoke/10a-human-gate-discoverability.png`, and `frontend/artifacts/ui-smoke/10b-human-gate-discoverability-runs.png`.
+  - Evidence (2026-03-04): Evaluator `pass`; added frontend contract `CID:12.1.01` that asserts runtime coverage for every `sparkspawn-ui-ux.md` run-inspection endpoint expectation in `frontend/src/components/__tests__/ContractBehavior.test.tsx`, bridged by `tests/contracts/frontend/test_api_integration_contracts.py`, plus runtime `GET /pipelines/{id}/questions` integration in `frontend/src/components/RunsPanel.tsx` with screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-editor-shell.png`, `frontend/artifacts/ui-smoke/06-execution-panel.png`, `frontend/artifacts/ui-smoke/08-runs-panel.png`, `frontend/artifacts/ui-smoke/10a-human-gate-discoverability.png`, and `frontend/artifacts/ui-smoke/10b-human-gate-discoverability-runs.png`.
 - [x] [12.1-02] Add typed client adapters and runtime schema validation for endpoint responses.
   - Evidence (2026-03-04): Evaluator `pass`; added typed API adapters + runtime schema guards in `frontend/src/lib/apiClient.ts` (including `/pipelines/{id}/graph`), wired endpoint consumers across `Editor`, `Navbar`, `ProjectsPanel`, `RunStream`, `RunsPanel`, `Terminal`, `TaskNode`, and `Sidebar`, and extended frontend contract `CID:12.1.02` with behavior-level parser assertions (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`), validated by `just test` (`593 passed`) plus screenshot-based visual QA on `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, `frontend/artifacts/ui-smoke/08b-runs-panel-populated-summary.png`, `frontend/artifacts/ui-smoke/08i-runs-panel-event-timeline.png`, and `frontend/artifacts/ui-smoke/19b-semantic-equivalence-round-trip-saved.png` (ui-smoke command reported backend `ECONNREFUSED` on `127.0.0.1:8000` for unrelated scenarios).
 - [x] [12.1-03] Add endpoint-level integration tests for happy path and common error cases.
@@ -607,11 +607,11 @@ Status key:
 - [ ] [1.2-02] Add CI acceptance checks proving the full journey works without raw DOT fallback.
   Deferred because the required full-journey UI surfaces (project registration/selection and project-scoped conversation/spec/plan flow) are not yet implemented, so a CI proof would be non-representative.
 - [ ] [3.1-02] Add role-oriented smoke tests (project onboarding, authoring, live operation, post-run audit).
-  Deferred because project onboarding and active-project workflow surfaces from `sparkspawn-frontend.md` sections 4.2 and 4.3 are not yet implemented, so role smoke tests would be partial and misleading.
+  Deferred because project onboarding and active-project workflow surfaces from `sparkspawn-ui-ux.md` are not yet implemented, so role smoke tests would be partial and misleading.
 - [ ] [3.2-01] Implement workflow guardrails from create/open to iterate/re-run as explicit state machine transitions.
   Deferred because the required project-scoped workflow surfaces (project registry/Git gating, conversation/spec loop, and spec->plan->build chain) are not yet implemented in the UI.
 - [ ] [3.2-02] Add test coverage for the full 12-step primary workflow sequence (project registration/selection through re-run).
-  Deferred because the project registration/Git gating and project-scoped conversation/spec/plan/run surfaces required by `sparkspawn-frontend.md` section 3.2 are not yet implemented for behavioral end-to-end coverage.
+  Deferred because the project registration/Git gating and project-scoped conversation/spec/plan/run surfaces required by `sparkspawn-ui-ux.md` are not yet implemented for behavioral end-to-end coverage.
 - [ ] [3.2-03] Ensure every step has a first-class UI surface (no hidden or CLI-only transition).
   Deferred because the required project-scoped conversation/spec/plan/build surfaces are not implemented yet, so the workflow still has unavoidable non-UI transitions.
 - [ ] [3.2-04] Add explicit workflow coverage for project-scoped AI conversation -> spec refinement -> plan generation/approval -> build execution chain.

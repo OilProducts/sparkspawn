@@ -87,7 +87,7 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
             id="proposal-1",
             created_at="2026-03-08T12:01:00Z",
             summary="Summary",
-            changes=[project_chat_models.SpecEditProposalChange(path="specs/sparkspawn-frontend.md", before="old", after="new")],
+            changes=[project_chat_models.SpecEditProposalChange(path="specs/sparkspawn-ui-ux.md", before="old", after="new")],
             status="approved",
         ),
         "Needs refinement",
