@@ -38,21 +38,21 @@ class WaitHumanHandler:
             options.append(QuestionOption(label=label, value=label, key=key))
 
         question = Question(
-            title=f"Human Gate: {runtime.node_id}",
-            prompt=runtime.prompt or "Choose next route",
-            question_type=QuestionType.MULTIPLE_CHOICE,
+            text=runtime.prompt or "Choose next route",
+            type=QuestionType.MULTIPLE_CHOICE,
             options=options,
+            stage=runtime.node_id,
             metadata={"node_id": runtime.node_id},
         )
 
         started_at = time.perf_counter()
-        runtime.emit("InterviewStarted", question=question.prompt, stage=runtime.node_id)
+        runtime.emit("InterviewStarted", question=question.text, stage=runtime.node_id)
         answer = self.interviewer.ask(question)
         duration = time.perf_counter() - started_at
         if _is_timeout(answer):
             default_choice = _default_choice(runtime.node_attrs, choices)
             timeout_payload = {
-                "question": question.prompt,
+                "question": question.text,
                 "stage": runtime.node_id,
                 "duration": duration,
                 "outcome_provenance": "timeout_default_applied" if default_choice else "timeout_no_default",
@@ -76,7 +76,7 @@ class WaitHumanHandler:
         if answer.value == AnswerValue.SKIPPED.value:
             runtime.emit(
                 "InterviewCompleted",
-                question=question.prompt,
+                question=question.text,
                 answer=answer.value,
                 duration=duration,
                 outcome_provenance="skipped",
@@ -87,7 +87,7 @@ class WaitHumanHandler:
         emitted_answer = selected.label if selected else answer.value
         runtime.emit(
             "InterviewCompleted",
-            question=question.prompt,
+            question=question.text,
             answer=emitted_answer,
             duration=duration,
             outcome_provenance="accepted" if selected is not None else "skipped",

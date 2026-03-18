@@ -75,7 +75,7 @@ class HumanGateBroker:
                 "run_id": run_id,
                 "node_id": node_id,
                 "flow_name": flow_name,
-                "prompt": question.prompt,
+                "prompt": question.text,
                 "options": [
                     {"label": opt.label, "value": opt.value} for opt in question.options
                 ],
@@ -94,7 +94,7 @@ class HumanGateBroker:
                 "question_id": gate_id,
                 "node_id": node_id,
                 "flow_name": flow_name,
-                "prompt": question.prompt,
+                "prompt": question.text,
                 "options": [
                     {"label": opt.label, "value": opt.value} for opt in question.options
                 ],
@@ -161,8 +161,8 @@ class WebInterviewer(Interviewer):
 
     def ask(self, question: Question) -> Answer:
         node_id = str(question.metadata.get("node_id", "")).strip()
-        if not node_id and question.title.lower().startswith("human gate:"):
-            node_id = question.title.split(":", 1)[1].strip()
+        if not node_id:
+            node_id = question.stage.strip()
         return self._broker.request(question, self._run_id, node_id, self._flow_name, self._emit)
 
 

@@ -28,7 +28,7 @@ class _FlakyHandler:
     def __init__(self):
         self.calls = 0
 
-    def run(self, runtime):
+    def execute(self, runtime):
         self.calls += 1
         if self.calls <= 2:
             return Outcome(status=OutcomeStatus.RETRY, failure_reason="temporary")
@@ -36,12 +36,12 @@ class _FlakyHandler:
 
 
 class _ContextWriterHandler:
-    def run(self, runtime):
+    def execute(self, runtime):
         return Outcome(status=OutcomeStatus.SUCCESS, context_updates={"artifact_path": "/tmp/out"})
 
 
 class _ContextReaderHandler:
-    def run(self, runtime):
+    def execute(self, runtime):
         seen = runtime.context.get("artifact_path", "")
         if seen == "/tmp/out":
             return Outcome(status=OutcomeStatus.SUCCESS)

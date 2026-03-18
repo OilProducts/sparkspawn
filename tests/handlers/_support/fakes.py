@@ -68,7 +68,7 @@ class _FanInRankingBackend:
         return self.response
 
 class _PluginHandler:
-    def run(self, runtime):
+    def execute(self, runtime):
         return Outcome(status=OutcomeStatus.SUCCESS, notes=f"plugin:{runtime.node_id}")
 
 class _ExecuteOnlyHandler:
@@ -88,12 +88,12 @@ class _RuntimeCaptureHandler:
         return Outcome(status=OutcomeStatus.SUCCESS, notes="captured")
 
 class _SlowHandler:
-    def run(self, runtime):
+    def execute(self, runtime):
         time.sleep(0.2)
         return Outcome(status=OutcomeStatus.SUCCESS, notes="slow handler completed")
 
 class _ConcurrentOutsideParallelHandler:
-    def run(self, runtime):
+    def execute(self, runtime):
         targets = [edge.target for edge in runtime.outgoing_edges]
         if len(targets) < 2:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="need at least two branches")
@@ -128,7 +128,7 @@ class _SharedRefSeedHandler:
     def __init__(self, shared_ref):
         self.shared_ref = shared_ref
 
-    def run(self, runtime):
+    def execute(self, runtime):
         return Outcome(
             status=OutcomeStatus.SUCCESS,
             context_updates={"shared_ref": self.shared_ref},
@@ -139,7 +139,7 @@ class _SharedRefIsolationChecker:
         self.marker = marker
         self.barrier = barrier
 
-    def run(self, runtime):
+    def execute(self, runtime):
         shared_ref = runtime.context.get("shared_ref", {})
         if not isinstance(shared_ref, dict):
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="missing shared_ref dict")
@@ -164,7 +164,7 @@ class _MaxParallelProbeHandler:
         self.state = state
         self.delay_s = delay_s
 
-    def run(self, runtime):
+    def execute(self, runtime):
         lock = self.state["lock"]
         with lock:
             self.state["in_flight"] += 1
@@ -194,15 +194,15 @@ class _CustomConcurrencyProbeHandler:
         return Outcome(status=OutcomeStatus.SUCCESS, notes=f"probe:{runtime.node_id}")
 
 class _AlwaysSuccessHandler:
-    def run(self, runtime):
+    def execute(self, runtime):
         return Outcome(status=OutcomeStatus.SUCCESS, notes=f"success:{runtime.node_id}")
 
 class _AlwaysFailHandler:
-    def run(self, runtime):
+    def execute(self, runtime):
         return Outcome(status=OutcomeStatus.FAIL, failure_reason=f"fail:{runtime.node_id}")
 
 class _SystemExitHandler:
-    def run(self, runtime):
+    def execute(self, runtime):
         del runtime
         raise SystemExit("handler terminated abruptly")
 

@@ -220,14 +220,9 @@ def _to_seconds(attr: Any) -> float | None:
 
 def _invoke_handler(handler: Any, runtime: HandlerRuntime) -> Outcome | None:
     execute = getattr(handler, "execute", None)
-    if callable(execute):
-        outcome = execute(runtime)
-    else:
-        # Backward compatibility for plugin handlers still using the old contract.
-        run = getattr(handler, "run", None)
-        if not callable(run):
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler does not implement execute(runtime)")
-        outcome = run(runtime)
+    if not callable(execute):
+        return Outcome(status=OutcomeStatus.FAIL, failure_reason="handler does not implement execute(runtime)")
+    outcome = execute(runtime)
 
     if outcome is None:
         return None

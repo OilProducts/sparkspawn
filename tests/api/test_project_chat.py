@@ -173,25 +173,6 @@ def test_process_turn_message_normalizes_item_reasoning_delta_by_item_and_summar
     assert events[0].summary_index == 0
 
 
-def test_process_turn_message_ignores_legacy_reasoning_event_family() -> None:
-    state = codex_app_server.CodexAppServerTurnState()
-
-    events = codex_app_server.process_turn_message(
-        {
-            "method": "codex/event/reasoning_content_delta",
-            "params": {
-                "msg": {
-                    "item_id": "rs-1",
-                    "summary_index": 0,
-                    "delta": "Planning",
-                }
-            },
-        },
-        state,
-    )
-    assert events == []
-
-
 def test_tool_call_from_command_execution_item_uses_completed_payload() -> None:
     tool_call = project_chat_session._tool_call_from_item(
         {
@@ -284,7 +265,7 @@ def test_build_segment_upsert_payload_serializes_segment(tmp_path: Path) -> None
     assert payload["segment"]["tool_call"]["output"] == "AGENTS.md\n"
 
 
-def test_conversation_state_rejects_legacy_event_only_snapshot_shape() -> None:
+def test_conversation_state_rejects_unsupported_snapshot_shape() -> None:
     with pytest.raises(ValueError, match="Unsupported conversation state schema"):
         project_chat.ConversationState.from_dict(
             {
@@ -297,7 +278,7 @@ def test_conversation_state_rejects_legacy_event_only_snapshot_shape() -> None:
         )
 
 
-def test_list_conversations_skips_unsupported_local_state_files(tmp_path: Path) -> None:
+def test_list_conversations_skips_invalid_local_state_files(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     project_path = str(tmp_path.resolve())
     service._write_state(
@@ -317,14 +298,14 @@ def test_list_conversations_skips_unsupported_local_state_files(tmp_path: Path) 
             ],
         )
     )
-    legacy_state_path = service._conversation_state_path("conversation-legacy", project_path)
-    legacy_state_path.parent.mkdir(parents=True, exist_ok=True)
-    legacy_state_path.write_text(
+    invalid_state_path = service._conversation_state_path("conversation-invalid", project_path)
+    invalid_state_path.parent.mkdir(parents=True, exist_ok=True)
+    invalid_state_path.write_text(
         json.dumps(
             {
-                "conversation_id": "conversation-legacy",
+                "conversation_id": "conversation-invalid",
                 "project_path": project_path,
-                "title": "Legacy thread",
+                "title": "Invalid thread",
                 "turns": [],
             }
         ),
@@ -827,7 +808,6 @@ def test_chat_session_initialize_enables_experimental_api(monkeypatch) -> None:
                 "clientInfo": {"name": "sparkspawn", "version": "0.1"},
                 "capabilities": {
                     "experimentalApi": True,
-                    "optOutNotificationMethods": project_chat_session.LEGACY_OPT_OUT_NOTIFICATION_METHODS,
                 },
             },
         )
@@ -1554,81 +1534,6 @@ def test_note_execution_card_dispatched_records_event(tmp_path: Path) -> None:
     assert snapshot["event_log"][-1]["message"] == "Dispatched execution card execution-card-1 as run run-123 using implement-spec.dot."
 
 
-def test_chat_session_ignores_legacy_codex_agent_delta_channel(monkeypatch) -> None:
-    session = project_chat.CodexAppServerChatSession("/tmp/project")
-    lines = iter(
-        [
-            json.dumps(
-                {
-                    "method": "item/agentMessage/delta",
-                    "params": {"delta": "{\"assistant_message\":\"Ack"},
-                }
-            ),
-            json.dumps(
-                {
-                    "method": "codex/event/agent_message_delta",
-                    "params": {"msg": {"delta": "{\"assistant_message\":\"Ack"}},
-                }
-            ),
-            json.dumps(
-                {
-                    "method": "item/agentMessage/delta",
-                    "params": {"delta": "\"}"},
-                }
-            ),
-            json.dumps(
-                {
-                    "method": "item/completed",
-                    "params": {
-                        "item": {
-                            "type": "AgentMessage",
-                            "id": "msg-1",
-                            "phase": "final_answer",
-                            "text": '{"assistant_message":"Ack"}',
-                        }
-                    },
-                }
-            ),
-            json.dumps(
-                {
-                    "method": "turn/completed",
-                    "params": {
-                        "turn": {
-                            "id": "turn-123",
-                            "status": "completed",
-                        }
-                    },
-                }
-            ),
-        ]
-    )
-    progress_messages: list[str] = []
-
-    monkeypatch.setattr(session, "_ensure_process", lambda: None)
-
-    def fake_ensure_thread(model: str | None) -> None:
-        session._thread_id = "thread-123"
-        session._thread_initialized = True
-
-    monkeypatch.setattr(session, "_ensure_thread", fake_ensure_thread)
-    monkeypatch.setattr(
-        session,
-        "_send_request",
-        lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress", "items": []}}},
-    )
-    monkeypatch.setattr(session, "_read_line", lambda wait: next(lines, None))
-
-    result = session.turn(
-        "hello",
-        None,
-        on_event=lambda progress: progress_messages.append(progress.content_delta or "") if progress.kind == "assistant_delta" else None,
-    )
-
-    assert result.assistant_message == '{"assistant_message":"Ack"}'
-    assert any(message == '{"assistant_message":"Ack' for message in progress_messages)
-    assert all("assistantassistant" not in message for message in progress_messages)
-
-
 def test_chat_session_emits_assistant_completed_from_item_completed(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     lines = iter(
@@ -1857,7 +1762,7 @@ def test_chat_session_emits_assistant_completed_for_commentary_item(monkeypatch)
     assert captured_events[3].phase == "final_answer"
 
 
-def test_build_session_ignores_legacy_persisted_thread_without_session_version(tmp_path: Path, monkeypatch) -> None:
+def test_build_session_ignores_unsupported_persisted_thread_state(tmp_path: Path, monkeypatch) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     conversation_id = "conversation-test"
     project_path = str(tmp_path)
@@ -1870,7 +1775,7 @@ def test_build_session_ignores_legacy_persisted_thread_without_session_version(t
                 "updated_at": "2026-03-08T19:00:00Z",
                 "project_path": project_path,
                 "runtime_project_path": project_path,
-                "thread_id": "legacy-thread",
+                "thread_id": "stale-thread",
             }
         ),
         encoding="utf-8",
@@ -2255,10 +2160,10 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     ]
 
 
-def test_snapshot_rejects_legacy_turn_event_only_payload(tmp_path: Path) -> None:
+def test_snapshot_rejects_unsupported_turn_event_only_payload(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     project_paths = ensure_project_paths(tmp_path, str(tmp_path))
-    legacy_payload = {
+    invalid_payload = {
         "conversation_id": "conversation-compact",
         "project_path": str(tmp_path),
         "title": "Compact thread",
@@ -2320,7 +2225,7 @@ def test_snapshot_rejects_legacy_turn_event_only_payload(tmp_path: Path) -> None
     }
     (project_paths.conversations_dir / "conversation-compact").mkdir(parents=True, exist_ok=True)
     (project_paths.conversations_dir / "conversation-compact" / "state.json").write_text(
-        json.dumps(legacy_payload, indent=2),
+        json.dumps(invalid_payload, indent=2),
         encoding="utf-8",
     )
 

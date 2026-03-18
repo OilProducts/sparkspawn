@@ -88,29 +88,18 @@ def test_custom_transforms_run_in_registration_order(monkeypatch: pytest.MonkeyP
     assert captured["prompt"] == "Build Ship docs [first] [second]"
 
 
-def test_transform_pipeline_accepts_transform_method_compatibility(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _LegacyTransform:
+def test_transform_pipeline_requires_apply_method(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _InvalidTransform:
         def transform(self, graph):
-            prompt_attr = graph.nodes["task"].attrs["prompt"]
-            prompt_attr.value = f"{prompt_attr.value} [legacy]"
             return graph
 
-    captured: dict[str, str] = {}
-
-    def _validate(graph):
-        captured["prompt"] = str(graph.nodes["task"].attrs["prompt"].value)
-        return []
-
-    monkeypatch.setattr(server, "validate_graph", _validate)
     server.clear_registered_transforms()
     try:
-        server.register_transform(_LegacyTransform())
-        payload = asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=FLOW_WITH_GOAL)))
+        server.register_transform(_InvalidTransform())
+        with pytest.raises(TypeError, match="Transform must implement apply\\(graph\\)"):
+            asyncio.run(server.preview_pipeline(server.PreviewRequest(flow_content=FLOW_WITH_GOAL)))
     finally:
         server.clear_registered_transforms()
-
-    assert payload["status"] == "ok"
-    assert captured["prompt"] == "Build Ship docs [legacy]"
 
 
 def test_http_server_mode_registers_canonical_attractor_routes() -> None:
@@ -147,21 +136,21 @@ def test_create_pipeline_endpoint_delegates_to_start_pipeline(monkeypatch: pytes
     async def _fake_start(req: server.PipelineStartRequest, *, run_id: str | None = None, on_complete=None) -> dict:
         captured["request"] = req
         captured["run_id"] = run_id
-        return {"status": "started", "pipeline_id": "legacy-run"}
+        return {"status": "started", "pipeline_id": "run-123"}
 
     monkeypatch.setattr(server, "_start_pipeline", _fake_start)
 
     payload = asyncio.run(
         server.create_pipeline(
             server.PipelineStartRequest(
-                run_id="legacy-run",
+                run_id="run-123",
                 flow_content=FLOW_WITH_GOAL,
                 working_directory=str(tmp_path / "work"),
             )
         )
     )
 
-    assert payload == {"status": "started", "pipeline_id": "legacy-run"}
+    assert payload == {"status": "started", "pipeline_id": "run-123"}
     assert "request" in captured
-    assert captured["run_id"] == "legacy-run"
+    assert captured["run_id"] == "run-123"
     assert captured["request"].flow_content.strip().startswith("digraph G")

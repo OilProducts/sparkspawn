@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import BaseModel
 
 from attractor.dsl import (
     canonicalize_dot,
@@ -134,8 +134,6 @@ def _resolve_ui_index_path() -> Path | None:
         index_path = settings.ui_dir / "index.html"
         if index_path.exists():
             return index_path
-    if settings.legacy_ui_index and settings.legacy_ui_index.exists():
-        return settings.legacy_ui_index
     return None
 
 
@@ -337,7 +335,7 @@ def _pop_active_run(run_id: str) -> Optional[ActiveRun]:
 
 class PipelineStartRequest(BaseModel):
     run_id: Optional[str] = None
-    flow_content: Optional[str] = Field(default=None, validation_alias=AliasChoices("flow_content", "dot_source"))
+    flow_content: Optional[str] = None
     working_directory: str = "./workspace"
     backend: str = "codex"
     model: Optional[str] = None

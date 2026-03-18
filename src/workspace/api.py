@@ -906,8 +906,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         await deps.get_project_chat().publish_snapshot(conversation_id)
         if req.disposition == "approved":
             persisted_execution_flow = (execution_card.flow_source or "").strip()
-            if not persisted_execution_flow or persisted_execution_flow == deps.default_execution_planning_flow:
-                persisted_execution_flow = deps.default_execution_dispatch_flow
             effective_flow_source = (
                 (req.flow_source or "").strip()
                 or await _resolve_trigger_flow(

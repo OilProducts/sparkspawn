@@ -29,9 +29,5 @@ class TransformPipeline:
             if callable(apply_fn):
                 cur = apply_fn(cur)
                 continue
-            transform_fn = getattr(transform_instance, "transform", None)
-            if callable(transform_fn):
-                cur = transform_fn(cur)
-                continue
-            raise TypeError("Transform must implement apply(graph) or transform(graph)")
+            raise TypeError("Transform must implement apply(graph)")
         return cur

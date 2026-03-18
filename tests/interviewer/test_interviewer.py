@@ -20,12 +20,12 @@ class TestInterviewerImplementations:
     def test_interviewer_ask_multiple_delegates_to_ask(self):
         class _StubInterviewer(Interviewer):
             def ask(self, question: Question) -> Answer:
-                return Answer(selected_values=[question.title])
+                return Answer(selected_values=[question.stage])
 
         interviewer = _StubInterviewer()
         questions = [
-            Question(title="q1", prompt="p1", question_type=QuestionType.SINGLE_SELECT),
-            Question(title="q2", prompt="p2", question_type=QuestionType.SINGLE_SELECT),
+            Question(stage="q1", text="p1", type=QuestionType.MULTIPLE_CHOICE),
+            Question(stage="q2", text="p2", type=QuestionType.MULTIPLE_CHOICE),
         ]
 
         answers = interviewer.ask_multiple(questions)
@@ -40,7 +40,7 @@ class TestInterviewerImplementations:
         assert interviewer.inform("Heads up", "review") is None
 
     def test_autoapprove_yes_no_returns_yes_value(self):
-        q = Question(title="Deploy", prompt="Ship it?", question_type=QuestionType.YES_NO)
+        q = Question(stage="Deploy", text="Ship it?", type=QuestionType.YES_NO)
         answer = AutoApproveInterviewer().ask(q)
         assert answer.value == AnswerValue.YES.value
 
@@ -48,9 +48,9 @@ class TestInterviewerImplementations:
         first = QuestionOption(label="A", value="a", key="A")
         second = QuestionOption(label="B", value="b", key="B")
         q = Question(
-            title="Pick",
-            prompt="choose",
-            question_type=QuestionType.MULTIPLE_CHOICE,
+            stage="Pick",
+            text="choose",
+            type=QuestionType.MULTIPLE_CHOICE,
             options=[first, second],
         )
         answer = AutoApproveInterviewer().ask(q)
@@ -96,14 +96,14 @@ class TestInterviewerImplementations:
 
     def test_callback_interviewer(self):
         interviewer = CallbackInterviewer(lambda q: Answer(selected_values=["x"]))
-        answer = interviewer.ask(Question(title="T", prompt="P", question_type=QuestionType.CONFIRMATION))
+        answer = interviewer.ask(Question(stage="T", text="P", type=QuestionType.CONFIRMATION))
         assert answer.selected_values == ["x"]
 
     def test_queue_interviewer(self):
         interviewer = QueueInterviewer([Answer(selected_values=["first"]), Answer(text="second")])
-        a1 = interviewer.ask(Question(title="1", prompt="1", question_type=QuestionType.SINGLE_SELECT))
-        a2 = interviewer.ask(Question(title="2", prompt="2", question_type=QuestionType.FREE_TEXT))
-        a3 = interviewer.ask(Question(title="3", prompt="3", question_type=QuestionType.FREE_TEXT))
+        a1 = interviewer.ask(Question(stage="1", text="1", type=QuestionType.MULTIPLE_CHOICE))
+        a2 = interviewer.ask(Question(stage="2", text="2", type=QuestionType.FREEFORM))
+        a3 = interviewer.ask(Question(stage="3", text="3", type=QuestionType.FREEFORM))
         assert a1.selected_values == ["first"]
         assert a2.text == "second"
         assert a3.value == AnswerValue.SKIPPED.value
@@ -129,9 +129,9 @@ class TestInterviewerImplementations:
 
     def test_builtin_interviewer_variants_satisfy_adapter_contracts(self):
         question = Question(
-            title="Pick",
-            prompt="Choose one",
-            question_type=QuestionType.MULTIPLE_CHOICE,
+            stage="Pick",
+            text="Choose one",
+            type=QuestionType.MULTIPLE_CHOICE,
             options=[QuestionOption(label="A", value="a", key="A"), QuestionOption(label="B", value="b", key="B")],
         )
         with patch("builtins.input", side_effect=["1", "1"]):

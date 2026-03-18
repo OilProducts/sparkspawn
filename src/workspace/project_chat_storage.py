@@ -16,7 +16,6 @@ from workspace.project_chat_common import (
     truncate_text,
 )
 from workspace.project_chat_models import (
-    CHAT_SESSION_VERSION,
     CONVERSATION_STATE_SCHEMA_VERSION,
     ConversationSegment,
     ConversationSessionState,
@@ -271,7 +270,10 @@ class ProjectChatRepository:
             return None
         if not isinstance(payload, dict):
             return None
-        state = ConversationSessionState.from_dict(payload)
+        try:
+            state = ConversationSessionState.from_dict(payload)
+        except ValueError:
+            return None
         if not state.conversation_id:
             state.conversation_id = conversation_id
         return state
@@ -297,12 +299,10 @@ class ProjectChatRepository:
                     updated_at=iso_now(),
                     project_path=normalized_project_path,
                     runtime_project_path=runtime_project_path,
-                    session_version=CHAT_SESSION_VERSION,
                 )
             session_state.thread_id = thread_id
             session_state.project_path = normalized_project_path
             session_state.runtime_project_path = runtime_project_path
-            session_state.session_version = CHAT_SESSION_VERSION
             session_state.updated_at = iso_now()
             self.write_session_state(session_state)
 

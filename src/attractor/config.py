@@ -23,7 +23,6 @@ class Settings:
     runs_dir: Path
     flows_dir: Path
     ui_dir: Optional[Path]
-    legacy_ui_index: Optional[Path]
 
 
 def resolve_settings(
@@ -43,10 +42,6 @@ def resolve_settings(
     default_flows_dir = default_data_dir / "flows"
 
     default_ui_dir = _resolve_default_ui_dir(project_root)
-    legacy_ui_index = project_root / "index.html"
-    if not legacy_ui_index.exists():
-        legacy_ui_index = None
-
     resolved_data_dir = _coalesce_path(
         cli_value=data_dir,
         env_value=env_map.get(ENV_HOME_DIR),
@@ -87,7 +82,6 @@ def resolve_settings(
         runs_dir=resolved_runs_dir,
         flows_dir=resolved_flows_dir,
         ui_dir=resolved_ui_dir,
-        legacy_ui_index=legacy_ui_index,
     )
 
 

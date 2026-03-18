@@ -28,7 +28,7 @@ def _start_pipeline_via_http(api_client: TestClient, payload: dict) -> dict:
     return response.json()
 
 
-def test_pipeline_start_request_accepts_dot_source_alias(
+def test_pipeline_start_request_requires_flow_content_or_flow_name(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -43,7 +43,10 @@ def test_pipeline_start_request_accepts_dot_source_alias(
             "backend": "codex",
         },
     )
-    assert payload["status"] == "started"
+    assert payload == {
+        "status": "validation_error",
+        "error": "Either flow_content or flow_name is required.",
+    }
 
 
 @pytest.mark.parametrize("backend", ["codex", "codex-cli"])

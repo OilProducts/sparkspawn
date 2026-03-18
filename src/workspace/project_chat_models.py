@@ -7,7 +7,6 @@ import threading
 from time import gmtime, strftime
 from typing import Any, Optional
 
-
 CHAT_SESSION_VERSION = 2
 CONVERSATION_STATE_SCHEMA_VERSION = 4
 
@@ -729,12 +728,17 @@ class ConversationSessionState:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ConversationSessionState":
+        session_version = payload.get("session_version")
+        if not isinstance(session_version, int) or session_version != CHAT_SESSION_VERSION:
+            raise ValueError(
+                "Unsupported conversation session schema. Delete the local conversation session and recreate it."
+            )
         return cls(
             conversation_id=str(payload.get("conversation_id", "")),
             updated_at=str(payload.get("updated_at", "")),
             project_path=_normalize_project_path(str(payload.get("project_path", ""))),
             runtime_project_path=_normalize_project_path(str(payload.get("runtime_project_path", ""))),
-            session_version=int(payload.get("session_version", 0) or 0),
+            session_version=session_version,
             thread_id=str(payload.get("thread_id")) if payload.get("thread_id") is not None else None,
         )
 

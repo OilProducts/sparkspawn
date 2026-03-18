@@ -26,17 +26,6 @@ from workspace.project_chat_models import (
 CHAT_TURN_IDLE_TIMEOUT_SECONDS = codex_app_server.APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS
 FINAL_ANSWER_SETTLE_TIMEOUT_SECONDS = 0.5
 APP_SERVER_REQUEST_TIMEOUT_SECONDS = 15.0
-LEGACY_OPT_OUT_NOTIFICATION_METHODS = [
-    "codex/event/agent_message",
-    "codex/event/agent_message_delta",
-    "codex/event/agent_message_content_delta",
-    "codex/event/agent_reasoning_delta",
-    "codex/event/reasoning_content_delta",
-    "codex/event/item_started",
-    "codex/event/item_completed",
-    "codex/event/task_complete",
-    "codex/event/token_count",
-]
 
 
 def _normalize_tool_call_status(value: Any) -> str:
@@ -88,14 +77,6 @@ def _extract_app_turn_id(message: dict[str, Any]) -> Optional[str]:
         nested = as_non_empty_string(turn.get("id"))
         if nested:
             return nested
-    nested_msg = params.get("msg")
-    if isinstance(nested_msg, dict):
-        nested = as_non_empty_string(nested_msg.get("turn_id") or nested_msg.get("turnId"))
-        if nested:
-            return nested
-    params_id = as_non_empty_string(params.get("id"))
-    if params_id and isinstance(message.get("method"), str) and str(message.get("method")).startswith("codex/event/"):
-        return params_id
     return None
 
 
@@ -186,7 +167,6 @@ class CodexAppServerChatSession:
                 "clientInfo": {"name": "sparkspawn", "version": "0.1"},
                 "capabilities": {
                     "experimentalApi": True,
-                    "optOutNotificationMethods": LEGACY_OPT_OUT_NOTIFICATION_METHODS,
                 },
             },
         )

@@ -63,7 +63,7 @@ class _FlakyHandler:
     def __init__(self) -> None:
         self.calls = 0
 
-    def run(self, runtime):  # noqa: ANN001, ANN201
+    def execute(self, runtime):  # noqa: ANN001, ANN201
         self.calls += 1
         if self.calls <= 2:
             return Outcome(status=OutcomeStatus.RETRY, failure_reason="temporary")
@@ -71,12 +71,12 @@ class _FlakyHandler:
 
 
 class _ContextWriterHandler:
-    def run(self, runtime):  # noqa: ANN001, ANN201
+    def execute(self, runtime):  # noqa: ANN001, ANN201
         return Outcome(status=OutcomeStatus.SUCCESS, context_updates={"artifact_path": "/tmp/out"})
 
 
 class _ContextReaderHandler:
-    def run(self, runtime):  # noqa: ANN001, ANN201
+    def execute(self, runtime):  # noqa: ANN001, ANN201
         return Outcome(
             status=OutcomeStatus.SUCCESS
             if runtime.context.get("artifact_path", "") == "/tmp/out"
@@ -86,7 +86,7 @@ class _ContextReaderHandler:
 
 
 class _CustomHandler:
-    def run(self, runtime):  # noqa: ANN001, ANN201
+    def execute(self, runtime):  # noqa: ANN001, ANN201
         return Outcome(status=OutcomeStatus.SUCCESS, context_updates={"custom.handler.ran": "true"})
 
 

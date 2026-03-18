@@ -18,7 +18,6 @@ from workspace.project_chat_common import (
     summarize_turns_for_debug as _summarize_turns_for_debug,
 )
 from workspace.project_chat_models import (
-    CHAT_SESSION_VERSION,
     ChatTurnLiveEvent,
     ChatTurnResult,
     ConversationSegment,
@@ -780,12 +779,7 @@ class ProjectChatService:
             if session is not None:
                 return session
             persisted_session = self._read_session_state(conversation_id, project_path)
-            persisted_thread_id: Optional[str] = None
-            if (
-                persisted_session is not None
-                and persisted_session.session_version >= CHAT_SESSION_VERSION
-            ):
-                persisted_thread_id = persisted_session.thread_id
+            persisted_thread_id = persisted_session.thread_id if persisted_session is not None else None
             session = CodexAppServerChatSession(
                 project_path,
                 persisted_thread_id=persisted_thread_id,

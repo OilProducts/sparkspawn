@@ -11,12 +11,6 @@ class QuestionType(str, Enum):
     FREEFORM = "FREEFORM"
     CONFIRMATION = "CONFIRMATION"
 
-    # Legacy aliases retained for compatibility with existing callers/tests.
-    SINGLE_SELECT = MULTIPLE_CHOICE
-    MULTI_SELECT = MULTIPLE_CHOICE
-    FREE_TEXT = FREEFORM
-    CONFIRM = CONFIRMATION
-
 
 class AnswerValue(str, Enum):
     YES = "YES"
@@ -51,49 +45,21 @@ class Question:
         timeout_seconds: float | None = None,
         stage: str = "",
         metadata: dict[str, Any] | None = None,
-        *,
-        title: str | None = None,
-        prompt: str | None = None,
-        question_type: QuestionType | None = None,
     ):
-        resolved_type = _coerce_question_type(type if type is not None else question_type)
+        resolved_type = _coerce_question_type(type)
         if resolved_type is None:
-            raise TypeError("Question requires `type` (or legacy `question_type`).")
+            raise TypeError("Question requires `type`.")
 
         resolved_options = list(options) if options else []
         _validate_option_schema(resolved_type, resolved_options)
 
-        self.text = text if text is not None else (prompt or "")
+        self.text = text or ""
         self.type = resolved_type
         self.options = resolved_options
         self.default = default
         self.timeout_seconds = timeout_seconds
-        self.stage = stage or (title or "")
+        self.stage = stage
         self.metadata = dict(metadata) if metadata else {}
-
-    @property
-    def title(self) -> str:
-        return self.stage
-
-    @title.setter
-    def title(self, value: str) -> None:
-        self.stage = value
-
-    @property
-    def prompt(self) -> str:
-        return self.text
-
-    @prompt.setter
-    def prompt(self, value: str) -> None:
-        self.text = value
-
-    @property
-    def question_type(self) -> QuestionType:
-        return self.type
-
-    @question_type.setter
-    def question_type(self, value: QuestionType) -> None:
-        self.type = value
 
 
 @dataclass(init=False)
@@ -138,12 +104,6 @@ class Answer:
 
 
 _SELECT_TYPES = {QuestionType.MULTIPLE_CHOICE}
-_LEGACY_QUESTION_TYPE_NAMES = {
-    "SINGLE_SELECT": QuestionType.MULTIPLE_CHOICE,
-    "MULTI_SELECT": QuestionType.MULTIPLE_CHOICE,
-    "FREE_TEXT": QuestionType.FREEFORM,
-    "CONFIRM": QuestionType.CONFIRMATION,
-}
 
 
 def _coerce_question_type(value: QuestionType | str | None) -> QuestionType | None:
@@ -152,9 +112,6 @@ def _coerce_question_type(value: QuestionType | str | None) -> QuestionType | No
     if isinstance(value, QuestionType):
         return value
     if isinstance(value, str):
-        legacy = _LEGACY_QUESTION_TYPE_NAMES.get(value)
-        if legacy is not None:
-            return legacy
         try:
             return QuestionType(value)
         except ValueError as exc:
