@@ -42,16 +42,15 @@ const resetGraphSettingsState = () => {
     recentProjectPaths: ['/tmp/project-graph-settings'],
     graphAttrs: {},
     graphAttrErrors: {},
+    graphAttrsUserEditVersion: 0,
     saveState: 'idle',
+    saveStateVersion: 0,
     saveErrorMessage: null,
     saveErrorKind: null,
     diagnostics: [],
     nodeDiagnostics: {},
     edgeDiagnostics: {},
     hasValidationErrors: false,
-    saveState: 'idle',
-    saveErrorMessage: null,
-    saveErrorKind: null,
     uiDefaults: {
       llm_provider: 'openai',
       llm_model: 'gpt-5.3',
@@ -245,5 +244,31 @@ describe('Graph and settings behavior', () => {
 
     expect(useStore.getState().saveState).toBe('idle')
     expect(screen.getByLabelText('Launch Policy')).toHaveValue('agent_requestable')
+  })
+
+  it('does not autosave when graph attrs are replaced from hydrated state', async () => {
+    const fetchMock = vi.mocked(fetch)
+    wrapWithFlowProvider(<GraphSettings inline />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-launch-policy-status')).toHaveTextContent(
+        'No catalog entry yet. Effective policy is Disabled.',
+      )
+    })
+
+    const saveRequestsBefore = fetchMock.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === 'POST').length
+
+    act(() => {
+      useStore.getState().replaceGraphAttrs({
+        goal: 'Hydrated goal',
+      })
+    })
+
+    await new Promise((resolve) => window.setTimeout(resolve, 300))
+
+    const saveRequestsAfter = fetchMock.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === 'POST').length
+    expect(saveRequestsAfter).toBe(saveRequestsBefore)
+    expect(useStore.getState().graphAttrsUserEditVersion).toBe(0)
+    expect(useStore.getState().saveState).toBe('idle')
   })
 })

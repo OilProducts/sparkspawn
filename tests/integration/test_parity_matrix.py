@@ -95,7 +95,7 @@ class TestParityMatrixSubset:
     def test_execute_conditional_branching_success_fail_paths(self):
         dot = """
         digraph G {
-            graph [default_max_retry=0]
+            graph [default_max_retries=0]
             start [shape=Mdiamond]
             gate [shape=box]
             fix [shape=box]

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNodes, useReactFlow } from '@xyflow/react'
 import { useStore, type DiagnosticEntry } from '@/store'
 import { generateDot } from '@/lib/dotUtils'
+import { extractDebugErrorSummary, recordFlowLoadDebug } from '@/lib/flowLoadDebug'
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions'
 import { GRAPH_FIDELITY_OPTIONS, getToolHookCommandWarning } from '@/lib/graphAttrValidation'
 import { resolveGraphFieldDiagnostics } from '@/lib/inspectorFieldDiagnostics'
@@ -26,7 +27,7 @@ const GRAPH_ATTR_HELP: Record<string, string> = {
     'sparkspawn.description': 'Short flow description stored in the DOT metadata.',
     goal: 'Primary graph intent used by handlers that read graph-level goal context.',
     label: 'Display label for graph metadata; does not override node labels.',
-    default_max_retry: 'Used only when a node omits max_retries. Node max_retries takes precedence.',
+    default_max_retries: 'Used only when a node omits max_retries. Node max_retries takes precedence.',
     default_fidelity: 'Default fidelity when node/edge fidelity is not set explicitly.',
     model_stylesheet: 'Selector-based model defaults. Explicit node attrs override stylesheet matches.',
     retry_target: 'Global retry target fallback when nodes do not define retry_target.',
@@ -50,7 +51,7 @@ const CORE_GRAPH_ATTR_KEYS = new Set<string>([
     'goal',
     'label',
     'model_stylesheet',
-    'default_max_retry',
+    'default_max_retries',
     'retry_target',
     'fallback_retry_target',
     'default_fidelity',
@@ -77,6 +78,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const diagnostics = useStore((state) => state.diagnostics)
     const graphAttrs = useStore((state) => state.graphAttrs)
     const graphAttrErrors = useStore((state) => state.graphAttrErrors)
+    const graphAttrsUserEditVersion = useStore((state) => state.graphAttrsUserEditVersion)
     const setGraphAttrs = useStore((state) => state.setGraphAttrs)
     const updateGraphAttr = useStore((state) => state.updateGraphAttr)
     const model = useStore((state) => state.model)
@@ -90,6 +92,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const saveTimer = useRef<number | null>(null)
     const hasPendingSave = useRef(false)
     const autosaveScopeRef = useRef<string | null>(null)
+    const lastHandledGraphAttrsVersionRef = useRef(graphAttrsUserEditVersion)
     const activeFlowRef = useRef<string | null>(activeFlow)
     const [launchPolicy, setLaunchPolicy] = useState<FlowLaunchPolicy>('disabled')
     const [launchPolicySource, setLaunchPolicySource] = useState<FlowLaunchPolicy | null>(null)
@@ -148,6 +151,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
             graphAttrs.model_stylesheet || '',
             flowNodes.map((node) => ({
                 id: node.id,
+                shape: typeof node.data?.shape === 'string' ? node.data.shape : '',
                 class: typeof node.data?.class === 'string' ? node.data.class : '',
                 llm_model: typeof node.data?.llm_model === 'string' ? node.data.llm_model : '',
                 llm_provider: typeof node.data?.llm_provider === 'string' ? node.data.llm_provider : '',
@@ -226,10 +230,18 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
 
         void (async () => {
             try {
+                recordFlowLoadDebug('launch-policy:request', activeFlow, {
+                    source: 'graph-settings',
+                })
                 const response = await fetchWorkspaceFlowValidated(activeFlow, 'human')
                 if (cancelled || activeFlowRef.current !== activeFlow) {
                     return
                 }
+                recordFlowLoadDebug('launch-policy:response', activeFlow, {
+                    source: 'graph-settings',
+                    launchPolicy: response.launch_policy ?? null,
+                    effectiveLaunchPolicy: response.effective_launch_policy,
+                })
                 const nextLaunchPolicy = response.launch_policy ?? response.effective_launch_policy
                 setLaunchPolicy(nextLaunchPolicy)
                 setLaunchPolicySource(response.launch_policy)
@@ -239,6 +251,10 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                 if (cancelled || activeFlowRef.current !== activeFlow) {
                     return
                 }
+                recordFlowLoadDebug('launch-policy:error', activeFlow, {
+                    source: 'graph-settings',
+                    ...extractDebugErrorSummary(error),
+                })
                 setLaunchPolicy('disabled')
                 setLaunchPolicySource(null)
                 setLaunchPolicyEffective('disabled')
@@ -289,13 +305,21 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     useEffect(() => {
         if (!activeProjectPath || !activeFlow) {
             autosaveScopeRef.current = null
+            lastHandledGraphAttrsVersionRef.current = graphAttrsUserEditVersion
+            hasPendingSave.current = false
             return
         }
         const autosaveScope = `${activeProjectPath}::${activeFlow}`
         if (autosaveScopeRef.current !== autosaveScope) {
             autosaveScopeRef.current = autosaveScope
+            lastHandledGraphAttrsVersionRef.current = graphAttrsUserEditVersion
+            hasPendingSave.current = false
             return
         }
+        if (graphAttrsUserEditVersion === lastHandledGraphAttrsVersionRef.current) {
+            return
+        }
+        lastHandledGraphAttrsVersionRef.current = graphAttrsUserEditVersion
         hasPendingSave.current = true
         if (saveTimer.current) {
             window.clearTimeout(saveTimer.current)
@@ -311,7 +335,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                 window.clearTimeout(saveTimer.current)
             }
         }
-    }, [activeProjectPath, activeFlow, graphAttrs, getNodes, getEdges])
+    }, [activeProjectPath, activeFlow, graphAttrs, graphAttrsUserEditVersion, getNodes, getEdges])
 
     useEffect(() => {
         const handleBeforeUnload = () => {
@@ -519,25 +543,25 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
-                            <label htmlFor="graph-attr-default-max-retry" className="text-xs font-medium text-foreground">
-                                Default Max Retry
+                            <label htmlFor="graph-attr-default-max-retries" className="text-xs font-medium text-foreground">
+                                Default Max Retries
                             </label>
                             <input
-                                id="graph-attr-default-max-retry"
-                                value={graphAttrs.default_max_retry ?? ''}
-                                onChange={(event) => updateGraphAttr('default_max_retry', event.target.value)}
+                                id="graph-attr-default-max-retries"
+                                value={graphAttrs.default_max_retries ?? ''}
+                                onChange={(event) => updateGraphAttr('default_max_retries', event.target.value)}
                                 type="number"
                                 min={0}
                                 step={1}
                                 inputMode="numeric"
                                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                             />
-                            <p data-testid="graph-attr-help-default_max_retry" className="text-[11px] text-muted-foreground">
-                                {GRAPH_ATTR_HELP.default_max_retry}
+                            <p data-testid="graph-attr-help-default_max_retries" className="text-[11px] text-muted-foreground">
+                                {GRAPH_ATTR_HELP.default_max_retries}
                             </p>
-                            {graphAttrErrors.default_max_retry && (
+                            {graphAttrErrors.default_max_retries && (
                                 <p className="text-[11px] text-destructive">
-                                    {graphAttrErrors.default_max_retry}
+                                    {graphAttrErrors.default_max_retries}
                                 </p>
                             )}
                         </div>
@@ -598,7 +622,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                                     data-testid="graph-model-stylesheet-selector-guidance"
                                     className="text-[11px] text-muted-foreground"
                                 >
-                                    Supported selectors: `*`, `.class`, `#id`. End each declaration with `;`.
+                                    Supported selectors: `*`, `shape`, `.class`, `#id`. End each declaration with `;`.
                                 </p>
                                 {showStylesheetFeedback && (
                                     <div

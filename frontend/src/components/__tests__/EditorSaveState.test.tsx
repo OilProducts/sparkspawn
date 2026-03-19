@@ -1,4 +1,6 @@
 import {
+  primeFlowSaveBaseline,
+  resetFlowSaveBaselines,
   retryLastSaveContent,
   saveFlowContent,
   saveFlowContentExpectingSemanticEquivalence,
@@ -11,6 +13,7 @@ const resetSaveState = () => {
   useStore.setState((state) => ({
     ...state,
     saveState: 'idle',
+    saveStateVersion: 0,
     saveErrorMessage: null,
     saveErrorKind: null,
   }))
@@ -19,6 +22,7 @@ const resetSaveState = () => {
 describe('Editor save state behavior', () => {
   beforeEach(() => {
     resetSaveState()
+    resetFlowSaveBaselines()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -119,5 +123,21 @@ describe('Editor save state behavior', () => {
       name: 'demo.dot',
       expect_semantic_equivalence: true,
     })
+  })
+
+  it('skips no-op saves that match the loaded baseline', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    primeFlowSaveBaseline('demo.dot', 'digraph Demo { start -> end }')
+
+    const saved = await saveFlowContent('demo.dot', 'digraph Demo { start -> end }')
+    expect(saved).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const saveState = useStore.getState()
+    expect(saveState.saveState).toBe('idle')
+    expect(saveState.saveErrorMessage).toBeNull()
+    expect(saveState.saveErrorKind).toBeNull()
   })
 })

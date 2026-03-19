@@ -41,7 +41,6 @@ def resolve_settings(
     default_logs_dir = default_data_dir / "logs"
     default_flows_dir = default_data_dir / "flows"
 
-    default_ui_dir = _resolve_default_ui_dir(project_root)
     resolved_data_dir = _coalesce_path(
         cli_value=data_dir,
         env_value=env_map.get(ENV_HOME_DIR),
@@ -63,11 +62,10 @@ def resolve_settings(
         env_value=env_map.get(ENV_FLOWS_DIR),
         default_value=default_flows_dir,
     )
-
     resolved_ui_dir = _coalesce_optional_path(
         cli_value=ui_dir,
         env_value=env_map.get(ENV_UI_DIR),
-        default_value=default_ui_dir,
+        default_value=None,
     )
 
     return Settings(
@@ -119,18 +117,6 @@ def _detect_project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _resolve_default_ui_dir(project_root: Path) -> Optional[Path]:
-    source_dist = project_root / "frontend" / "dist"
-    if (source_dist / "index.html").exists():
-        return source_dist.resolve(strict=False)
-
-    packaged_dist = Path(__file__).resolve().parent / "ui_dist"
-    if (packaged_dist / "index.html").exists():
-        return packaged_dist.resolve(strict=False)
-
-    return None
-
-
 def _coalesce_path(
     *,
     cli_value: Path | str | None,
@@ -151,8 +137,7 @@ def _coalesce_optional_path(
     default_value: Optional[Path],
 ) -> Optional[Path]:
     if cli_value is not None:
-        candidate = _normalize_path(cli_value)
-        return candidate
+        return _normalize_path(cli_value)
     if env_value:
         return _normalize_path(env_value)
     if default_value is None:

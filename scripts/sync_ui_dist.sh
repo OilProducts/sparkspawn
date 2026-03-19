@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="$ROOT_DIR/frontend/dist"
-TARGET_DIR="$ROOT_DIR/src/attractor/ui_dist"
+TARGET_DIR="$ROOT_DIR/src/sparkspawn_app/ui_dist"
 
 if [[ ! -f "$SOURCE_DIR/index.html" ]]; then
   echo "Missing frontend build output at $SOURCE_DIR/index.html" >&2

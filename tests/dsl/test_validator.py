@@ -323,6 +323,24 @@ class TestDotValidator:
         errors = [d for d in diagnostics if d.rule_id == "stylesheet_syntax" and d.severity == DiagnosticSeverity.ERROR]
         assert len(errors) >= 3
 
+    def test_stylesheet_shape_selector_is_allowed(self):
+        dot = """
+        digraph G {
+            graph [model_stylesheet="box { llm_model: gpt-5; }"]
+            start [shape=Mdiamond]
+            task [shape=box]
+            done [shape=Msquare]
+            start -> task -> done
+        }
+        """
+        graph = parse_dot(dot)
+        diagnostics = validate_graph(graph)
+        stylesheet_errors = [
+            d for d in self._errors(diagnostics) if d.rule_id == "stylesheet_syntax"
+        ]
+
+        assert stylesheet_errors == []
+
     def test_stylesheet_requires_at_least_one_declaration(self):
         dot = """
         digraph G {

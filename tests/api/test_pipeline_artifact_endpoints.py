@@ -13,23 +13,23 @@ from tests.api._support import (
 
 
 def _seed_run(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> tuple[str, Path]:
     runs_root = tmp_path / "runs"
     server.configure_runtime_paths(runs_dir=runs_root)
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    run_id = str(_start_pipeline(api_client, tmp_path / "work")["pipeline_id"])
+    run_id = str(_start_pipeline(attractor_api_client, tmp_path / "work")["pipeline_id"])
     return run_id, server._run_root(run_id)
 
 
 def test_list_pipeline_artifacts_returns_run_outputs_for_known_pipeline(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    run_id, run_root = _seed_run(api_client, monkeypatch, tmp_path)
+    run_id, run_root = _seed_run(attractor_api_client, monkeypatch, tmp_path)
 
     (run_root / "manifest.json").write_text("{}", encoding="utf-8")
     (run_root / "checkpoint.json").write_text("{}", encoding="utf-8")
@@ -47,7 +47,7 @@ def test_list_pipeline_artifacts_returns_run_outputs_for_known_pipeline(
     # Internal checkpoint state should not be exposed by the artifact browser list.
     (run_root / "state.json").write_text("{}", encoding="utf-8")
 
-    response = api_client.get(f"/attractor/pipelines/{run_id}/artifacts")
+    response = attractor_api_client.get(f"/pipelines/{run_id}/artifacts")
 
     assert response.status_code == 200
     payload = response.json()
@@ -66,17 +66,17 @@ def test_list_pipeline_artifacts_returns_run_outputs_for_known_pipeline(
 
 
 def test_get_pipeline_artifact_file_returns_file_for_known_artifact(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    run_id, run_root = _seed_run(api_client, monkeypatch, tmp_path)
+    run_id, run_root = _seed_run(attractor_api_client, monkeypatch, tmp_path)
 
     artifact_path = run_root / "plan" / "prompt.md"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text("# prompt", encoding="utf-8")
 
-    response = api_client.get(f"/attractor/pipelines/{run_id}/artifacts/plan/prompt.md")
+    response = attractor_api_client.get(f"/pipelines/{run_id}/artifacts/plan/prompt.md")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
@@ -84,26 +84,26 @@ def test_get_pipeline_artifact_file_returns_file_for_known_artifact(
 
 
 def test_get_pipeline_artifact_file_rejects_parent_traversal(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    run_id, _ = _seed_run(api_client, monkeypatch, tmp_path)
+    run_id, _ = _seed_run(attractor_api_client, monkeypatch, tmp_path)
 
-    response = api_client.get(f"/attractor/pipelines/{run_id}/artifacts/%2E%2E/run.json")
+    response = attractor_api_client.get(f"/pipelines/{run_id}/artifacts/%2E%2E/run.json")
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid artifact path"
 
 
 def test_get_pipeline_artifact_file_returns_404_when_missing(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    run_id, _ = _seed_run(api_client, monkeypatch, tmp_path)
+    run_id, _ = _seed_run(attractor_api_client, monkeypatch, tmp_path)
 
-    response = api_client.get(f"/attractor/pipelines/{run_id}/artifacts/plan/missing.md")
+    response = attractor_api_client.get(f"/pipelines/{run_id}/artifacts/plan/missing.md")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Artifact not found"

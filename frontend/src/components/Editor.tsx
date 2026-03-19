@@ -21,6 +21,7 @@ import { ValidationPanel } from './ValidationPanel';
 import { ExecutionControls } from './ExecutionControls';
 import { clearDotSerializationContext, generateDot, setDotSerializationContext } from '@/lib/dotUtils';
 import { buildCanonicalFlowModelFromPreviewGraph } from '@/lib/canonicalFlowModel';
+import { recordFlowLoadDebug, summarizeDiagnosticsForFlowLoadDebug } from '@/lib/flowLoadDebug';
 import {
     fetchFlowPayloadValidated,
     fetchPreviewValidated,
@@ -28,6 +29,7 @@ import {
 } from '@/lib/attractorClient';
 import {
     EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS,
+    primeFlowSaveBaseline,
     saveFlowContent,
     saveFlowContentExpectingSemanticEquivalence,
 } from '@/lib/flowPersistence';
@@ -62,6 +64,15 @@ type PreviewResponse = PreviewResponsePayload
 type EditorMode = 'structured' | 'raw'
 type SaveFlowOptions = {
     expectSemanticEquivalence?: boolean
+}
+
+type PreviewDebugContext = {
+    source: 'flow-load-source-dot' | 'structured-sync-preview' | 'raw-dot-handoff'
+    loadId: number | null
+    nodeCount?: number
+    edgeCount?: number
+    graphAttrCount?: number
+    debounceMs?: number
 }
 
 function normalizeLegacyDot(content: string): string {
@@ -115,7 +126,7 @@ export function Editor() {
     const nodeStatuses = useStore((state) => state.nodeStatuses);
     const graphAttrs = useStore((state) => state.graphAttrs);
     const uiDefaults = useStore((state) => state.uiDefaults);
-    const setGraphAttrs = useStore((state) => state.setGraphAttrs);
+    const replaceGraphAttrs = useStore((state) => state.replaceGraphAttrs);
     const setDiagnostics = useStore((state) => state.setDiagnostics);
     const clearDiagnostics = useStore((state) => state.clearDiagnostics);
     const suppressPreview = useStore((state) => state.suppressPreview);
@@ -125,6 +136,7 @@ export function Editor() {
     const previewTimer = useRef<number | null>(null);
     const saveTimer = useRef<number | null>(null);
     const pendingSaveRef = useRef<{ nodes: Node[]; edges: Edge[]; options?: SaveFlowOptions } | null>(null);
+    const activeFlowLoadIdRef = useRef(0);
     const rawDotEntryDraftRef = useRef<string>('');
     const rawHandoffInFlightRef = useRef(false);
     const [isDragging, setIsDragging] = useState(false);
@@ -204,20 +216,39 @@ export function Editor() {
         saveFlow(pending.nodes, pending.edges, pending.options);
     }, [activeProjectPath, flowName, saveFlow]);
 
-    const hydrateFromPreview = useCallback(async (preview: PreviewResponse, sourceDot?: string) => {
-        if (!preview.graph) return false;
+    const hydrateFromPreview = useCallback(async (
+        preview: PreviewResponse,
+        sourceDot?: string,
+        debugContext?: { loadId: number | null; source: PreviewDebugContext['source'] },
+    ) => {
+        if (!preview.graph) {
+            recordFlowLoadDebug('hydrate:skipped', flowName, {
+                loadId: debugContext?.loadId ?? null,
+                source: debugContext?.source ?? 'flow-load-source-dot',
+                reason: 'preview graph missing',
+            });
+            return false;
+        }
         const canonicalModel = buildCanonicalFlowModelFromPreviewGraph(
             flowName ?? 'flow',
             preview.graph,
             sourceDot !== undefined ? { rawDot: sourceDot } : undefined,
         )
+        const nextGraphAttrs: GraphAttrs = preview.graph.graph_attrs ? { ...canonicalModel.graphAttrs } : {}
+        recordFlowLoadDebug('hydrate:start', flowName, {
+            loadId: debugContext?.loadId ?? null,
+            source: debugContext?.source ?? 'flow-load-source-dot',
+            sourceDotLength: sourceDot?.length ?? null,
+            nodeCount: canonicalModel.nodes.length,
+            edgeCount: canonicalModel.edges.length,
+            graphAttrCount: Object.keys(canonicalModel.graphAttrs).length,
+        })
         setDotSerializationContext({
             defaults: canonicalModel.defaults,
             subgraphs: canonicalModel.subgraphs,
         })
 
         if (preview.graph.graph_attrs) {
-            const nextGraphAttrs: GraphAttrs = { ...canonicalModel.graphAttrs }
             const shouldSeed = (value?: string | null) =>
                 value === undefined || value === null || value === ''
             if (shouldSeed(nextGraphAttrs.ui_default_llm_model) && uiDefaults.llm_model) {
@@ -229,8 +260,8 @@ export function Editor() {
             if (shouldSeed(nextGraphAttrs.ui_default_reasoning_effort) && uiDefaults.reasoning_effort) {
                 nextGraphAttrs.ui_default_reasoning_effort = uiDefaults.reasoning_effort
             }
-            setGraphAttrs(nextGraphAttrs)
         }
+        replaceGraphAttrs(nextGraphAttrs)
 
         const rfNodes: Node[] = canonicalModel.nodes.map((n, i: number) => ({
             id: n.id,
@@ -303,49 +334,93 @@ export function Editor() {
         }));
 
         const layoutStart = nowMs();
+        let layoutDurationMs = 0;
+        let serializedNodes = rfNodes;
         try {
             const layoutNodes = await layoutWithElk(rfNodes, rfEdges);
             setNodes(layoutNodes);
+            serializedNodes = layoutNodes;
         } catch (error) {
             console.error('ELK layout failed, using fallback positions.', error);
             setNodes(rfNodes);
+            serializedNodes = rfNodes;
         } finally {
-            const elapsed = Math.max(0, nowMs() - layoutStart);
-            setLastLayoutMs(elapsed);
+            layoutDurationMs = Math.max(0, nowMs() - layoutStart);
+            setLastLayoutMs(layoutDurationMs);
         }
         setEdges(rfEdges);
+        primeFlowSaveBaseline(flowName ?? 'flow', generateDot(flowName ?? 'flow', serializedNodes, rfEdges, nextGraphAttrs))
         hydratedRef.current = true;
+        recordFlowLoadDebug('hydrate:complete', flowName, {
+            loadId: debugContext?.loadId ?? null,
+            source: debugContext?.source ?? 'flow-load-source-dot',
+            nodeCount: rfNodes.length,
+            edgeCount: rfEdges.length,
+            layoutMs: layoutDurationMs,
+        })
         return true;
     }, [
         flowName,
         setEdges,
-        setGraphAttrs,
+        replaceGraphAttrs,
         setNodes,
         uiDefaults.llm_model,
         uiDefaults.llm_provider,
         uiDefaults.reasoning_effort,
     ]);
 
-    const requestPreview = useCallback(async (dot: string): Promise<PreviewResponse> => {
+    const requestPreview = useCallback(async (
+        dot: string,
+        debugContext?: PreviewDebugContext,
+    ): Promise<PreviewResponse> => {
+        recordFlowLoadDebug('preview:request', flowName, {
+            loadId: debugContext?.loadId ?? null,
+            source: debugContext?.source ?? 'structured-sync-preview',
+            dotLength: dot.length,
+            nodeCount: debugContext?.nodeCount ?? null,
+            edgeCount: debugContext?.edgeCount ?? null,
+            graphAttrCount: debugContext?.graphAttrCount ?? null,
+            debounceMs: debugContext?.debounceMs ?? null,
+        });
         const previewStart = nowMs();
         const preview = await fetchPreviewValidated(dot)
         const elapsed = Math.max(0, nowMs() - previewStart);
         setLastPreviewMs(elapsed);
+        recordFlowLoadDebug('preview:response', flowName, {
+            loadId: debugContext?.loadId ?? null,
+            source: debugContext?.source ?? 'structured-sync-preview',
+            elapsedMs: elapsed,
+            status: preview.status,
+            hasGraph: Boolean(preview.graph),
+            backendErrorCount: preview.errors?.length ?? 0,
+            ...summarizeDiagnosticsForFlowLoadDebug(preview.diagnostics),
+        });
         if (preview.diagnostics) {
             setDiagnostics(preview.diagnostics);
         } else {
             clearDiagnostics();
         }
+        recordFlowLoadDebug('diagnostics:apply', flowName, {
+            loadId: debugContext?.loadId ?? null,
+            source: debugContext?.source ?? 'structured-sync-preview',
+            ...summarizeDiagnosticsForFlowLoadDebug(preview.diagnostics),
+        });
         return preview;
-    }, [setDiagnostics, clearDiagnostics]);
+    }, [clearDiagnostics, flowName, setDiagnostics]);
 
     // Auto-load and sync with Backend Preview
     useEffect(() => {
         hydratedRef.current = false;
         if (!flowName) {
+            activeFlowLoadIdRef.current += 1;
+            recordFlowLoadDebug('flow-load:cleared', null, {
+                loadId: activeFlowLoadIdRef.current,
+                reason: 'no active flow',
+            });
             clearDotSerializationContext();
             setNodes([]);
             setEdges([]);
+            replaceGraphAttrs({});
             clearDiagnostics();
             setRawDotDraft('');
             setRawHandoffError(null);
@@ -357,8 +432,20 @@ export function Editor() {
             setLastPreviewMs(0);
             return;
         }
+        const loadId = activeFlowLoadIdRef.current + 1;
+        activeFlowLoadIdRef.current = loadId;
+        recordFlowLoadDebug('flow-load:start', flowName, {
+            loadId,
+            activeProjectPath,
+            viewMode,
+        });
         clearDotSerializationContext();
+        replaceGraphAttrs({});
         clearDiagnostics();
+        recordFlowLoadDebug('diagnostics:clear', flowName, {
+            loadId,
+            reason: 'flow-load reset',
+        });
         setRawHandoffError(null);
         rawHandoffInFlightRef.current = false;
         setIsRawHandoffInFlight(false);
@@ -368,25 +455,36 @@ export function Editor() {
         fetchFlowPayloadValidated(flowName)
             .then((data) => {
                 const normalizedContent = normalizeLegacyDot(data.content);
+                recordFlowLoadDebug('flow-load:payload', flowName, {
+                    loadId,
+                    originalLength: data.content.length,
+                    normalizedLength: normalizedContent.length,
+                    normalizedLegacySyntax: normalizedContent !== data.content,
+                });
                 setRawDotDraft(normalizedContent);
-                if (activeProjectPath && normalizedContent !== data.content) {
-                    void saveFlowContentExpectingSemanticEquivalence(flowName, normalizedContent);
-                }
-                return requestPreview(normalizedContent).then((preview) => ({
+                return requestPreview(normalizedContent, {
+                    loadId,
+                    source: 'flow-load-source-dot',
+                }).then((preview) => ({
                     normalizedContent,
                     preview,
                 }));
             })
-            .then(({ normalizedContent, preview }) => hydrateFromPreview(preview, normalizedContent))
+            .then(({ normalizedContent, preview }) => hydrateFromPreview(preview, normalizedContent, {
+                loadId,
+                source: 'flow-load-source-dot',
+            }))
             .catch(console.error);
     }, [
-        flowName,
         activeProjectPath,
+        flowName,
         clearDiagnostics,
         hydrateFromPreview,
         requestPreview,
+        replaceGraphAttrs,
         setEdges,
         setNodes,
+        viewMode,
     ]);
 
     useEffect(() => {
@@ -402,8 +500,24 @@ export function Editor() {
         if (previewTimer.current) {
             window.clearTimeout(previewTimer.current);
         }
+        recordFlowLoadDebug('preview:schedule', flowName, {
+            loadId: activeFlowLoadIdRef.current,
+            source: 'structured-sync-preview',
+            debounceMs: previewDebounceMs,
+            nodeCount: nodes.length,
+            edgeCount: edges.length,
+            graphAttrCount: Object.keys(graphAttrs).length,
+            dotLength: dot.length,
+        });
         previewTimer.current = window.setTimeout(() => {
-            void requestPreview(dot).catch(console.error);
+            void requestPreview(dot, {
+                loadId: activeFlowLoadIdRef.current,
+                source: 'structured-sync-preview',
+                nodeCount: nodes.length,
+                edgeCount: edges.length,
+                graphAttrCount: Object.keys(graphAttrs).length,
+                debounceMs: previewDebounceMs,
+            }).catch(console.error);
         }, previewDebounceMs);
 
         return () => {
@@ -575,14 +689,20 @@ export function Editor() {
             }
 
             try {
-                const preview = await requestPreview(rawDotDraft);
+                const preview = await requestPreview(rawDotDraft, {
+                    loadId: activeFlowLoadIdRef.current,
+                    source: 'raw-dot-handoff',
+                });
                 if (preview.status === 'validation_error' || (preview.errors?.length ?? 0) > 0) {
                     setRawHandoffError(
                         'Raw DOT edit conflicts with structured mode assumptions. Resolve validation errors before switching modes.',
                     );
                     return;
                 }
-                const hydrated = await hydrateFromPreview(preview, rawDotDraft);
+                const hydrated = await hydrateFromPreview(preview, rawDotDraft, {
+                    loadId: activeFlowLoadIdRef.current,
+                    source: 'raw-dot-handoff',
+                });
                 if (!hydrated) {
                     setRawHandoffError('Safe handoff requires valid DOT. Preview response did not include a graph.');
                     return;

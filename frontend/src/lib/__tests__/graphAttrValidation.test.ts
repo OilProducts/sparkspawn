@@ -12,8 +12,8 @@ describe('graphAttrValidation', () => {
       'Turn spec edits into plans.',
     )
     expect(normalizeGraphAttrValue('goal', '  Ship release  ')).toBe('Ship release')
-    expect(normalizeGraphAttrValue('default_max_retry', ' 003 ')).toBe('3')
-    expect(normalizeGraphAttrValue('default_max_retry', 'abc')).toBe('abc')
+    expect(normalizeGraphAttrValue('default_max_retries', ' 003 ')).toBe('3')
+    expect(normalizeGraphAttrValue('default_max_retries', 'abc')).toBe('abc')
     expect(normalizeGraphAttrValue('default_fidelity', ' Summary:High ')).toBe('summary:high')
     expect(normalizeGraphAttrValue('model_stylesheet', '  .fast { llm_model: x; }  ')).toBe(
       '  .fast { llm_model: x; }  ',
@@ -21,10 +21,10 @@ describe('graphAttrValidation', () => {
   })
 
   it('validates fidelity and retry constraints', () => {
-    expect(validateGraphAttrValue('default_max_retry', '')).toBeNull()
-    expect(validateGraphAttrValue('default_max_retry', '2')).toBeNull()
-    expect(validateGraphAttrValue('default_max_retry', '-1')).toBe(
-      'Default max retry must be a non-negative integer.',
+    expect(validateGraphAttrValue('default_max_retries', '')).toBeNull()
+    expect(validateGraphAttrValue('default_max_retries', '2')).toBeNull()
+    expect(validateGraphAttrValue('default_max_retries', '-1')).toBe(
+      'Default max retries must be a non-negative integer.',
     )
 
     expect(validateGraphAttrValue('default_fidelity', '')).toBeNull()

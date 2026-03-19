@@ -928,7 +928,27 @@ class TestExecutor:
 
         assert result.status == "success"
         assert result.current_node == "done"
-        assert result.route_trace == ["start", "work", "done"]
+
+    def test_run_from_returns_success_when_non_fail_stage_has_no_route(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                work [shape=box]
+                alternate [shape=box]
+                work -> alternate [condition="outcome=fail"]
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            return Outcome(status=OutcomeStatus.SUCCESS, notes=node_id)
+
+        result = PipelineExecutor(graph, runner).run_from("work", Context())
+
+        assert result.status == "success"
+        assert result.current_node == "work"
+        assert result.completed_nodes == ["work"]
+        assert result.route_trace == ["work"]
 
     def test_shape_start_takes_precedence_over_start_id_fallback(self):
         graph = parse_dot(

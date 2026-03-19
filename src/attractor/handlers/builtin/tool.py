@@ -27,6 +27,16 @@ class ToolHandler:
         if pre_hook:
             pre_hook_result = _run_hook(pre_hook, hook_phase="pre", metadata=hook_metadata)
             _record_hook_failure(runtime, command=pre_hook, hook_phase="pre", result=pre_hook_result)
+            if pre_hook_result.returncode != 0:
+                _write_output_artifact(runtime, "")
+                return Outcome(
+                    status=OutcomeStatus.FAIL,
+                    failure_reason=_pre_hook_failure_reason(pre_hook, pre_hook_result),
+                    context_updates={
+                        "context.tool.output": "",
+                        "context.tool.exit_code": -1,
+                    },
+                )
         post_hook = _resolve_hook_command(runtime, "tool_hooks.post")
 
         timeout = _to_seconds(runtime.node_attrs.get("timeout"))
@@ -147,6 +157,13 @@ def _record_hook_failure(
             handle.write(json.dumps(record, sort_keys=True) + "\n")
     except OSError:
         return
+
+
+def _pre_hook_failure_reason(command: str, result: subprocess.CompletedProcess[str]) -> str:
+    stderr = str(result.stderr or "").strip()
+    if stderr:
+        return f"tool pre-hook blocked execution: {stderr}"
+    return f"tool pre-hook blocked execution (exit code {int(result.returncode)}): {command}"
 
 
 def _write_output_artifact(runtime: HandlerRuntime, output: str) -> None:

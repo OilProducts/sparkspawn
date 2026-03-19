@@ -567,11 +567,11 @@ def _tokenize(source: str) -> List[Token]:
                 tokens.append(Token("INT", source[start:i], start_line))
             continue
 
-        # Identifier / qualified identifier
+        # Identifier / bare value token
         if ch.isalpha() or ch == "_":
             start = i
             i += 1
-            while i < n and (source[i].isalnum() or source[i] in "_."):
+            while i < n and (source[i].isalnum() or source[i] in "_.-"):
                 i += 1
             tokens.append(Token("IDENT", source[start:i], line))
             continue

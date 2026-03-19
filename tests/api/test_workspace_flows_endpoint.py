@@ -43,7 +43,7 @@ def test_flow_catalog_round_trip_defaults_uncataloged_to_disabled() -> None:
 
 
 def test_list_workspace_flows_human_surface_returns_all_flows_with_metadata_fallbacks(
-    api_client: TestClient,
+    product_api_client: TestClient,
 ) -> None:
     _write_flow(
         "rich.dot",
@@ -70,7 +70,7 @@ digraph fallback {
         + "\n",
     )
 
-    response = api_client.get("/workspace/api/flows", params={"surface": "human"})
+    response = product_api_client.get("/workspace/api/flows", params={"surface": "human"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -97,7 +97,7 @@ digraph fallback {
 
 
 def test_list_workspace_flows_agent_surface_filters_non_requestable_flows(
-    api_client: TestClient,
+    product_api_client: TestClient,
 ) -> None:
     _write_flow("requestable.dot", "digraph requestable { start -> done; }\n")
     _write_flow("trigger-only.dot", "digraph trigger_only { start -> done; }\n")
@@ -106,7 +106,7 @@ def test_list_workspace_flows_agent_surface_filters_non_requestable_flows(
     set_flow_launch_policy(server.get_settings().config_dir, "trigger-only.dot", "trigger_only")
     set_flow_launch_policy(server.get_settings().config_dir, "disabled.dot", "disabled")
 
-    response = api_client.get("/workspace/api/flows", params={"surface": "agent"})
+    response = product_api_client.get("/workspace/api/flows", params={"surface": "agent"})
 
     assert response.status_code == 200
     assert response.json() == [
@@ -123,7 +123,7 @@ def test_list_workspace_flows_agent_surface_filters_non_requestable_flows(
 
 
 def test_workspace_flow_describe_returns_derived_graph_features(
-    api_client: TestClient,
+    product_api_client: TestClient,
 ) -> None:
     _write_flow(
         "inspectable.dot",
@@ -143,7 +143,7 @@ digraph inspectable {
     )
     set_flow_launch_policy(server.get_settings().config_dir, "inspectable.dot", "agent_requestable")
 
-    response = api_client.get("/workspace/api/flows/inspectable.dot", params={"surface": "agent"})
+    response = product_api_client.get("/workspace/api/flows/inspectable.dot", params={"surface": "agent"})
 
     assert response.status_code == 200
     assert response.json() == {
@@ -164,26 +164,26 @@ digraph inspectable {
 
 
 def test_workspace_flow_agent_surface_hides_non_requestable_describe_and_raw(
-    api_client: TestClient,
+    product_api_client: TestClient,
 ) -> None:
     _write_flow("trigger-only.dot", "digraph trigger_only { start -> done; }\n")
     set_flow_launch_policy(server.get_settings().config_dir, "trigger-only.dot", "trigger_only")
 
-    describe_response = api_client.get("/workspace/api/flows/trigger-only.dot", params={"surface": "agent"})
-    raw_response = api_client.get("/workspace/api/flows/trigger-only.dot/raw", params={"surface": "agent"})
+    describe_response = product_api_client.get("/workspace/api/flows/trigger-only.dot", params={"surface": "agent"})
+    raw_response = product_api_client.get("/workspace/api/flows/trigger-only.dot/raw", params={"surface": "agent"})
 
     assert describe_response.status_code == 404
     assert raw_response.status_code == 404
 
 
 def test_workspace_flow_raw_returns_dot_for_requestable_flow(
-    api_client: TestClient,
+    product_api_client: TestClient,
 ) -> None:
     flow_content = 'digraph requestable { graph [label="Requestable"]; start -> done; }\n'
     _write_flow("requestable.dot", flow_content)
     set_flow_launch_policy(server.get_settings().config_dir, "requestable.dot", "agent_requestable")
 
-    response = api_client.get("/workspace/api/flows/requestable.dot/raw", params={"surface": "agent"})
+    response = product_api_client.get("/workspace/api/flows/requestable.dot/raw", params={"surface": "agent"})
 
     assert response.status_code == 200
     assert response.text == flow_content
@@ -191,11 +191,11 @@ def test_workspace_flow_raw_returns_dot_for_requestable_flow(
 
 
 def test_workspace_flow_launch_policy_update_persists_catalog_entry(
-    api_client: TestClient,
+    product_api_client: TestClient,
 ) -> None:
     _write_flow("editable.dot", "digraph editable { start -> done; }\n")
 
-    response = api_client.put(
+    response = product_api_client.put(
         "/workspace/api/flows/editable.dot/launch-policy",
         json={"launch_policy": "trigger_only"},
     )

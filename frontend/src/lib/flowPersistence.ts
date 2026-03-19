@@ -1,5 +1,6 @@
 import { useStore, type SaveErrorKind } from '@/store'
 import { saveFlowValidated } from '@/lib/attractorClient'
+import { recordFlowLoadDebug } from '@/lib/flowLoadDebug'
 
 interface SaveFlowErrorDetail {
     status?: string
@@ -13,6 +14,12 @@ export interface SaveFlowOptions {
 const FALLBACK_SAVE_FAILURE_MESSAGE = 'Flow save failed before confirmation from backend.'
 export const EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS: SaveFlowOptions = { expectSemanticEquivalence: true }
 let lastSaveRequest: { name: string; content: string; options?: SaveFlowOptions } | null = null
+const persistedBaselineByScope = new Map<string, string>()
+
+function getSaveScopeKey(name: string): string {
+    const activeProjectPath = useStore.getState().activeProjectPath ?? '__no_project__'
+    return `${activeProjectPath}::${name}`
+}
 
 function parseErrorDetail(payload: unknown): SaveFlowErrorDetail {
     if (!payload || typeof payload !== 'object') {
@@ -48,13 +55,36 @@ export async function retryLastSaveContent(): Promise<boolean> {
     return saveFlowContent(lastSaveRequest.name, lastSaveRequest.content, lastSaveRequest.options)
 }
 
+export function primeFlowSaveBaseline(name: string, content: string): void {
+    persistedBaselineByScope.set(getSaveScopeKey(name), content)
+}
+
+export function resetFlowSaveBaselines(): void {
+    persistedBaselineByScope.clear()
+    lastSaveRequest = null
+}
+
 export async function saveFlowContentExpectingSemanticEquivalence(name: string, content: string): Promise<boolean> {
     return saveFlowContent(name, content, EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS)
 }
 
 export async function saveFlowContent(name: string, content: string, options?: SaveFlowOptions): Promise<boolean> {
+    const scopeKey = getSaveScopeKey(name)
+    const existingBaseline = persistedBaselineByScope.get(scopeKey)
+    if (existingBaseline === content) {
+        recordFlowLoadDebug('save:skipped', name, {
+            contentLength: content.length,
+            expectSemanticEquivalence: options?.expectSemanticEquivalence === true,
+            reason: 'baseline_match',
+        })
+        return true
+    }
     const { markSaveInFlight, markSaveSuccess, markSaveFailure, markSaveConflict } = useStore.getState()
     lastSaveRequest = { name, content, options }
+    recordFlowLoadDebug('save:request', name, {
+        contentLength: content.length,
+        expectSemanticEquivalence: options?.expectSemanticEquivalence === true,
+    })
     markSaveInFlight()
 
     try {
@@ -62,6 +92,13 @@ export async function saveFlowContent(name: string, content: string, options?: S
         if (!response.ok) {
             const detail = parseErrorDetail(response.payload)
             const message = buildErrorMessage(detail.status, detail.error, response.statusCode)
+            recordFlowLoadDebug('save:response', name, {
+                ok: false,
+                statusCode: response.statusCode,
+                saveStatus: detail.status ?? null,
+                message,
+                expectSemanticEquivalence: options?.expectSemanticEquivalence === true,
+            })
             if (detail.status === 'conflict' || (response.statusCode === 409 && detail.status !== 'semantic_mismatch')) {
                 markSaveConflict(message)
                 return false
@@ -80,6 +117,13 @@ export async function saveFlowContent(name: string, content: string, options?: S
             ? (response.payload as { status: string }).status
             : undefined
         if (status !== 'saved') {
+            recordFlowLoadDebug('save:response', name, {
+                ok: false,
+                statusCode: response.statusCode,
+                saveStatus: status ?? null,
+                message: FALLBACK_SAVE_FAILURE_MESSAGE,
+                expectSemanticEquivalence: options?.expectSemanticEquivalence === true,
+            })
             if (status === 'conflict') {
                 markSaveConflict(buildErrorMessage(status, undefined, response.statusCode))
                 return false
@@ -88,10 +132,21 @@ export async function saveFlowContent(name: string, content: string, options?: S
             return false
         }
 
+        recordFlowLoadDebug('save:response', name, {
+            ok: true,
+            statusCode: response.statusCode,
+            saveStatus: status,
+            expectSemanticEquivalence: options?.expectSemanticEquivalence === true,
+        })
+        persistedBaselineByScope.set(scopeKey, content)
         markSaveSuccess()
         return true
     } catch (error) {
         const message = error instanceof Error ? error.message : 'network error while saving flow'
+        recordFlowLoadDebug('save:error', name, {
+            message,
+            expectSemanticEquivalence: options?.expectSemanticEquivalence === true,
+        })
         markSaveFailure(`Flow save failed: ${message}`, 'network')
         return false
     }

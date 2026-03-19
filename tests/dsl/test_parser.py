@@ -324,6 +324,18 @@ line2"]
         graph.nodes["second"].attrs["llm_model"].value = "mutated"
         assert graph.nodes["third"].attrs["llm_model"].value == "gpt-5"
 
+    def test_parses_unquoted_bare_values_with_hyphen_dot_and_colon(self):
+        dot = """
+        digraph BareValues {
+            task [shape=box, llm_model=gpt-5.2, fidelity=summary:high]
+        }
+        """
+        graph = parse_dot(dot)
+        attrs = graph.nodes["task"].attrs
+
+        assert attrs["llm_model"].value == "gpt-5.2"
+        assert attrs["fidelity"].value == "summary:high"
+
     def test_explicit_node_attrs_override_later_defaults_when_redeclared(self):
         dot = """
         digraph ExplicitWins {

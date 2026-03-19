@@ -6,13 +6,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+import sparkspawn_app.app as product_app
 
 
 @pytest.fixture(autouse=True)
-def _reset_api_server_state(tmp_path: Path) -> None:
+def _reset_api_server_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("SPARKSPAWN_UI_DIR", raising=False)
     server.configure_runtime_paths(
         data_dir=tmp_path / ".sparkspawn",
+        runs_dir=None,
         flows_dir=tmp_path / "flows",
+        ui_dir=None,
     )
     with server.ACTIVE_RUNS_LOCK:
         server.ACTIVE_RUNS.clear()
@@ -33,6 +37,12 @@ def _reset_api_server_state(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def api_client() -> TestClient:
-    with TestClient(server.app) as client:
+def attractor_api_client() -> TestClient:
+    with TestClient(server.attractor_app) as client:
+        yield client
+
+
+@pytest.fixture
+def product_api_client() -> TestClient:
+    with TestClient(product_app.app) as client:
         yield client

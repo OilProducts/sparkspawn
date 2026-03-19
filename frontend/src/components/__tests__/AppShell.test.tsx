@@ -32,6 +32,7 @@ const resetAppShellState = () => {
     graphAttrs: {},
     graphAttrErrors: {},
     saveState: 'idle',
+    saveStateVersion: 0,
     saveErrorMessage: null,
     saveErrorKind: null,
   }))

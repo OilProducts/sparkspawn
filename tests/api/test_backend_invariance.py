@@ -22,21 +22,21 @@ from tests.api._support import (
 )
 
 
-def _start_pipeline_via_http(api_client: TestClient, payload: dict) -> dict:
-    response = api_client.post("/attractor/pipelines", json=payload)
+def _start_pipeline_via_http(attractor_api_client: TestClient, payload: dict) -> dict:
+    response = attractor_api_client.post("/pipelines", json=payload)
     assert response.status_code == 200
     return response.json()
 
 
 def test_pipeline_start_request_requires_flow_content_or_flow_name(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     payload = _start_pipeline_via_http(
-        api_client,
+        attractor_api_client,
         {
             "dot_source": FLOW,
             "working_directory": str(tmp_path / "work"),
@@ -51,7 +51,7 @@ def test_pipeline_start_request_requires_flow_content_or_flow_name(
 
 @pytest.mark.parametrize("backend", ["codex", "codex-cli"])
 def test_pipeline_definition_is_backend_invariant_for_backend_selection(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     backend: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -60,7 +60,7 @@ def test_pipeline_definition_is_backend_invariant_for_backend_selection(
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
     payload = _start_pipeline_via_http(
-        api_client,
+        attractor_api_client,
         {
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
@@ -72,14 +72,14 @@ def test_pipeline_definition_is_backend_invariant_for_backend_selection(
 
 
 def test_pipeline_emits_lifecycle_phases_in_spec_order(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
     payload = _start_pipeline_via_http(
-        api_client,
+        attractor_api_client,
         {
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
@@ -88,7 +88,7 @@ def test_pipeline_emits_lifecycle_phases_in_spec_order(
     )
     assert payload["status"] == "started"
     run_id = payload["run_id"]
-    _wait_for_pipeline_completion(api_client, run_id)
+    _wait_for_pipeline_completion(attractor_api_client, run_id)
 
     lifecycle_phases = [
         str(event.get("phase"))
@@ -96,18 +96,18 @@ def test_pipeline_emits_lifecycle_phases_in_spec_order(
         if event.get("type") == "lifecycle"
     ]
 
-    assert lifecycle_phases == ["PARSE", "VALIDATE", "INITIALIZE", "EXECUTE", "FINALIZE"]
+    assert lifecycle_phases == ["PARSE", "TRANSFORM", "VALIDATE", "INITIALIZE", "EXECUTE", "FINALIZE"]
 
 
 def test_pipeline_stream_includes_executor_typed_runtime_events(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
     payload = _start_pipeline_via_http(
-        api_client,
+        attractor_api_client,
         {
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
@@ -116,7 +116,7 @@ def test_pipeline_stream_includes_executor_typed_runtime_events(
     )
     assert payload["status"] == "started"
     run_id = payload["run_id"]
-    _wait_for_pipeline_completion(api_client, run_id)
+    _wait_for_pipeline_completion(attractor_api_client, run_id)
 
     event_types = [str(event.get("type")) for event in server.EVENT_HUB.history(run_id)]
 
@@ -128,7 +128,7 @@ def test_pipeline_stream_includes_executor_typed_runtime_events(
 
 
 def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -136,7 +136,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
 
     flow = """
     digraph G {
-        graph [goal="Ship API", default_max_retry=7, default_fidelity="compact", model_stylesheet=".fast { llm_model: fast-model; }"]
+        graph [goal="Ship API", default_max_retries=7, default_fidelity="compact", model_stylesheet=".fast { llm_model: fast-model; }"]
         start [shape=Mdiamond]
         plan [shape=box, class="fast", prompt="Plan for $goal"]
         done [shape=Msquare]
@@ -145,7 +145,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
     """
 
     payload = _start_pipeline_via_http(
-        api_client,
+        attractor_api_client,
         {
             "flow_content": flow,
             "working_directory": str(tmp_path / "work"),
@@ -163,6 +163,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
     assert checkpoint.current_node == "start"
     assert checkpoint.completed_nodes == []
     assert checkpoint.context["graph.goal"] == "Ship API"
+    assert checkpoint.context["graph.default_max_retries"] == 7
     assert checkpoint.context["graph.default_max_retry"] == 7
     assert checkpoint.context["graph.default_fidelity"] == "compact"
 
@@ -172,7 +173,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
         for event in history
         if event.get("type") == "lifecycle"
     ]
-    assert lifecycle_phases == ["PARSE", "VALIDATE", "INITIALIZE"]
+    assert lifecycle_phases == ["PARSE", "TRANSFORM", "VALIDATE", "INITIALIZE"]
 
     graph_event = next(event for event in history if event.get("type") == "graph")
     nodes_by_id = {str(node["id"]): node for node in graph_event["nodes"]}
@@ -212,7 +213,7 @@ def test_local_codex_cli_backend_missing_binary_returns_fail_outcome_and_emits_l
     def _raise_missing(*args, **kwargs):
         raise FileNotFoundError("codex")
 
-    monkeypatch.setattr(server.subprocess, "run", _raise_missing)
+    monkeypatch.setattr(codex_backends_module.subprocess, "run", _raise_missing)
 
     result = backend.run("plan", "hello", Context())
 

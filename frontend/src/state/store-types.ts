@@ -41,6 +41,7 @@ export interface GraphAttrs {
     goal?: string
     label?: string
     model_stylesheet?: string
+    default_max_retries?: number | string
     default_max_retry?: number | string
     retry_target?: string
     fallback_retry_target?: string
@@ -195,7 +196,9 @@ export interface EditorSlice {
     setModel: (value: string) => void
     graphAttrs: GraphAttrs
     graphAttrErrors: GraphAttrErrors
+    graphAttrsUserEditVersion: number
     setGraphAttrs: (attrs: GraphAttrs) => void
+    replaceGraphAttrs: (attrs: GraphAttrs) => void
     updateGraphAttr: (key: keyof GraphAttrs, value: string) => void
     diagnostics: DiagnosticEntry[]
     setDiagnostics: (diagnostics: DiagnosticEntry[]) => void
@@ -209,12 +212,14 @@ export interface EditorSlice {
     setUiDefaults: (values: Partial<UiDefaults>) => void
     setUiDefault: (key: keyof UiDefaults, value: string) => void
     saveState: SaveState
+    saveStateVersion: number
     saveErrorMessage: string | null
     saveErrorKind: SaveErrorKind | null
     markSaveInFlight: () => void
     markSaveSuccess: () => void
     markSaveConflict: (message: string) => void
     markSaveFailure: (message: string, kind?: SaveErrorKind) => void
+    resetSaveState: () => void
 }
 
 export type AppState = WorkspaceSlice & RunInspectorSlice & EditorSlice

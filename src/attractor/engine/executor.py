@@ -13,6 +13,11 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from attractor.dsl.models import DotEdge, DotGraph
 from attractor.dsl.models import Duration
+from attractor.graph_prep import (
+    DEFAULT_MAX_RETRIES_KEY,
+    LEGACY_DEFAULT_MAX_RETRY_KEY,
+    resolve_default_max_retries_value,
+)
 from attractor.transforms.runtime_preamble import RuntimePreambleTransform
 
 from .checkpoint import Checkpoint, load_checkpoint, save_checkpoint
@@ -221,7 +226,7 @@ class PipelineExecutor:
                             current = resumed_next.target
                             incoming_edge = resumed_next
                             route_trace = [current]
-        self._mirror_graph_goal(ctx)
+        self._mirror_graph_attrs(ctx)
         self._seed_builtin_context(ctx, current)
         self._ensure_run_root_layout(current_node=current, context=ctx)
         self._emit_pipeline_started(current_node=current, resumed=resume)
@@ -464,16 +469,21 @@ class PipelineExecutor:
                             route_trace=route_trace,
                             failure_reason=failure_reason,
                         )
-                    message = self._no_route_message(node.node_id, routing_outcome)
-                    self._emit_event(
-                        "StageFailed",
-                        node_id=node.node_id,
-                        name=node.node_id,
-                        index=stage_index,
-                        error=message,
-                        will_retry=False,
+                    self._finalize_run(
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelineCompleted",
                     )
-                    raise RuntimeError(message)
+                    return PipelineResult(
+                        status="success",
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
 
                 if _edge_attr_bool(next_edge, "loop_restart"):
                     self._emit_event("PipelineRestarted", from_node=node.node_id, restart_node=next_edge.target)
@@ -541,7 +551,7 @@ class PipelineExecutor:
         self._stage_status_transitions = {}
 
         ctx = context or Context()
-        self._mirror_graph_goal(ctx)
+        self._mirror_graph_attrs(ctx)
         completed: List[str] = []
         outcomes: Dict[str, Outcome] = {}
         retry_counts: Dict[str, int] = {}
@@ -805,23 +815,20 @@ class PipelineExecutor:
                             route_trace=route_trace,
                             failure_reason=failure_reason,
                         )
-                    message = self._no_route_message(node.node_id, routing_outcome)
                     self._finalize_run(
                         current_node=node.node_id,
                         completed_nodes=completed,
                         context=ctx,
                         retry_counts=retry_counts,
-                        event_type="PipelineFailed",
-                        error=message,
+                        event_type="PipelineCompleted",
                     )
                     return PipelineResult(
-                        status="fail",
-                        current_node=current,
+                        status="success",
+                        current_node=node.node_id,
                         completed_nodes=completed,
                         context=dict(ctx.values),
                         node_outcomes=outcomes,
                         route_trace=route_trace,
-                        failure_reason=message,
                     )
 
                 if _edge_attr_bool(next_edge, "loop_restart"):
@@ -1308,9 +1315,12 @@ class PipelineExecutor:
             return "non-codergen"
         return "codergen"
 
-    def _mirror_graph_goal(self, context: Context) -> None:
+    def _mirror_graph_attrs(self, context: Context) -> None:
         goal_attr = self.graph.graph_attrs.get("goal")
         context.set("graph.goal", str(goal_attr.value) if goal_attr else "")
+        default_max_retries = resolve_default_max_retries_value(self.graph.graph_attrs, default=0)
+        context.set(f"graph.{DEFAULT_MAX_RETRIES_KEY}", default_max_retries)
+        context.set(f"graph.{LEGACY_DEFAULT_MAX_RETRY_KEY}", default_max_retries)
 
     def _seed_builtin_context(self, context: Context, current_node: str) -> None:
         outcomes = context.get(NODE_OUTCOMES_KEY, None)
@@ -1383,13 +1393,13 @@ class PipelineExecutor:
         if node_attr and node_attr.line > 0:
             return _to_int(node_attr.value, 0)
 
-        graph_attr = self.graph.graph_attrs.get("default_max_retry")
-        if graph_attr:
-            return _to_int(graph_attr.value, 50)
+        graph_default = resolve_default_max_retries_value(self.graph.graph_attrs, default=0)
+        if graph_default >= 0:
+            return graph_default
 
         if node_attr:
             return _to_int(node_attr.value, 0)
-        return 50
+        return 0
 
     def _retry_policy_for_node(self, node_id: str) -> RetryPolicy:
         preset_name = self._retry_policy_name_for_node(node_id)
@@ -1576,11 +1586,6 @@ class PipelineExecutor:
         if node_target:
             return node_target
         return self._resolve_graph_retry_target()
-
-    def _no_route_message(self, node_id: str, routing_outcome: Outcome) -> str:
-        if routing_outcome.status == OutcomeStatus.FAIL:
-            return f"Stage '{node_id}' failed with no outgoing fail edge"
-        return f"Stage '{node_id}' has no eligible outgoing edge"
 
     def _stage_failure_reason(self, outcome: Outcome) -> str:
         reason = (outcome.failure_reason or "").strip()

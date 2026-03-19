@@ -15,9 +15,15 @@ from attractor.api.run_records import (
     extract_token_usage,
     normalize_run_status,
 )
-from attractor.config import Settings
 from attractor.engine import load_checkpoint
+from attractor.graph_prep import (
+    DEFAULT_MAX_RETRIES_KEY,
+    LEGACY_DEFAULT_MAX_RETRY_KEY,
+    normalize_graph_attr_aliases,
+    resolve_default_max_retries_value,
+)
 from sparkspawn_common.runtime import build_project_id, normalize_project_path
+from sparkspawn_common.settings import Settings
 
 
 def runs_root(get_settings: Callable[[], Settings]) -> Path:
@@ -90,6 +96,7 @@ def resolve_start_node_id(graph) -> str:
 
 
 def graph_attr_context_seed(graph) -> Dict[str, object]:
+    normalize_graph_attr_aliases(graph)
     seeded: Dict[str, object] = {}
     for key, attr in graph.graph_attrs.items():
         value = getattr(attr, "value", "")
@@ -97,6 +104,9 @@ def graph_attr_context_seed(graph) -> Dict[str, object]:
             value = value.raw
         seeded[f"graph.{key}"] = value
     seeded.setdefault("graph.goal", "")
+    default_max_retries = resolve_default_max_retries_value(graph.graph_attrs, default=0)
+    seeded[f"graph.{DEFAULT_MAX_RETRIES_KEY}"] = default_max_retries
+    seeded[f"graph.{LEGACY_DEFAULT_MAX_RETRY_KEY}"] = default_max_retries
     return seeded
 
 

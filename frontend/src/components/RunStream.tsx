@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore, type RuntimeStatus } from '@/store'
 import { ApiHttpError, fetchPipelineStatusValidated, pipelineEventsUrl } from '@/lib/attractorClient'
+import { retryLastSaveContent } from '@/lib/flowPersistence'
 import { resolveSaveRemediation } from '@/lib/saveRemediation'
 
 function classifyLog(message: string): 'info' | 'success' | 'error' {
@@ -53,10 +54,16 @@ export function RunStream() {
     const selectedRunId = useStore((state) => state.selectedRunId)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const saveState = useStore((state) => state.saveState)
+    const saveStateVersion = useStore((state) => state.saveStateVersion)
     const saveErrorMessage = useStore((state) => state.saveErrorMessage)
     const saveErrorKind = useStore((state) => state.saveErrorKind)
+    const resetSaveState = useStore((state) => state.resetSaveState)
     const [runtimeApiDegradedMessage, setRuntimeApiDegradedMessage] = useState<string | null>(null)
+    const [showSavedToast, setShowSavedToast] = useState(false)
+    const [fadeSavedToast, setFadeSavedToast] = useState(false)
     const stageCursorsRef = useRef<Record<string, RuntimeStageCursor>>({})
+    const savedToastFadeTimerRef = useRef<number | null>(null)
+    const savedToastDismissTimerRef = useRef<number | null>(null)
     const saveStateLabel =
         saveState === 'saving'
             ? 'Saving...'
@@ -68,12 +75,14 @@ export function RunStream() {
                     ? 'Save Failed'
                     : ''
     const remediation = resolveSaveRemediation(saveState, saveErrorKind)
+    const shouldShowPersistentSaveIndicator = saveState === 'saving' || saveState === 'error' || saveState === 'conflict'
     const showSaveStateIndicator = (
-        saveState !== 'idle'
-        || Boolean(saveErrorMessage)
+        saveState === 'saved'
+        || showSavedToast
+        || shouldShowPersistentSaveIndicator
         || Boolean(runtimeApiDegradedMessage)
-        || Boolean(remediation)
     )
+    const shouldFadeSaveCard = showSavedToast && !shouldShowPersistentSaveIndicator && !runtimeApiDegradedMessage
 
     useEffect(() => {
         stageCursorsRef.current = {}
@@ -82,6 +91,45 @@ export function RunStream() {
         clearLogs()
         setRuntimeStatus('idle')
     }, [selectedRunId, resetNodeStatuses, clearHumanGate, clearLogs, setRuntimeStatus])
+
+    useEffect(() => {
+        if (savedToastFadeTimerRef.current) {
+            window.clearTimeout(savedToastFadeTimerRef.current)
+            savedToastFadeTimerRef.current = null
+        }
+        if (savedToastDismissTimerRef.current) {
+            window.clearTimeout(savedToastDismissTimerRef.current)
+            savedToastDismissTimerRef.current = null
+        }
+
+        if (saveState !== 'saved') {
+            setShowSavedToast(false)
+            setFadeSavedToast(false)
+            return
+        }
+
+        setShowSavedToast(true)
+        setFadeSavedToast(false)
+        savedToastFadeTimerRef.current = window.setTimeout(() => {
+            setFadeSavedToast(true)
+        }, 1000)
+        savedToastDismissTimerRef.current = window.setTimeout(() => {
+            setShowSavedToast(false)
+            setFadeSavedToast(false)
+            resetSaveState()
+        }, 2000)
+
+        return () => {
+            if (savedToastFadeTimerRef.current) {
+                window.clearTimeout(savedToastFadeTimerRef.current)
+                savedToastFadeTimerRef.current = null
+            }
+            if (savedToastDismissTimerRef.current) {
+                window.clearTimeout(savedToastDismissTimerRef.current)
+                savedToastDismissTimerRef.current = null
+            }
+        }
+    }, [resetSaveState, saveState, saveStateVersion])
 
     useEffect(() => {
         if (!selectedRunId) {
@@ -251,12 +299,16 @@ export function RunStream() {
         }
     }, [selectedRunId, addLog, setNodeStatus, clearHumanGate, resetNodeStatuses, setHumanGate, setRuntimeStatus, setSelectedRunId])
 
+    const handleRetrySave = () => {
+        void retryLastSaveContent()
+    }
+
     return (
         <div data-testid="execution-runtime-stream-indicator" className="pointer-events-none fixed right-4 top-16 z-[70]">
             {showSaveStateIndicator ? (
                 <div
                     data-testid="global-save-state-indicator"
-                    className={`rounded-md border px-2 py-1 text-[11px] font-medium shadow-sm ${
+                    className={`pointer-events-auto rounded-md border px-2 py-1 text-[11px] font-medium shadow-sm transition-opacity duration-1000 ${
                         saveState === 'error'
                             ? 'border-destructive/50 bg-destructive/10 text-destructive'
                             : saveState === 'conflict'
@@ -264,7 +316,7 @@ export function RunStream() {
                             : saveState === 'saved'
                                 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
                                 : 'border-border bg-background/95 text-muted-foreground'
-                    }`}
+                    } ${shouldFadeSaveCard && fadeSavedToast ? 'opacity-0' : 'opacity-100'}`}
                     title={saveErrorMessage || undefined}
                 >
                     {saveStateLabel ? <span>{saveStateLabel}</span> : null}
@@ -278,6 +330,16 @@ export function RunStream() {
                         <p data-testid="global-save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
                             {remediation.message}
                         </p>
+                    ) : null}
+                    {remediation?.allowRetry ? (
+                        <button
+                            type="button"
+                            data-testid="global-save-remediation-retry"
+                            onClick={handleRetrySave}
+                            className="mt-2 inline-flex rounded border border-current px-2 py-0.5 text-[10px] font-semibold hover:bg-current/10"
+                        >
+                            Retry Save
+                        </button>
                     ) : null}
                 </div>
             ) : null}

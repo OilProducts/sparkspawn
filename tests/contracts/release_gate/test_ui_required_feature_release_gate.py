@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from attractor.ui_release_gate import (
+from sparkspawn_app.ui_release_gate import (
     extract_required_ui_feature_rows,
     enforce_required_ui_feature_release_gate,
     main,
@@ -75,5 +75,4 @@ def test_ui_release_gate_cli_entrypoint_succeeds_for_checked_checklist(tmp_path)
     )
 
     assert main(["--checklist", str(checklist_path)]) == 0
-
 

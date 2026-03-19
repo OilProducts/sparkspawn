@@ -1,4 +1,5 @@
 attractor
 sparkspawn
+sparkspawn_app
 sparkspawn_common
 workspace

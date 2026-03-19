@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
-import mimetypes
 import threading
 import uuid
 import os
-import shutil
 import re
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
-import subprocess
 from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -21,12 +18,11 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from attractor.dsl import (
-    canonicalize_dot,
     DotParseError,
     Diagnostic,
     DiagnosticSeverity,
+    format_dot,
     parse_dot,
-    validate_graph,
 )
 from attractor.engine import (
     Checkpoint,
@@ -38,7 +34,15 @@ from attractor.engine import (
     save_checkpoint,
 )
 from attractor.graphviz_export import export_graphviz_artifact
-from attractor.config import Settings, resolve_settings, validate_settings
+from attractor.graph_prep import (
+    DEFAULT_MAX_RETRIES_KEY,
+    LEGACY_DEFAULT_MAX_RETRY_KEY,
+    build_transform_pipeline as _build_graph_transform_pipeline,
+    canonicalize_graph_source as _canonicalize_graph_source,
+    normalize_graph_attr_aliases as _normalize_graph_attr_aliases,
+    prepare_graph as _prepare_graph_impl,
+    resolve_default_max_retries_value,
+)
 from attractor.api.codex_backends import (
     LocalCodexAppServerBackend,
     LocalCodexCliBackend,
@@ -74,20 +78,12 @@ from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, AnswerValue, Question
-from attractor.transforms import (
-    GoalVariableTransform,
-    ModelStylesheetTransform,
-    TransformPipeline,
-)
 from sparkspawn_common.runtime import resolve_runtime_workspace_path
-from workspace.attractor_client import AttractorApiClient
-from workspace.api import create_workspace_router, WorkspaceApiDependencies
+from sparkspawn_common.settings import Settings, resolve_settings, validate_settings
 from workspace.project_chat import ProjectChatService
 
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 attractor_app = FastAPI(title="Attractor API", docs_url="/docs", redoc_url=None, openapi_url="/openapi.json")
-workspace_app = FastAPI(title="Spark Spawn Workspace API", docs_url="/docs", redoc_url=None, openapi_url="/openapi.json")
 attractor_router = APIRouter()
 LOGGER = logging.getLogger(__name__)
 SETTINGS_LOCK = threading.Lock()
@@ -95,6 +91,7 @@ SETTINGS = resolve_settings()
 PROJECT_CHAT = ProjectChatService(SETTINGS.data_dir)
 REGISTERED_TRANSFORMS: List[object] = []
 _REGISTERED_TRANSFORMS_LOCK = threading.Lock()
+_UNSET = object()
 
 
 def get_settings() -> Settings:
@@ -104,18 +101,18 @@ def get_settings() -> Settings:
 
 def configure_runtime_paths(
     *,
-    data_dir: Path | str | None = None,
-    runs_dir: Path | str | None = None,
-    flows_dir: Path | str | None = None,
-    ui_dir: Path | str | None = None,
+    data_dir: Path | str | None | object = _UNSET,
+    runs_dir: Path | str | None | object = _UNSET,
+    flows_dir: Path | str | None | object = _UNSET,
+    ui_dir: Path | str | None | object = _UNSET,
 ) -> Settings:
     global SETTINGS, PROJECT_CHAT
     current = get_settings()
     updated = resolve_settings(
-        data_dir=data_dir if data_dir is not None else current.data_dir,
-        runs_dir=runs_dir,
-        flows_dir=flows_dir if flows_dir is not None else current.flows_dir,
-        ui_dir=ui_dir if ui_dir is not None else current.ui_dir,
+        data_dir=current.data_dir if data_dir is _UNSET else data_dir,
+        runs_dir=current.runs_dir if runs_dir is _UNSET else runs_dir,
+        flows_dir=current.flows_dir if flows_dir is _UNSET else flows_dir,
+        ui_dir=current.ui_dir if ui_dir is _UNSET else ui_dir,
     )
     validate_settings(updated)
     with SETTINGS_LOCK:
@@ -126,25 +123,6 @@ def configure_runtime_paths(
 
 def validate_runtime_paths() -> None:
     validate_settings(get_settings())
-
-
-def _resolve_ui_index_path() -> Path | None:
-    settings = get_settings()
-    if settings.ui_dir:
-        index_path = settings.ui_dir / "index.html"
-        if index_path.exists():
-            return index_path
-    return None
-
-
-def _resolve_ui_asset_path(relative_path: str) -> Path | None:
-    settings = get_settings()
-    if not settings.ui_dir:
-        return None
-    candidate = settings.ui_dir / relative_path
-    if candidate.exists():
-        return candidate
-    return None
 
 
 def register_transform(transform: object) -> None:
@@ -171,7 +149,7 @@ ACTIVE_RUNS: Dict[str, ActiveRun] = {}
 
 
 RUN_HISTORY_LOCK = threading.Lock()
-PIPELINE_LIFECYCLE_PHASES = ("PARSE", "VALIDATE", "INITIALIZE", "EXECUTE", "FINALIZE")
+PIPELINE_LIFECYCLE_PHASES = ("PARSE", "TRANSFORM", "VALIDATE", "INITIALIZE", "EXECUTE", "FINALIZE")
 
 
 def _runs_root() -> Path:
@@ -377,8 +355,6 @@ DEFAULT_FLOW = """digraph SoftwareFactory {
     start -> setup -> build -> done;
 }"""
 
-DEFAULT_EXECUTION_PLANNING_FLOW = "plan-generation.dot"
-DEFAULT_EXECUTION_DISPATCH_FLOW = "implement-spec.dot"
 EXECUTION_PLANNING_STAGE_ID = "generate_execution_card"
 
 
@@ -395,30 +371,6 @@ def _build_codergen_backend(
         emit,
         model=model,
     )
-
-
-@app.get("/")
-async def get_ui():
-    index_path = _resolve_ui_index_path()
-    if not index_path:
-        raise HTTPException(status_code=404, detail="UI index not found")
-    return FileResponse(index_path)
-
-
-@app.get("/assets/{asset_path:path}")
-async def get_frontend_asset(asset_path: str):
-    file_path = _resolve_ui_asset_path(f"assets/{asset_path}")
-    if not file_path:
-        raise HTTPException(status_code=404, detail="Asset not found")
-    return FileResponse(file_path)
-
-
-@app.get("/vite.svg")
-async def get_frontend_vite_icon():
-    file_path = _resolve_ui_asset_path("vite.svg")
-    if not file_path:
-        raise HTTPException(status_code=404, detail="Asset not found")
-    return FileResponse(file_path)
 
 
 @attractor_router.websocket("/ws")
@@ -481,6 +433,10 @@ async def list_runs(project_path: Optional[str] = None):
 
 
 def _graph_payload(graph) -> dict:
+    canonical_graph = copy.deepcopy(graph)
+    _normalize_graph_attr_aliases(canonical_graph)
+    canonical_graph_attrs = canonical_graph.graph_attrs
+
     def _attr_value(attrs: Dict[str, object], key: str, default: Optional[object] = None):
         attr = attrs.get(key)
         if attr is None:
@@ -551,21 +507,25 @@ def _graph_payload(graph) -> dict:
             for n in graph.nodes.values()
         ],
         "graph_attrs": _merge_extension_attrs({
-            "goal": _attr_value(graph.graph_attrs, "goal"),
-            "label": _attr_value(graph.graph_attrs, "label", ""),
-            "model_stylesheet": _attr_value(graph.graph_attrs, "model_stylesheet"),
-            "default_max_retry": _attr_value(graph.graph_attrs, "default_max_retry"),
-            "retry_target": _attr_value(graph.graph_attrs, "retry_target"),
-            "fallback_retry_target": _attr_value(graph.graph_attrs, "fallback_retry_target"),
-            "default_fidelity": _attr_value(graph.graph_attrs, "default_fidelity"),
-            "stack.child_dotfile": _attr_value(graph.graph_attrs, "stack.child_dotfile"),
-            "stack.child_workdir": _attr_value(graph.graph_attrs, "stack.child_workdir"),
-            "tool_hooks.pre": _attr_value(graph.graph_attrs, "tool_hooks.pre"),
-            "tool_hooks.post": _attr_value(graph.graph_attrs, "tool_hooks.post"),
-            "ui_default_llm_model": _attr_value(graph.graph_attrs, "ui_default_llm_model"),
-            "ui_default_llm_provider": _attr_value(graph.graph_attrs, "ui_default_llm_provider"),
-            "ui_default_reasoning_effort": _attr_value(graph.graph_attrs, "ui_default_reasoning_effort"),
-        }, graph.graph_attrs),
+            "goal": _attr_value(canonical_graph_attrs, "goal"),
+            "label": _attr_value(canonical_graph_attrs, "label", ""),
+            "model_stylesheet": _attr_value(canonical_graph_attrs, "model_stylesheet"),
+            DEFAULT_MAX_RETRIES_KEY: _attr_value(canonical_graph_attrs, DEFAULT_MAX_RETRIES_KEY),
+            "retry_target": _attr_value(canonical_graph_attrs, "retry_target"),
+            "fallback_retry_target": _attr_value(canonical_graph_attrs, "fallback_retry_target"),
+            "default_fidelity": _attr_value(canonical_graph_attrs, "default_fidelity"),
+            "stack.child_dotfile": _attr_value(canonical_graph_attrs, "stack.child_dotfile"),
+            "stack.child_workdir": _attr_value(canonical_graph_attrs, "stack.child_workdir"),
+            "tool_hooks.pre": _attr_value(canonical_graph_attrs, "tool_hooks.pre"),
+            "tool_hooks.post": _attr_value(canonical_graph_attrs, "tool_hooks.post"),
+            "ui_default_llm_model": _attr_value(canonical_graph_attrs, "ui_default_llm_model"),
+            "ui_default_llm_provider": _attr_value(canonical_graph_attrs, "ui_default_llm_provider"),
+            "ui_default_reasoning_effort": _attr_value(canonical_graph_attrs, "ui_default_reasoning_effort"),
+        }, {
+            key: value
+            for key, value in canonical_graph_attrs.items()
+            if key != LEGACY_DEFAULT_MAX_RETRY_KEY
+        }),
         "edges": [
             _merge_extension_attrs({
                 "from": e.source,
@@ -601,13 +561,15 @@ def _diagnostic_payload(diagnostic: Diagnostic) -> dict:
     return payload
 
 
-def _build_transform_pipeline() -> TransformPipeline:
-    pipeline = TransformPipeline()
-    pipeline.register(GoalVariableTransform())
-    pipeline.register(ModelStylesheetTransform())
-    for transform in _registered_transforms_snapshot():
-        pipeline.register(transform)
-    return pipeline
+def _build_transform_pipeline() -> object:
+    return _build_graph_transform_pipeline(_registered_transforms_snapshot())
+
+
+def _prepare_graph_for_server(graph):
+    return _prepare_graph_impl(
+        graph,
+        extra_transforms=_registered_transforms_snapshot(),
+    )
 
 
 @attractor_router.post("/preview")
@@ -629,10 +591,7 @@ async def preview_pipeline(req: PreviewRequest):
             "diagnostics": [parse_diag],
             "errors": [parse_diag],
         }
-
-    graph = _build_transform_pipeline().apply(graph)
-
-    diagnostics = validate_graph(graph)
+    graph, diagnostics = _prepare_graph_for_server(graph)
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
 
     payload = {
@@ -658,7 +617,6 @@ async def _start_pipeline(
             "status": "validation_error",
             "error": f"Run id already exists: {run_id}",
         }
-    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[0])
     flow_name = (req.flow_name or "").strip()
     flow_content = (req.flow_content or "").strip()
     if not flow_content:
@@ -676,6 +634,7 @@ async def _start_pipeline(
             }
     if req.goal:
         flow_content = _inject_pipeline_goal_impl(flow_content, req.goal)
+    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[0])
     try:
         graph = parse_dot(flow_content)
     except DotParseError as exc:
@@ -698,10 +657,9 @@ async def _start_pipeline(
             "errors": [parse_diag],
         }
 
-    graph = _build_transform_pipeline().apply(graph)
-
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[1])
-    diagnostics = validate_graph(graph)
+    graph, diagnostics = _prepare_graph_for_server(graph)
+    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[2])
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
     diagnostic_payloads = [_diagnostic_payload(d) for d in diagnostics]
     error_payloads = [_diagnostic_payload(d) for d in errors]
@@ -714,7 +672,7 @@ async def _start_pipeline(
             "errors": error_payloads,
         }
 
-    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[2])
+    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[3])
 
     os.makedirs(req.working_directory, exist_ok=True)
     working_dir = str(Path(req.working_directory).resolve())
@@ -834,7 +792,7 @@ async def _start_pipeline(
     async def _run():
         final_status = "failed"
         try:
-            await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[3])
+            await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[4])
             active = _get_active_run(run_id)
             control = active.control if active else ExecutionControl()
             executor = PipelineExecutor(
@@ -868,7 +826,7 @@ async def _start_pipeline(
             _record_run_end(run_id, working_dir, "failed", str(exc))
             await _publish_run_event(run_id, {"type": "log", "msg": f"⚠️ Pipeline Failed: {exc}"})
         finally:
-            await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[4])
+            await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[5])
             _pop_active_run(run_id)
             if on_complete is not None:
                 try:
@@ -1114,71 +1072,6 @@ def _resolve_run_project_git_metadata(working_directory: str) -> tuple[str, Opti
     )
 
 
-def _pick_directory_with_osascript(prompt: str) -> Path | None:
-    escaped_prompt = prompt.replace('"', '\\"')
-    completed = subprocess.run(
-        [
-            "osascript",
-            "-e",
-            "try",
-            "-e",
-            f'POSIX path of (choose folder with prompt "{escaped_prompt}")',
-            "-e",
-            "on error number -128",
-            "-e",
-            'return "__CANCELED__"',
-            "-e",
-            "end try",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        message = (completed.stderr or completed.stdout or "Native macOS directory picker failed.").strip()
-        raise RuntimeError(message)
-    selected_path = completed.stdout.strip()
-    if not selected_path or selected_path == "__CANCELED__":
-        return None
-    return Path(selected_path).expanduser().resolve()
-
-
-def _pick_directory_with_tk(prompt: str) -> Path | None:
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except Exception as exc:  # pragma: no cover - platform-dependent fallback
-        raise RuntimeError("Tk directory picker is unavailable.") from exc
-
-    root = tk.Tk()
-    root.withdraw()
-    try:
-        root.attributes("-topmost", True)
-    except Exception:
-        pass
-    try:
-        selected_path = filedialog.askdirectory(title=prompt, mustexist=True)
-    finally:
-        root.destroy()
-    if not selected_path:
-        return None
-    return Path(selected_path).expanduser().resolve()
-
-
-def _pick_project_directory(prompt: str = "Select Spark Spawn project directory") -> Path | None:
-    picker_errors: list[str] = []
-    if sys.platform == "darwin" and shutil.which("osascript"):
-        try:
-            return _pick_directory_with_osascript(prompt)
-        except RuntimeError as exc:
-            picker_errors.append(str(exc))
-    try:
-        return _pick_directory_with_tk(prompt)
-    except RuntimeError as exc:
-        picker_errors.append(str(exc))
-    raise RuntimeError(picker_errors[-1] if picker_errors else "No native directory picker is available in this runtime.")
-
-
 def _load_flow_content(flow_source: str) -> str:
     return _load_flow_content_impl(_flows_dir(), flow_source)
 
@@ -1197,20 +1090,6 @@ def _record_run_metadata(run_id: str, *, spec_id: Optional[str] = None, plan_id:
         if plan_id is not None:
             record.plan_id = plan_id
         _write_run_meta(record)
-
-
-WORKSPACE_ROUTER = create_workspace_router(
-    WorkspaceApiDependencies(
-        get_settings=get_settings,
-        get_project_chat=lambda: PROJECT_CHAT,
-        get_attractor_client=lambda: AttractorApiClient(base_url="http://attractor.internal", app=attractor_app),
-        resolve_project_git_branch=lambda runtime_path: _resolve_project_git_branch(runtime_path),
-        resolve_project_git_commit=lambda runtime_path: _resolve_project_git_commit(runtime_path),
-        pick_project_directory=lambda: _pick_project_directory(),
-        default_execution_planning_flow=DEFAULT_EXECUTION_PLANNING_FLOW,
-        default_execution_dispatch_flow=DEFAULT_EXECUTION_DISPATCH_FLOW,
-    )
-)
 
 
 @attractor_router.get("/api/flows")
@@ -1244,7 +1123,7 @@ async def save_flow(req: SaveFlowRequest):
     canonical_content: str
     try:
         graph = parse_dot(req.content)
-        canonical_content = canonicalize_dot(req.content)
+        canonical_content = _canonicalize_graph_source(req.content)
     except DotParseError as exc:
         parse_diag = {
             "rule": "parse_error",
@@ -1265,8 +1144,7 @@ async def save_flow(req: SaveFlowRequest):
             },
         ) from exc
 
-    graph = _build_transform_pipeline().apply(graph)
-    diagnostics = validate_graph(graph)
+    graph, diagnostics = _prepare_graph_for_server(graph)
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
     if errors:
         diagnostic_payloads = [_diagnostic_payload(d) for d in diagnostics]
@@ -1316,6 +1194,3 @@ async def delete_flow(flow_name: str):
 
 
 attractor_app.include_router(attractor_router)
-workspace_app.include_router(WORKSPACE_ROUTER)
-app.mount("/attractor", attractor_app)
-app.mount("/workspace", workspace_app)

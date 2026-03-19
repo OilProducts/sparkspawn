@@ -30,7 +30,7 @@ class TestTransforms:
             "goal": ("", DotValueType.STRING),
             "label": ("", DotValueType.STRING),
             "model_stylesheet": ("", DotValueType.STRING),
-            "default_max_retry": (50, DotValueType.INTEGER),
+            "default_max_retries": (0, DotValueType.INTEGER),
             "default_fidelity": ("", DotValueType.STRING),
             "tool_hooks.pre": ("", DotValueType.STRING),
             "tool_hooks.post": ("", DotValueType.STRING),
@@ -137,7 +137,7 @@ class TestTransforms:
         graph = parse_dot(
             """
             digraph G {
-                graph [goal="Ship", default_max_retry=9]
+                graph [goal="Ship", default_max_retries=9]
                 start [shape=Mdiamond]
                 task [
                     label="Task Label",
@@ -158,7 +158,7 @@ class TestTransforms:
         AttributeDefaultsTransform().apply(graph)
 
         assert graph.graph_attrs["goal"].value == "Ship"
-        assert graph.graph_attrs["default_max_retry"].value == 9
+        assert graph.graph_attrs["default_max_retries"].value == 9
 
         task = graph.nodes["task"]
         assert task.attrs["label"].value == "Task Label"
@@ -174,6 +174,23 @@ class TestTransforms:
         assert edge.attrs["condition"].value == "outcome=success"
         assert edge.attrs["weight"].value == 7
         assert edge.attrs["loop_restart"].value is True
+
+    def test_attribute_defaults_transform_normalizes_legacy_default_max_retry_alias(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [default_max_retry=9]
+                start [shape=Mdiamond]
+                done [shape=Msquare]
+                start -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+
+        assert graph.graph_attrs["default_max_retries"].value == 9
+        assert "default_max_retry" not in graph.graph_attrs
 
     def test_goal_variable_transform(self):
         graph = parse_dot(
@@ -267,6 +284,30 @@ class TestTransforms:
         ModelStylesheetTransform().apply(graph)
 
         assert graph.nodes["review"].attrs["llm_model"].value == "gpt-5.2"
+
+    def test_stylesheet_shape_selector_applies_between_universal_and_class_specificity(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [
+                    model_stylesheet="* { llm_provider: universal; } box { llm_model: shape-model; llm_provider: shape-provider; } .fast { llm_model: class-model; }"
+                ]
+                start [shape=Mdiamond]
+                plan [shape=box, class="fast"]
+                review [shape=box]
+                done [shape=Msquare]
+                start -> plan -> review -> done
+            }
+            """
+        )
+
+        AttributeDefaultsTransform().apply(graph)
+        ModelStylesheetTransform().apply(graph)
+
+        assert graph.nodes["plan"].attrs["llm_model"].value == "class-model"
+        assert graph.nodes["plan"].attrs["llm_provider"].value == "shape-provider"
+        assert graph.nodes["review"].attrs["llm_model"].value == "shape-model"
+        assert graph.nodes["review"].attrs["llm_provider"].value == "shape-provider"
 
     def test_stylesheet_multiple_matching_classes_use_rule_order_for_equal_specificity(self):
         graph = parse_dot(

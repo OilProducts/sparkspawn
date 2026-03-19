@@ -245,6 +245,7 @@ const resetContractState = () => {
     edgeDiagnostics: {},
     hasValidationErrors: false,
     saveState: 'idle',
+    saveStateVersion: 0,
     saveErrorMessage: null,
     saveErrorKind: null,
     selectedNodeId: null,
@@ -1914,7 +1915,7 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByLabelText('Working Directory')).toBeVisible()
     expect(screen.getByLabelText('Goal')).toBeVisible()
     expect(screen.getByLabelText('Label')).toBeVisible()
-    expect(screen.getByLabelText('Default Max Retry')).toBeVisible()
+    expect(screen.getByLabelText('Default Max Retries')).toBeVisible()
     expect(screen.getByLabelText('Default Fidelity')).toBeVisible()
 
     const advancedToggle = screen.getByTestId('graph-advanced-toggle')
@@ -4791,6 +4792,10 @@ describe('Frontend contract behavior', () => {
     await screen.findByTestId('editor-mode-toggle')
     await user.click(screen.getByRole('button', { name: 'Raw DOT' }))
     expect(await screen.findByTestId('raw-dot-editor')).toBeVisible()
+    const previewCallsBeforeHandoff = fetchMock.mock.calls.filter(([input]) => {
+      const callUrl = requestUrl(input as RequestInfo | URL)
+      return callUrl.endsWith('/attractor/preview')
+    }).length
 
     const structuredButton = screen.getByRole('button', { name: 'Structured' })
     fireEvent.click(structuredButton)
@@ -4801,15 +4806,19 @@ describe('Frontend contract behavior', () => {
         const callUrl = requestUrl(input as RequestInfo | URL)
         return callUrl.endsWith('/attractor/api/flows') && (requestInit as RequestInit | undefined)?.method === 'POST'
       })
-      expect(saveCalls).toHaveLength(1)
+      expect(saveCalls).toHaveLength(0)
     })
-
-    expect(saveResolvers).toHaveLength(1)
-    saveResolvers[0]()
 
     await waitFor(() => {
       expect(screen.queryByTestId('raw-dot-editor')).not.toBeInTheDocument()
     })
+
+    const previewCallsAfterHandoff = fetchMock.mock.calls.filter(([input]) => {
+      const callUrl = requestUrl(input as RequestInfo | URL)
+      return callUrl.endsWith('/attractor/preview')
+    }).length
+    expect(previewCallsAfterHandoff - previewCallsBeforeHandoff).toBe(1)
+    expect(saveResolvers).toHaveLength(0)
   })
 
   it('[CID:11.3.02] preserves unsurfaced canonical data through structured and raw edit paths', async () => {
@@ -4929,15 +4938,19 @@ digraph contract_behavior {
 
     await user.click(screen.getByRole('button', { name: 'Structured' }))
     await waitFor(() => {
-      expect(savedPayloads.length).toBeGreaterThanOrEqual(2)
+      expect(screen.queryByTestId('raw-dot-editor')).not.toBeInTheDocument()
     })
 
-    const rawHandoffSave = savedPayloads[savedPayloads.length - 1].content
-    expect(rawHandoffSave).toContain('x_unsurfaced_node_default="keep-node-default"')
-    expect(rawHandoffSave).toContain('x_unsurfaced_edge_default="keep-edge-default"')
-    expect(rawHandoffSave).toContain('subgraph cluster_review {')
-    expect(rawHandoffSave).toContain('x_unsurfaced_node="keep-node"')
-    expect(rawHandoffSave).toContain('x_unsurfaced_edge="keep-edge"')
+    expect(savedPayloads).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: 'Raw DOT' }))
+    const roundTrippedRawEditor = await screen.findByTestId('raw-dot-editor')
+    const roundTrippedRawValue = (roundTrippedRawEditor as HTMLTextAreaElement).value
+    expect(roundTrippedRawValue).toContain('x_unsurfaced_node_default="keep-node-default"')
+    expect(roundTrippedRawValue).toContain('x_unsurfaced_edge_default="keep-edge-default"')
+    expect(roundTrippedRawValue).toContain('subgraph cluster_review {')
+    expect(roundTrippedRawValue).toContain('x_unsurfaced_node="keep-node"')
+    expect(roundTrippedRawValue).toContain('x_unsurfaced_edge="keep-edge"')
   })
 
   it('[CID:11.3.03] blocks raw-to-structured handoff when raw edits conflict with structured assumptions', async () => {

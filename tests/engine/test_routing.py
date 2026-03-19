@@ -312,6 +312,29 @@ class TestRouting:
         )
         self._assert_stable_target(self._edges_from(graph, "a"), outcome, "label_hit")
 
+    def test_preferred_label_ignores_conditioned_edges_after_condition_miss(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                a [shape=box]
+                conditioned_hit [shape=box]
+                unconditional_hit [shape=box]
+                done [shape=Msquare]
+
+                start -> a
+                a -> conditioned_hit [condition="outcome=partial_success", label="[Y] Approve"]
+                a -> unconditional_hit [label="[Y] Approve"]
+                conditioned_hit -> done
+                unconditional_hit -> done
+            }
+            """
+        )
+        outcome = Outcome(status=OutcomeStatus.SUCCESS, preferred_label="Approve")
+        edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
+        assert edge is not None
+        assert edge.target == "unconditional_hit"
+
     def test_deterministic_step_3_suggested_next_ids(self):
         graph = parse_dot(
             """
@@ -332,6 +355,29 @@ class TestRouting:
         )
         outcome = Outcome(status=OutcomeStatus.FAIL, suggested_next_ids=["missing", "c", "b"])
         self._assert_stable_target(self._edges_from(graph, "a"), outcome, "c")
+
+    def test_suggested_next_ids_ignores_conditioned_edges_after_condition_miss(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                a [shape=box]
+                conditioned_hit [shape=box]
+                unconditional_hit [shape=box]
+                done [shape=Msquare]
+
+                start -> a
+                a -> conditioned_hit [condition="outcome=partial_success"]
+                a -> unconditional_hit
+                conditioned_hit -> done
+                unconditional_hit -> done
+            }
+            """
+        )
+        outcome = Outcome(status=OutcomeStatus.SUCCESS, suggested_next_ids=["conditioned_hit", "unconditional_hit"])
+        edge = select_next_edge(self._edges_from(graph, "a"), outcome, Context())
+        assert edge is not None
+        assert edge.target == "unconditional_hit"
 
     def test_deterministic_step_4_highest_weight_unconditional(self):
         graph = parse_dot(
@@ -375,7 +421,7 @@ class TestRouting:
         outcome = Outcome(status=OutcomeStatus.FAIL)
         self._assert_stable_target(self._edges_from(graph, "a"), outcome, "alpha")
 
-    def test_deterministic_fallback_selects_best_edge_when_no_conditions_match(self):
+    def test_no_condition_match_with_only_conditioned_edges_returns_none(self):
         graph = parse_dot(
             """
             digraph G {
@@ -394,9 +440,9 @@ class TestRouting:
             """
         )
         outcome = Outcome(status=OutcomeStatus.SUCCESS)
-        self._assert_stable_target(self._edges_from(graph, "a"), outcome, "high")
+        assert select_next_edge(self._edges_from(graph, "a"), outcome, Context()) is None
 
-    def test_skipped_status_uses_non_fail_fallback_routing(self):
+    def test_skipped_status_uses_unconditional_edge_when_conditions_do_not_match(self):
         graph = parse_dot(
             """
             digraph G {
@@ -408,7 +454,7 @@ class TestRouting:
 
                 start -> a
                 a -> secondary [condition="outcome=success", weight=1]
-                a -> primary [condition="outcome=partial_success", weight=3]
+                a -> primary [weight=3]
                 primary -> done
                 secondary -> done
             }

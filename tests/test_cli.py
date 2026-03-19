@@ -34,7 +34,7 @@ def test_run_serve_uses_import_string_when_reload_enabled(monkeypatch, tmp_path:
     assert result == 0
     assert calls == [
         {
-            "app": "attractor.api.server:app",
+            "app": "sparkspawn_app.app:app",
             "host": "127.0.0.1",
             "port": 8000,
             "reload": True,

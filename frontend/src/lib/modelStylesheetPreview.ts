@@ -3,6 +3,7 @@ export type ModelValueSource = 'node' | 'stylesheet' | 'graph_default' | 'system
 
 export interface StylesheetPreviewNodeInput {
     id: string
+    shape?: string
     class?: string
     llm_model?: string
     llm_provider?: string
@@ -48,6 +49,7 @@ const ALLOWED_PROPERTIES = new Set<ModelProperty>(['llm_model', 'llm_provider', 
 const ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high'])
 const CLASS_NAME_RE = /^[a-z0-9-]+$/
 const NODE_ID_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+const SHAPE_SELECTOR_RE = /^[A-Za-z][A-Za-z0-9_]*$/
 const QUOTED_VALUE_RE = /^"(?:[^"\\]|\\.)+"$/
 const SYSTEM_DEFAULTS: Record<ModelProperty, string> = {
     llm_model: '',
@@ -343,7 +345,7 @@ function isValidSelector(selector: string): boolean {
     if (selector.startsWith('#')) {
         return NODE_ID_RE.test(selector.slice(1))
     }
-    return false
+    return SHAPE_SELECTOR_RE.test(selector)
 }
 
 function selectorMatches(selector: string, node: StylesheetPreviewNodeInput): boolean {
@@ -357,7 +359,7 @@ function selectorMatches(selector: string, node: StylesheetPreviewNodeInput): bo
         const className = selector.slice(1)
         return nodeClasses(node).includes(className)
     }
-    return false
+    return normalizeValue(node.shape).toLowerCase() === selector.trim().toLowerCase()
 }
 
 function selectorSpecificity(selector: string): number {
@@ -366,6 +368,9 @@ function selectorSpecificity(selector: string): number {
     }
     if (selector.startsWith('.')) {
         return 2
+    }
+    if (SHAPE_SELECTOR_RE.test(selector)) {
+        return 1
     }
     if (selector === '*') {
         return 0

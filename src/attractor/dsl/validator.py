@@ -21,6 +21,7 @@ _CONTEXT_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_
 _STYLESHEET_ALLOWED_PROPERTIES = {"llm_model", "llm_provider", "reasoning_effort"}
 _STYLESHEET_CLASS_RE = re.compile(r"^[a-z0-9-]+$")
 _STYLESHEET_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_STYLESHEET_SHAPE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _STYLESHEET_QUOTED_VALUE_RE = re.compile(r'^"(?:[^"\\]|\\.)+"$')
 _KNOWN_HANDLER_TYPES = {
     "start",
@@ -717,13 +718,14 @@ def _lint_stylesheet_syntax(stylesheet: str, line: int) -> List[Diagnostic]:
         elif selector != "*" and not (
             (selector.startswith(".") and _STYLESHEET_CLASS_RE.fullmatch(selector[1:] or ""))
             or (selector.startswith("#") and _STYLESHEET_ID_RE.fullmatch(selector[1:] or ""))
+            or _STYLESHEET_SHAPE_RE.fullmatch(selector)
         ):
             diagnostics.append(
                 Diagnostic(
                     rule_id="stylesheet_syntax",
                     severity=DiagnosticSeverity.ERROR,
                     message=(
-                        f"invalid stylesheet selector '{selector}', must be '*', '.class', or '#node_id'"
+                        f"invalid stylesheet selector '{selector}', must be '*', 'shape', '.class', or '#node_id'"
                     ),
                     line=line,
                 )

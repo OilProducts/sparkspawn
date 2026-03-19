@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from attractor.config import resolve_settings
+from sparkspawn_common.settings import resolve_settings
 
 
 def test_resolve_settings_defaults_flows_dir_to_repo_flows_when_running_from_git_repo() -> None:

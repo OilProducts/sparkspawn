@@ -87,7 +87,7 @@ const fromPreview = mod.buildCanonicalFlowModelFromPreviewGraph('flow_model_prob
 const fromEditor = mod.buildCanonicalFlowModelFromEditorState('flow_model_probe', {
   graphAttrs: {
     goal: 'Ship release',
-    default_max_retry: 3,
+    default_max_retries: 3,
     'ext.graph_scope': 'custom'
   },
   nodes: [
@@ -212,7 +212,7 @@ def test_canonical_flow_model_serializes_editor_state_without_losing_core_attrs_
     graph = payload["graph"]
 
     assert graph["graph_attrs"]["goal"] == "Ship release"
-    assert graph["graph_attrs"]["default_max_retry"] == 3
+    assert graph["graph_attrs"]["default_max_retries"] == 3
 
     node = graph["nodes"][0]
     assert node["id"] == "author"

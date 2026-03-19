@@ -47,7 +47,8 @@ def _run_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
     import attractor.api.server as server
-    from attractor.config import ENV_FLOWS_DIR, ENV_HOME_DIR, ENV_UI_DIR
+    import sparkspawn_app.app as product_app
+    from sparkspawn_common.settings import ENV_FLOWS_DIR, ENV_HOME_DIR, ENV_UI_DIR
 
     def _set_path_env(name: str, value: Path | None) -> None:
         if value is None:
@@ -65,7 +66,7 @@ def _run_serve(args: argparse.Namespace) -> int:
     _set_path_env(ENV_UI_DIR, args.ui_dir)
 
     uvicorn.run(
-        "attractor.api.server:app" if args.reload else server.app,
+        "sparkspawn_app.app:app" if args.reload else product_app.app,
         host=args.host,
         port=args.port,
         reload=args.reload,

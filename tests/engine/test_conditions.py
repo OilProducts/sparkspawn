@@ -88,6 +88,18 @@ class TestConditions:
         assert evaluate_condition("context.review_result=Ship", outcome, context)
         assert not evaluate_condition("context.review_result=ship", outcome, context)
 
+    def test_bare_literals_can_include_hyphen_dot_and_colon(self):
+        outcome = Outcome(status=OutcomeStatus.SUCCESS)
+        context = Context(
+            values={
+                "context.model": "gpt-5.2",
+                "context.fidelity": "summary:high",
+            }
+        )
+
+        assert evaluate_condition("context.model=gpt-5.2", outcome, context)
+        assert evaluate_condition("context.fidelity=summary:high", outcome, context)
+
     def test_bare_key_truthy_checks(self):
         outcome = Outcome(status=OutcomeStatus.SUCCESS, preferred_label="Fix")
         context = Context(values={"context.tests_passed": "true"})

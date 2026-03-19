@@ -233,11 +233,13 @@ export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice
                 selectedEdgeId: isProjectSwitch ? null : state.selectedEdgeId,
                 graphAttrs: isProjectSwitch ? {} : state.graphAttrs,
                 graphAttrErrors: isProjectSwitch ? {} : state.graphAttrErrors,
+                graphAttrsUserEditVersion: isProjectSwitch ? 0 : state.graphAttrsUserEditVersion,
                 diagnostics: isProjectSwitch ? [] : state.diagnostics,
                 nodeDiagnostics: isProjectSwitch ? {} : state.nodeDiagnostics,
                 edgeDiagnostics: isProjectSwitch ? {} : state.edgeDiagnostics,
                 hasValidationErrors: isProjectSwitch ? false : state.hasValidationErrors,
                 saveState: isProjectSwitch ? 'idle' : state.saveState,
+                saveStateVersion: isProjectSwitch ? 0 : state.saveStateVersion,
                 saveErrorMessage: isProjectSwitch ? null : state.saveErrorMessage,
                 saveErrorKind: isProjectSwitch ? null : state.saveErrorKind,
             }

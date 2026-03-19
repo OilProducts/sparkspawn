@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+from attractor.dsl import parse_dot
 from attractor.dsl.models import Diagnostic, DiagnosticSeverity, DotAttribute, DotValueType
 from tests.api._support import (
     SIMPLE_FLOW as FLOW,
@@ -52,12 +53,16 @@ def _warning_error_diagnostics() -> list[Diagnostic]:
 
 
 def test_preview_preserves_warning_and_info_diagnostics(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_info_diagnostics())
+    monkeypatch.setattr(
+        server,
+        "_prepare_graph_for_server",
+        lambda graph: (graph, _warning_info_diagnostics()),
+    )
 
-    response = api_client.post("/attractor/preview", json={"flow_content": FLOW})
+    response = attractor_api_client.post("/preview", json={"flow_content": FLOW})
 
     assert response.status_code == 200
     payload = response.json()
@@ -68,12 +73,16 @@ def test_preview_preserves_warning_and_info_diagnostics(
 
 
 def test_preview_validation_error_payload_shape(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_error_diagnostics())
+    monkeypatch.setattr(
+        server,
+        "_prepare_graph_for_server",
+        lambda graph: (graph, _warning_error_diagnostics()),
+    )
 
-    response = api_client.post("/attractor/preview", json={"flow_content": FLOW})
+    response = attractor_api_client.post("/preview", json={"flow_content": FLOW})
 
     assert response.status_code == 200
     payload = response.json()
@@ -101,16 +110,20 @@ def test_preview_validation_error_payload_shape(
 
 
 def test_start_pipeline_preserves_warning_and_info_diagnostics(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_info_diagnostics())
+    monkeypatch.setattr(
+        server,
+        "_prepare_graph_for_server",
+        lambda graph: (graph, _warning_info_diagnostics()),
+    )
 
-    response = api_client.post(
-        "/attractor/pipelines",
+    response = attractor_api_client.post(
+        "/pipelines",
         json={
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
@@ -130,16 +143,20 @@ def test_start_pipeline_preserves_warning_and_info_diagnostics(
 
 
 def test_start_pipeline_validation_error_payload_shape(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    monkeypatch.setattr(server, "validate_graph", lambda graph: _warning_error_diagnostics())
+    monkeypatch.setattr(
+        server,
+        "_prepare_graph_for_server",
+        lambda graph: (graph, _warning_error_diagnostics()),
+    )
 
-    response = api_client.post(
-        "/attractor/pipelines",
+    response = attractor_api_client.post(
+        "/pipelines",
         json={
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
@@ -166,22 +183,7 @@ def test_start_pipeline_validation_error_payload_shape(
     assert payload["errors"][0] == error_diag
 
 
-def test_start_pipeline_runs_stylesheet_transform_before_validation(
-    api_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
-    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    captured: dict[str, str | None] = {}
-
-    def _validate(graph):
-        llm_model_attr = graph.nodes["plan"].attrs.get("llm_model")
-        captured["plan_llm_model"] = None if llm_model_attr is None else str(llm_model_attr.value)
-        return []
-
-    monkeypatch.setattr(server, "validate_graph", _validate)
-
+def test_server_graph_prep_runs_stylesheet_transform_before_validation() -> None:
     flow = """
     digraph G {
         graph [model_stylesheet=".fast { llm_model: fast-model; }"]
@@ -191,27 +193,13 @@ def test_start_pipeline_runs_stylesheet_transform_before_validation(
         start -> plan -> done
     }
     """
+    graph, diagnostics = server._prepare_graph_for_server(parse_dot(flow))
 
-    response = api_client.post(
-        "/attractor/pipelines",
-        json={
-            "flow_content": flow,
-            "working_directory": str(tmp_path / "work"),
-            "backend": "codex",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    try:
-        assert payload["status"] == "started"
-        assert captured["plan_llm_model"] == "fast-model"
-    finally:
-        if payload.get("pipeline_id"):
-            server._pop_active_run(str(payload["pipeline_id"]))
+    assert [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR] == []
+    assert graph.nodes["plan"].attrs["llm_model"].value == "fast-model"
 
 
-def test_preview_applies_registered_custom_transform(api_client: TestClient) -> None:
+def test_preview_applies_registered_custom_transform(attractor_api_client: TestClient) -> None:
     class _CustomPromptTransform:
         def apply(self, graph):
             prompt_attr = graph.nodes["task"].attrs["prompt"]
@@ -230,7 +218,7 @@ def test_preview_applies_registered_custom_transform(api_client: TestClient) -> 
     server.clear_registered_transforms()
     try:
         server.register_transform(_CustomPromptTransform())
-        response = api_client.post("/attractor/preview", json={"flow_content": flow})
+        response = attractor_api_client.post("/preview", json={"flow_content": flow})
         assert response.status_code == 200
         payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
@@ -239,7 +227,7 @@ def test_preview_applies_registered_custom_transform(api_client: TestClient) -> 
         server.clear_registered_transforms()
 
 
-def test_preview_applies_multiple_custom_transforms_in_registration_order(api_client: TestClient) -> None:
+def test_preview_applies_multiple_custom_transforms_in_registration_order(attractor_api_client: TestClient) -> None:
     class _AppendFirstTransform:
         def apply(self, graph):
             prompt_attr = graph.nodes["task"].attrs["prompt"]
@@ -266,7 +254,7 @@ def test_preview_applies_multiple_custom_transforms_in_registration_order(api_cl
     try:
         server.register_transform(_AppendFirstTransform())
         server.register_transform(_AppendSecondTransform())
-        response = api_client.post("/attractor/preview", json={"flow_content": flow})
+        response = attractor_api_client.post("/preview", json={"flow_content": flow})
         assert response.status_code == 200
         payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
@@ -276,7 +264,7 @@ def test_preview_applies_multiple_custom_transforms_in_registration_order(api_cl
         server.clear_registered_transforms()
 
 
-def test_preview_runs_custom_transforms_after_builtin_transforms(api_client: TestClient) -> None:
+def test_preview_runs_custom_transforms_after_builtin_transforms(attractor_api_client: TestClient) -> None:
     class _BuiltInOrderingProbeTransform:
         def apply(self, graph):
             prompt_attr = graph.nodes["task"].attrs["prompt"]
@@ -299,7 +287,7 @@ def test_preview_runs_custom_transforms_after_builtin_transforms(api_client: Tes
     server.clear_registered_transforms()
     try:
         server.register_transform(_BuiltInOrderingProbeTransform())
-        response = api_client.post("/attractor/preview", json={"flow_content": flow})
+        response = attractor_api_client.post("/preview", json={"flow_content": flow})
         assert response.status_code == 200
         payload = response.json()
         nodes_by_id = {str(node["id"]): node for node in payload["graph"]["nodes"]}
@@ -309,10 +297,7 @@ def test_preview_runs_custom_transforms_after_builtin_transforms(api_client: Tes
         server.clear_registered_transforms()
 
 
-def test_start_pipeline_custom_transform_conflict_uses_later_registration_precedence(
-    api_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_server_graph_prep_custom_transform_conflict_uses_later_registration_precedence() -> None:
     class _SetFirstModelTransform:
         def apply(self, graph):
             graph.nodes["task"].attrs["llm_model"] = DotAttribute(
@@ -333,17 +318,6 @@ def test_start_pipeline_custom_transform_conflict_uses_later_registration_preced
             )
             return graph
 
-    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
-    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
-    captured: dict[str, str | None] = {}
-
-    def _validate(graph):
-        model_attr = graph.nodes["task"].attrs.get("llm_model")
-        captured["task_llm_model"] = None if model_attr is None else str(model_attr.value)
-        return []
-
-    monkeypatch.setattr(server, "validate_graph", _validate)
-
     flow = """
     digraph G {
         graph [model_stylesheet="* { llm_model: base-model; }"]
@@ -358,27 +332,15 @@ def test_start_pipeline_custom_transform_conflict_uses_later_registration_preced
     try:
         server.register_transform(_SetFirstModelTransform())
         server.register_transform(_SetSecondModelTransform())
-        response = api_client.post(
-            "/attractor/pipelines",
-            json={
-                "flow_content": flow,
-                "working_directory": str(tmp_path / "work"),
-                "backend": "codex",
-            },
-        )
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["status"] == "started"
-        assert captured["task_llm_model"] == "second-model"
+        graph, diagnostics = server._prepare_graph_for_server(parse_dot(flow))
+        assert [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR] == []
+        assert graph.nodes["task"].attrs["llm_model"].value == "second-model"
     finally:
-        if "payload" in locals() and payload.get("pipeline_id"):
-            server._pop_active_run(str(payload["pipeline_id"]))
         server.clear_registered_transforms()
 
 
 def test_preview_custom_transform_conflict_precedence_is_deterministic_across_runs(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
 ) -> None:
     class _StatefulFirstTransform:
         def __init__(self):
@@ -424,8 +386,8 @@ def test_preview_custom_transform_conflict_precedence_is_deterministic_across_ru
         server.register_transform(first)
         server.register_transform(second)
 
-        first_response = api_client.post("/attractor/preview", json={"flow_content": flow})
-        second_response = api_client.post("/attractor/preview", json={"flow_content": flow})
+        first_response = attractor_api_client.post("/preview", json={"flow_content": flow})
+        second_response = attractor_api_client.post("/preview", json={"flow_content": flow})
         assert first_response.status_code == 200
         assert second_response.status_code == 200
         first_payload = first_response.json()
@@ -440,7 +402,6 @@ def test_preview_custom_transform_conflict_precedence_is_deterministic_across_ru
 
 
 def test_build_transform_pipeline_uses_stable_custom_transform_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _FirstTransform:
         def apply(self, graph):
@@ -452,22 +413,12 @@ def test_build_transform_pipeline_uses_stable_custom_transform_snapshot(
 
     first = _FirstTransform()
     late = _LateTransform()
-    original_register = server.TransformPipeline.register
-
-    def _register_and_mutate_registry(self, transform):
-        original_register(self, transform)
-        if transform is first and late not in server.REGISTERED_TRANSFORMS:
-            server.REGISTERED_TRANSFORMS.append(late)
 
     server.clear_registered_transforms()
     try:
         server.register_transform(first)
-        monkeypatch.setattr(
-            server.TransformPipeline,
-            "register",
-            _register_and_mutate_registry,
-        )
         pipeline = server._build_transform_pipeline()
+        server.register_transform(late)
         custom_transforms = [t for t in pipeline.transforms if t in (first, late)]
 
         assert custom_transforms == [first]

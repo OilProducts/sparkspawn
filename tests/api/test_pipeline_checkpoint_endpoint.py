@@ -14,20 +14,20 @@ from tests.api._support import (
 
 
 def test_get_pipeline_checkpoint_returns_404_for_unknown_pipeline(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
-    response = api_client.get("/attractor/pipelines/missing-run/checkpoint")
+    response = attractor_api_client.get("/pipelines/missing-run/checkpoint")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Unknown pipeline"
 
 
 def test_get_pipeline_checkpoint_returns_current_state_for_known_pipeline(
-    api_client: TestClient,
+    attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -35,7 +35,7 @@ def test_get_pipeline_checkpoint_returns_current_state_for_known_pipeline(
     server.configure_runtime_paths(runs_dir=runs_root)
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
-    start_payload = _start_pipeline(api_client, tmp_path / "work")
+    start_payload = _start_pipeline(attractor_api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])
     run_root = server._run_root(run_id)
 
@@ -49,7 +49,7 @@ def test_get_pipeline_checkpoint_returns_current_state_for_known_pipeline(
     )
     save_checkpoint(run_root / "state.json", checkpoint)
 
-    response = api_client.get(f"/attractor/pipelines/{run_id}/checkpoint")
+    response = attractor_api_client.get(f"/pipelines/{run_id}/checkpoint")
 
     assert response.status_code == 200
     payload = response.json()

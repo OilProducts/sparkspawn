@@ -1128,7 +1128,7 @@ def test_create_spec_edit_proposal_places_artifact_on_latest_assistant_turn(tmp_
 
 
 def test_create_spec_edit_proposal_by_handle_route_resolves_conversation(
-    api_client,
+    product_api_client,
     tmp_path: Path,
 ) -> None:
     project_dir = tmp_path.resolve()
@@ -1158,7 +1158,7 @@ def test_create_spec_edit_proposal_by_handle_route_resolves_conversation(
     server.PROJECT_CHAT._write_state(state)
     snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
 
-    response = api_client.post(
+    response = product_api_client.post(
         f"/workspace/api/conversations/by-handle/{snapshot['conversation_handle']}/spec-edit-proposals",
         json={
             "summary": "Capture the approved spec gate.",
@@ -1247,7 +1247,7 @@ def test_create_flow_run_request_places_artifact_on_latest_assistant_turn(tmp_pa
 
 
 def test_flow_run_request_routes_create_and_approve_launch(
-    api_client,
+    product_api_client,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1310,7 +1310,7 @@ def test_flow_run_request_routes_create_and_approve_launch(
 
     monkeypatch.setattr(attractor_client.AttractorApiClient, "start_pipeline", fake_start_pipeline)
 
-    create_response = api_client.post(
+    create_response = product_api_client.post(
         f"/workspace/api/conversations/by-handle/{snapshot['conversation_handle']}/flow-run-requests",
         json={
             "flow_name": "implement-spec.dot",
@@ -1326,7 +1326,7 @@ def test_flow_run_request_routes_create_and_approve_launch(
     assert create_payload["conversation_id"] == conversation_id
     request_id = create_payload["flow_run_request_id"]
 
-    review_response = api_client.post(
+    review_response = product_api_client.post(
         f"/workspace/api/conversations/{conversation_id}/flow-run-requests/{request_id}/review",
         json={
             "project_path": str(project_dir),
@@ -2058,7 +2058,7 @@ def test_list_conversations_filters_by_project_and_sorts_latest_first(tmp_path: 
 
 
 def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
-    api_client,
+    product_api_client,
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -2121,7 +2121,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
 
     monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: FakeSession())
 
-    response = api_client.post(
+    response = product_api_client.post(
         "/workspace/api/conversations/conversation-test/turns",
         json={
             "project_path": str(tmp_path),
@@ -2233,7 +2233,7 @@ def test_snapshot_rejects_unsupported_turn_event_only_payload(tmp_path: Path) ->
         service.get_snapshot("conversation-compact", str(tmp_path))
 
 
-def test_list_project_conversations_endpoint_returns_project_threads(api_client, tmp_path: Path) -> None:
+def test_list_project_conversations_endpoint_returns_project_threads(product_api_client, tmp_path: Path) -> None:
     service = server.PROJECT_CHAT
     service._write_state(
         project_chat.ConversationState(
@@ -2253,7 +2253,7 @@ def test_list_project_conversations_endpoint_returns_project_threads(api_client,
         )
     )
 
-    response = api_client.get("/workspace/api/projects/conversations", params={"project_path": str(tmp_path)})
+    response = product_api_client.get("/workspace/api/projects/conversations", params={"project_path": str(tmp_path)})
 
     assert response.status_code == 200
     payload = response.json()
@@ -2263,7 +2263,7 @@ def test_list_project_conversations_endpoint_returns_project_threads(api_client,
     assert payload[0]["last_message_preview"] == "Design thread preview"
 
 
-def test_delete_project_conversation_endpoint_removes_thread_state(api_client, tmp_path: Path) -> None:
+def test_delete_project_conversation_endpoint_removes_thread_state(product_api_client, tmp_path: Path) -> None:
     service = server.PROJECT_CHAT
     conversation_id = "conversation-delete-me"
     project_paths = ensure_project_paths(tmp_path / ".sparkspawn", str(tmp_path))
@@ -2286,7 +2286,7 @@ def test_delete_project_conversation_endpoint_removes_thread_state(api_client, t
         )
     )
 
-    response = api_client.delete(
+    response = product_api_client.delete(
         f"/workspace/api/conversations/{conversation_id}",
         params={"project_path": str(tmp_path)},
     )
@@ -2301,6 +2301,6 @@ def test_delete_project_conversation_endpoint_removes_thread_state(api_client, t
     handle_index = json.loads(conversation_handles_path(tmp_path / ".sparkspawn").read_text(encoding="utf-8"))
     assert conversation_id not in handle_index["conversation_ids"]
 
-    list_response = api_client.get("/workspace/api/projects/conversations", params={"project_path": str(tmp_path)})
+    list_response = product_api_client.get("/workspace/api/projects/conversations", params={"project_path": str(tmp_path)})
     assert list_response.status_code == 200
     assert list_response.json() == []

@@ -117,7 +117,7 @@ Important path overrides:
 
 ## API Overview
 
-The canonical route inventory lives in [server.py](/Users/chris/tinker/sparkspawn/src/attractor/api/server.py) and [api.py](/Users/chris/tinker/sparkspawn/src/workspace/api.py).
+The canonical route inventory lives in [app.py](/Users/chris/tinker/sparkspawn/src/sparkspawn_app/app.py), [server.py](/Users/chris/tinker/sparkspawn/src/attractor/api/server.py), and [api.py](/Users/chris/tinker/sparkspawn/src/workspace/api.py).
 
 The root app is a mount host only. Canonical public API surfaces are:
 - Attractor docs/OpenAPI under `/attractor/docs` and `/attractor/openapi.json`

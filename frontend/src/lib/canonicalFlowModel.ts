@@ -95,6 +95,15 @@ function cloneCanonicalAttrMap(
     return cloned
 }
 
+function canonicalizeGraphAttrs(attrs: CanonicalAttrMap): CanonicalAttrMap {
+    const canonical = { ...attrs }
+    if (canonical.default_max_retries === undefined && canonical.default_max_retry !== undefined) {
+        canonical.default_max_retries = canonical.default_max_retry
+    }
+    delete canonical.default_max_retry
+    return canonical
+}
+
 function cloneDefaultsScope(defaults?: Partial<CanonicalDefaultsScope>): CanonicalDefaultsScope {
     return {
         node: cloneCanonicalAttrMap(defaults?.node),
@@ -236,7 +245,7 @@ export function buildCanonicalFlowModelFromPreviewGraph(
 
     return {
         graphId,
-        graphAttrs: cloneCanonicalAttrMap(graph.graph_attrs),
+        graphAttrs: canonicalizeGraphAttrs(cloneCanonicalAttrMap(graph.graph_attrs)),
         nodes,
         edges,
         defaults: cloneDefaultsScope(options?.defaults ?? parseDefaultsScope(graph.defaults)),
@@ -266,7 +275,7 @@ export function buildCanonicalFlowModelFromEditorState(
 
     return {
         graphId,
-        graphAttrs: cloneCanonicalAttrMap(input.graphAttrs),
+        graphAttrs: canonicalizeGraphAttrs(cloneCanonicalAttrMap(input.graphAttrs)),
         nodes,
         edges,
         defaults: cloneDefaultsScope(input.defaults),
@@ -357,7 +366,7 @@ const KNOWN_GRAPH_ATTR_KEYS = new Set<string>([
     'goal',
     'label',
     'model_stylesheet',
-    'default_max_retry',
+    'default_max_retries',
     'retry_target',
     'fallback_retry_target',
     'default_fidelity',
@@ -483,7 +492,7 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
         formatGraphAttr('goal', readStringAttr(graphAttrs, 'goal')),
         formatGraphAttr('label', readStringAttr(graphAttrs, 'label')),
         formatGraphAttr('model_stylesheet', readStringAttr(graphAttrs, 'model_stylesheet')),
-        formatIntAttr('default_max_retry', readStringOrNumberAttr(graphAttrs, 'default_max_retry')),
+        formatIntAttr('default_max_retries', readStringOrNumberAttr(graphAttrs, 'default_max_retries')),
         formatGraphAttr('retry_target', readStringAttr(graphAttrs, 'retry_target')),
         formatGraphAttr('fallback_retry_target', readStringAttr(graphAttrs, 'fallback_retry_target')),
         formatGraphAttr('default_fidelity', readStringAttr(graphAttrs, 'default_fidelity')),

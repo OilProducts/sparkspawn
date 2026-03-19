@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
+from attractor.graph_prep import DEFAULT_MAX_RETRIES_KEY, normalize_graph_attr_aliases
 from attractor.dsl.models import DotAttribute, DotGraph, DotValueType
 
 
@@ -17,7 +18,7 @@ GRAPH_DEFAULTS: tuple[tuple[str, DotValueType, _DefaultFactory], ...] = (
     ("goal", DotValueType.STRING, _static("")),
     ("label", DotValueType.STRING, _static("")),
     ("model_stylesheet", DotValueType.STRING, _static("")),
-    ("default_max_retry", DotValueType.INTEGER, _static(50)),
+    (DEFAULT_MAX_RETRIES_KEY, DotValueType.INTEGER, _static(0)),
     ("retry_target", DotValueType.STRING, _static("")),
     ("fallback_retry_target", DotValueType.STRING, _static("")),
     ("default_fidelity", DotValueType.STRING, _static("")),
@@ -57,6 +58,7 @@ EDGE_DEFAULTS: tuple[tuple[str, DotValueType, _DefaultFactory], ...] = (
 
 class AttributeDefaultsTransform:
     def apply(self, graph: DotGraph) -> DotGraph:
+        normalize_graph_attr_aliases(graph)
         for key, value_type, factory in GRAPH_DEFAULTS:
             _set_default(graph.graph_attrs, key, value_type, factory(""))
 

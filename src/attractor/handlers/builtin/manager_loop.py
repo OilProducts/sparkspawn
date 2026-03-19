@@ -7,12 +7,13 @@ import re
 import time
 from typing import Any
 
-from attractor.dsl import DotParseError, parse_dot
+from attractor.dsl import DiagnosticSeverity, DotParseError, parse_dot
 from attractor.dsl.models import DotAttribute, Duration
 from attractor.engine.conditions import evaluate_condition
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.graph_prep import prepare_graph
 from attractor.handlers.runner import HandlerRunner
 
 from ..base import HandlerRuntime
@@ -111,6 +112,13 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
         return Outcome(
             status=OutcomeStatus.FAIL,
             failure_reason=f"Failed to parse child DOT graph: {exc}",
+        )
+    child_graph, diagnostics = prepare_graph(child_graph)
+    child_errors = [diag for diag in diagnostics if diag.severity == DiagnosticSeverity.ERROR]
+    if child_errors:
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=f"Child DOT graph failed validation: {child_errors[0].message}",
         )
 
     registry = getattr(runtime.runner, "registry", None)

@@ -641,7 +641,7 @@ class TestCheckpointAndArtifacts:
             assert seen_resume_markers == ["from-checkpoint"]
             assert resumed.context["context.resume.marker"] == "from-checkpoint"
 
-    def test_checkpoint_updates_after_stage_completion_before_routing_error(self):
+    def test_checkpoint_updates_after_stage_completion_before_successful_no_route_completion(self):
         graph = parse_dot(
             """
             digraph G {
@@ -666,11 +666,11 @@ class TestCheckpointAndArtifacts:
                 checkpoint_file=str(checkpoint_file),
             )
 
-            try:
-                executor.run(Context())
-                raise AssertionError("Expected pipeline execution to fail on missing outgoing edge")
-            except RuntimeError as exc:
-                assert "no eligible outgoing edge" in str(exc)
+            result = executor.run(Context())
+
+            assert result.status == "success"
+            assert result.current_node == "plan"
+            assert result.completed_nodes == ["start", "plan"]
 
             checkpoint = load_checkpoint(checkpoint_file)
             assert checkpoint is not None

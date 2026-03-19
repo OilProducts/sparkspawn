@@ -16,6 +16,7 @@ _SYSTEM_DEFAULTS = {
 }
 _CLASS_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 _NODE_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SHAPE_SELECTOR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _QUOTED_VALUE_RE = re.compile(r'^"(?:[^"\\]|\\.)+"$')
 
 
@@ -141,7 +142,7 @@ def _selector_is_valid(selector: str) -> bool:
         return bool(_CLASS_NAME_RE.fullmatch(selector[1:] or ""))
     if selector.startswith("#"):
         return bool(_NODE_ID_RE.fullmatch(selector[1:] or ""))
-    return False
+    return bool(_SHAPE_SELECTOR_RE.fullmatch(selector))
 
 
 def _selector_matches(selector: str, node: DotNode) -> bool:
@@ -158,6 +159,8 @@ def _selector_matches(selector: str, node: DotNode) -> bool:
             return False
         classes = [c.strip() for c in str(class_attr.value).split(",") if c.strip()]
         return selector[1:] in classes
+    shape_attr = node.attrs.get("shape")
+    return _normalize_shape_name(str(shape_attr.value).strip()) == _normalize_shape_name(selector)
 
     return False
 
@@ -168,9 +171,15 @@ def _selector_specificity(selector: str) -> int:
         return 3
     if selector.startswith("."):
         return 2
+    if _SHAPE_SELECTOR_RE.fullmatch(selector):
+        return 1
     if selector == "*":
         return 0
     return -1
+
+
+def _normalize_shape_name(shape: str) -> str:
+    return shape.strip().lower()
 
 
 def _parse_value(value: str) -> str | None:

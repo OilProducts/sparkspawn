@@ -8,9 +8,8 @@ import { getHandlerType, getNodeFieldVisibility } from "@/lib/nodeVisibility"
 import { getToolHookCommandWarning } from "@/lib/graphAttrValidation"
 import { resolveEdgeFieldDiagnostics, resolveNodeFieldDiagnostics } from "@/lib/inspectorFieldDiagnostics"
 import { toExtensionAttrEntries } from "@/lib/extensionAttrs"
-import { retryLastSaveContent, saveFlowContent } from "@/lib/flowPersistence"
+import { saveFlowContent } from "@/lib/flowPersistence"
 import { deleteFlowValidated, fetchFlowListValidated } from '@/lib/attractorClient'
-import { resolveSaveRemediation } from "@/lib/saveRemediation"
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
 import { GraphSettings } from './GraphSettings'
@@ -95,9 +94,6 @@ export function Sidebar() {
     const humanGate = useStore((state) => state.humanGate)
     const graphAttrs = useStore((state) => state.graphAttrs)
     const uiDefaults = useStore((state) => state.uiDefaults)
-    const saveState = useStore((state) => state.saveState)
-    const saveErrorMessage = useStore((state) => state.saveErrorMessage)
-    const saveErrorKind = useStore((state) => state.saveErrorKind)
     const [flows, setFlows] = useState<string[]>([])
     const [showAdvanced, setShowAdvanced] = useState(false)
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
@@ -272,22 +268,6 @@ export function Sidebar() {
     })
     const activeTab = activeInspectorScope === 'edge' ? 'edge' : activeInspectorScope === 'node' ? 'edit' : 'flows'
     const inspectorTitle = activeInspectorScope === 'edge' ? 'Edge' : activeInspectorScope === 'node' ? 'Node' : activeInspectorScope === 'graph' ? 'Graph' : 'Flows'
-    const saveStateLabel =
-        saveState === 'saving'
-            ? 'Saving...'
-            : saveState === 'saved'
-                ? 'Saved'
-                : saveState === 'conflict'
-                    ? 'Save Conflict'
-                : saveState === 'error'
-                    ? 'Save Failed'
-                    : ''
-    const remediation = resolveSaveRemediation(saveState, saveErrorKind)
-    const showSaveStateIndicator = saveState !== 'idle' || Boolean(saveErrorMessage) || Boolean(remediation)
-
-    const handleRetrySave = () => {
-        void retryLastSaveContent()
-    }
 
     const handleEdgePropertyChange = (key: string, value: string | boolean) => {
         if (!activeProjectPath || !selectedEdgeId || !displayedFlow) return;
@@ -456,39 +436,6 @@ export function Sidebar() {
                     <span>{inspectorTitle}</span>
                     <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
                 </div>
-                {showSaveStateIndicator ? (
-                    <div
-                        data-testid="save-state-indicator"
-                        className={`mt-2 rounded-md border px-2 py-1 text-[11px] font-medium ${
-                            saveState === 'error'
-                                ? 'border-destructive/50 bg-destructive/10 text-destructive'
-                                : saveState === 'conflict'
-                                    ? 'border-amber-500/50 bg-amber-500/10 text-amber-800'
-                                : saveState === 'saved'
-                                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
-                                    : 'border-border bg-muted/30 text-muted-foreground'
-                        }`}
-                        title={saveErrorMessage || undefined}
-                    >
-                        <span>{saveStateLabel}</span>
-                        {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
-                        {remediation ? (
-                            <p data-testid="save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
-                                {remediation.message}
-                            </p>
-                        ) : null}
-                        {remediation?.allowRetry ? (
-                            <button
-                                type="button"
-                                data-testid="save-remediation-retry"
-                                onClick={handleRetrySave}
-                                className="mt-2 inline-flex rounded border border-current px-2 py-0.5 text-[10px] font-semibold hover:bg-current/10"
-                            >
-                                Retry Save
-                            </button>
-                        ) : null}
-                    </div>
-                ) : null}
             </div>
 
             {activeTab === 'flows' && (

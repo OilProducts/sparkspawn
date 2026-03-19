@@ -48,6 +48,69 @@ class TestManagerLoopHandler:
         assert context.get("context.stack.child.outcome") == "success"
         assert context.get("context.stack.child.active_stage") == "done"
 
+    def test_manager_loop_applies_child_graph_transforms_before_execution(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                graph [goal="Ship child"]
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Plan for $goal"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+
+        outcome = runner("manager", "", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert [call[1] for call in backend.calls] == ["Plan for Ship child"]
+
+    def test_manager_loop_fails_when_child_graph_validation_fails(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Child task"]
+                start -> task
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend(ok=True))
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+
+        outcome = runner("manager", "", Context())
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason is not None
+        assert outcome.failure_reason.startswith("Child DOT graph failed validation:")
+
     def test_manager_loop_observe_action_writes_telemetry_artifacts(self, monkeypatch, tmp_path):
         def _fake_observe(context: Context, node_id: str, cycle: int) -> None:
             del node_id

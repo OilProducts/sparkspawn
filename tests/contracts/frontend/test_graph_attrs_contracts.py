@@ -30,7 +30,7 @@ def test_graph_attr_edit_round_trip_serializes_and_rehydrates_item_6_1_04() -> N
         "goal": "Ship release",
         "label": "Release Graph",
         "model_stylesheet": ".fast { llm_model: fast-model; }",
-        "default_max_retry": "3",
+        "default_max_retries": "3",
         "retry_target": "retry_stage",
         "fallback_retry_target": "fallback_stage",
         "default_fidelity": "summary:medium",
@@ -48,7 +48,7 @@ def test_graph_attr_edit_round_trip_serializes_and_rehydrates_item_6_1_04() -> N
     assert graph_attrs["goal"] == "Ship release"
     assert graph_attrs["label"] == "Release Graph"
     assert graph_attrs["model_stylesheet"] == ".fast { llm_model: fast-model; }"
-    assert graph_attrs["default_max_retry"] == 3
+    assert graph_attrs["default_max_retries"] == 3
     assert graph_attrs["retry_target"] == "retry_stage"
     assert graph_attrs["fallback_retry_target"] == "fallback_stage"
     assert graph_attrs["default_fidelity"] == "summary:medium"

@@ -16,6 +16,9 @@ const resetStore = () => {
     projectScopedWorkspaces: {},
     projectRegistrationError: null,
     recentProjectPaths: [],
+    graphAttrs: {},
+    graphAttrErrors: {},
+    graphAttrsUserEditVersion: 0,
   }))
 }
 
@@ -86,7 +89,30 @@ describe('project scope store behavior', () => {
     expect(next.selectedNodeId).toBeNull()
     expect(next.diagnostics).toEqual([])
     expect(next.graphAttrs).toEqual({})
+    expect(next.graphAttrsUserEditVersion).toBe(0)
     expect(next.saveState).toBe('idle')
+  })
+
+  it('tracks user graph attr edits separately from hydrated replacements', () => {
+    const store = useStore.getState()
+
+    store.replaceGraphAttrs({ goal: 'Hydrated goal' })
+    let next = useStore.getState()
+    expect(next.graphAttrs).toEqual({ goal: 'Hydrated goal' })
+    expect(next.graphAttrsUserEditVersion).toBe(0)
+
+    store.updateGraphAttr('goal', 'Edited goal')
+    next = useStore.getState()
+    expect(next.graphAttrs.goal).toBe('Edited goal')
+    expect(next.graphAttrsUserEditVersion).toBe(1)
+
+    store.setGraphAttrs({
+      ...next.graphAttrs,
+      retry_target: 'retry-node',
+    })
+    next = useStore.getState()
+    expect(next.graphAttrs.retry_target).toBe('retry-node')
+    expect(next.graphAttrsUserEditVersion).toBe(2)
   })
 
   it('does not persist run selection into project-scoped workspace state', () => {

@@ -6,7 +6,7 @@ from attractor.dsl.models import DotEdge
 
 from .conditions import evaluate_condition
 from .context import Context
-from .outcome import Outcome, OutcomeStatus
+from .outcome import Outcome
 
 
 def select_next_edge(edges: Iterable[DotEdge], outcome: Outcome, context: Context) -> Optional[DotEdge]:
@@ -24,8 +24,7 @@ def select_next_edge(edges: Iterable[DotEdge], outcome: Outcome, context: Contex
     if preferred:
         norm_preferred = _normalize_label(preferred)
         for edge in ordered:
-            condition = _condition_text(edge)
-            if condition and not evaluate_condition(condition, outcome, context):
+            if _condition_text(edge) != "":
                 continue
             if _normalize_label(_attr_str(edge, "label")) == norm_preferred:
                 return edge
@@ -33,8 +32,7 @@ def select_next_edge(edges: Iterable[DotEdge], outcome: Outcome, context: Contex
     if outcome.suggested_next_ids:
         for suggested_id in outcome.suggested_next_ids:
             for edge in ordered:
-                condition = _condition_text(edge)
-                if condition and not evaluate_condition(condition, outcome, context):
+                if _condition_text(edge) != "":
                     continue
                 if edge.target == suggested_id:
                     return edge
@@ -43,9 +41,7 @@ def select_next_edge(edges: Iterable[DotEdge], outcome: Outcome, context: Contex
     if unconditional:
         return _best_by_weight_then_lexical(unconditional)
 
-    if outcome.status == OutcomeStatus.FAIL:
-        return None
-    return _best_by_weight_then_lexical(ordered)
+    return None
 
 
 def _best_by_weight_then_lexical(edges: list[DotEdge]) -> Optional[DotEdge]:
