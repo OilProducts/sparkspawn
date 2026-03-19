@@ -278,6 +278,53 @@ class TestManagerLoopHandler:
         )
         assert Path(child_tool_output.strip()) == child_workdir
 
+    def test_manager_loop_resolves_relative_child_dotfile_from_flow_source_dir_and_runs_in_parent_workdir(
+        self, tmp_path
+    ):
+        flow_source_dir = tmp_path / "flows"
+        flow_source_dir.mkdir(parents=True, exist_ok=True)
+        child_dot_path = flow_source_dir / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=parallelogram, tool_command="pwd"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+        run_workdir = tmp_path / "project"
+        run_workdir.mkdir(parents=True, exist_ok=True)
+
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [stack.child_dotfile="child.dot"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend(ok=True))
+        logs_root = tmp_path / "logs"
+        runner = HandlerRunner(graph, registry, logs_root=logs_root)
+        context = Context(
+            values={
+                "internal.flow_source_dir": str(flow_source_dir),
+                "internal.run_workdir": str(run_workdir),
+            }
+        )
+
+        outcome = runner("manager", "", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        child_tool_output = (logs_root / "manager" / "child" / "task" / "tool_output.txt").read_text(
+            encoding="utf-8"
+        )
+        assert Path(child_tool_output.strip()) == run_workdir
+
     def test_manager_loop_steer_action_honors_cooldown(self, monkeypatch):
         steered = []
         clock = iter([0.0, 1.0, 2.0])

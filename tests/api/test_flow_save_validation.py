@@ -36,7 +36,7 @@ digraph G {
 
 SPEC_VALID_NO_OP_SAVE_FIXTURES: tuple[str, ...] = (
     "tests/fixtures/flows/reference-1.1-03-graph-attrs.dot",
-    "starter-flows/manager-human.dot",
+    "tests/fixtures/flows/reference-1.1-03-manager-loop.dot",
     "tests/fixtures/reference-1.1-03-subgraph-defaults.dot",
     "tests/fixtures/flows/reference-1.1-03-extension-attrs.dot",
 )

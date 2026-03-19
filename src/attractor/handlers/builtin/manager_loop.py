@@ -84,17 +84,17 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
     if current_status in {"running", "completed", "failed"}:
         return None
 
-    child_workdir = _dot_attr_string(runtime.graph.graph_attrs.get("stack.child_workdir")) or "."
-    child_workdir_path = Path(child_workdir)
-    if not child_workdir_path.is_absolute():
-        child_workdir_path = (Path.cwd() / child_workdir_path).resolve()
-    else:
-        child_workdir_path = child_workdir_path.resolve()
-
-    child_dot_path = Path(child_dotfile)
-    if not child_dot_path.is_absolute():
-        child_dot_path = child_workdir_path / child_dot_path
-    child_dot_path = child_dot_path.resolve()
+    authored_child_workdir = _authored_dot_attr_string(runtime.graph.graph_attrs.get("stack.child_workdir"))
+    child_workdir_path = _resolve_child_workdir_path(
+        runtime.context,
+        authored_child_workdir=authored_child_workdir,
+    )
+    child_dot_path = _resolve_child_dot_path(
+        child_dotfile,
+        child_workdir_path=child_workdir_path,
+        context=runtime.context,
+        child_workdir_is_authored=bool(authored_child_workdir),
+    )
     if not child_dot_path.exists():
         return Outcome(
             status=OutcomeStatus.FAIL,
@@ -237,6 +237,51 @@ def _dot_attr_string(attr: DotAttribute | None) -> str:
     if hasattr(value, "raw"):
         return str(value.raw).strip()
     return str(value).strip()
+
+
+def _authored_dot_attr_string(attr: DotAttribute | None) -> str:
+    if attr is None or attr.line == 0:
+        return ""
+    return _dot_attr_string(attr)
+
+
+def _context_dir(context: Context, key: str) -> Path | None:
+    raw_value = str(context.get(key, "")).strip()
+    if not raw_value:
+        return None
+    return Path(raw_value).expanduser().resolve()
+
+
+def _resolve_child_workdir_path(context: Context, *, authored_child_workdir: str) -> Path:
+    run_workdir = _context_dir(context, "internal.run_workdir")
+    if authored_child_workdir:
+        base_dir = run_workdir or Path.cwd().resolve()
+        return _resolve_path_from_base(authored_child_workdir, base_dir)
+    return run_workdir or Path.cwd().resolve()
+
+
+def _resolve_child_dot_path(
+    child_dotfile: str,
+    *,
+    child_workdir_path: Path,
+    context: Context,
+    child_workdir_is_authored: bool,
+) -> Path:
+    child_dot_path = Path(child_dotfile)
+    if child_dot_path.is_absolute():
+        return child_dot_path.resolve()
+    if child_workdir_is_authored:
+        base_dir = child_workdir_path
+    else:
+        base_dir = _context_dir(context, "internal.flow_source_dir") or child_workdir_path
+    return _resolve_path_from_base(child_dot_path, base_dir)
+
+
+def _resolve_path_from_base(raw_path: str | Path, base_dir: Path) -> Path:
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (base_dir / candidate).resolve()
 
 
 def _stop_condition(attr: DotAttribute | None) -> str:

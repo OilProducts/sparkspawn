@@ -634,6 +634,14 @@ async def _start_pipeline(
             }
     if req.goal:
         flow_content = _inject_pipeline_goal_impl(flow_content, req.goal)
+    flow_source_dir: Path | None = None
+    if flow_name:
+        try:
+            flow_path = _resolve_flow_path(flow_name)
+        except HTTPException:
+            flow_path = None
+        if flow_path is not None and flow_path.exists():
+            flow_source_dir = flow_path.parent.resolve()
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[0])
     try:
         graph = parse_dot(flow_content)
@@ -722,6 +730,9 @@ async def _start_pipeline(
     graphviz_export = export_graphviz_artifact(flow_content, run_root)
 
     context = Context(values=_graph_attr_context_seed(graph))
+    context.set("internal.run_workdir", working_dir)
+    if flow_source_dir is not None:
+        context.set("internal.flow_source_dir", str(flow_source_dir))
     run_root.mkdir(parents=True, exist_ok=True)
     Path(logs_root).mkdir(parents=True, exist_ok=True)
     save_checkpoint(

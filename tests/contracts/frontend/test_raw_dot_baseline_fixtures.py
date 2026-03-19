@@ -10,12 +10,11 @@ BASELINE_FIXTURES: dict[str, tuple[str, ...]] = {
         "tool_hooks.pre",
         "tool_hooks.post",
     ),
-    "starter-flows/manager-human.dot": (
+    "tests/fixtures/flows/reference-1.1-03-manager-loop.dot": (
         "manager.poll_interval",
         "manager.max_cycles",
         "manager.stop_condition",
         "manager.actions",
-        "human.default_choice",
     ),
     "tests/fixtures/reference-1.1-03-subgraph-defaults.dot": (
         "subgraph cluster_",

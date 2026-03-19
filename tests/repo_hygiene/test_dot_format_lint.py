@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from attractor.dsl import parse_dot
 from attractor.dsl.dot_lint import (
     find_dot_paths,
     find_non_canonical_dot_diffs,
@@ -45,6 +46,34 @@ def test_lint_reports_start_node_cardinality_violations(tmp_path: Path) -> None:
     assert len(errors) == 1
     assert "start_node" in errors[0]
     assert "exactly one start node" in errors[0]
+
+
+def test_starter_child_dotfile_references_are_relative_and_resolve_within_starter_flows() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    starter_flows_dir = repo_root / "starter-flows"
+    resolved_starter_root = starter_flows_dir.resolve()
+
+    for dot_path in find_dot_paths(starter_flows_dir):
+        graph = parse_dot(dot_path.read_text(encoding="utf-8"))
+        child_dotfile_attr = graph.graph_attrs.get("stack.child_dotfile")
+        if child_dotfile_attr is None:
+            continue
+        child_dotfile = str(child_dotfile_attr.value).strip()
+        if not child_dotfile:
+            continue
+
+        child_path = Path(child_dotfile)
+        assert not child_path.is_absolute(), f"starter child flow must use a relative path: {dot_path}"
+
+        resolved_child = (dot_path.parent / child_path).resolve()
+        assert resolved_child.suffix == ".dot", f"starter child flow must point to a .dot file: {dot_path}"
+        assert resolved_child.exists(), f"starter child flow is missing: {resolved_child}"
+        try:
+            resolved_child.relative_to(resolved_starter_root)
+        except ValueError as exc:
+            raise AssertionError(
+                f"starter child flow must stay within starter-flows/: {resolved_child}"
+            ) from exc
 
 
 def test_justfile_exposes_dot_lint_recipe() -> None:
