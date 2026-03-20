@@ -190,6 +190,50 @@ def test_workspace_flow_raw_returns_dot_for_requestable_flow(
     assert response.headers["content-type"].startswith("text/vnd.graphviz")
 
 
+def test_workspace_flow_validate_returns_preview_payload_for_existing_flow(
+    product_api_client: TestClient,
+) -> None:
+    _write_flow(
+        "draft.dot",
+        """
+digraph draft {
+  graph [label="Draft Flow", goal="Draft the thing"];
+  start [shape=Mdiamond];
+  draft_email [shape=box, prompt="Draft the thing."];
+  done [shape=Msquare];
+  start -> draft_email;
+  draft_email -> done;
+}
+""".strip()
+        + "\n",
+    )
+
+    response = product_api_client.get("/workspace/api/flows/draft.dot/validate")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "draft.dot"
+    assert payload["path"].endswith("/draft.dot")
+    assert payload["status"] == "ok"
+    assert payload["diagnostics"] == []
+    assert payload["errors"] == []
+
+
+def test_workspace_flow_validate_surfaces_parse_errors(
+    product_api_client: TestClient,
+) -> None:
+    _write_flow("broken.dot", "digraph broken { start -> \n")
+
+    response = product_api_client.get("/workspace/api/flows/broken.dot/validate")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "broken.dot"
+    assert payload["status"] == "parse_error"
+    assert len(payload["diagnostics"]) == 1
+    assert payload["diagnostics"][0]["rule_id"] == "parse_error"
+
+
 def test_workspace_flow_launch_policy_update_persists_catalog_entry(
     product_api_client: TestClient,
 ) -> None:

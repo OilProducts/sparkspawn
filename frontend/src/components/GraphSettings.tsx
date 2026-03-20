@@ -17,6 +17,13 @@ import {
 import { InspectorScaffold } from './InspectorScaffold'
 import { StylesheetEditor } from './StylesheetEditor'
 import { AdvancedKeyValueEditor } from './AdvancedKeyValueEditor'
+import { LaunchInputsEditor } from './LaunchInputsEditor'
+import {
+    parseLaunchInputDefinitions,
+    serializeLaunchInputDefinitions,
+    validateLaunchInputDefinitions,
+    type LaunchInputDefinition,
+} from '@/lib/flowContracts'
 
 interface GraphSettingsProps {
     inline?: boolean
@@ -25,7 +32,8 @@ interface GraphSettingsProps {
 const GRAPH_ATTR_HELP: Record<string, string> = {
     'sparkspawn.title': 'Human-friendly flow title stored in the DOT metadata.',
     'sparkspawn.description': 'Short flow description stored in the DOT metadata.',
-    goal: 'Primary graph intent used by handlers that read graph-level goal context.',
+    'sparkspawn.launch_inputs': 'Structured launch-time context fields Spark Spawn should collect before starting a run.',
+    goal: 'Primary stated goal for the flow. Handlers can read it as shared run context.',
     label: 'Display label for graph metadata; does not override node labels.',
     default_max_retries: 'Used only when a node omits max_retries. Node max_retries takes precedence.',
     default_fidelity: 'Default fidelity when node/edge fidelity is not set explicitly.',
@@ -48,6 +56,7 @@ const MODEL_VALUE_SOURCE_LABEL: Record<ModelValueSource, string> = {
 const CORE_GRAPH_ATTR_KEYS = new Set<string>([
     'sparkspawn.title',
     'sparkspawn.description',
+    'sparkspawn.launch_inputs',
     'goal',
     'label',
     'model_stylesheet',
@@ -73,6 +82,8 @@ const FLOW_LAUNCH_POLICY_LABELS: Record<FlowLaunchPolicy, string> = {
 export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const [isOpen, setIsOpen] = useState(false)
     const [showAdvancedGraphAttrs, setShowAdvancedGraphAttrs] = useState(false)
+    const [launchInputDrafts, setLaunchInputDrafts] = useState<LaunchInputDefinition[]>([])
+    const [launchInputDraftError, setLaunchInputDraftError] = useState<string | null>(null)
     const activeFlow = useStore((state) => state.activeFlow)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const diagnostics = useStore((state) => state.diagnostics)
@@ -112,6 +123,13 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const graphExtensionEntries = useMemo(
         () => toExtensionAttrEntries(graphAttrs as Record<string, unknown>, CORE_GRAPH_ATTR_KEYS),
         [graphAttrs],
+    )
+    const rawLaunchInputsValue = typeof graphAttrs['sparkspawn.launch_inputs'] === 'string'
+        ? graphAttrs['sparkspawn.launch_inputs']
+        : ''
+    const parsedLaunchInputs = useMemo(
+        () => parseLaunchInputDefinitions(rawLaunchInputsValue),
+        [rawLaunchInputsValue],
     )
     const launchPolicyStatusMessage = useMemo(() => {
         if (!activeFlow) {
@@ -174,6 +192,11 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
         uiDefaults.reasoning_effort,
     ])
 
+    useEffect(() => {
+        setLaunchInputDrafts(parsedLaunchInputs.entries)
+        setLaunchInputDraftError(parsedLaunchInputs.error)
+    }, [parsedLaunchInputs.entries, parsedLaunchInputs.error])
+
     const flushPendingSave = useCallback(() => {
         if (!activeProjectPath || !activeFlow || !hasPendingSave.current) return
         hasPendingSave.current = false
@@ -204,6 +227,21 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
 
         const dot = generateDot(activeFlow, updatedNodes, getEdges(), graphAttrs)
         void saveFlowContent(activeFlow, dot)
+    }
+
+    const handleLaunchInputDefinitionsChange = (entries: LaunchInputDefinition[]) => {
+        setLaunchInputDrafts(entries)
+        if (entries.length === 0) {
+            setLaunchInputDraftError(null)
+            updateGraphAttr('sparkspawn.launch_inputs', '')
+            return
+        }
+        const validationError = validateLaunchInputDefinitions(entries)
+        setLaunchInputDraftError(validationError)
+        if (validationError) {
+            return
+        }
+        updateGraphAttr('sparkspawn.launch_inputs', serializeLaunchInputDefinitions(entries))
     }
 
     useEffect(() => {
@@ -527,6 +565,11 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                             {GRAPH_ATTR_HELP.goal}
                         </p>
                     </div>
+                    <LaunchInputsEditor
+                        entries={launchInputDrafts}
+                        error={launchInputDraftError}
+                        onChange={handleLaunchInputDefinitionsChange}
+                    />
                     <div className="space-y-1">
                         <label htmlFor="graph-attr-label" className="text-xs font-medium text-foreground">
                             Label

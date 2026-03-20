@@ -30,7 +30,8 @@ def start_pipeline(
     working_directory: Path,
     *,
     flow_content: str = SIMPLE_FLOW,
-    backend: str = "codex",
+    backend: str = "codex-app-server",
+    launch_context: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     response = api_client.post(
         "/pipelines",
@@ -38,6 +39,7 @@ def start_pipeline(
             "flow_content": flow_content,
             "working_directory": str(working_directory),
             "backend": backend,
+            "launch_context": launch_context,
         },
     )
     assert response.status_code == 200

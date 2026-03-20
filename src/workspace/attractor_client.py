@@ -29,6 +29,7 @@ class AttractorApiClient:
         working_directory: str,
         model: Optional[str],
         goal: Optional[str] = None,
+        launch_context: dict[str, Any] | None = None,
         spec_id: Optional[str] = None,
         plan_id: Optional[str] = None,
     ) -> dict[str, Any]:
@@ -36,13 +37,17 @@ class AttractorApiClient:
             "run_id": run_id,
             "flow_name": flow_name,
             "working_directory": working_directory,
-            "backend": "codex",
+            "backend": "codex-app-server",
             "model": model,
             "goal": goal,
+            "launch_context": launch_context,
             "spec_id": spec_id,
             "plan_id": plan_id,
         }
         return await self._request_json("POST", "/pipelines", json=payload)
+
+    async def preview_flow(self, flow_content: str) -> dict[str, Any]:
+        return await self._request_json("POST", "/preview", json={"flow_content": flow_content})
 
     async def get_pipeline(self, run_id: str) -> dict[str, Any]:
         return await self._request_json("GET", f"/pipelines/{run_id}")

@@ -126,6 +126,7 @@ export interface FlowRunRequestResponse {
     status: 'pending' | 'approved' | 'rejected' | 'launch_failed' | 'launched'
     source_segment_id?: string | null
     goal?: string | null
+    launch_context?: Record<string, unknown> | null
     model?: string | null
     run_id?: string | null
     launch_error?: string | null
@@ -582,6 +583,7 @@ function parseFlowRunRequestResponse(value: unknown): FlowRunRequestResponse | n
         status,
         source_segment_id: asOptionalNullableString(record.source_segment_id),
         goal: asOptionalNullableString(record.goal),
+        launch_context: asUnknownRecord(record.launch_context),
         model: asOptionalNullableString(record.model),
         run_id: asOptionalNullableString(record.run_id),
         launch_error: asOptionalNullableString(record.launch_error),

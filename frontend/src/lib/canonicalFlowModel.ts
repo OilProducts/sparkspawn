@@ -363,6 +363,7 @@ export function sanitizeGraphId(flowName: string): string {
 const KNOWN_GRAPH_ATTR_KEYS = new Set<string>([
     'sparkspawn.title',
     'sparkspawn.description',
+    'sparkspawn.launch_inputs',
     'goal',
     'label',
     'model_stylesheet',
@@ -408,6 +409,8 @@ const KNOWN_NODE_ATTR_KEYS = new Set<string>([
     'manager.stop_condition',
     'manager.actions',
     'human.default_choice',
+    'sparkspawn.reads_context',
+    'sparkspawn.writes_context',
 ])
 
 const KNOWN_EDGE_ATTR_KEYS = new Set<string>([
@@ -489,6 +492,7 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
     const graphAttrLines = [
         formatGraphAttr('sparkspawn.title', readStringAttr(graphAttrs, 'sparkspawn.title')),
         formatGraphAttr('sparkspawn.description', readStringAttr(graphAttrs, 'sparkspawn.description')),
+        formatGraphAttr('sparkspawn.launch_inputs', readStringAttr(graphAttrs, 'sparkspawn.launch_inputs')),
         formatGraphAttr('goal', readStringAttr(graphAttrs, 'goal')),
         formatGraphAttr('label', readStringAttr(graphAttrs, 'label')),
         formatGraphAttr('model_stylesheet', readStringAttr(graphAttrs, 'model_stylesheet')),
@@ -543,6 +547,8 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
         const managerStopConditionValue = readStringAttr(attrs, 'manager.stop_condition')
         const managerActionsValue = readStringAttr(attrs, 'manager.actions')
         const humanDefaultChoiceValue = readStringAttr(attrs, 'human.default_choice')
+        const readsContextValue = readStringAttr(attrs, 'sparkspawn.reads_context')
+        const writesContextValue = readStringAttr(attrs, 'sparkspawn.writes_context')
 
         const label = hasLabelAttr ? `label="${escapeDotString(labelValue)}"` : ''
         const shape = shapeValue ? `shape=${formatAttrValue(shapeValue)}` : ''
@@ -583,6 +589,8 @@ export function generateDotFromCanonicalFlowModel(flowName: string, model: Canon
             managerStopConditionValue ? `manager.stop_condition="${escapeDotString(managerStopConditionValue)}"` : '',
             managerActionsValue ? `manager.actions="${escapeDotString(managerActionsValue)}"` : '',
             humanDefaultChoiceValue ? `human.default_choice=${formatAttrValue(humanDefaultChoiceValue)}` : '',
+            readsContextValue ? `sparkspawn.reads_context="${escapeDotString(readsContextValue)}"` : '',
+            writesContextValue ? `sparkspawn.writes_context="${escapeDotString(writesContextValue)}"` : '',
             ...formatCanonicalAttrEntries(attrs, KNOWN_NODE_ATTR_KEYS),
         ].filter(Boolean).join(', ')
 

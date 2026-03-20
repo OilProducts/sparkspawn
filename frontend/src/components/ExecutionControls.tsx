@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { OctagonX, Play } from 'lucide-react'
 import { useStore, type RuntimeStatus } from '@/store'
 import { buildPipelineStartPayload, type PipelineStartPayload } from '@/lib/pipelineStartPayload'
@@ -10,6 +10,12 @@ import {
 } from '@/lib/attractorClient'
 import { fetchProjectMetadataValidated } from '@/lib/workspaceClient'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
+import {
+    buildLaunchContextFromValues,
+    initializeLaunchInputFormValues,
+    parseLaunchInputDefinitions,
+    type LaunchInputFormValues,
+} from '@/lib/flowContracts'
 
 type WorkflowFailureDiagnostics = {
     message: string
@@ -88,6 +94,7 @@ export function ExecutionControls() {
     const executionFlow = useStore((state) => state.executionFlow)
     const workingDir = useStore((state) => state.workingDir)
     const model = useStore((state) => state.model)
+    const graphAttrs = useStore((state) => state.graphAttrs)
     const diagnostics = useStore((state) => state.diagnostics)
     const hasValidationErrors = useStore((state) => state.hasValidationErrors)
     const runtimeStatus = useStore((state) => state.runtimeStatus)
@@ -101,13 +108,19 @@ export function ExecutionControls() {
     const [runStartError, setRunStartError] = useState<string | null>(null)
     const [lastBuildWorkflowFailure, setLastBuildWorkflowFailure] = useState<WorkflowFailureDiagnostics | null>(null)
     const [runStartGitPolicyWarning, setRunStartGitPolicyWarning] = useState<string | null>(null)
+    const [launchInputValues, setLaunchInputValues] = useState<LaunchInputFormValues>({})
     const executionFlowName = executionFlow || activeFlow
+    const parsedLaunchInputs = useMemo(
+        () => parseLaunchInputDefinitions(graphAttrs['sparkspawn.launch_inputs']),
+        [graphAttrs],
+    )
     const runInitiationForm = {
         projectPath: activeProjectPath || '',
         flowSource: executionFlowName || '',
         workingDirectory: workingDir,
-        backend: 'codex',
+        backend: 'codex-app-server',
         model: model.trim() || null,
+        launchContext: null,
         specArtifactId: activeProjectScope?.specId || null,
         planArtifactId: activeProjectScope?.planId || null,
     }
@@ -141,6 +154,10 @@ export function ExecutionControls() {
                     ? 'Warnings are present. Review diagnostics before running.'
                     : undefined
 
+    useEffect(() => {
+        setLaunchInputValues((current) => initializeLaunchInputFormValues(parsedLaunchInputs.entries, current))
+    }, [parsedLaunchInputs.entries])
+
     if (!shouldShowFooter) return null
 
     const confirmGitPolicyGate = async () => {
@@ -170,6 +187,18 @@ export function ExecutionControls() {
         if (!activeProjectPath || !executionFlowName || hasValidationErrors) return
 
         setRunStartError(null)
+        if (parsedLaunchInputs.error) {
+            setRunStartError(`Flow launch input schema is invalid: ${parsedLaunchInputs.error}`)
+            return
+        }
+        const { launchContext, errors: launchContextErrors } = buildLaunchContextFromValues(
+            parsedLaunchInputs.entries,
+            launchInputValues,
+        )
+        if (launchContextErrors.length > 0) {
+            setRunStartError(launchContextErrors.join(' '))
+            return
+        }
         if (!buildWorkflowLaunchReady) {
             const launchGateMessage = 'Build workflow launch requires an approved plan state.'
             setRunStartError(launchGateMessage)
@@ -191,6 +220,7 @@ export function ExecutionControls() {
             const startPayload = buildPipelineStartPayload(
                 {
                     ...runInitiationForm,
+                    launchContext,
                     workingDirectory: resolvedWorkingDirectory,
                 },
                 flow.content
@@ -250,6 +280,98 @@ export function ExecutionControls() {
                 }`}
         >
             <div className={`flex ${isNarrowViewport ? 'flex-col items-stretch gap-2' : 'flex-wrap items-center gap-2'}`}>
+                {parsedLaunchInputs.entries.length > 0 ? (
+                    <div
+                        data-testid="execution-launch-inputs"
+                        className="w-full rounded-md border border-border/80 bg-muted/20 px-3 py-3"
+                    >
+                        <div className="mb-3 space-y-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Launch Inputs
+                            </p>
+                            <p className="text-[11px] text-muted-foreground">
+                                These values populate `context.*` at run start.
+                            </p>
+                            {parsedLaunchInputs.error ? (
+                                <p className="text-[11px] text-destructive">{parsedLaunchInputs.error}</p>
+                            ) : null}
+                        </div>
+                        <div className="grid gap-3">
+                            {parsedLaunchInputs.entries.map((entry) => (
+                                <div key={entry.key} className="space-y-1">
+                                    <label className="text-xs font-medium text-foreground">
+                                        {entry.label}
+                                        {entry.required ? ' *' : ''}
+                                    </label>
+                                    {entry.type === 'string' ? (
+                                        <input
+                                            data-testid={`execution-launch-input-${entry.key}`}
+                                            value={launchInputValues[entry.key] ?? ''}
+                                            onChange={(event) => setLaunchInputValues((current) => ({
+                                                ...current,
+                                                [entry.key]: event.target.value,
+                                            }))}
+                                            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    ) : entry.type === 'string[]' ? (
+                                        <textarea
+                                            data-testid={`execution-launch-input-${entry.key}`}
+                                            value={launchInputValues[entry.key] ?? ''}
+                                            onChange={(event) => setLaunchInputValues((current) => ({
+                                                ...current,
+                                                [entry.key]: event.target.value,
+                                            }))}
+                                            rows={3}
+                                            className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            placeholder="One item per line"
+                                        />
+                                    ) : entry.type === 'boolean' ? (
+                                        <select
+                                            data-testid={`execution-launch-input-${entry.key}`}
+                                            value={launchInputValues[entry.key] ?? ''}
+                                            onChange={(event) => setLaunchInputValues((current) => ({
+                                                ...current,
+                                                [entry.key]: event.target.value,
+                                            }))}
+                                            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        >
+                                            <option value="">Unset</option>
+                                            <option value="true">True</option>
+                                            <option value="false">False</option>
+                                        </select>
+                                    ) : entry.type === 'number' ? (
+                                        <input
+                                            data-testid={`execution-launch-input-${entry.key}`}
+                                            type="number"
+                                            value={launchInputValues[entry.key] ?? ''}
+                                            onChange={(event) => setLaunchInputValues((current) => ({
+                                                ...current,
+                                                [entry.key]: event.target.value,
+                                            }))}
+                                            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            placeholder="42"
+                                        />
+                                    ) : (
+                                        <textarea
+                                            data-testid={`execution-launch-input-${entry.key}`}
+                                            value={launchInputValues[entry.key] ?? ''}
+                                            onChange={(event) => setLaunchInputValues((current) => ({
+                                                ...current,
+                                                [entry.key]: event.target.value,
+                                            }))}
+                                            rows={4}
+                                            className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            placeholder='{"key":"value"}'
+                                        />
+                                    )}
+                                    {entry.description ? (
+                                        <p className="text-[11px] text-muted-foreground">{entry.description}</p>
+                                    ) : null}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
                 {showValidationWarningBanner ? (
                     <p
                         data-testid="execute-warning-banner"

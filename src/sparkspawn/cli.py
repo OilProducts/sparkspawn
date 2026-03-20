@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import sys
 from typing import Sequence
+
+import sparkspawn.starter_assets as starter_assets
 
 
 def _build_runtime_parser() -> argparse.ArgumentParser:
@@ -25,6 +28,14 @@ def _build_runtime_parser() -> argparse.ArgumentParser:
     serve.add_argument("--flows-dir", type=Path, default=None, help="Flow storage directory")
     serve.add_argument("--ui-dir", type=Path, default=None, help="Built UI directory (contains index.html)")
 
+    init = subparsers.add_parser(
+        "init",
+        help="Initialize Spark Spawn runtime directories and seed starter flows",
+    )
+    init.add_argument("--data-dir", type=Path, default=None, help="Runtime data directory root")
+    init.add_argument("--flows-dir", type=Path, default=None, help="Flow storage directory")
+    init.add_argument("--force", action="store_true", help="Overwrite existing starter flows")
+
     return parser
 
 
@@ -38,6 +49,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "serve":
         return _run_serve(args)
+    if args.command == "init":
+        return _run_init(args)
 
     parser.error(f"Unknown command: {args.command}")
     return 2
@@ -57,6 +70,7 @@ def _run_serve(args: argparse.Namespace) -> int:
 
     server.configure_runtime_paths(
         data_dir=args.data_dir,
+        runs_dir=None,
         flows_dir=args.flows_dir,
         ui_dir=args.ui_dir,
     )
@@ -70,6 +84,37 @@ def _run_serve(args: argparse.Namespace) -> int:
         host=args.host,
         port=args.port,
         reload=args.reload,
+    )
+    return 0
+
+
+def _run_init(args: argparse.Namespace) -> int:
+    from sparkspawn_common.settings import resolve_settings, validate_settings
+
+    settings = resolve_settings(
+        data_dir=args.data_dir,
+        flows_dir=args.flows_dir,
+    )
+    validate_settings(settings)
+
+    try:
+        result = starter_assets.seed_starter_flows(
+            settings.flows_dir,
+            force=args.force,
+            project_root=settings.project_root,
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(f"Initialized Spark Spawn at {settings.data_dir}")
+    print(f"Starter flows: {result.flows_dir}")
+    print(
+        "created={created} updated={updated} skipped={skipped}".format(
+            created=len(result.created),
+            updated=len(result.updated),
+            skipped=len(result.skipped),
+        )
     )
     return 0
 

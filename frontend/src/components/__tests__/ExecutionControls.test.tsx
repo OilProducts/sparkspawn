@@ -49,7 +49,7 @@ describe('Execution controls behavior', () => {
         projectPath: '/tmp/project',
         flowSource: 'implement-spec.dot',
         workingDirectory: '/tmp/project',
-        backend: 'codex',
+        backend: 'codex-app-server',
         model: 'gpt-5',
         specArtifactId: 'spec-123',
         planArtifactId: 'plan-456',
@@ -60,11 +60,44 @@ describe('Execution controls behavior', () => {
     expect(payload).toEqual({
       flow_content: 'digraph G { start -> done }',
       working_directory: '/tmp/project',
-      backend: 'codex',
+      backend: 'codex-app-server',
       model: 'gpt-5',
       flow_name: 'implement-spec.dot',
       spec_id: 'spec-123',
       plan_id: 'plan-456',
+    })
+  })
+
+  it('includes structured launch context in the start payload when provided', () => {
+    const payload = buildPipelineStartPayload(
+      {
+        projectPath: '/tmp/project',
+        flowSource: 'implement-review-loop.dot',
+        workingDirectory: '/tmp/project',
+        backend: 'codex-app-server',
+        model: 'gpt-5',
+        launchContext: {
+          'context.request.summary': 'Add a health check endpoint.',
+          'context.request.acceptance_criteria': ['GET /healthz returns 200'],
+        },
+        specArtifactId: null,
+        planArtifactId: null,
+      },
+      'digraph G { start -> done }',
+    )
+
+    expect(payload).toEqual({
+      flow_content: 'digraph G { start -> done }',
+      working_directory: '/tmp/project',
+      backend: 'codex-app-server',
+      model: 'gpt-5',
+      launch_context: {
+        'context.request.summary': 'Add a health check endpoint.',
+        'context.request.acceptance_criteria': ['GET /healthz returns 200'],
+      },
+      flow_name: 'implement-review-loop.dot',
+      spec_id: null,
+      plan_id: null,
     })
   })
 
@@ -179,6 +212,119 @@ describe('Execution controls behavior', () => {
     })
     expect(useStore.getState().activeFlow).toBe('preferred.dot')
     expect(useStore.getState().executionFlow).toBe('run-opened.dot')
+  })
+
+  it('renders declared launch inputs and submits them as launch_context', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.includes('/workspace/api/projects/metadata')) {
+        return new Response(JSON.stringify({ branch: 'main' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.endsWith('/attractor/api/flows/implement-review-loop.dot')) {
+        return new Response(JSON.stringify({
+          name: 'implement-review-loop.dot',
+          content: 'digraph implement_review_loop { start -> done }',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.endsWith('/attractor/pipelines') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ status: 'started', pipeline_id: 'run-555' }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    useStore.setState((state) => ({
+      ...state,
+      viewMode: 'execution',
+      activeProjectPath: '/tmp/project',
+      activeFlow: 'implement-review-loop.dot',
+      graphAttrs: {
+        'sparkspawn.launch_inputs': JSON.stringify([
+          {
+            key: 'context.request.summary',
+            label: 'Request Summary',
+            type: 'string',
+            description: 'Brief description of the requested change.',
+            required: true,
+          },
+          {
+            key: 'context.request.acceptance_criteria',
+            label: 'Acceptance Criteria',
+            type: 'string[]',
+            description: 'One acceptance criterion per line.',
+            required: false,
+          },
+        ]),
+      },
+      projectScopedWorkspaces: {
+        '/tmp/project': {
+          activeFlow: 'implement-review-loop.dot',
+          workingDir: '/tmp/project',
+          conversationId: null,
+          projectEventLog: [],
+          specId: null,
+          specStatus: null,
+          specProvenance: null,
+          planId: 'plan-123',
+          planStatus: 'approved',
+          planProvenance: null,
+        },
+      },
+    }))
+
+    render(<ExecutionControls />)
+
+    expect(screen.getByTestId('execution-launch-inputs')).toBeVisible()
+
+    await user.type(
+      screen.getByTestId('execution-launch-input-context.request.summary'),
+      'Add a health check endpoint',
+    )
+    await user.type(
+      screen.getByTestId('execution-launch-input-context.request.acceptance_criteria'),
+      'GET /healthz returns 200{enter}Response body contains status ok',
+    )
+
+    await user.click(screen.getByTestId('execute-button'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/attractor/pipelines',
+        expect.objectContaining({
+          method: 'POST',
+        }),
+      )
+    })
+
+    const pipelineCall = fetchMock.mock.calls.find(
+      ([input, init]) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+        return url.endsWith('/attractor/pipelines') && init?.method === 'POST'
+      },
+    )
+    expect(pipelineCall).toBeDefined()
+    const requestBody = JSON.parse(String(pipelineCall?.[1]?.body))
+    expect(requestBody.launch_context).toEqual({
+      'context.request.summary': 'Add a health check endpoint',
+      'context.request.acceptance_criteria': [
+        'GET /healthz returns 200',
+        'Response body contains status ok',
+      ],
+    })
   })
 
   it('renders runtime state and disables unsupported pause/resume controls', () => {

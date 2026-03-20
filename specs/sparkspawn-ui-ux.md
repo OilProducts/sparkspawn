@@ -212,6 +212,51 @@ The UI may provide:
 
 This section is about the authoring experience, not the DOT DSL itself.
 
+### 12.1 Flow Contract Authoring
+
+Spark Spawn authoring surfaces should make the flow's launch and context contract visible without forcing raw DOT edits for common cases.
+
+The structured graph inspector should support:
+- graph title and description
+- graph launch input declarations
+- graph defaults and advanced attrs
+
+Launch input declarations should:
+- edit the persisted `sparkspawn.launch_inputs` metadata
+- define the `context.*` values Spark Spawn should collect before a direct run
+- make required vs optional inputs explicit
+- render stable user-facing labels and descriptions instead of raw key names alone
+
+### 12.2 Node Context Contract Authoring
+
+The structured node inspector should support node-level context contract declarations.
+
+At minimum, Spark Spawn should expose:
+- `Reads Context`
+- `Writes Context`
+
+These fields should edit the persisted `sparkspawn.reads_context` and `sparkspawn.writes_context` metadata rather than inventing hidden local-only state.
+
+The primary UX purpose is to:
+- document what launch or prior-stage state a node expects
+- document what state a node is expected to produce for later stages
+- help operators understand retry loops and multi-stage feedback flows
+
+These declarations do not, by themselves, create runtime behavior. They are authoring-surface contract metadata.
+
+### 12.3 Launch Form Generation
+
+When a flow declares launch inputs, direct-run launch surfaces should render a launch form from that metadata.
+
+That launch form should:
+- appear before run submission
+- collect values using the declared field types
+- validate required inputs
+- convert the submitted values into Attractor `launch_context`
+- surface invalid launch-schema problems as explicit launch blockers rather than failing silently
+
+The frontend should not require the operator to hand-author raw JSON for routine launch input cases if the flow already declares them.
+
 ## 13. Run Inspection UX
 
 The run inspector is a frontend for Attractor runs, not for workspace artifacts.

@@ -66,9 +66,25 @@ cat >"$goal_file" <<'EOF'
 Implement the approved work items from the current conversation state.
 EOF
 sparkspawn-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --goal-file "$goal_file"'''
+FLOW_RUN_LAUNCH_CONTEXT_EXAMPLE = '''launch_context_file=$(mktemp)
+cat >"$launch_context_file" <<'EOF'
+{
+  "context.request.summary": "Implement the approved work items from the current conversation state.",
+  "context.request.acceptance_criteria": [
+    "All approved work items are implemented.",
+    "Any required tests are updated."
+  ],
+  "context.request.target_paths": [
+    "src/workspace",
+    "tests/api"
+  ]
+}
+EOF
+sparkspawn-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --launch-context-file "$launch_context_file"'''
 LIST_FLOWS_TEXT_EXAMPLE = "sparkspawn-workspace list-flows --text"
 DESCRIBE_FLOW_TEXT_EXAMPLE = "sparkspawn-workspace describe-flow --flow implement-spec.dot --text"
 GET_FLOW_TEXT_EXAMPLE = "sparkspawn-workspace get-flow --flow implement-spec.dot --text"
+VALIDATE_FLOW_TEXT_EXAMPLE = "sparkspawn-workspace validate-flow --flow implement-spec.dot --text"
 
 
 def _build_workspace_parser() -> argparse.ArgumentParser:
@@ -131,7 +147,8 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
             "  --flow: the Attractor flow name to request\n"
             "  --summary: short explanation for why the run should start\n"
             "  --conversation: the target conversation handle\n\n"
-            "Use --goal-file or --goal - when the flow needs launch context.\n"
+            "Use --goal for the common stated-goal case.\n"
+            "Use --launch-context-json or --launch-context-file for structured context.* launch state.\n"
             "The command does not approve the request or start the run immediately."
         ),
         epilog=(
@@ -139,6 +156,8 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
             + FLOW_RUN_STDIN_EXAMPLE
             + "\n\nFallback temp-file example:\n"
             + FLOW_RUN_TEMPFILE_EXAMPLE
+            + "\n\nStructured launch-context example:\n"
+            + FLOW_RUN_LAUNCH_CONTEXT_EXAMPLE
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -167,6 +186,17 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
         "--goal-file",
         dest="goal_file",
         help="Path to a text file containing the optional run goal.",
+    )
+    launch_context_group = flow_run.add_mutually_exclusive_group()
+    launch_context_group.add_argument(
+        "--launch-context-json",
+        dest="launch_context_json",
+        help="Inline JSON object whose keys must use the context.* namespace.",
+    )
+    launch_context_group.add_argument(
+        "--launch-context-file",
+        dest="launch_context_file",
+        help="Path to a JSON file containing optional context.* launch state.",
     )
     flow_run.add_argument(
         "--model",
@@ -254,6 +284,34 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
         help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
     )
 
+    validate_flow = subparsers.add_parser(
+        "validate-flow",
+        help="Validate one flow in the flow library after raw DOT edits",
+        description=(
+            "Validate a flow file from the flow library through the Attractor preview path.\n\n"
+            "Use this after direct DOT edits so syntax and validation issues are surfaced before the flow is requested or launched.\n"
+            "JSON is the default stdout format so agents can consume diagnostics reliably.\n"
+            "Use --text for a human-readable summary."
+        ),
+        epilog=f"Example:\n{VALIDATE_FLOW_TEXT_EXAMPLE}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    validate_flow.add_argument(
+        "--flow",
+        required=True,
+        help="Flow file name, for example 'implement-spec.dot'.",
+    )
+    validate_flow.add_argument(
+        "--text",
+        action="store_true",
+        help="Render human-readable text instead of the default JSON output.",
+    )
+    validate_flow.add_argument(
+        "--base-url",
+        default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
+    )
+
     return parser
 
 
@@ -275,6 +333,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_describe_flow(args)
     if args.command == "get-flow":
         return _run_get_flow(args)
+    if args.command == "validate-flow":
+        return _run_validate_flow(args)
 
     parser.error(f"Unknown command: {args.command}")
     return EXIT_USAGE_ERROR
@@ -399,6 +459,20 @@ def _read_optional_goal(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _read_optional_launch_context(args: argparse.Namespace) -> dict[str, object] | None:
+    launch_context_json = str(getattr(args, "launch_context_json", "") or "").strip()
+    launch_context_file = str(getattr(args, "launch_context_file", "") or "").strip()
+    if launch_context_json:
+        parsed = json.loads(launch_context_json)
+    elif launch_context_file:
+        parsed = json.loads(Path(launch_context_file).read_text(encoding="utf-8"))
+    else:
+        return None
+    if not isinstance(parsed, dict):
+        raise ValueError("Launch context must be a JSON object.")
+    return parsed
+
+
 def _run_flow_run(args: argparse.Namespace) -> int:
     conversation_handle = str(args.conversation or "").strip()
     if not conversation_handle:
@@ -410,6 +484,20 @@ def _run_flow_run(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         print(json.dumps({"ok": False, "error": f"Goal file not found: {args.goal_file}"}), file=sys.stderr)
         return EXIT_GENERAL_FAILURE
+    try:
+        launch_context = _read_optional_launch_context(args)
+    except FileNotFoundError:
+        print(
+            json.dumps({"ok": False, "error": f"Launch context file not found: {args.launch_context_file}"}),
+            file=sys.stderr,
+        )
+        return EXIT_GENERAL_FAILURE
+    except json.JSONDecodeError as exc:
+        print(json.dumps({"ok": False, "error": f"Launch context must be valid JSON: {exc}"}), file=sys.stderr)
+        return EXIT_GENERAL_FAILURE
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)
+        return EXIT_GENERAL_FAILURE
 
     try:
         payload = normalize_flow_run_request_payload(
@@ -417,6 +505,7 @@ def _run_flow_run(args: argparse.Namespace) -> int:
                 "flow_name": args.flow,
                 "summary": args.summary,
                 "goal": goal,
+                "launch_context": launch_context,
                 "model": args.model,
             },
             source_name="sparkspawn-workspace flow-run",
@@ -497,6 +586,24 @@ def _run_get_flow(args: argparse.Namespace) -> int:
         print(response_text, end="" if response_text.endswith("\n") else "\n")
         return 0
     _print_success_payload({"name": flow_name, "content": response_text})
+    return 0
+
+
+def _run_validate_flow(args: argparse.Namespace) -> int:
+    flow_name = str(args.flow or "").strip()
+    if not flow_name:
+        _print_error_payload({"ok": False, "error": "Missing required --flow name."})
+        return EXIT_GENERAL_FAILURE
+    response_payload, exit_code = _request_json(
+        "GET",
+        _workspace_agent_url(args.base_url, f"/workspace/api/flows/{quote(flow_name, safe='')}/validate"),
+    )
+    if response_payload is None:
+        return exit_code
+    if args.text:
+        _print_validate_flow_text(response_payload)
+        return 0
+    _print_success_payload(response_payload)
     return 0
 
 
@@ -602,13 +709,41 @@ def _print_describe_flow_text(payload: object) -> None:
     print(f"Description: {description or '(none)'}")
     print(f"Launch Policy: {payload.get('effective_launch_policy') or 'disabled'}")
     print(f"Graph Label: {graph_label or '(none)'}")
-    print(f"Graph Goal: {graph_goal or '(none)'}")
+    print(f"Stated Goal: {graph_goal or '(none)'}")
     print(f"Node Count: {payload.get('node_count')}")
     print(f"Edge Count: {payload.get('edge_count')}")
     features = payload.get("features")
     if isinstance(features, dict):
         print(f"Has Human Gate: {bool(features.get('has_human_gate'))}")
         print(f"Has Manager Loop: {bool(features.get('has_manager_loop'))}")
+
+
+def _print_validate_flow_text(payload: object) -> None:
+    if not isinstance(payload, dict):
+        print(str(payload))
+        return
+    name = str(payload.get("name") or "").strip()
+    path = str(payload.get("path") or "").strip()
+    status = str(payload.get("status") or "").strip()
+    diagnostics = payload.get("diagnostics")
+    errors = payload.get("errors")
+    diagnostics_list = diagnostics if isinstance(diagnostics, list) else []
+    errors_list = errors if isinstance(errors, list) else []
+    print(f"Name: {name}")
+    print(f"Path: {path or '(unknown)'}")
+    print(f"Status: {status or '(unknown)'}")
+    print(f"Diagnostics: {len(diagnostics_list)}")
+    print(f"Errors: {len(errors_list)}")
+    for diagnostic in diagnostics_list:
+        if not isinstance(diagnostic, dict):
+            continue
+        severity = str(diagnostic.get("severity") or "info").strip().upper()
+        rule = str(diagnostic.get("rule_id") or diagnostic.get("rule") or "").strip()
+        message = str(diagnostic.get("message") or "").strip()
+        line_value = diagnostic.get("line")
+        line_suffix = f" line {line_value}" if isinstance(line_value, int) and line_value > 0 else ""
+        rule_prefix = f" {rule}" if rule else ""
+        print(f"- {severity}{rule_prefix}{line_suffix}: {message}")
 
 
 if __name__ == "__main__":

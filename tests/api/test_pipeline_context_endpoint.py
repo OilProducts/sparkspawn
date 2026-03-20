@@ -61,3 +61,70 @@ def test_get_pipeline_context_returns_context_for_known_pipeline(
         "pipeline_id": run_id,
         "context": checkpoint.context,
     }
+
+
+def test_start_pipeline_seeds_launch_context_into_initial_checkpoint(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    server.configure_runtime_paths(runs_dir=runs_root)
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    launch_context = {
+        "context.request.summary": "Implement the approved scope.",
+        "context.request.acceptance_criteria": ["Tests are updated."],
+    }
+
+    start_payload = _start_pipeline(
+        attractor_api_client,
+        tmp_path / "work",
+        launch_context=launch_context,
+    )
+    run_id = str(start_payload["pipeline_id"])
+
+    response = attractor_api_client.get(f"/pipelines/{run_id}/context")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline_id"] == run_id
+    assert payload["context"]["context.request.summary"] == "Implement the approved scope."
+    assert payload["context"]["context.request.acceptance_criteria"] == ["Tests are updated."]
+    assert payload["context"]["internal.run_workdir"] == str((tmp_path / "work").resolve())
+
+
+def test_start_pipeline_rejects_launch_context_outside_context_namespace(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    server.configure_runtime_paths(runs_dir=runs_root)
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    response = attractor_api_client.post(
+        "/pipelines",
+        json={
+            "flow_content": """
+digraph G {
+    start [shape=Mdiamond]
+    done [shape=Msquare]
+    start -> done
+}
+""",
+            "working_directory": str(tmp_path / "work"),
+            "backend": "codex-app-server",
+            "launch_context": {
+                "graph.goal": "not allowed",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "validation_error",
+        "error": (
+            "Attractor pipeline start launch_context key must use the context.* namespace: graph.goal"
+        ),
+    }

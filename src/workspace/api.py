@@ -82,6 +82,7 @@ class FlowRunRequestCreateByHandleRequest(BaseModel):
     flow_name: str
     summary: str
     goal: Optional[str] = None
+    launch_context: Optional[dict[str, Any]] = None
     model: Optional[str] = None
 
 
@@ -380,6 +381,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         project_path: str,
         flow_name: str,
         goal: Optional[str],
+        launch_context: Optional[dict[str, Any]],
         model: Optional[str],
     ) -> str | None:
         project_chat = deps.get_project_chat()
@@ -390,6 +392,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 working_directory=project_path,
                 model=model,
                 goal=goal,
+                launch_context=launch_context,
             )
         except AttractorApiError as exc:
             await asyncio.to_thread(
@@ -505,6 +508,27 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"Unknown flow: {flow_name}") from exc
         return PlainTextResponse(raw_content, media_type="text/vnd.graphviz", headers={"X-Sparkspawn-Flow-Name": resolved_flow_name})
+
+    @router.get("/api/flows/{flow_name}/validate")
+    async def validate_workspace_flow(flow_name: str):
+        try:
+            resolved_flow_name, raw_content = await asyncio.to_thread(
+                read_flow_raw,
+                deps.get_settings().flows_dir,
+                flow_name,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Unknown flow: {flow_name}") from exc
+        try:
+            preview_payload = await deps.get_attractor_client().preview_flow(raw_content)
+        except AttractorApiError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        flow_path = resolve_flow_path(deps.get_settings().flows_dir, resolved_flow_name)
+        return {
+            "name": resolved_flow_name,
+            "path": str(flow_path.resolve(strict=False)),
+            **preview_payload,
+        }
 
     @router.put("/api/flows/{flow_name}/launch-policy")
     async def put_workspace_flow_launch_policy(flow_name: str, req: FlowLaunchPolicyUpdateRequest):
@@ -861,6 +885,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 project_path=normalized_project_path,
                 flow_name=approved_flow_name,
                 goal=flow_run_request.goal,
+                launch_context=flow_run_request.launch_context,
                 model=req.model or flow_run_request.model,
             )
             return await asyncio.to_thread(

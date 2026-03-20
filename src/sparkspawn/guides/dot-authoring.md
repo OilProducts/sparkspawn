@@ -1,0 +1,458 @@
+# Spark Spawn DOT Authoring Guide
+
+This guide is for agents editing `.dot` workflow files directly.
+
+It is intentionally more operational than the specs. For exact runtime semantics, Attractor remains authoritative. This guide summarizes the documented authoring surface that Spark Spawn expects and exposes.
+
+## Boundary
+
+- The active project repository is the source of truth for domain work and codebase context.
+- The flow library is the user-owned directory of editable `.dot` workflows.
+- Do not edit conversation state, project metadata, or other files under `~/.sparkspawn` as part of normal flow authoring.
+
+## Validation Loop
+
+After changing a flow, validate it before claiming the edit is finished:
+
+```bash
+sparkspawn-workspace validate-flow --flow <name> --text
+```
+
+Use the exact flow file name after saving the `.dot` file into the flow library.
+
+## Structural Building Blocks
+
+Attractor flows are Graphviz `digraph` files.
+
+```dot
+digraph my_flow {
+  graph [
+    label="Human-readable title",
+    goal="Stated goal for the run",
+    sparkspawn.title="Catalog title",
+    sparkspawn.description="Catalog description"
+  ];
+
+  start [shape=Mdiamond];
+  plan [shape=box, prompt="Inspect the repository and plan the work."];
+  done [shape=Msquare];
+
+  start -> plan;
+  plan -> done;
+}
+```
+
+The main authorable structures are:
+
+- graph attributes in `graph [ ... ]`
+- nodes declared as `node_id [ ... ]`
+- edges declared as `from -> to [ ... ]`
+- optional `node [ ... ]` and `edge [ ... ]` default blocks
+- optional subgraphs for scoped defaults and stylesheet classes
+
+Chained edges are legal:
+
+```dot
+start -> plan -> implement -> done
+```
+
+That expands to one edge per hop.
+
+## Value Types
+
+Common documented value types:
+
+- strings: `"hello"`
+- integers: `0`, `3`, `-1`
+- floats: `0.5`, `-3.14`
+- booleans: `true`, `false`
+- durations: `250ms`, `45s`, `15m`, `2h`, `1d`
+
+The parser also accepts documented bare values where the grammar allows them, such as model ids like `gpt-5`.
+
+## Nodes vs Edges
+
+Important distinction:
+
+- nodes have handler types and prompts
+- edges do not have types
+- edge behavior comes from attributes such as `condition`, `label`, `weight`, `fidelity`, `thread_id`, and `loop_restart`
+
+## Node Types And Shape Mapping
+
+The documented node surface is:
+
+| Shape | Default type | Meaning |
+| --- | --- | --- |
+| `Mdiamond` | `start` | Entry node |
+| `Msquare` | `exit` | Terminal node |
+| `box` | `codergen` | Normal LLM-backed stage |
+| `hexagon` | `wait.human` | Human gate |
+| `diamond` | `conditional` | Conditional pass-through node |
+| `component` | `parallel` | Parallel fan-out |
+| `tripleoctagon` | `parallel.fan_in` | Parallel fan-in |
+| `parallelogram` | `tool` | Tool execution |
+| `house` | `stack.manager_loop` | Parent/child supervisor |
+
+You can also set `type="..."` explicitly. That overrides shape-based resolution.
+
+Documented handler types:
+
+- `start`
+- `exit`
+- `codergen`
+- `wait.human`
+- `conditional`
+- `parallel`
+- `parallel.fan_in`
+- `tool`
+- `stack.manager_loop`
+
+Prefer explicit `type=` when the behavior matters more than the rendered shape.
+
+## Core Graph Attributes
+
+Documented Attractor graph attributes:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `goal` | string | Stated goal for the run. Exposed to prompts as `$goal`. |
+| `label` | string | Human-readable graph label. |
+| `model_stylesheet` | string | CSS-like LLM defaults. |
+| `default_max_retries` | integer | Default additional retries for nodes without `max_retries`. |
+| `retry_target` | string | Graph-level retry jump target when exiting with unmet goal gates. |
+| `fallback_retry_target` | string | Secondary graph-level retry target. |
+| `default_fidelity` | string | Default context fidelity mode. |
+| `stack.child_dotfile` | string | Child flow path for manager-loop supervision. |
+| `stack.child_workdir` | string | Child run working directory. |
+| `tool_hooks.pre` | string | Shell command before tool execution. |
+| `tool_hooks.post` | string | Shell command after tool execution. |
+
+Notes:
+
+- `default_max_retries` is the canonical key. `default_max_retry` is legacy input only and should not be authored.
+- `stack.child_workdir` default `cwd` means the current pipeline run working directory.
+- Relative `stack.child_dotfile` resolves from the parent flow source directory when the parent flow path is known.
+
+## Core Node Attributes
+
+Documented Attractor node attributes:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `label` | string | Display label; defaults to the node id. |
+| `shape` | string | Graphviz shape; determines the default handler. |
+| `type` | string | Explicit handler type override. |
+| `prompt` | string | Primary task instruction. Supports `$goal`. |
+| `max_retries` | integer | Additional retries for the node. |
+| `goal_gate` | boolean | Node must reach `SUCCESS` or `PARTIAL_SUCCESS` before pipeline exit. |
+| `retry_target` | string | Node-level retry jump target. |
+| `fallback_retry_target` | string | Secondary node-level retry target. |
+| `fidelity` | string | Node-level context fidelity override. |
+| `thread_id` | string | Explicit thread/session reuse key. |
+| `class` | string | Comma-separated stylesheet classes. |
+| `timeout` | duration | Max node execution time. |
+| `llm_model` | string | Explicit model override. |
+| `llm_provider` | string | Explicit provider override. |
+| `reasoning_effort` | string | `low`, `medium`, or `high`. |
+| `auto_status` | boolean | Auto-generate success when the handler writes no status. |
+| `allow_partial` | boolean | Accept `PARTIAL_SUCCESS` when retries exhaust. |
+
+## Handler-Specific Node Attributes
+
+These attrs are only meaningful for specific node types:
+
+### `tool`
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `tool_command` | string | Shell command to run. |
+| `tool_hooks.pre` | string | Node-level pre-hook override. |
+| `tool_hooks.post` | string | Node-level post-hook override. |
+
+### `parallel`
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `join_policy` | string | Join rule for branch completion. Documented values: `wait_all`, `first_success`. |
+| `max_parallel` | integer | Max concurrent branches. |
+
+`error_policy` exists in the current implementation but is not documented in the spec, so do not rely on it in authored flows unless and until it is promoted into the spec.
+
+### `wait.human`
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `human.default_choice` | string | Default selected choice on timeout. |
+
+### `stack.manager_loop`
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `manager.poll_interval` | duration | Poll cadence for observing child progress. |
+| `manager.max_cycles` | integer | Max supervisor cycles. |
+| `manager.stop_condition` | string | Condition expression evaluated against context. |
+| `manager.actions` | string | Comma-separated manager actions such as `observe,wait` or `observe,steer,wait`. |
+| `stack.child_autostart` | boolean | Whether the child pipeline should be started automatically. |
+
+`manager.steer_cooldown` exists in the runtime implementation but is not currently documented in the spec, so it is intentionally omitted from this guide.
+
+## Edge Attributes
+
+Edges do not have types. The documented edge surface is:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `label` | string | Human-facing caption and preferred-label routing key. |
+| `condition` | string | Boolean routing expression. |
+| `weight` | integer | Priority among equally eligible unconditional edges. |
+| `fidelity` | string | Incoming-edge fidelity override for the target node. |
+| `thread_id` | string | Incoming-edge thread/session override for the target node. |
+| `loop_restart` | boolean | Restart the run with a fresh log directory instead of continuing in place. |
+
+## Routing Behavior
+
+Routing matters when authoring edges:
+
+1. The engine evaluates conditioned edges first.
+2. If no condition matches, it checks unconditional edges for `preferred_label`.
+3. Then unconditional edges for suggested next ids.
+4. Then unconditional edges by highest `weight`.
+5. Then unconditional edges by lexical target-node order.
+6. If no eligible edge remains after a non-failing outcome, the pipeline completes successfully.
+
+A false conditioned edge is not a fallback.
+
+## Condition Language
+
+Documented condition variables:
+
+- `outcome`
+- `preferred_label`
+- any `context.*` key
+
+Documented operators:
+
+- `=`
+- `!=`
+- `&&`
+
+Examples:
+
+```dot
+review -> done      [condition="outcome=success"]
+review -> implement [condition="outcome=fail"]
+gate -> revise      [condition="preferred_label=Revise"]
+validate -> done    [condition="context.request.approved=true && outcome=success"]
+```
+
+## Fidelity And Threading
+
+Documented fidelity values:
+
+- `full`
+- `truncate`
+- `compact`
+- `summary:low`
+- `summary:medium`
+- `summary:high`
+
+Resolution order:
+
+1. incoming edge `fidelity`
+2. target node `fidelity`
+3. graph `default_fidelity`
+4. runtime fallback
+
+Thread/session resolution for `full` fidelity follows the same pattern:
+
+1. target node `thread_id`
+2. incoming edge `thread_id`
+3. derived runtime thread key
+
+## Model Stylesheet
+
+`model_stylesheet` lets you define default `llm_model`, `llm_provider`, and `reasoning_effort` centrally.
+
+Documented selectors:
+
+- `*`
+- shape selectors like `box` or `house`
+- `.class`
+- `#node_id`
+
+Selector precedence:
+
+1. `#node_id`
+2. `.class`
+3. shape selector
+4. `*`
+
+Allowed properties:
+
+- `llm_model`
+- `llm_provider`
+- `reasoning_effort`
+
+Example:
+
+```dot
+graph [
+  model_stylesheet="
+    * { llm_provider: openai; reasoning_effort: medium; }
+    box { llm_model: gpt-5; }
+    .review { reasoning_effort: high; }
+    #finalize { llm_model: gpt-5.4; }
+  "
+];
+```
+
+## Subgraphs And Defaults
+
+Subgraphs are authorable and useful.
+
+Use them for:
+
+- scoped `node [ ... ]` defaults
+- scoped `edge [ ... ]` defaults
+- grouping nodes visually
+- adding stylesheet classes via subgraph structure
+
+Example:
+
+```dot
+subgraph cluster_review {
+  label = "Review Loop";
+  node [thread_id="review-loop", timeout="900s"];
+
+  implement [shape=box];
+  review [shape=box, class="review"];
+}
+```
+
+## Spark Spawn Graph Metadata
+
+Spark Spawn stores additional graph-level authoring metadata in DOT:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `sparkspawn.title` | string | Catalog/display title. |
+| `sparkspawn.description` | string | Catalog/display description. |
+| `sparkspawn.launch_inputs` | JSON-encoded array string | Launch-form schema used by Spark Spawn to build `launch_context`. |
+| `ui_default_llm_model` | string | Flow-level UI default model. |
+| `ui_default_llm_provider` | string | Flow-level UI default provider. |
+| `ui_default_reasoning_effort` | string | Flow-level UI default reasoning effort. |
+
+These are Spark Spawn-owned metadata, not Attractor core semantics.
+
+### `sparkspawn.launch_inputs`
+
+`sparkspawn.launch_inputs` is a JSON array encoded as a string in DOT.
+
+Each entry has this documented shape:
+
+```json
+[
+  {
+    "key": "context.request.summary",
+    "label": "Request Summary",
+    "type": "string",
+    "description": "Short launch summary.",
+    "required": true
+  }
+]
+```
+
+Documented `type` values:
+
+- `string`
+- `string[]`
+- `boolean`
+- `number`
+- `json`
+
+The `key` must use the `context.*` namespace.
+
+## Spark Spawn Node Metadata
+
+Spark Spawn also stores node-level authoring metadata in DOT:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `sparkspawn.reads_context` | JSON-encoded array string | Declared `context.*` keys the node is expected to consume. |
+| `sparkspawn.writes_context` | JSON-encoded array string | Declared `context.*` keys the node is expected to produce. |
+
+These keys document intent for authors and the editor. They do not automatically change runtime behavior.
+
+## Context Passing Pattern
+
+Use stable `context.*` keys for feedback that later nodes need.
+
+Patterns:
+
+- launch state arrives through `launch_context`
+- handlers can emit `context_updates`
+- later nodes see that state through shared run context and carryover
+- edge conditions may branch on `context.*`
+
+Example review response contract:
+
+```json
+{
+  "outcome": "fail",
+  "notes": "The draft is missing the acceptance criteria.",
+  "failure_reason": "Revise before completion.",
+  "context_updates": {
+    "context.review.summary": "The work is close, but it does not satisfy the stated acceptance criteria.",
+    "context.review.required_changes": "Address the missing acceptance criteria and rerun the review.",
+    "context.review.blockers": ""
+  }
+}
+```
+
+Use domain-specific keys when software-review names are not appropriate.
+
+Examples:
+
+- `context.email.required_revisions`
+- `context.research.open_questions`
+- `context.request.target_paths`
+
+## Parent/Child Flows
+
+For `stack.manager_loop`:
+
+- use relative `stack.child_dotfile` when bundling parent and child flows together
+- relative child DOT paths resolve from the parent flow source directory
+- child execution defaults to the parent run working directory unless `stack.child_workdir` is explicitly set
+- avoid absolute `stack.child_workdir` values in portable shipped flows
+
+## What This Guide Does Not Standardize
+
+The parser and editor may preserve unknown attributes, but this guide only lists the documented flow surface.
+
+Treat any extra attrs you encounter as one of:
+
+- Spark Spawn metadata explicitly documented elsewhere
+- implementation-specific runtime behavior not yet promoted into the spec
+- project-specific extension attrs that are only meaningful to a custom host
+
+Do not assume an undocumented attribute is portable just because it round-trips.
+
+## Starter Flow Starting Points
+
+- `simple-linear.dot`: smallest useful single-pass pattern
+- `implement-review-loop.dot`: review-driven retry loop
+- `human-review-loop.dot`: human approval / revise loop
+- `parallel-review.dot`: fan-out / fan-in flow
+- `supervised-implementation.dot`: parent/child composition
+
+## Authoring Checklist
+
+Before you finish a flow edit:
+
+1. Ensure the graph has a valid start node and terminal path.
+2. Confirm graph metadata uses `sparkspawn.title` and `sparkspawn.description` when the flow should be catalog-friendly.
+3. Keep launch expectations in `sparkspawn.launch_inputs` when direct execution should render a form.
+4. Keep node read/write context contracts in DOT metadata when they matter to future editors.
+5. Validate with `sparkspawn-workspace validate-flow --flow <name> --text`.

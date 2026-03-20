@@ -9,6 +9,11 @@ import pytest
 
 import attractor.api.server as server
 import sparkspawn_common.codex_app_server as codex_app_server
+from sparkspawn.authoring_assets import (
+    attractor_spec_path,
+    dot_authoring_guide_path,
+    flow_extensions_spec_path,
+)
 import workspace.project_chat as project_chat
 import workspace.project_chat_models as project_chat_models
 import workspace.project_chat_session as project_chat_session
@@ -97,6 +102,23 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
     assert "CHAT /tmp/project :: Latest message :: USER: Older message" in chat_prompt
     assert '"id": "proposal-1"' in execution_prompt
     assert execution_prompt.endswith(":: Needs refinement")
+
+
+def test_project_chat_prompt_includes_flow_authoring_boundary(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    state = project_chat.ConversationState(
+        conversation_id="conversation-flow-authoring",
+        project_path="/tmp/project",
+        conversation_handle="amber-otter",
+    )
+
+    prompt = service._build_chat_prompt(state, "Create a flow that drafts and reviews an email.")
+
+    assert f"flow library at `{(tmp_path / 'flows').resolve(strict=False)}`" in prompt
+    assert f"`{dot_authoring_guide_path()}`" in prompt
+    assert f"`{flow_extensions_spec_path()}`" in prompt
+    assert f"`{attractor_spec_path()}`" in prompt
+    assert "sparkspawn-workspace validate-flow --flow <name> --text" in prompt
 
 
 def test_project_chat_service_rejects_malformed_prompt_templates(tmp_path: Path) -> None:
@@ -1230,6 +1252,10 @@ def test_create_flow_run_request_places_artifact_on_latest_assistant_turn(tmp_pa
             "flow_name": "implement-spec.dot",
             "summary": "Run implementation for the approved scope.",
             "goal": "Implement the approved scope.",
+            "launch_context": {
+                "context.request.summary": "Implement the approved scope.",
+                "context.request.target_paths": ["src/workspace", "tests/api"],
+            },
             "model": "gpt-5.4",
         },
     )
@@ -1244,6 +1270,10 @@ def test_create_flow_run_request_places_artifact_on_latest_assistant_turn(tmp_pa
     assert request_segment["artifact_id"] == result["flow_run_request_id"]
     assert snapshot["flow_run_requests"][0]["flow_name"] == "implement-spec.dot"
     assert snapshot["flow_run_requests"][0]["summary"] == "Run implementation for the approved scope."
+    assert snapshot["flow_run_requests"][0]["launch_context"] == {
+        "context.request.summary": "Implement the approved scope.",
+        "context.request.target_paths": ["src/workspace", "tests/api"],
+    }
 
 
 def test_flow_run_request_routes_create_and_approve_launch(
@@ -1292,6 +1322,7 @@ def test_flow_run_request_routes_create_and_approve_launch(
         working_directory: str,
         model: str | None,
         goal: str | None = None,
+        launch_context: dict[str, object] | None = None,
         spec_id: str | None = None,
         plan_id: str | None = None,
     ) -> dict[str, object]:
@@ -1302,6 +1333,7 @@ def test_flow_run_request_routes_create_and_approve_launch(
                 "working_directory": working_directory,
                 "model": model,
                 "goal": goal,
+                "launch_context": launch_context,
                 "spec_id": spec_id,
                 "plan_id": plan_id,
             }
@@ -1316,6 +1348,13 @@ def test_flow_run_request_routes_create_and_approve_launch(
             "flow_name": "implement-spec.dot",
             "summary": "Run implementation for the approved scope.",
             "goal": "Implement the approved scope.",
+            "launch_context": {
+                "context.request.summary": "Implement the approved scope.",
+                "context.request.acceptance_criteria": [
+                    "Approved work items are implemented.",
+                    "Required tests are updated.",
+                ],
+            },
             "model": "gpt-5.4",
         },
     )
@@ -1350,6 +1389,13 @@ def test_flow_run_request_routes_create_and_approve_launch(
             "working_directory": str(project_dir),
             "model": "gpt-5.4",
             "goal": "Implement the approved scope.",
+            "launch_context": {
+                "context.request.summary": "Implement the approved scope.",
+                "context.request.acceptance_criteria": [
+                    "Approved work items are implemented.",
+                    "Required tests are updated.",
+                ],
+            },
             "spec_id": None,
             "plan_id": None,
         }

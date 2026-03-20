@@ -27,6 +27,7 @@ def test_graph_attr_edit_round_trip_serializes_and_rehydrates_item_6_1_04() -> N
     graph_attrs_input: dict[str, object] = {
         "sparkspawn.title": "Execution Planning",
         "sparkspawn.description": "Turn approved spec edits into execution plans.",
+        "sparkspawn.launch_inputs": '[{"key":"context.request.summary","label":"Request Summary","type":"string","description":"Brief request summary.","required":true}]',
         "goal": "Ship release",
         "label": "Release Graph",
         "model_stylesheet": ".fast { llm_model: fast-model; }",
@@ -45,6 +46,7 @@ def test_graph_attr_edit_round_trip_serializes_and_rehydrates_item_6_1_04() -> N
 
     assert graph_attrs["sparkspawn.title"] == "Execution Planning"
     assert graph_attrs["sparkspawn.description"] == "Turn approved spec edits into execution plans."
+    assert graph_attrs["sparkspawn.launch_inputs"] == '[{"key":"context.request.summary","label":"Request Summary","type":"string","description":"Brief request summary.","required":true}]'
     assert graph_attrs["goal"] == "Ship release"
     assert graph_attrs["label"] == "Release Graph"
     assert graph_attrs["model_stylesheet"] == ".fast { llm_model: fast-model; }"

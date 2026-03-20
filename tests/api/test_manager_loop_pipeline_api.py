@@ -46,7 +46,7 @@ def test_pipeline_flow_name_resolves_relative_manager_child_paths_from_parent_fl
         json={
             "flow_name": "supervised-implementation.dot",
             "working_directory": str(workdir),
-            "backend": "codex",
+            "backend": "codex-app-server",
         },
     )
 

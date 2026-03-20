@@ -37,6 +37,36 @@ class TestCodergenHandler:
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0][1] == "Plan for ship"
 
+    def test_codergen_handler_prepends_runtime_carryover_to_rendered_prompt(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [shape=box, prompt="Plan for $goal"]
+            }
+            """
+        )
+
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+        ctx = Context(
+            values={
+                "graph.goal": "ship",
+                "_attractor.runtime.context_carryover": "carryover:summary:high\ncontext.review.required_changes=add tests",
+            }
+        )
+
+        outcome = runner("task", "Plan for $goal", ctx)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0][1] == (
+            "Context carryover:\n\n"
+            "carryover:summary:high\n"
+            "context.review.required_changes=add tests\n\n"
+            "Current stage task:\n\n"
+            "Plan for ship"
+        )
+
     def test_codergen_handler_expands_goal_from_graph_attr_when_context_missing(self):
         graph = parse_dot(
             """
@@ -122,7 +152,11 @@ class TestCodergenHandler:
         assert outcome.status == OutcomeStatus.RETRY
         assert outcome.notes == "please retry"
         assert outcome.suggested_next_ids == ["fallback_stage"]
-        assert outcome.context_updates == {"work.last": "task"}
+        assert outcome.context_updates == {
+            "last_response": "please retry",
+            "last_stage": "task",
+            "work.last": "task",
+        }
 
     def test_codergen_handler_supports_backend_text_response(self):
         graph = parse_dot(
@@ -142,6 +176,10 @@ class TestCodergenHandler:
             outcome = runner("task", "Plan for $goal", Context(values={"graph.goal": "ship"}))
 
             assert outcome.status == OutcomeStatus.SUCCESS
+            assert outcome.context_updates == {
+                "last_response": "backend text response",
+                "last_stage": "task",
+            }
             response_path = logs_root / "task" / "response.md"
             assert response_path.exists()
             assert response_path.read_text(encoding="utf-8").strip() == "backend text response"
@@ -199,7 +237,11 @@ class TestCodergenHandler:
             status_path = logs_root / "task" / "status.json"
             assert status_path.exists()
             assert json.loads(status_path.read_text(encoding="utf-8")) == {
-                "context_updates": {"work.last": "task"},
+                "context_updates": {
+                    "last_response": "backend returned partial",
+                    "last_stage": "task",
+                    "work.last": "task",
+                },
                 "notes": "backend returned partial",
                 "outcome": "partial_success",
                 "preferred_next_label": "continue",

@@ -10,6 +10,8 @@ from attractor.engine.outcome import Outcome, OutcomeStatus
 
 from ..base import CodergenBackend, HandlerRuntime
 
+RUNTIME_CONTEXT_CARRYOVER_KEY = "_attractor.runtime.context_carryover"
+
 
 class CodergenHandler:
     def __init__(self, backend: Optional[CodergenBackend] = None):
@@ -24,18 +26,19 @@ class CodergenHandler:
             if not prompt:
                 prompt = runtime.node_id
         prompt = _expand_goal(prompt, runtime.context, runtime.graph)
+        prompt = _apply_runtime_carryover(prompt, runtime.context)
         stage_dir = _ensure_stage_dir(runtime.logs_root, runtime.node_id)
         _write_stage_file(stage_dir, "prompt.md", prompt)
 
         if self.backend is None:
             response_text = f"[Simulated] Response for stage: {runtime.node_id}"
-            outcome = Outcome(
-                status=OutcomeStatus.SUCCESS,
-                notes=f"Stage completed: {runtime.node_id}",
-                context_updates={
-                    "last_stage": runtime.node_id,
-                    "last_response": response_text[:200],
-                },
+            outcome = _with_builtin_response_context(
+                Outcome(
+                    status=OutcomeStatus.SUCCESS,
+                    notes=f"Stage completed: {runtime.node_id}",
+                ),
+                node_id=runtime.node_id,
+                response_text=response_text,
             )
             _write_stage_file(stage_dir, "response.md", response_text)
             _write_status_file(stage_dir, outcome)
@@ -46,16 +49,32 @@ class CodergenHandler:
         outcome: Outcome
         response_text: str
         if isinstance(result, Outcome):
-            outcome = result
+            outcome = _with_builtin_response_context(
+                result,
+                node_id=runtime.node_id,
+                response_text=result.notes or result.failure_reason or "",
+            )
             response_text = outcome.notes or outcome.failure_reason or ""
         elif isinstance(result, str):
             response_text = result
-            outcome = Outcome(status=OutcomeStatus.SUCCESS, notes=response_text)
+            outcome = _with_builtin_response_context(
+                Outcome(status=OutcomeStatus.SUCCESS, notes=response_text),
+                node_id=runtime.node_id,
+                response_text=response_text,
+            )
         elif result:
-            outcome = Outcome(status=OutcomeStatus.SUCCESS, notes="codergen backend success")
+            outcome = _with_builtin_response_context(
+                Outcome(status=OutcomeStatus.SUCCESS, notes="codergen backend success"),
+                node_id=runtime.node_id,
+                response_text="codergen backend success",
+            )
             response_text = outcome.notes
         else:
-            outcome = Outcome(status=OutcomeStatus.FAIL, failure_reason="codergen backend failure")
+            outcome = _with_builtin_response_context(
+                Outcome(status=OutcomeStatus.FAIL, failure_reason="codergen backend failure"),
+                node_id=runtime.node_id,
+                response_text="codergen backend failure",
+            )
             response_text = outcome.failure_reason
         _write_stage_file(stage_dir, "response.md", response_text)
         _write_status_file(stage_dir, outcome)
@@ -71,6 +90,30 @@ def _expand_goal(prompt: str, context, graph) -> str:
     if goal is None:
         goal = ""
     return prompt.replace("$goal", str(goal))
+
+
+def _apply_runtime_carryover(prompt: str, context) -> str:
+    carryover = str(context.get(RUNTIME_CONTEXT_CARRYOVER_KEY, "") or "").strip()
+    if not carryover:
+        return prompt
+    return "\n\n".join(
+        [
+            "Context carryover:",
+            carryover,
+            "Current stage task:",
+            prompt,
+        ]
+    )
+
+
+def _with_builtin_response_context(outcome: Outcome, *, node_id: str, response_text: str) -> Outcome:
+    merged_updates = {
+        "last_stage": node_id,
+        "last_response": response_text[:200],
+    }
+    merged_updates.update(dict(outcome.context_updates))
+    outcome.context_updates = merged_updates
+    return outcome
 
 
 def _to_seconds(attr) -> float | None:

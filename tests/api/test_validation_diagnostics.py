@@ -127,7 +127,7 @@ def test_start_pipeline_preserves_warning_and_info_diagnostics(
         json={
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
-            "backend": "codex",
+            "backend": "codex-app-server",
         },
     )
 
@@ -160,7 +160,7 @@ def test_start_pipeline_validation_error_payload_shape(
         json={
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
-            "backend": "codex",
+            "backend": "codex-app-server",
         },
     )
 

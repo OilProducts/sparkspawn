@@ -14,70 +14,19 @@ from attractor.handlers.base import CodergenBackend
 from sparkspawn_common import codex_app_server
 from sparkspawn_common.runtime import build_codex_runtime_environment, resolve_runtime_workspace_path
 
-
-class LocalCodexCliBackend(CodergenBackend):
-    def __init__(self, working_dir: str, emit, model: Optional[str] = None):
-        self.requested_working_dir = str(Path(working_dir).expanduser().resolve(strict=False))
-        self.working_dir = resolve_runtime_workspace_path(working_dir)
-        self.emit = emit
-        self.model = model
-
-    def run(
-        self,
-        node_id: str,
-        prompt: str,
-        context: Context,
-        *,
-        timeout: Optional[float] = None,
-    ) -> str | Outcome:
-        del context
-        cmd = [
-            "codex",
-            "exec",
-            "-C",
-            self.working_dir,
-            "-s",
-            "danger-full-access",
-        ]
-        if self.model:
-            cmd.extend(["-m", self.model])
-        cmd.append(prompt)
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=self.working_dir,
-                env=build_codex_runtime_environment(),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                start_new_session=True,
-            )
-        except FileNotFoundError:
-            if not Path(self.working_dir).exists():
-                failure_reason = (
-                    "codex working directory is unavailable in the runtime: "
-                    f"requested {self.requested_working_dir}, resolved {self.working_dir}"
-                )
-            else:
-                failure_reason = "codex executable not found on PATH"
-            self.emit({"type": "log", "msg": f"[{node_id}] {failure_reason}"})
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=failure_reason)
-        except subprocess.TimeoutExpired:
-            failure_reason = f"timeout after {timeout}s"
-            self.emit({"type": "log", "msg": f"[{node_id}] {failure_reason}"})
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=failure_reason)
-        if proc.stdout.strip():
-            self.emit({"type": "log", "msg": f"[{node_id}] {proc.stdout.strip()}"})
-        if proc.stderr.strip():
-            self.emit({"type": "log", "msg": f"[{node_id}] {proc.stderr.strip()}"})
-        if proc.returncode != 0:
-            failure_reason = proc.stderr.strip() or f"codex cli exited with code {proc.returncode}"
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=failure_reason)
-        output = proc.stdout.strip()
-        return output if output else "codex cli completed successfully"
+_STRUCTURED_OUTCOME_KEYS = {
+    "outcome",
+    "preferred_label",
+    "preferred_next_label",
+    "suggested_next_ids",
+    "context_updates",
+    "notes",
+    "failure_reason",
+    "retryable",
+}
 
 
-class LocalCodexAppServerBackend(CodergenBackend):
+class CodexAppServerBackend(CodergenBackend):
     RUNTIME_THREAD_ID_KEY = "_attractor.runtime.thread_id"
 
     def __init__(self, working_dir: str, emit, model: Optional[str] = None):
@@ -317,9 +266,9 @@ class LocalCodexAppServerBackend(CodergenBackend):
             if stream_state.last_token_total is not None:
                 log_line(f"tokens used: {stream_state.last_token_total}")
             if agent_text:
-                return agent_text
+                return _coerce_structured_text_outcome(agent_text)
             if command_text:
-                return command_text
+                return _coerce_structured_text_outcome(command_text)
             return "codex app-server completed successfully"
         finally:
             try:
@@ -340,11 +289,82 @@ def build_codergen_backend(
     *,
     model: Optional[str],
 ) -> CodergenBackend:
-    normalized = backend_name.strip().lower().replace("_", "-")
-    if normalized in {"codex", "codex-app-server"}:
-        return LocalCodexAppServerBackend(working_dir, emit, model=model)
-    if normalized == "codex-cli":
-        return LocalCodexCliBackend(working_dir, emit, model=model)
+    normalized = backend_name.strip().lower()
+    if normalized == "codex-app-server":
+        return CodexAppServerBackend(working_dir, emit, model=model)
     raise ValueError(
-        "Unsupported backend. Supported backends: codex, codex-app-server, codex-cli."
+        "Unsupported backend. Supported backends: codex-app-server."
     )
+
+
+def _coerce_structured_text_outcome(text: str) -> str | Outcome:
+    candidate = _extract_structured_outcome_payload(text)
+    if candidate is None:
+        return text
+
+    preferred_label = candidate.get("preferred_label")
+    if preferred_label is None:
+        preferred_label = candidate.get("preferred_next_label", "")
+    suggested_next_ids = candidate.get("suggested_next_ids", [])
+    context_updates = candidate.get("context_updates", {})
+    notes = candidate.get("notes", "")
+    failure_reason = candidate.get("failure_reason", "")
+    retryable = candidate.get("retryable", None)
+
+    if not isinstance(preferred_label, str):
+        return text
+    if not isinstance(suggested_next_ids, list) or any(not isinstance(item, str) for item in suggested_next_ids):
+        return text
+    if not isinstance(context_updates, dict):
+        return text
+    if notes is not None and not isinstance(notes, str):
+        return text
+    if failure_reason is not None and not isinstance(failure_reason, str):
+        return text
+    if retryable is not None and not isinstance(retryable, bool):
+        return text
+
+    outcome_name = str(candidate.get("outcome", "")).strip().lower()
+    try:
+        status = OutcomeStatus(outcome_name)
+    except ValueError:
+        return text
+
+    if status == OutcomeStatus.SKIPPED:
+        return text
+
+    return Outcome(
+        status=status,
+        preferred_label=preferred_label,
+        suggested_next_ids=list(suggested_next_ids),
+        context_updates=dict(context_updates),
+        notes=notes or "",
+        failure_reason=failure_reason or "",
+        retryable=retryable,
+    )
+
+
+def _extract_structured_outcome_payload(text: str) -> dict[str, object] | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    candidates = [stripped]
+    if stripped.startswith("```") and stripped.endswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 3:
+            candidates.append("\n".join(lines[1:-1]).strip())
+
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if "outcome" not in payload:
+            continue
+        if not set(payload.keys()).issubset(_STRUCTURED_OUTCOME_KEYS):
+            continue
+        return payload
+    return None

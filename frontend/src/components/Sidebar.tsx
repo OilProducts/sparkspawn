@@ -14,6 +14,12 @@ import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
 import { GraphSettings } from './GraphSettings'
 import { AdvancedKeyValueEditor } from './AdvancedKeyValueEditor'
+import { ContextKeyListEditor } from './ContextKeyListEditor'
+import {
+    parseContextKeyDraft,
+    parseContextKeyList,
+    serializeContextKeyList,
+} from '@/lib/flowContracts'
 
 type InspectorScope = 'none' | 'graph' | 'node' | 'edge'
 const INSPECTOR_SAVE_DEBOUNCE_MS = 600
@@ -46,6 +52,8 @@ const CORE_NODE_ATTR_KEYS = new Set<string>([
     'manager.stop_condition',
     'manager.actions',
     'human.default_choice',
+    'sparkspawn.reads_context',
+    'sparkspawn.writes_context',
 ])
 const CORE_EDGE_ATTR_KEYS = new Set<string>([
     'label',
@@ -96,6 +104,10 @@ export function Sidebar() {
     const uiDefaults = useStore((state) => state.uiDefaults)
     const [flows, setFlows] = useState<string[]>([])
     const [showAdvanced, setShowAdvanced] = useState(false)
+    const [readsContextDraft, setReadsContextDraft] = useState('')
+    const [writesContextDraft, setWritesContextDraft] = useState('')
+    const [readsContextError, setReadsContextError] = useState<string | null>(null)
+    const [writesContextError, setWritesContextError] = useState<string | null>(null)
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
     const nodes = useReactFlowStore((state) => state.nodes)
     const edges = useReactFlowStore((state) => state.edges)
@@ -245,6 +257,12 @@ export function Sidebar() {
         (selectedNode?.data?.shape as string) || '',
         (selectedNode?.data?.type as string) || ''
     )
+    const selectedNodeReadsContextRaw = typeof selectedNode?.data?.['sparkspawn.reads_context'] === 'string'
+        ? selectedNode.data['sparkspawn.reads_context']
+        : ''
+    const selectedNodeWritesContextRaw = typeof selectedNode?.data?.['sparkspawn.writes_context'] === 'string'
+        ? selectedNode.data['sparkspawn.writes_context']
+        : ''
     const visibility = getNodeFieldVisibility(handlerType)
     const selectedNodeToolHookPreWarning = getToolHookCommandWarning((selectedNode?.data?.["tool_hooks.pre"] as string) || "")
     const selectedNodeToolHookPostWarning = getToolHookCommandWarning((selectedNode?.data?.["tool_hooks.post"] as string) || "")
@@ -268,6 +286,18 @@ export function Sidebar() {
     })
     const activeTab = activeInspectorScope === 'edge' ? 'edge' : activeInspectorScope === 'node' ? 'edit' : 'flows'
     const inspectorTitle = activeInspectorScope === 'edge' ? 'Edge' : activeInspectorScope === 'node' ? 'Node' : activeInspectorScope === 'graph' ? 'Graph' : 'Flows'
+
+    useEffect(() => {
+        const parsedReads = parseContextKeyList(selectedNodeReadsContextRaw)
+        setReadsContextDraft(parsedReads.keys.join('\n'))
+        setReadsContextError(parsedReads.error)
+    }, [selectedNodeId, selectedNodeReadsContextRaw])
+
+    useEffect(() => {
+        const parsedWrites = parseContextKeyList(selectedNodeWritesContextRaw)
+        setWritesContextDraft(parsedWrites.keys.join('\n'))
+        setWritesContextError(parsedWrites.error)
+    }, [selectedNodeId, selectedNodeWritesContextRaw])
 
     const handleEdgePropertyChange = (key: string, value: string | boolean) => {
         if (!activeProjectPath || !selectedEdgeId || !displayedFlow) return;
@@ -319,6 +349,26 @@ export function Sidebar() {
             ...attrs,
             [key]: value,
         }))
+    }
+
+    const handleReadsContextChange = (value: string) => {
+        setReadsContextDraft(value)
+        const parsed = parseContextKeyDraft(value)
+        setReadsContextError(parsed.error)
+        if (parsed.error) {
+            return
+        }
+        handlePropertyChange('sparkspawn.reads_context', serializeContextKeyList(parsed.keys))
+    }
+
+    const handleWritesContextChange = (value: string) => {
+        setWritesContextDraft(value)
+        const parsed = parseContextKeyDraft(value)
+        setWritesContextError(parsed.error)
+        if (parsed.error) {
+            return
+        }
+        handlePropertyChange('sparkspawn.writes_context', serializeContextKeyList(parsed.keys))
     }
 
     const handleNodeExtensionRemove = (key: string) => {
@@ -542,6 +592,26 @@ export function Sidebar() {
                                             placeholder="Enter system prompt instructions..."
                                         />
                                         {renderFieldDiagnostics('node', 'prompt', nodeFieldDiagnostics, 'node-field-diagnostics-prompt')}
+                                    </div>
+                                )}
+                                {(selectedNode?.data?.shape as string) !== 'Mdiamond' && (selectedNode?.data?.shape as string) !== 'Msquare' && (
+                                    <div className="space-y-3">
+                                        <ContextKeyListEditor
+                                            testId="node-reads-context-editor"
+                                            title="Reads Context"
+                                            description="Declare the `context.*` keys this node expects to consume from launch state or earlier stages."
+                                            value={readsContextDraft}
+                                            error={readsContextError}
+                                            onChange={handleReadsContextChange}
+                                        />
+                                        <ContextKeyListEditor
+                                            testId="node-writes-context-editor"
+                                            title="Writes Context"
+                                            description="Declare the `context.*` keys this node is expected to produce for later stages."
+                                            value={writesContextDraft}
+                                            error={writesContextError}
+                                            onChange={handleWritesContextChange}
+                                        />
                                     </div>
                                 )}
                                 {visibility.showToolCommand && (

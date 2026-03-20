@@ -40,7 +40,7 @@ def test_pipeline_start_request_requires_flow_content_or_flow_name(
         {
             "dot_source": FLOW,
             "working_directory": str(tmp_path / "work"),
-            "backend": "codex",
+            "backend": "codex-app-server",
         },
     )
     assert payload == {
@@ -49,7 +49,7 @@ def test_pipeline_start_request_requires_flow_content_or_flow_name(
     }
 
 
-@pytest.mark.parametrize("backend", ["codex", "codex-cli"])
+@pytest.mark.parametrize("backend", ["codex-app-server"])
 def test_pipeline_definition_is_backend_invariant_for_backend_selection(
     attractor_api_client: TestClient,
     backend: str,
@@ -83,7 +83,7 @@ def test_pipeline_emits_lifecycle_phases_in_spec_order(
         {
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
-            "backend": "codex",
+            "backend": "codex-app-server",
         },
     )
     assert payload["status"] == "started"
@@ -111,7 +111,7 @@ def test_pipeline_stream_includes_executor_typed_runtime_events(
         {
             "flow_content": FLOW,
             "working_directory": str(tmp_path / "work"),
-            "backend": "codex",
+            "backend": "codex-app-server",
         },
     )
     assert payload["status"] == "started"
@@ -149,7 +149,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
         {
             "flow_content": flow,
             "working_directory": str(tmp_path / "work"),
-            "backend": "codex",
+            "backend": "codex-app-server",
         },
     )
     assert payload["status"] == "started"
@@ -184,9 +184,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
 @pytest.mark.parametrize(
     ("backend_name", "expected_type"),
     [
-        ("codex", server.LocalCodexAppServerBackend),
-        ("codex_app_server", server.LocalCodexAppServerBackend),
-        ("codex-cli", server.LocalCodexCliBackend),
+        ("codex-app-server", server.CodexAppServerBackend),
     ],
 )
 def test_backend_factory_builds_multiple_implementations(
@@ -204,30 +202,22 @@ def test_backend_factory_builds_multiple_implementations(
     assert isinstance(backend, expected_type)
 
 
-def test_local_codex_cli_backend_missing_binary_returns_fail_outcome_and_emits_log(
+@pytest.mark.parametrize("backend_name", ["codex", "codex_app_server", "codex-cli"])
+def test_backend_factory_rejects_non_canonical_backend_names(backend_name: str, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Unsupported backend. Supported backends: codex-app-server."):
+        server._build_codergen_backend(
+            backend_name,
+            str(tmp_path),
+            lambda event: None,
+            model=None,
+        )
+
+
+def test_codex_app_server_backend_missing_binary_returns_fail_outcome_and_emits_log(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     events: List[dict] = []
-    backend = server.LocalCodexCliBackend(str(tmp_path), events.append, model=None)
-
-    def _raise_missing(*args, **kwargs):
-        raise FileNotFoundError("codex")
-
-    monkeypatch.setattr(codex_backends_module.subprocess, "run", _raise_missing)
-
-    result = backend.run("plan", "hello", Context())
-
-    assert isinstance(result, Outcome)
-    assert result.status == OutcomeStatus.FAIL
-    assert result.failure_reason == "codex executable not found on PATH"
-    assert events[-1] == {"type": "log", "msg": "[plan] codex executable not found on PATH"}
-
-
-def test_local_codex_app_server_backend_missing_binary_returns_fail_outcome_and_emits_log(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    events: List[dict] = []
-    backend = server.LocalCodexAppServerBackend(str(tmp_path), events.append, model=None)
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
 
     def _raise_missing(*args, **kwargs):
         raise FileNotFoundError("codex")
@@ -303,12 +293,12 @@ def test_build_codex_runtime_environment_falls_back_to_host_codex_home_when_seed
     assert (runtime_root / ".codex" / "config.toml").read_text(encoding="utf-8") == "model = 'host-model'\n"
 
 
-def test_local_codex_app_server_backend_missing_runtime_working_directory_returns_specific_failure(
+def test_codex_app_server_backend_missing_runtime_working_directory_returns_specific_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     missing_dir = tmp_path / "missing-workdir"
     events: List[dict] = []
-    backend = server.LocalCodexAppServerBackend(str(missing_dir), events.append, model=None)
+    backend = server.CodexAppServerBackend(str(missing_dir), events.append, model=None)
 
     def _raise_missing(*args, **kwargs):
         raise FileNotFoundError(str(missing_dir))
@@ -324,8 +314,8 @@ def test_local_codex_app_server_backend_missing_runtime_working_directory_return
     assert "working directory is unavailable in the runtime" in events[-1]["msg"]
 
 
-def test_local_codex_app_server_backend_reuses_session_for_same_thread_key(tmp_path: Path) -> None:
-    backend = server.LocalCodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
+def test_codex_app_server_backend_reuses_session_for_same_thread_key(tmp_path: Path) -> None:
+    backend = server.CodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
     created: list[str] = []
 
     def _start_thread() -> str:
@@ -341,10 +331,10 @@ def test_local_codex_app_server_backend_reuses_session_for_same_thread_key(tmp_p
     assert created == ["thread-1"]
 
 
-def test_local_codex_app_server_backend_isolates_sessions_for_different_thread_keys(
+def test_codex_app_server_backend_isolates_sessions_for_different_thread_keys(
     tmp_path: Path,
 ) -> None:
-    backend = server.LocalCodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
+    backend = server.CodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
     created: list[str] = []
 
     def _start_thread() -> str:
@@ -360,8 +350,8 @@ def test_local_codex_app_server_backend_isolates_sessions_for_different_thread_k
     assert created == ["thread-1", "thread-2"]
 
 
-def test_local_codex_app_server_backend_does_not_cache_empty_thread_key(tmp_path: Path) -> None:
-    backend = server.LocalCodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
+def test_codex_app_server_backend_does_not_cache_empty_thread_key(tmp_path: Path) -> None:
+    backend = server.CodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
     created: list[str] = []
 
     def _start_thread() -> str:
@@ -377,12 +367,12 @@ def test_local_codex_app_server_backend_does_not_cache_empty_thread_key(tmp_path
     assert created == ["thread-1", "thread-2"]
 
 
-def test_local_codex_app_server_backend_accepts_item_completed_without_turn_completed_after_idle(
+def test_codex_app_server_backend_accepts_item_completed_without_turn_completed_after_idle(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     events: List[dict] = []
-    backend = server.LocalCodexAppServerBackend(str(tmp_path), events.append, model=None)
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
 
     class FakeStdout:
         def __init__(self, lines: list[str]) -> None:
@@ -447,3 +437,78 @@ def test_local_codex_app_server_backend_accepts_item_completed_without_turn_comp
 
     assert result == "Ack"
     assert {"type": "log", "msg": "[plan] Ack"} in events
+
+
+def test_codex_app_server_backend_parses_structured_outcome_agent_text(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+
+    class FakeStdout:
+        def __init__(self, lines: list[str]) -> None:
+            self._lines = list(lines)
+
+        def readline(self) -> str:
+            if not self._lines:
+                return ""
+            return f"{self._lines.pop(0)}\n"
+
+    class FakeStdin:
+        def write(self, text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self, lines: list[str]) -> None:
+            self.stdout = FakeStdout(lines)
+            self.stdin = FakeStdin()
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> None:
+            return None
+
+        def kill(self) -> None:
+            return None
+
+    class FakeSelector:
+        def __init__(self) -> None:
+            self._stdout = None
+
+        def register(self, stdout, events) -> None:
+            self._stdout = stdout
+
+        def select(self, timeout: float | None = None):
+            if self._stdout is not None and getattr(self._stdout, "_lines", None):
+                return [(object(), object())]
+            return []
+
+    lines = [
+        '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"experimentalApi":true}}}',
+        '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-123"}}}',
+        '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-123","status":"inProgress","items":[]}}}',
+        '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"{\\"outcome\\":\\"fail\\",\\"notes\\":\\"needs fixes\\",\\"failure_reason\\":\\"review requested changes\\",\\"context_updates\\":{\\"context.review.summary\\":\\"missing validation\\"}}"}}',
+        '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"{\\"outcome\\":\\"fail\\",\\"notes\\":\\"needs fixes\\",\\"failure_reason\\":\\"review requested changes\\",\\"context_updates\\":{\\"context.review.summary\\":\\"missing validation\\"}}"}],"phase":"final_answer"}}}',
+    ]
+    monotonic_values = iter([0.0, 0.1, 0.2, 0.3, 0.4, 1.6])
+
+    monkeypatch.setattr(codex_backends_module.subprocess, "Popen", lambda *args, **kwargs: FakeProcess(lines))
+    monkeypatch.setattr(codex_backends_module.selectors, "DefaultSelector", FakeSelector)
+    monkeypatch.setattr(codex_backends_module.codex_app_server, "APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(codex_backends_module.time, "monotonic", lambda: next(monotonic_values))
+
+    result = backend.run("review", "hello", Context())
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.notes == "needs fixes"
+    assert result.failure_reason == "review requested changes"
+    assert result.context_updates == {"context.review.summary": "missing validation"}

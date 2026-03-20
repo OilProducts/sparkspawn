@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import uuid
 from pathlib import Path
 from typing import Callable, Optional
@@ -146,6 +147,7 @@ class ProjectChatReviewService:
         if not flow_name or not summary:
             return None
         goal = str(flow_run_request_payload.get("goal", "")).strip() or None
+        launch_context = copy.deepcopy(flow_run_request_payload.get("launch_context")) if isinstance(flow_run_request_payload.get("launch_context"), dict) else None
         model = str(flow_run_request_payload.get("model", "")).strip() or None
 
         requests_by_id = {request.id: request for request in state.flow_run_requests}
@@ -159,6 +161,7 @@ class ProjectChatReviewService:
                 existing_request.flow_name == flow_name
                 and existing_request.summary == summary
                 and existing_request.goal == goal
+                and existing_request.launch_context == launch_context
                 and existing_request.model == model
             ):
                 return None
@@ -174,6 +177,7 @@ class ProjectChatReviewService:
             conversation_id=state.conversation_id,
             source_turn_id=parent_turn.id,
             goal=goal,
+            launch_context=launch_context,
             model=model,
         )
         request_segment = ConversationSegment(

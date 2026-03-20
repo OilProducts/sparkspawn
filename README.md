@@ -25,6 +25,84 @@ Spark Spawn is a project-scoped workflow workbench for AI-assisted software deli
 
 The UI also supports a direct authoring workflow: Home -> Editor -> Execution -> Runs.
 
+For agent-facing raw DOT editing guidance, see [src/sparkspawn/guides/dot-authoring.md](/Users/chris/tinker/sparkspawn/src/sparkspawn/guides/dot-authoring.md). After direct flow edits, validate with `sparkspawn-workspace validate-flow --flow <name> --text`.
+
+## Flow Building Guide
+
+Start with the smallest flow that matches the job:
+
+- [starter-flows/simple-linear.dot](/Users/chris/tinker/sparkspawn/starter-flows/simple-linear.dot): one pass through plan -> implement -> summarize
+- [starter-flows/implement-review-loop.dot](/Users/chris/tinker/sparkspawn/starter-flows/implement-review-loop.dot): plan -> implement -> review with an actual retry loop
+- [starter-flows/human-review-loop.dot](/Users/chris/tinker/sparkspawn/starter-flows/human-review-loop.dot): explicit human approval or requested fixes
+- [starter-flows/parallel-review.dot](/Users/chris/tinker/sparkspawn/starter-flows/parallel-review.dot): fan-out / fan-in structure
+- [starter-flows/supervised-implementation.dot](/Users/chris/tinker/sparkspawn/starter-flows/supervised-implementation.dot): parent/child composition with `stack.manager_loop`
+
+Use the flow `goal` as the user-facing stated goal for the run:
+
+- In prompts and flow descriptions, write to the “stated goal”, not internal engine names like `graph.goal`.
+- Direct runs from the editor currently use the flow's saved `goal`.
+- Workspace chat flow-run requests and `sparkspawn-workspace flow-run --goal/--goal-file` can override that stated goal per run.
+
+Use `launch_context` when one goal string is not enough:
+
+- `launch_context` is first-class initial run state under `context.*`, not a prompt-only hack.
+- Use it for structured launch details like request summaries, target paths, constraints, and acceptance criteria.
+- Workspace flow-run requests accept `launch_context`, and `sparkspawn-workspace flow-run --launch-context-json/--launch-context-file` can populate it.
+- Keep launch keys stable and semantic, for example `context.request.summary`, `context.request.target_paths`, and `context.request.acceptance_criteria`.
+- In the flow editor, declare these inputs in Graph Settings -> Launch Inputs so direct execution can render a launch form from the flow itself.
+
+Keep nodes single-purpose:
+
+- A good node usually does one job: plan, implement, review, summarize, wait for human input, or supervise a child flow.
+- Avoid combining planning, implementation, and review into one prompt if you want meaningful routing and retries.
+- Prefer explicit labels on decision edges so the graph stays readable in the editor and run artifacts.
+
+Pass context forward intentionally:
+
+- Later nodes do not automatically understand why an earlier node was unhappy. If a stage should guide a later stage, it should emit `context_updates`.
+- Use stable keys under `context.*` for cross-node feedback, for example `context.review.summary`, `context.review.required_changes`, and `context.review.blockers`.
+- Author downstream prompts to consume that carryover directly. The implementation and planning starters in this repo do that on purpose.
+- In the node inspector, use `Reads Context` and `Writes Context` to document that contract in the `.dot` itself instead of keeping it only in prompt prose.
+
+Drive loops with outcome semantics, not prose:
+
+- A node saying “needs fixes” in plain text does not create a retry loop by itself.
+- Route retries off real outcomes such as `outcome=fail` and `outcome=success`.
+- For Codex-backed review nodes, the most reliable pattern is to return a strict JSON status envelope so the backend can convert the model response into a real Attractor outcome plus `context_updates`.
+
+Example review response shape:
+
+```json
+{
+  "outcome": "fail",
+  "notes": "Implementation is close but missing regression coverage.",
+  "failure_reason": "Add tests before landing.",
+  "context_updates": {
+    "context.review.summary": "Behavior looks correct, but the change is not adequately covered by tests.",
+    "context.review.required_changes": "Add a regression test for the changed path and rerun validation.",
+    "context.review.blockers": ""
+  }
+}
+```
+
+Be explicit about routing behavior:
+
+- If no conditioned edge matches, Attractor only considers unconditional edges next.
+- A false conditioned edge is not a fallback route.
+- If a non-failing node has no eligible next edge, the pipeline completes successfully.
+
+Keep parent/child flows portable:
+
+- Use relative `stack.child_dotfile` paths when bundling parent and child flows together.
+- Avoid absolute `stack.child_workdir` values in shipped flows unless you really mean to force execution into a specific directory.
+- Child flows should be reusable workers; parent flows should add supervision, governance, summary, or escalation rather than duplicating the child's work.
+
+Use hooks and model defaults deliberately:
+
+- A failing `tool_hooks.pre` prevents the tool command from running. Use it only when setup failure should block the tool.
+- `model_stylesheet` is best for broad model defaults; explicit node attrs still win over stylesheet matches.
+- Graph defaults should establish a baseline. Node attrs should capture true per-stage exceptions.
+
 ## Architecture
 
 - [src/attractor/](/Users/chris/tinker/sparkspawn/src/attractor): Attractor runtime, pipeline engine, handlers, CLI, and mounted Attractor API
@@ -51,6 +129,12 @@ Install dependencies:
 ```bash
 uv sync --dev
 npm --prefix frontend install
+```
+
+Initialize the runtime tree and seed starter flows:
+
+```bash
+uv run sparkspawn init
 ```
 
 Run the full stack locally:

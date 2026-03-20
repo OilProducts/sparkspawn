@@ -214,6 +214,9 @@ export function ProjectFlowRunRequestEntry({
 
     const statusPresentation = getFlowRunRequestStatusPresentation(flowRunRequest.status)
     const canReview = flowRunRequest.status === "pending" || flowRunRequest.status === "launch_failed"
+    const launchContextText = flowRunRequest.launch_context
+        ? JSON.stringify(flowRunRequest.launch_context, null, 2)
+        : null
 
     return (
         <div
@@ -245,6 +248,16 @@ export function ProjectFlowRunRequestEntry({
                     <p className="whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-1 text-[11px] text-muted-foreground">
                         {flowRunRequest.goal}
                     </p>
+                ) : null}
+                {launchContextText ? (
+                    <div className="space-y-1">
+                        <p>
+                            Launch context:
+                        </p>
+                        <pre className="overflow-x-auto whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-2 font-mono text-[10px] text-muted-foreground">
+                            {launchContextText}
+                        </pre>
+                    </div>
                 ) : null}
                 {flowRunRequest.model ? (
                     <p>

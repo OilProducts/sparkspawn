@@ -79,7 +79,8 @@ class TestManagerLoopHandler:
         outcome = runner("manager", "", Context())
 
         assert outcome.status == OutcomeStatus.SUCCESS
-        assert [call[1] for call in backend.calls] == ["Plan for Ship child"]
+        assert len(backend.calls) == 1
+        assert backend.calls[0][1].endswith("Current stage task:\n\nPlan for Ship child")
 
     def test_manager_loop_fails_when_child_graph_validation_fails(self, tmp_path):
         child_dot_path = tmp_path / "child.dot"

@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 import io
 
+import sparkspawn.authoring_assets as authoring_assets
 import sparkspawn.cli as spark_cli
+import sparkspawn.starter_assets as starter_assets
 import workspace.cli as workspace_cli
 
 
@@ -66,6 +68,111 @@ def test_run_serve_preserves_runtime_path_env_for_reload(monkeypatch, tmp_path: 
     assert spark_cli.os.environ["SPARKSPAWN_HOME"] == str(data_dir.resolve(strict=False))
     assert spark_cli.os.environ["SPARKSPAWN_FLOWS_DIR"] == str(flows_dir.resolve(strict=False))
     assert spark_cli.os.environ["SPARKSPAWN_UI_DIR"] == str(ui_dir.resolve(strict=False))
+
+
+def test_run_init_seeds_missing_starter_flows_without_overwriting_existing(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    flows_dir = tmp_path / "flows"
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    existing_flow = flows_dir / "parallel-review.dot"
+    existing_flow.write_text("custom-parallel\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        starter_assets,
+        "load_starter_flow_assets",
+        lambda *, project_root=None: (
+            starter_assets.StarterFlowAsset("parallel-review.dot", "canonical-parallel\n"),
+            starter_assets.StarterFlowAsset("simple-linear.dot", "simple-linear\n"),
+        ),
+    )
+
+    result = spark_cli.main(
+        [
+            "init",
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--flows-dir",
+            str(flows_dir),
+        ]
+    )
+
+    assert result == 0
+    assert existing_flow.read_text(encoding="utf-8") == "custom-parallel\n"
+    assert (flows_dir / "simple-linear.dot").read_text(encoding="utf-8") == "simple-linear\n"
+    output = capsys.readouterr().out
+    assert "created=1 updated=0 skipped=1" in output
+
+
+def test_run_init_force_overwrites_existing_starter_flows(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    flows_dir = tmp_path / "flows"
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    existing_flow = flows_dir / "parallel-review.dot"
+    existing_flow.write_text("custom-parallel\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        starter_assets,
+        "load_starter_flow_assets",
+        lambda *, project_root=None: (
+            starter_assets.StarterFlowAsset("parallel-review.dot", "canonical-parallel\n"),
+            starter_assets.StarterFlowAsset("simple-linear.dot", "simple-linear\n"),
+        ),
+    )
+
+    result = spark_cli.main(
+        [
+            "init",
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--flows-dir",
+            str(flows_dir),
+            "--force",
+        ]
+    )
+
+    assert result == 0
+    assert existing_flow.read_text(encoding="utf-8") == "canonical-parallel\n"
+    assert (flows_dir / "simple-linear.dot").read_text(encoding="utf-8") == "simple-linear\n"
+    output = capsys.readouterr().out
+    assert "created=1 updated=1 skipped=0" in output
+
+
+def test_packaged_starter_flows_match_repo_starter_flows() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_starter_dir = repo_root / "starter-flows"
+    packaged_starter_dir = repo_root / "src" / "sparkspawn" / "starter_flows"
+
+    repo_payload = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(repo_starter_dir.glob("*.dot"))
+    }
+    packaged_payload = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(packaged_starter_dir.glob("*.dot"))
+    }
+
+    assert packaged_payload == repo_payload
+
+
+def test_packaged_authoring_references_match_repo_sources() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    packaged_guide = authoring_assets.dot_authoring_guide_path()
+    packaged_attractor_spec = authoring_assets.attractor_spec_path()
+    packaged_flow_extensions_spec = authoring_assets.flow_extensions_spec_path()
+
+    assert packaged_guide.read_text(encoding="utf-8").startswith("# Spark Spawn DOT Authoring Guide")
+    assert packaged_attractor_spec.read_text(encoding="utf-8") == (
+        repo_root / "specs" / "attractor-spec.md"
+    ).read_text(encoding="utf-8")
+    assert packaged_flow_extensions_spec.read_text(encoding="utf-8") == (
+        repo_root / "specs" / "sparkspawn-flow-extensions.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_run_workspace_spec_proposal_posts_payload_and_prints_response(
@@ -257,6 +364,16 @@ def test_run_workspace_flow_run_posts_payload_and_prints_response(
 ) -> None:
     goal_path = tmp_path / "goal.txt"
     goal_path.write_text("Implement the approved scope.", encoding="utf-8")
+    launch_context_path = tmp_path / "launch-context.json"
+    launch_context_path.write_text(
+        json.dumps(
+            {
+                "context.request.summary": "Implement the approved scope.",
+                "context.request.target_paths": ["src/workspace", "tests/api"],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     class FakeResponse:
         status_code = 200
@@ -300,6 +417,8 @@ def test_run_workspace_flow_run_posts_payload_and_prints_response(
             "Run implementation for the approved scope",
             "--goal-file",
             str(goal_path),
+            "--launch-context-file",
+            str(launch_context_path),
             "--model",
             "gpt-5.4",
             "--base-url",
@@ -315,6 +434,10 @@ def test_run_workspace_flow_run_posts_payload_and_prints_response(
                 "flow_name": "implement-spec.dot",
                 "summary": "Run implementation for the approved scope",
                 "goal": "Implement the approved scope.",
+                "launch_context": {
+                    "context.request.summary": "Implement the approved scope.",
+                    "context.request.target_paths": ["src/workspace", "tests/api"],
+                },
                 "model": "gpt-5.4",
             },
         )
@@ -431,6 +554,77 @@ def test_workspace_describe_flow_text_mode_formats_human_readable_output(
     assert "Title: Implement Spec" in output
     assert "Launch Policy: agent_requestable" in output
     assert "Has Manager Loop: True" in output
+
+
+def test_workspace_validate_flow_text_mode_formats_diagnostics(
+    monkeypatch,
+    capsys,
+) -> None:
+    class FakeResponse:
+        status_code = 200
+        is_error = False
+        text = ""
+
+        def json(self) -> dict[str, object]:
+            return {
+                "name": "draft.dot",
+                "path": "/tmp/flows/draft.dot",
+                "status": "validation_error",
+                "diagnostics": [
+                    {
+                        "rule_id": "start_node",
+                        "severity": "error",
+                        "message": "Graph must define a start node.",
+                        "line": 1,
+                    }
+                ],
+                "errors": [
+                    {
+                        "rule_id": "start_node",
+                        "severity": "error",
+                        "message": "Graph must define a start node.",
+                        "line": 1,
+                    }
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, timeout: float) -> None:
+            assert timeout == 30.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def request(self, method: str, url: str, json: object | None = None) -> FakeResponse:
+            assert method == "GET"
+            assert json is None
+            assert url == "http://127.0.0.1:8000/workspace/api/flows/draft.dot/validate"
+            return FakeResponse()
+
+    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+
+    result = workspace_cli.main(
+        [
+            "validate-flow",
+            "--flow",
+            "draft.dot",
+            "--text",
+            "--base-url",
+            "http://127.0.0.1:8000",
+        ]
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Name: draft.dot" in output
+    assert "Path: /tmp/flows/draft.dot" in output
+    assert "Status: validation_error" in output
+    assert "Diagnostics: 1" in output
+    assert "Errors: 1" in output
+    assert "- ERROR start_node line 1: Graph must define a start node." in output
 
 
 def test_workspace_get_flow_defaults_to_json_wrapper(

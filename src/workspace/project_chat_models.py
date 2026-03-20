@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 import threading
@@ -369,6 +370,7 @@ class FlowRunRequest:
     status: str = "pending"
     source_segment_id: Optional[str] = None
     goal: Optional[str] = None
+    launch_context: Optional[dict[str, Any]] = None
     model: Optional[str] = None
     run_id: Optional[str] = None
     launch_error: Optional[str] = None
@@ -390,6 +392,8 @@ class FlowRunRequest:
             payload["source_segment_id"] = self.source_segment_id
         if self.goal:
             payload["goal"] = self.goal
+        if self.launch_context:
+            payload["launch_context"] = copy.deepcopy(self.launch_context)
         if self.model:
             payload["model"] = self.model
         if self.run_id:
@@ -414,6 +418,7 @@ class FlowRunRequest:
             status=str(payload.get("status", "pending") or "pending"),
             source_segment_id=str(payload.get("source_segment_id")) if payload.get("source_segment_id") is not None else None,
             goal=str(payload.get("goal")) if payload.get("goal") is not None else None,
+            launch_context=copy.deepcopy(payload.get("launch_context")) if isinstance(payload.get("launch_context"), dict) else None,
             model=str(payload.get("model")) if payload.get("model") is not None else None,
             run_id=str(payload.get("run_id")) if payload.get("run_id") is not None else None,
             launch_error=str(payload.get("launch_error")) if payload.get("launch_error") is not None else None,

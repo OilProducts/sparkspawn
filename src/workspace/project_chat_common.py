@@ -7,6 +7,7 @@ import re
 import time
 from typing import Any, Optional
 
+from sparkspawn_common.launch_context import normalize_launch_context
 from sparkspawn_common.runtime import (
     build_codex_runtime_environment as _build_codex_runtime_environment,
     normalize_project_path,
@@ -112,6 +113,12 @@ def normalize_flow_run_request_payload(
     goal = as_non_empty_string(arguments.get("goal"))
     if goal:
         payload["goal"] = goal
+    launch_context = normalize_launch_context(
+        arguments.get("launch_context"),
+        source_name=source_name,
+    )
+    if launch_context:
+        payload["launch_context"] = launch_context
     model = as_non_empty_string(arguments.get("model"))
     if model:
         payload["model"] = model

@@ -29,6 +29,7 @@ where = ["src"]
 include = ["attractor*", "workspace*", "sparkspawn*", "sparkspawn_app*", "sparkspawn_common*"]
 
 [tool.setuptools.package-data]
+sparkspawn = ["starter_flows/*.dot", "guides/*.md"]
 sparkspawn_app = ["ui_dist/**"]
 
 [dependency-groups]

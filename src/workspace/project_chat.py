@@ -7,6 +7,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from sparkspawn.authoring_assets import (
+    attractor_spec_path,
+    dot_authoring_guide_path,
+    flow_extensions_spec_path,
+)
 from workspace.project_chat_common import (
     as_non_empty_string as _as_non_empty_string,
     iso_now as _iso_now,
@@ -68,8 +73,18 @@ def _normalize_assistant_phase(value: Any) -> Optional[str]:
 
 
 class ProjectChatService:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        *,
+        flows_dir: Path | None = None,
+        authoring_guide_path: Path | None = None,
+    ) -> None:
         self._data_dir = data_dir
+        self._flows_dir = (flows_dir or (data_dir / "flows")).expanduser().resolve(strict=False)
+        self._authoring_guide_path = (authoring_guide_path or dot_authoring_guide_path()).expanduser().resolve(strict=False)
+        self._flow_extensions_spec_path = flow_extensions_spec_path().expanduser().resolve(strict=False)
+        self._attractor_spec_path = attractor_spec_path().expanduser().resolve(strict=False)
         self._prompt_templates = load_prompt_templates(data_dir / "config")
         self._lock = threading.Lock()
         self._repository = ProjectChatRepository(data_dir, self._lock)
@@ -420,6 +435,11 @@ class ProjectChatService:
             {
                 "conversation_handle": state.conversation_handle,
                 "project_path": state.project_path,
+                "flow_library_path": str(self._flows_dir),
+                "dot_authoring_guide_path": str(self._authoring_guide_path),
+                "flow_extensions_spec_path": str(self._flow_extensions_spec_path),
+                "attractor_spec_path": str(self._attractor_spec_path),
+                "flow_validation_command": "sparkspawn-workspace validate-flow --flow <name> --text",
                 "recent_conversation": history_text,
                 "latest_user_message": message,
             },

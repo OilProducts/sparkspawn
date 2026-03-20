@@ -4,6 +4,7 @@ export interface RunInitiationFormState {
     workingDirectory: string
     backend: string
     model: string | null
+    launchContext?: Record<string, unknown> | null
     specArtifactId: string | null
     planArtifactId: string | null
 }
@@ -13,6 +14,7 @@ export interface PipelineStartPayload {
     working_directory: string
     backend: string
     model: string | null
+    launch_context?: Record<string, unknown> | null
     flow_name: string | null
     spec_id: string | null
     plan_id: string | null
@@ -72,7 +74,7 @@ export function buildPipelineStartPayload(
     flowContent: string,
 ): PipelineStartPayload {
     const workingDirectory = resolveExecutionWorkingDirectory(form)
-    return {
+    const payload: PipelineStartPayload = {
         flow_content: flowContent,
         working_directory: workingDirectory,
         backend: form.backend,
@@ -81,4 +83,8 @@ export function buildPipelineStartPayload(
         spec_id: form.specArtifactId,
         plan_id: form.planArtifactId,
     }
+    if (form.launchContext && Object.keys(form.launchContext).length > 0) {
+        payload.launch_context = form.launchContext
+    }
+    return payload
 }

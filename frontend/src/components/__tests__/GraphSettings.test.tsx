@@ -223,6 +223,41 @@ describe('Graph and settings behavior', () => {
     expect(dot).toContain('sparkspawn.description="Turn approved spec edits into execution plans."')
   })
 
+  it('persists launch input declarations as DOT-backed Spark Spawn metadata', async () => {
+    const user = userEvent.setup()
+    wrapWithFlowProvider(<GraphSettings inline />)
+
+    expect(screen.getByTestId('graph-launch-inputs-editor')).toBeVisible()
+    await user.click(screen.getByTestId('graph-launch-input-add'))
+
+    await user.type(screen.getByTestId('graph-launch-input-label-0'), 'Acceptance Criteria')
+    await user.selectOptions(screen.getByTestId('graph-launch-input-type-0'), 'string[]')
+    await user.clear(screen.getByTestId('graph-launch-input-key-0'))
+    await user.type(screen.getByTestId('graph-launch-input-key-0'), 'context.request.acceptance_criteria')
+    await user.type(
+      screen.getByTestId('graph-launch-input-description-0'),
+      'One acceptance criterion per line in the execution form.',
+    )
+    await user.click(screen.getByTestId('graph-launch-input-required-0'))
+
+    expect(screen.queryByTestId('graph-launch-inputs-error')).not.toBeInTheDocument()
+    expect(useStore.getState().graphAttrs['sparkspawn.launch_inputs']).toBe(
+      JSON.stringify([
+        {
+          key: 'context.request.acceptance_criteria',
+          label: 'Acceptance Criteria',
+          type: 'string[]',
+          description: 'One acceptance criterion per line in the execution form.',
+          required: true,
+        },
+      ]),
+    )
+
+    const dot = generateDot('implement-spec.dot', [], [], useStore.getState().graphAttrs)
+    expect(dot).toContain('sparkspawn.launch_inputs=')
+    expect(dot).toContain('context.request.acceptance_criteria')
+  })
+
   it('loads and saves workspace launch policy without touching flow save state', async () => {
     const user = userEvent.setup()
     wrapWithFlowProvider(<GraphSettings inline />)

@@ -44,8 +44,7 @@ from attractor.graph_prep import (
     resolve_default_max_retries_value,
 )
 from attractor.api.codex_backends import (
-    LocalCodexAppServerBackend,
-    LocalCodexCliBackend,
+    CodexAppServerBackend,
     build_codergen_backend as _build_codergen_backend_impl,
 )
 from attractor.api.flow_sources import (
@@ -78,6 +77,7 @@ from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, AnswerValue, Question
+from sparkspawn_common.launch_context import normalize_launch_context
 from sparkspawn_common.runtime import resolve_runtime_workspace_path
 from sparkspawn_common.settings import Settings, resolve_settings, validate_settings
 from workspace.project_chat import ProjectChatService
@@ -88,7 +88,7 @@ attractor_router = APIRouter()
 LOGGER = logging.getLogger(__name__)
 SETTINGS_LOCK = threading.Lock()
 SETTINGS = resolve_settings()
-PROJECT_CHAT = ProjectChatService(SETTINGS.data_dir)
+PROJECT_CHAT = ProjectChatService(SETTINGS.data_dir, flows_dir=SETTINGS.flows_dir)
 REGISTERED_TRANSFORMS: List[object] = []
 _REGISTERED_TRANSFORMS_LOCK = threading.Lock()
 _UNSET = object()
@@ -117,7 +117,7 @@ def configure_runtime_paths(
     validate_settings(updated)
     with SETTINGS_LOCK:
         SETTINGS = updated
-    PROJECT_CHAT = ProjectChatService(updated.data_dir)
+    PROJECT_CHAT = ProjectChatService(updated.data_dir, flows_dir=updated.flows_dir)
     return updated
 
 
@@ -315,10 +315,11 @@ class PipelineStartRequest(BaseModel):
     run_id: Optional[str] = None
     flow_content: Optional[str] = None
     working_directory: str = "./workspace"
-    backend: str = "codex"
+    backend: str = "codex-app-server"
     model: Optional[str] = None
     flow_name: Optional[str] = None
     goal: Optional[str] = None
+    launch_context: Optional[dict[str, Any]] = None
     spec_id: Optional[str] = None
     plan_id: Optional[str] = None
 
@@ -680,6 +681,19 @@ async def _start_pipeline(
             "errors": error_payloads,
         }
 
+    try:
+        launch_context = normalize_launch_context(
+            req.launch_context,
+            source_name="Attractor pipeline start",
+        )
+    except ValueError as exc:
+        RUNTIME.status = "validation_error"
+        RUNTIME.last_error = str(exc)
+        return {
+            "status": "validation_error",
+            "error": str(exc),
+        }
+
     await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[3])
 
     os.makedirs(req.working_directory, exist_ok=True)
@@ -730,6 +744,8 @@ async def _start_pipeline(
     graphviz_export = export_graphviz_artifact(flow_content, run_root)
 
     context = Context(values=_graph_attr_context_seed(graph))
+    if launch_context:
+        context.apply_updates(launch_context)
     context.set("internal.run_workdir", working_dir)
     if flow_source_dir is not None:
         context.set("internal.flow_source_dir", str(flow_source_dir))

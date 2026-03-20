@@ -24,6 +24,39 @@ class _WorkflowBackend:
         return self._responses.get(node_id, True)
 
 
+class _StructuredLoopBackend:
+    def __init__(self):
+        self.prompts: dict[str, list[str]] = {}
+        self.review_calls = 0
+
+    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> str | Outcome:
+        del context, timeout
+        self.prompts.setdefault(node_id, []).append(prompt)
+        if node_id == "review":
+            self.review_calls += 1
+            if self.review_calls == 1:
+                return Outcome(
+                    status=OutcomeStatus.FAIL,
+                    notes="needs another pass",
+                    failure_reason="review requested fixes",
+                    context_updates={
+                        "context.review.summary": "implementation is incomplete",
+                        "context.review.required_changes": "add regression coverage and tighten edge handling",
+                        "context.review.blockers": "missing regression coverage",
+                    },
+                )
+            return Outcome(
+                status=OutcomeStatus.SUCCESS,
+                notes="change is ready",
+                context_updates={
+                    "context.review.summary": "looks good",
+                    "context.review.required_changes": "",
+                    "context.review.blockers": "",
+                },
+            )
+        return f"{node_id} completed"
+
+
 class TestExecutor:
     @pytest.mark.parametrize(
         ("validate_outcomes", "expected_route"),
@@ -443,6 +476,35 @@ class TestExecutor:
 
         assert result.status == "success"
         assert seen_payload == ""
+
+    def test_executor_carries_review_feedback_into_next_implement_pass(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [goal="Ship docs", default_fidelity="summary:high"]
+                start [shape=Mdiamond]
+                implement [shape=box, prompt="Implement the requested change."]
+                review [shape=box, prompt="Review the implementation and respond with a status envelope."]
+                done [shape=Msquare]
+                start -> implement
+                implement -> review [condition="outcome=success"]
+                review -> done [condition="outcome=success"]
+                review -> implement [condition="outcome=fail"]
+            }
+            """
+        )
+
+        backend = _StructuredLoopBackend()
+        runner = HandlerRunner(graph, build_default_registry(codergen_backend=backend))
+
+        result = PipelineExecutor(graph, runner).run(Context(values={"internal.run_id": "run-123"}))
+
+        assert result.status == "success"
+        assert backend.review_calls == 2
+        assert len(backend.prompts["implement"]) == 2
+        assert "Current stage task:\n\nImplement the requested change." in backend.prompts["implement"][1]
+        assert "context.review.required_changes=add regression coverage and tighten edge handling" in backend.prompts["implement"][1]
+        assert result.route_trace == ["start", "implement", "review", "implement", "review", "done"]
 
     def test_executor_mirrors_graph_goal_into_context(self):
         graph = parse_dot(
