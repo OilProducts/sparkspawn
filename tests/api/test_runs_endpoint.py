@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import workspace.project_chat as project_chat
 import workspace.project_chat_models as project_chat_models
+import workspace.triggers as workspace_triggers
 import attractor.api.server as server
 
 
@@ -402,14 +403,20 @@ def test_execution_planning_approval_uses_project_trigger_binding_when_present(
 
     _write_flow("custom-plan.dot")
     product_api_client.post("/workspace/api/projects/register", json={"project_path": project_path})
-    binding_response = product_api_client.put(
-        "/workspace/api/projects/flow-bindings/spec_edit_approved",
-        json={
-            "project_path": project_path,
+    protected_trigger, _ = workspace_triggers.create_trigger_definition(
+        server.get_settings().config_dir,
+        name="Project planning route",
+        enabled=True,
+        source_type="workspace_event",
+        action={
             "flow_name": "custom-plan.dot",
+            "project_path": project_path,
+            "static_context": {},
         },
+        source={"event_name": "spec_edit_approved"},
+        protected=True,
     )
-    assert binding_response.status_code == 200
+    assert protected_trigger.action.flow_name == "custom-plan.dot"
 
     server.PROJECT_CHAT._write_state(
         project_chat.ConversationState(
@@ -589,14 +596,20 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
 
     _write_flow("custom-implement.dot")
     product_api_client.post("/workspace/api/projects/register", json={"project_path": project_path})
-    binding_response = product_api_client.put(
-        "/workspace/api/projects/flow-bindings/execution_card_approved",
-        json={
-            "project_path": project_path,
+    protected_trigger, _ = workspace_triggers.create_trigger_definition(
+        server.get_settings().config_dir,
+        name="Project execution route",
+        enabled=True,
+        source_type="workspace_event",
+        action={
             "flow_name": "custom-implement.dot",
+            "project_path": project_path,
+            "static_context": {},
         },
+        source={"event_name": "execution_card_approved"},
+        protected=True,
     )
-    assert binding_response.status_code == 200
+    assert protected_trigger.action.flow_name == "custom-implement.dot"
 
     server.PROJECT_CHAT._write_state(
         project_chat.ConversationState(

@@ -26,14 +26,25 @@ from workspace.flow_catalog import (
     read_flow_raw,
     set_flow_launch_policy,
 )
+from workspace.project_chat_common import normalize_flow_run_request_payload
 from workspace.project_chat import ProjectChatService, TurnInProgressError
 from workspace.storage import (
-    delete_project_flow_binding,
     delete_project_record,
     list_project_records,
     read_project_record,
-    set_project_flow_binding,
     update_project_record,
+)
+from workspace.triggers import (
+    TriggerError,
+    TriggerRuntime,
+    create_trigger_definition,
+    delete_trigger_definition,
+    delete_trigger_state,
+    list_trigger_definitions,
+    load_trigger_state,
+    read_trigger_definition,
+    serialize_trigger,
+    update_trigger_definition,
 )
 
 
@@ -94,9 +105,15 @@ class FlowRunRequestReviewRequest(BaseModel):
     model: Optional[str] = None
 
 
-class ProjectFlowBindingUpsertRequest(BaseModel):
-    project_path: str
+class RunLaunchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     flow_name: str
+    summary: str
+    conversation_handle: Optional[str] = None
+    project_path: Optional[str] = None
+    goal: Optional[str] = None
+    launch_context: Optional[dict[str, Any]] = None
+    model: Optional[str] = None
 
 
 class FlowLaunchPolicyUpdateRequest(BaseModel):
@@ -109,6 +126,24 @@ class ExecutionCardReviewRequest(BaseModel):
     message: str
     model: Optional[str] = None
     flow_source: Optional[str] = None
+
+
+class TriggerCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    enabled: bool = True
+    source_type: str
+    action: dict[str, Any]
+    source: dict[str, Any]
+
+
+class TriggerUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Optional[str] = None
+    enabled: Optional[bool] = None
+    action: Optional[dict[str, Any]] = None
+    source: Optional[dict[str, Any]] = None
+    regenerate_webhook_secret: bool = False
 
 
 class WorkspaceSettings(Protocol):
@@ -125,18 +160,13 @@ class WorkspaceApiDependencies:
     resolve_project_git_branch: Callable[[Path], Optional[str]]
     resolve_project_git_commit: Callable[[Path], Optional[str]]
     pick_project_directory: Callable[[], Optional[Path]]
+    get_trigger_runtime: Callable[[], TriggerRuntime]
     default_execution_planning_flow: str
     default_execution_dispatch_flow: str
 
 
 def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
     router = APIRouter()
-    workspace_flow_triggers = {
-        "spec_edit_approved",
-        "execution_card_approved",
-        "execution_card_rejected",
-        "execution_card_revision_requested",
-    }
     terminal_pipeline_statuses = {
         "success",
         "failed",
@@ -155,7 +185,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             "last_accessed_at": project.last_accessed_at,
             "is_favorite": project.is_favorite,
             "active_conversation_id": project.active_conversation_id,
-            "flow_bindings": dict(project.flow_bindings),
         }
 
     def _serialize_deleted_project_record(project: Any) -> dict[str, object]:
@@ -172,22 +201,25 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             raise HTTPException(status_code=400, detail="Project path is required.")
         return normalized_project_path
 
-    def _validate_workspace_flow_trigger(trigger: str) -> str:
-        normalized_trigger = trigger.strip()
-        if normalized_trigger not in workspace_flow_triggers:
-            raise HTTPException(status_code=400, detail=f"Unknown workspace flow trigger: {trigger}")
-        return normalized_trigger
-
     def _validate_flow_surface(surface: Optional[str]) -> str:
         normalized_surface = str(surface or "human").strip().lower()
         if normalized_surface not in {"human", "agent"}:
             raise HTTPException(status_code=400, detail="Flow surface must be 'human' or 'agent'.")
         return normalized_surface
 
-    async def _resolve_trigger_flow(project_path: str, trigger: str, fallback_flow: str) -> str:
-        project = await asyncio.to_thread(read_project_record, deps.get_settings().data_dir, project_path)
-        flow_bindings = project.flow_bindings if project is not None else {}
-        return (flow_bindings.get(trigger) or "").strip() or fallback_flow
+    def _find_workspace_event_trigger(project_path: str, event_name: str) -> str | None:
+        matching_flow: str | None = None
+        for definition in list_trigger_definitions(deps.get_settings().config_dir):
+            if definition.source_type != "workspace_event" or not definition.enabled:
+                continue
+            if str(definition.source.get("event_name") or "").strip() != event_name:
+                continue
+            configured_project = (definition.action.project_path or "").strip()
+            if configured_project and configured_project != project_path:
+                continue
+            if matching_flow is None or configured_project == project_path:
+                matching_flow = definition.action.flow_name
+        return matching_flow
 
     async def _ensure_flow_exists(flow_name: str) -> None:
         flow_path = resolve_flow_path(deps.get_settings().flows_dir, flow_name)
@@ -290,6 +322,12 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             await project_chat.publish_snapshot(conversation_id)
             raise HTTPException(status_code=500, detail=error)
 
+        await deps.get_trigger_runtime().observe_run(
+            run_id=workflow_run_id,
+            flow_name=flow_source,
+            project_path=launch_spec.project_path,
+        )
+
         async def monitor() -> None:
             try:
                 payload = await _wait_for_pipeline_terminal_status(workflow_run_id)
@@ -364,6 +402,11 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         if not run_id:
             raise HTTPException(status_code=500, detail="Execution flow did not return a run id.")
 
+        await deps.get_trigger_runtime().observe_run(
+            run_id=run_id,
+            flow_name=flow_source,
+            project_path=project_path,
+        )
         await asyncio.to_thread(
             project_chat.note_execution_card_dispatched,
             conversation_id,
@@ -436,7 +479,47 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             run_id,
             flow_name,
         )
+        await deps.get_trigger_runtime().observe_run(
+            run_id=run_id,
+            flow_name=flow_name,
+            project_path=project_path,
+        )
         await project_chat.publish_snapshot(conversation_id)
+        return run_id
+
+    async def _launch_direct_flow(
+        *,
+        flow_name: str,
+        project_path: str,
+        goal: Optional[str],
+        launch_context: Optional[dict[str, Any]],
+        model: Optional[str],
+    ) -> str:
+        try:
+            launch_payload = await deps.get_attractor_client().start_pipeline(
+                run_id=None,
+                flow_name=flow_name,
+                working_directory=project_path,
+                model=model,
+                goal=goal,
+                launch_context=launch_context,
+            )
+        except AttractorApiError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+        if launch_payload.get("status") != "started":
+            error = str(launch_payload.get("error") or "Flow launch could not be started.")
+            raise HTTPException(status_code=500, detail=error)
+
+        run_id = str(launch_payload.get("run_id") or "")
+        if not run_id:
+            raise HTTPException(status_code=500, detail="Flow launch did not return a run id.")
+
+        await deps.get_trigger_runtime().observe_run(
+            run_id=run_id,
+            flow_name=flow_name,
+            project_path=project_path,
+        )
         return run_id
 
     @router.get("/api/conversations/{conversation_id}")
@@ -590,51 +673,101 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @router.get("/api/projects/flow-bindings")
-    async def get_project_flow_bindings(project_path: str):
-        normalized_project_path = _normalize_project_path_or_400(project_path)
-        project = await asyncio.to_thread(read_project_record, deps.get_settings().data_dir, normalized_project_path)
-        if project is None:
-            raise HTTPException(status_code=404, detail="Unknown project.")
-        return {
-            "project_path": project.project_path,
-            "flow_bindings": dict(project.flow_bindings),
-        }
+    @router.get("/api/triggers")
+    async def list_triggers():
+        return await deps.get_trigger_runtime().list_triggers()
 
-    @router.put("/api/projects/flow-bindings/{trigger}")
-    async def put_project_flow_binding(trigger: str, req: ProjectFlowBindingUpsertRequest):
-        normalized_project_path = _normalize_project_path_or_400(req.project_path)
-        normalized_trigger = _validate_workspace_flow_trigger(trigger)
-        flow_name = req.flow_name.strip()
-        if not flow_name:
-            raise HTTPException(status_code=400, detail="Flow name is required.")
-        await _ensure_flow_exists(flow_name)
-        project = await asyncio.to_thread(
-            set_project_flow_binding,
-            deps.get_settings().data_dir,
-            normalized_project_path,
-            normalized_trigger,
-            flow_name,
-        )
-        return {
-            "project_path": project.project_path,
-            "flow_bindings": dict(project.flow_bindings),
-        }
+    @router.post("/api/triggers")
+    async def create_trigger(req: TriggerCreateRequest):
+        flow_name = req.action.get("flow_name")
+        if not isinstance(flow_name, str) or not flow_name.strip():
+            raise HTTPException(status_code=400, detail="Trigger action requires a flow_name.")
+        await _ensure_flow_exists(flow_name.strip())
+        try:
+            definition, webhook_secret = await asyncio.to_thread(
+                create_trigger_definition,
+                deps.get_settings().config_dir,
+                name=req.name,
+                enabled=req.enabled,
+                source_type=req.source_type,
+                action=req.action,
+                source=req.source,
+                protected=False,
+            )
+        except TriggerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await deps.get_trigger_runtime().reload()
+        state = load_trigger_state(deps.get_settings().data_dir, definition.id)
+        return serialize_trigger(definition, state, webhook_secret=webhook_secret)
 
-    @router.delete("/api/projects/flow-bindings/{trigger}")
-    async def remove_project_flow_binding(trigger: str, project_path: str):
-        normalized_project_path = _normalize_project_path_or_400(project_path)
-        normalized_trigger = _validate_workspace_flow_trigger(trigger)
-        project = await asyncio.to_thread(
-            delete_project_flow_binding,
-            deps.get_settings().data_dir,
-            normalized_project_path,
-            normalized_trigger,
-        )
-        return {
-            "project_path": project.project_path,
-            "flow_bindings": dict(project.flow_bindings),
-        }
+    @router.get("/api/triggers/{trigger_id}")
+    async def get_trigger(trigger_id: str):
+        payload = await deps.get_trigger_runtime().get_trigger(trigger_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Unknown trigger.")
+        return payload
+
+    @router.patch("/api/triggers/{trigger_id}")
+    async def patch_trigger(trigger_id: str, req: TriggerUpdateRequest):
+        next_action = req.action
+        if next_action is not None:
+            flow_name = next_action.get("flow_name")
+            if isinstance(flow_name, str) and flow_name.strip():
+                await _ensure_flow_exists(flow_name.strip())
+        try:
+            definition, webhook_secret = await asyncio.to_thread(
+                update_trigger_definition,
+                deps.get_settings().config_dir,
+                trigger_id,
+                name=req.name,
+                enabled=req.enabled,
+                action=next_action,
+                source=req.source,
+                regenerate_webhook_secret=req.regenerate_webhook_secret,
+            )
+        except TriggerError as exc:
+            status_code = 404 if str(exc) == "Unknown trigger." else 400
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+        await deps.get_trigger_runtime().reload()
+        state = load_trigger_state(deps.get_settings().data_dir, definition.id)
+        return serialize_trigger(definition, state, webhook_secret=webhook_secret)
+
+    @router.delete("/api/triggers/{trigger_id}")
+    async def remove_trigger(trigger_id: str):
+        definition = read_trigger_definition(deps.get_settings().config_dir, trigger_id)
+        if definition is None:
+            raise HTTPException(status_code=404, detail="Unknown trigger.")
+        if definition.protected:
+            raise HTTPException(status_code=400, detail="Protected triggers cannot be deleted.")
+        await asyncio.to_thread(delete_trigger_definition, deps.get_settings().config_dir, trigger_id)
+        await asyncio.to_thread(delete_trigger_state, deps.get_settings().data_dir, trigger_id)
+        await deps.get_trigger_runtime().reload()
+        return {"status": "deleted", "id": trigger_id}
+
+    @router.post("/api/webhooks")
+    async def post_trigger_webhook(request: Request):
+        webhook_key = request.headers.get("X-Spark-Webhook-Key", "").strip()
+        webhook_secret = request.headers.get("X-Spark-Webhook-Secret", "").strip()
+        request_id = request.headers.get("X-Spark-Webhook-Request-Id", "").strip() or None
+        if not webhook_key or not webhook_secret:
+            raise HTTPException(status_code=401, detail="Webhook key and secret headers are required.")
+        try:
+            payload = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail="Webhook payload must be valid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Webhook payload must be a JSON object.")
+        try:
+            return await deps.get_trigger_runtime().handle_webhook(
+                webhook_key=webhook_key,
+                webhook_secret=webhook_secret,
+                payload=payload,
+                request_id=request_id,
+            )
+        except TriggerError as exc:
+            detail = str(exc)
+            status_code = 403 if "secret" in detail.lower() else 404 if "Unknown" in detail else 400
+            raise HTTPException(status_code=status_code, detail=detail) from exc
 
     @router.get("/api/projects/conversations")
     async def list_project_conversations(project_path: str):
@@ -768,6 +901,109 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             **result,
         }
 
+    @router.post("/api/runs/launch")
+    async def launch_workspace_run(req: RunLaunchRequest):
+        normalized_payload = normalize_flow_run_request_payload(
+            req.model_dump(),
+            source_name="spark run launch",
+        )
+        await _ensure_flow_exists(normalized_payload["flow_name"])
+
+        conversation_handle = str(req.conversation_handle or "").strip() or None
+        explicit_project_path = str(req.project_path or "").strip() or None
+        conversation_id: str | None = None
+        normalized_project_path: str
+        artifact_result: dict[str, object] | None = None
+
+        if conversation_handle:
+            try:
+                conversation_id, resolved_project_path = await asyncio.to_thread(
+                    deps.get_project_chat().resolve_conversation_handle,
+                    conversation_handle,
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"Unknown conversation handle: {conversation_handle}. "
+                        "Verify the handle shown in the thread UI and try again."
+                    ),
+                ) from exc
+            if explicit_project_path:
+                normalized_explicit_project_path = _normalize_project_path_or_400(explicit_project_path)
+                if normalized_explicit_project_path != resolved_project_path:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Explicit --project path does not match the project bound to the conversation handle."
+                        ),
+                    )
+            normalized_project_path = resolved_project_path
+            try:
+                artifact_result = await asyncio.to_thread(
+                    deps.get_project_chat().create_flow_launch,
+                    conversation_id,
+                    normalized_project_path,
+                    normalized_payload,
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=f"Unknown conversation: {conversation_id}") from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            await deps.get_project_chat().publish_snapshot(conversation_id)
+        else:
+            if not explicit_project_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Project path is required when conversation_handle is omitted.",
+                )
+            normalized_project_path = _normalize_project_path_or_400(explicit_project_path)
+
+        try:
+            run_id = await _launch_direct_flow(
+                flow_name=str(normalized_payload["flow_name"]),
+                project_path=normalized_project_path,
+                goal=normalized_payload.get("goal") if isinstance(normalized_payload.get("goal"), str) else None,
+                launch_context=normalized_payload.get("launch_context") if isinstance(normalized_payload.get("launch_context"), dict) else None,
+                model=normalized_payload.get("model") if isinstance(normalized_payload.get("model"), str) else None,
+            )
+        except HTTPException as exc:
+            if conversation_id and artifact_result and isinstance(artifact_result.get("flow_launch_id"), str):
+                await asyncio.to_thread(
+                    deps.get_project_chat().fail_flow_launch,
+                    conversation_id,
+                    str(artifact_result["flow_launch_id"]),
+                    str(normalized_payload["flow_name"]),
+                    str(exc.detail),
+                )
+                await deps.get_project_chat().publish_snapshot(conversation_id)
+            raise
+
+        if conversation_id and artifact_result and isinstance(artifact_result.get("flow_launch_id"), str):
+            await asyncio.to_thread(
+                deps.get_project_chat().note_flow_launch_started,
+                conversation_id,
+                str(artifact_result["flow_launch_id"]),
+                run_id,
+                str(normalized_payload["flow_name"]),
+            )
+            await deps.get_project_chat().publish_snapshot(conversation_id)
+
+        response_payload: dict[str, object] = {
+            "ok": True,
+            "status": "started",
+            "run_id": run_id,
+            "flow_name": str(normalized_payload["flow_name"]),
+            "project_path": normalized_project_path,
+        }
+        if conversation_handle:
+            response_payload["conversation_handle"] = conversation_handle
+        if conversation_id:
+            response_payload["conversation_id"] = conversation_id
+        if artifact_result:
+            response_payload.update(artifact_result)
+        return response_payload
+
     @router.post("/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/approve")
     async def approve_project_spec_edit_proposal(
         conversation_id: str,
@@ -777,11 +1013,8 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         normalized_project_path = _normalize_project_path_or_400(req.project_path)
         effective_flow_source = (
             (req.flow_source or "").strip()
-            or await _resolve_trigger_flow(
-                normalized_project_path,
-                "spec_edit_approved",
-                deps.default_execution_planning_flow,
-            )
+            or _find_workspace_event_trigger(normalized_project_path, "spec_edit_approved")
+            or deps.default_execution_planning_flow
         )
         await _ensure_flow_exists(effective_flow_source)
         try:
@@ -911,10 +1144,9 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 if req.disposition == "revision_requested"
                 else "execution_card_rejected"
             )
-            review_flow_source = await _resolve_trigger_flow(
-                normalized_project_path,
-                planning_trigger,
-                deps.default_execution_planning_flow,
+            review_flow_source = (
+                _find_workspace_event_trigger(normalized_project_path, planning_trigger)
+                or deps.default_execution_planning_flow
             )
         try:
             snapshot, execution_card, proposal_id, workflow_run_id = await asyncio.to_thread(
@@ -933,11 +1165,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             persisted_execution_flow = (execution_card.flow_source or "").strip()
             effective_flow_source = (
                 (req.flow_source or "").strip()
-                or await _resolve_trigger_flow(
-                    normalized_project_path,
-                    "execution_card_approved",
-                    persisted_execution_flow or deps.default_execution_dispatch_flow,
-                )
+                or _find_workspace_event_trigger(normalized_project_path, "execution_card_approved")
                 or persisted_execution_flow
                 or deps.default_execution_dispatch_flow
             )

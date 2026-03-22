@@ -118,7 +118,7 @@ def test_project_chat_prompt_includes_flow_authoring_boundary(tmp_path: Path) ->
     assert f"`{dot_authoring_guide_path()}`" in prompt
     assert f"`{flow_extensions_spec_path()}`" in prompt
     assert f"`{attractor_spec_path()}`" in prompt
-    assert "spark-workspace validate-flow --flow <name> --text" in prompt
+    assert "spark flow validate --flow <name> --text" in prompt
 
 
 def test_project_chat_service_rejects_malformed_prompt_templates(tmp_path: Path) -> None:
@@ -1395,6 +1395,123 @@ def test_flow_run_request_routes_create_and_approve_launch(
                     "Approved work items are implemented.",
                     "Required tests are updated.",
                 ],
+            },
+            "spec_id": None,
+            "plan_id": None,
+        }
+    ]
+
+
+def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
+    product_api_client,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path.resolve()
+    conversation_id = "conversation-flow-launch"
+    state = project_chat.ConversationState(
+        conversation_id=conversation_id,
+        project_path=str(project_dir),
+        title="Flow launch route",
+        created_at="2026-03-13T10:00:00Z",
+        updated_at="2026-03-13T10:01:00Z",
+        turns=[
+            project_chat.ConversationTurn(
+                id="turn-user-1",
+                role="user",
+                content="Launch the implementation flow now.",
+                timestamp="2026-03-13T10:00:00Z",
+            ),
+            project_chat.ConversationTurn(
+                id="turn-assistant-1",
+                role="assistant",
+                content="I can launch that now.",
+                timestamp="2026-03-13T10:01:00Z",
+                status="complete",
+            ),
+        ],
+    )
+    server.PROJECT_CHAT._write_state(state)
+    snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
+
+    flows_dir = server.get_settings().flows_dir
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    (flows_dir / "implement-spec.dot").write_text("digraph implement_spec { start -> done; }\n", encoding="utf-8")
+
+    start_calls: list[dict[str, object | None]] = []
+
+    async def fake_start_pipeline(
+        self,
+        *,
+        run_id: str | None,
+        flow_name: str,
+        working_directory: str,
+        model: str | None,
+        goal: str | None = None,
+        launch_context: dict[str, object] | None = None,
+        spec_id: str | None = None,
+        plan_id: str | None = None,
+    ) -> dict[str, object]:
+        start_calls.append(
+            {
+                "run_id": run_id,
+                "flow_name": flow_name,
+                "working_directory": working_directory,
+                "model": model,
+                "goal": goal,
+                "launch_context": launch_context,
+                "spec_id": spec_id,
+                "plan_id": plan_id,
+            }
+        )
+        return {"status": "started", "run_id": "run-launch-123"}
+
+    monkeypatch.setattr(attractor_client.AttractorApiClient, "start_pipeline", fake_start_pipeline)
+
+    launch_response = product_api_client.post(
+        "/workspace/api/runs/launch",
+        json={
+            "flow_name": "implement-spec.dot",
+            "summary": "Launch implementation immediately.",
+            "conversation_handle": snapshot["conversation_handle"],
+            "project_path": str(project_dir),
+            "goal": "Implement the approved scope.",
+            "launch_context": {
+                "context.request.summary": "Implement the approved scope.",
+            },
+            "model": "gpt-5.4",
+        },
+    )
+
+    assert launch_response.status_code == 200
+    launch_payload = launch_response.json()
+    assert launch_payload["ok"] is True
+    assert launch_payload["conversation_id"] == conversation_id
+    assert launch_payload["conversation_handle"] == snapshot["conversation_handle"]
+    assert launch_payload["run_id"] == "run-launch-123"
+    assert launch_payload["flow_launch_id"].startswith("flow-launch-")
+
+    updated_snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
+    flow_launch = next(
+        entry for entry in updated_snapshot["flow_launches"] if entry["id"] == launch_payload["flow_launch_id"]
+    )
+    assert flow_launch["status"] == "launched"
+    assert flow_launch["run_id"] == "run-launch-123"
+    assert flow_launch["goal"] == "Implement the approved scope."
+    segment = next(
+        entry for entry in updated_snapshot["segments"] if entry["artifact_id"] == launch_payload["flow_launch_id"]
+    )
+    assert segment["kind"] == "flow_launch"
+    assert segment["turn_id"] == "turn-assistant-1"
+    assert start_calls == [
+        {
+            "run_id": None,
+            "flow_name": "implement-spec.dot",
+            "working_directory": str(project_dir),
+            "model": "gpt-5.4",
+            "goal": "Implement the approved scope.",
+            "launch_context": {
+                "context.request.summary": "Implement the approved scope.",
             },
             "spec_id": None,
             "plan_id": None,

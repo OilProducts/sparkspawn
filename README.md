@@ -24,7 +24,7 @@ Spark is a workspace workbench for AI-assisted software delivery. It combines a 
 8. Monitor execution in the Execution and Runs views.
 
 The UI also supports a direct authoring workflow: Home -> Editor -> Execution -> Runs.
-Flow authoring is workspace-global rather than project-owned: you can open the Editor without selecting a project, while the Execution view keeps run-start actions disabled until a project context is selected.
+Flow authoring is workspace-global rather than project-owned: you can open the Editor without selecting a project, while the Execution view keeps run-start actions disabled until a project context is selected. Trigger automation is also workspace-global and lives in its own top-level Triggers tab rather than inside project settings.
 
 For flow authoring, use this progression:
 
@@ -32,7 +32,7 @@ For flow authoring, use this progression:
 - Product overview and authoring heuristics: this README
 - Full raw DOT reference: [src/spark/guides/dot-authoring.md](/Users/chris/projects/spark/src/spark/guides/dot-authoring.md)
 
-After direct flow edits, validate with `spark-workspace validate-flow --flow <name> --text`.
+After direct flow edits, validate with `spark flow validate --flow <name> --text`.
 
 ## Flow Building Guide
 
@@ -49,13 +49,13 @@ Use the flow `goal` as the user-facing stated goal for the run:
 
 - In prompts and flow descriptions, write to the “stated goal”, not internal engine names like `graph.goal`.
 - Direct runs from the editor currently use the flow's saved `goal`.
-- Workspace chat flow-run requests and `spark-workspace flow-run --goal/--goal-file` can override that stated goal per run.
+- Workspace chat run requests and `spark convo run-request --goal/--goal-file` can override that stated goal per run.
 
 Use `launch_context` when one goal string is not enough:
 
 - `launch_context` is first-class initial run state under `context.*`, not a prompt-only hack.
 - Use it for structured launch details like request summaries, target paths, constraints, and acceptance criteria.
-- Workspace flow-run requests accept `launch_context`, and `spark-workspace flow-run --launch-context-json/--launch-context-file` can populate it.
+- Workspace run requests accept `launch_context`, and `spark convo run-request --launch-context-json/--launch-context-file` can populate it.
 - Keep launch keys stable and semantic, for example `context.request.summary`, `context.request.target_paths`, and `context.request.acceptance_criteria`.
 - In the flow editor, declare these inputs in Graph Settings -> Launch Inputs so direct execution can render a launch form from the flow itself.
 
@@ -115,7 +115,7 @@ Use hooks and model defaults deliberately:
 ## Architecture
 
 - [src/attractor/](/Users/chris/projects/spark/src/attractor): Attractor runtime, pipeline engine, handlers, CLI, and mounted Attractor API
-- [src/workspace/](/Users/chris/projects/spark/src/workspace): Spark workspace service, conversations, review artifacts, trigger bindings, and mounted Workspace API
+- [src/workspace/](/Users/chris/projects/spark/src/workspace): Spark workspace service, conversations, review artifacts, trigger subsystem, and mounted Workspace API
 - [frontend/](/Users/chris/projects/spark/frontend): React 19 + Vite UI
 - [starter-flows/](/Users/chris/projects/spark/starter-flows): curated starter `.dot` flows intended for first-run seeding
 - [tests/fixtures/flows/](/Users/chris/projects/spark/tests/fixtures/flows): repo-only `.dot` fixtures used by tests and local development
@@ -224,7 +224,7 @@ Current API groups include:
 - Attractor human-gate actions: `GET /attractor/pipelines/{id}/questions`, `POST /attractor/pipelines/{id}/questions/{question_id}/answer`
 - Attractor flow management: `GET /attractor/api/flows`, `POST /attractor/api/flows`, `GET /attractor/api/flows/{name}`, `DELETE /attractor/api/flows/{name}`
 - Workspace project management: `GET /workspace/api/projects`, `POST /workspace/api/projects/register`, `PATCH /workspace/api/projects/state`, `DELETE /workspace/api/projects`
-- Workspace flow bindings and metadata: `GET /workspace/api/projects/flow-bindings`, `PUT /workspace/api/projects/flow-bindings/{trigger}`, `DELETE /workspace/api/projects/flow-bindings/{trigger}`, `GET /workspace/api/projects/metadata`, `POST /workspace/api/projects/pick-directory`
+- Workspace triggers and project metadata: `GET /workspace/api/triggers`, `POST /workspace/api/triggers`, `GET /workspace/api/triggers/{trigger_id}`, `PATCH /workspace/api/triggers/{trigger_id}`, `DELETE /workspace/api/triggers/{trigger_id}`, `POST /workspace/api/webhooks`, `GET /workspace/api/projects/metadata`, `POST /workspace/api/projects/pick-directory`
 - Workspace conversations: `GET /workspace/api/projects/conversations`, `GET /workspace/api/conversations/{conversation_id}`, `GET /workspace/api/conversations/{conversation_id}/events`, `POST /workspace/api/conversations/{conversation_id}/turns`, `DELETE /workspace/api/conversations/{conversation_id}`
 - Workspace review workflows: `POST /workspace/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/approve`, `POST /workspace/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/reject`, `POST /workspace/api/conversations/{conversation_id}/execution-cards/{execution_card_id}/review`
 
@@ -286,7 +286,7 @@ pip install dist/*.whl
 
 - Flow files are stored as canonical DOT and validated before save.
 - Spark flow self-description lives in DOT via `spark.title` and `spark.description`, while workspace launch policy is stored separately in `~/.spark/config/flow-catalog.toml`.
-- The agent-facing workspace CLI exposes curated flow discovery commands with JSON default output: `spark-workspace list-flows`, `spark-workspace describe-flow --flow <name>`, and `spark-workspace get-flow --flow <name>`.
+- The agent-facing CLI exposes curated flow discovery commands with JSON default output: `spark flow list`, `spark flow describe --flow <name>`, and `spark flow get --flow <name>`.
 - The editor supports both structured editing and raw DOT editing, including semantic-equivalence safety checks during handoff.
 - The Runs view is intended for historical inspection, diagnostics, artifact browsing, and replaying execution context.
 - Starter flow templates live in [starter-flows/plan-generation.dot](/Users/chris/projects/spark/starter-flows/plan-generation.dot), [starter-flows/parallel-review.dot](/Users/chris/projects/spark/starter-flows/parallel-review.dot), [starter-flows/simple-linear.dot](/Users/chris/projects/spark/starter-flows/simple-linear.dot), [starter-flows/human-review-loop.dot](/Users/chris/projects/spark/starter-flows/human-review-loop.dot), [starter-flows/implement-review-loop.dot](/Users/chris/projects/spark/starter-flows/implement-review-loop.dot), [starter-flows/implement-spec.dot](/Users/chris/projects/spark/starter-flows/implement-spec.dot), [starter-flows/implementation-worker.dot](/Users/chris/projects/spark/starter-flows/implementation-worker.dot), and [starter-flows/supervised-implementation.dot](/Users/chris/projects/spark/starter-flows/supervised-implementation.dot).

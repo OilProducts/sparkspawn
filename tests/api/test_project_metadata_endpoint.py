@@ -154,7 +154,7 @@ def test_project_registry_endpoints_persist_project_metadata(
     assert register_payload["display_name"] == "registered-project"
     assert register_payload["is_favorite"] is False
     assert register_payload["active_conversation_id"] is None
-    assert register_payload["flow_bindings"] == {}
+    assert "flow_bindings" not in register_payload
 
     list_response = product_api_client.get("/workspace/api/projects")
 
@@ -219,58 +219,7 @@ def test_project_state_endpoint_updates_favorite_and_conversation_metadata(
     assert payload["is_favorite"] is True
     assert payload["last_accessed_at"] == "2026-03-08T12:00:00Z"
     assert payload["active_conversation_id"] == "conversation-tracked-project"
-    assert payload["flow_bindings"] == {}
-
-
-def test_project_flow_binding_endpoints_persist_trigger_bindings(
-    product_api_client: TestClient,
-    tmp_path: Path,
-) -> None:
-    project_dir = (tmp_path / "binding-project").resolve()
-    project_dir.mkdir()
-    _write_flow("plan-generation.dot")
-
-    product_api_client.post("/workspace/api/projects/register", json={"project_path": str(project_dir)})
-
-    put_response = product_api_client.put(
-        "/workspace/api/projects/flow-bindings/spec_edit_approved",
-        json={
-            "project_path": str(project_dir),
-            "flow_name": "plan-generation.dot",
-        },
-    )
-
-    assert put_response.status_code == 200
-    assert put_response.json() == {
-        "project_path": str(project_dir),
-        "flow_bindings": {
-            "spec_edit_approved": "plan-generation.dot",
-        },
-    }
-
-    get_response = product_api_client.get(
-        "/workspace/api/projects/flow-bindings",
-        params={"project_path": str(project_dir)},
-    )
-
-    assert get_response.status_code == 200
-    assert get_response.json() == {
-        "project_path": str(project_dir),
-        "flow_bindings": {
-            "spec_edit_approved": "plan-generation.dot",
-        },
-    }
-
-    delete_response = product_api_client.delete(
-        "/workspace/api/projects/flow-bindings/spec_edit_approved",
-        params={"project_path": str(project_dir)},
-    )
-
-    assert delete_response.status_code == 200
-    assert delete_response.json() == {
-        "project_path": str(project_dir),
-        "flow_bindings": {},
-    }
+    assert "flow_bindings" not in payload
 
 
 def test_project_delete_endpoint_removes_registered_project_storage(

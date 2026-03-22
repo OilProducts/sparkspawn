@@ -67,7 +67,6 @@ export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice
                     directoryPath: normalizedPath,
                     isFavorite: project.isFavorite === true,
                     lastAccessedAt: typeof project.lastAccessedAt === 'string' ? project.lastAccessedAt : null,
-                    flowBindings: { ...(project.flowBindings ?? {}) },
                 }
                 nextProjectSessionStates[normalizedPath] = resolveProjectSessionState(
                     {
@@ -112,7 +111,6 @@ export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice
                     directoryPath: normalizedPath,
                     isFavorite: project.isFavorite === true,
                     lastAccessedAt: typeof project.lastAccessedAt === 'string' ? project.lastAccessedAt : null,
-                    flowBindings: { ...(project.flowBindings ?? {}) },
                 },
             }
             const nextProjectSessionStates = {
@@ -278,7 +276,6 @@ export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice
                     directoryPath: normalizedPath,
                     isFavorite: false,
                     lastAccessedAt: nowIso,
-                    flowBindings: {},
                 },
             }
             nextProjectSessionStates[normalizedPath] = resolveProjectSessionState(

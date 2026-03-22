@@ -35,8 +35,8 @@ Workspace owns:
 - execution cards
 - human review decisions for workspace artifacts
 - provenance links from workspace artifacts to Attractor flows and runs
-- project-to-flow associations
-- trigger-to-flow bindings
+- flow references for workspace artifacts
+- workspace-owned trigger definitions and trigger runtime state
 
 Workspace does not own:
 - the Attractor flow definition itself
@@ -60,7 +60,7 @@ Spark remains authoritative for:
 - workspace artifacts and review state
 - workspace-scoped project identity
 - provenance between artifacts and runs
-- launch selection and project-scoped trigger bindings
+- launch selection and workspace-owned triggers
 
 When both layers run inside one process, they must still remain distinct service surfaces. A modular monolith is acceptable; a mixed undifferentiated API surface is not.
 
@@ -142,9 +142,9 @@ Flow documents remain Attractor resources.
 They are shared workspace/global authoring assets rather than per-project copies.
 
 Spark owns:
-- which flows are associated with a project
 - which flow a workspace artifact references
-- which triggers are bound to which flows for a project
+- which workspace triggers launch which flows
+- whether a trigger action carries a project target
 
 ## 6. Project Identity and Registration
 
@@ -271,11 +271,12 @@ The main touch points are:
 Spark may expose a narrow first-party CLI surface for agent-created workspace artifacts:
 
 ```text
-spark-workspace spec-proposal --conversation <adjective-noun> --json <payload.json>
-spark-workspace flow-run --conversation <adjective-noun> --flow <flow_name> --summary <text> [--goal-file <path>|--goal -] [--model <model>]
-spark-workspace list-flows [--text]
-spark-workspace describe-flow --flow <flow_name> [--text]
-spark-workspace get-flow --flow <flow_name> [--text]
+spark convo spec-proposal --conversation <adjective-noun> --json <payload.json>
+spark convo run-request --conversation <adjective-noun> --flow <flow_name> --summary <text> [--goal-file <path>|--goal -] [--model <model>]
+spark run launch --flow <flow_name> --summary <text> [--conversation <adjective-noun>] [--project <path>]
+spark flow list [--text]
+spark flow describe --flow <flow_name> [--text]
+spark flow get --flow <flow_name> [--text]
 ```
 
 The artifact-creation commands create pending review artifacts. They must not approve, reject, or launch downstream execution by themselves.
@@ -330,25 +331,43 @@ That provenance model must support:
 - inspecting downstream run outcomes from a conversation
 - tracing review decisions back to their source turn and project context
 
-## 15. Project-to-Flow Associations and Trigger Bindings
+## 15. Workspace Trigger Subsystem
 
-Trigger bindings are workspace resources, not Attractor flow resources.
+Triggers are workspace resources, not project records and not Attractor flow resources.
 
-Each binding is:
-- project-scoped
-- keyed by a stable trigger name
-- resolved to a flow name owned by Attractor
+Each trigger definition includes:
+- stable trigger id
+- name
+- enabled/disabled state
+- protected/non-protected status
+- source configuration
+- `launch_flow` action configuration
 
-Initial trigger set:
+The action may optionally include a project target. Project context is therefore an execution input, not the owner of trigger identity.
+
+Persisted definitions live under:
+- `SPARK_HOME/config/triggers/<id>.toml`
+
+Persisted runtime state lives under:
+- `SPARK_HOME/workspace/trigger-state/<id>.json`
+
+V1 source types are:
+- `workspace_event`
+- `schedule`
+- `poll`
+- `webhook`
+- `flow_event`
+
+Protected system triggers cover the built-in approval/review hooks:
 - `spec_edit_approved`
 - `execution_card_approved`
 - `execution_card_rejected`
 - `execution_card_revision_requested`
 
-Launch flow resolution order:
-1. explicit request override
-2. project trigger binding
-3. built-in workspace fallback
+Webhook ingress is shared under:
+- `POST /workspace/api/webhooks`
+
+Webhook routing is resolved by per-trigger credentials rather than by per-trigger URL paths.
 
 ## 16. Storage Boundaries
 
@@ -366,7 +385,7 @@ Spark-owned durable data includes:
 - review decisions
 - run metadata linkage
 - project registry metadata
-- trigger bindings and provenance metadata
+- trigger definitions, trigger runtime state, and provenance metadata
 
 Project-owned data includes:
 - specifications
@@ -385,9 +404,11 @@ Canonical `SPARK_HOME` layout:
 ```text
 SPARK_HOME/
   config/
+    triggers/
   runtime/
   logs/
   workspace/
+    trigger-state/
     projects/
       <project-id>/
         project.toml
@@ -418,7 +439,7 @@ Workspace API categories should cover:
 - conversation events and snapshots
 - review artifacts
 - artifact review actions
-- trigger bindings
+- triggers and webhook ingress
 - provenance lookups
 
 Workspace events and Attractor events should remain separate at the service boundary even if the frontend presents them together.

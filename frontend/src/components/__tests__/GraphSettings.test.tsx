@@ -29,7 +29,6 @@ const resetGraphSettingsState = () => {
     },
     projectSessionsByPath: {
       '/tmp/project-graph-settings': {
-        activeFlow: 'implement-spec.dot',
         workingDir: DEFAULT_WORKING_DIRECTORY,
         conversationId: null,
         specId: null,

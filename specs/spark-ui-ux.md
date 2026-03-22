@@ -68,7 +68,7 @@ The frontend must not persist local state that overrides backend truth for:
 - which artifacts exist
 - whether an artifact was approved
 - which run an artifact launched
-- which flow a trigger resolves to
+- which flows workspace triggers resolve to
 
 When local state becomes invalid relative to backend state, the backend wins.
 
@@ -81,7 +81,7 @@ The frontend consumes workspace data for:
 - project conversations
 - inline conversation artifacts
 - proposal and execution-card review state
-- trigger bindings
+- workspace trigger definitions and runtime summaries
 - provenance references to flows and runs
 
 ### 5.2 Attractor Data
@@ -103,7 +103,7 @@ The frontend must preserve the conceptual separation between:
 - workspace artifacts
 - Attractor runs
 
-Workflow launch flow selection comes from workspace bindings or explicit operator overrides. It must not be inferred from whichever flow happens to be open in the editor.
+Workflow launch flow selection comes from workspace trigger configuration or explicit operator overrides. It must not be inferred from whichever flow happens to be open in the editor.
 
 ## 6. Primary User Workflows
 
@@ -125,6 +125,7 @@ Home is the default top-level workspace for:
 
 Navigation should preserve project framing as the operator moves from conversation to execution and run inspection whenever that framing still applies.
 The Editor may open with no active project. The Execution view may also open without a project, but run-start actions must remain locally gated on selecting a project.
+Triggers are a first-class top-level workspace view because they are global automations rather than project settings.
 
 ## 8. Presentation Surfaces
 

@@ -6,6 +6,7 @@ import { RunStream } from "./components/RunStream"
 import { SettingsPanel } from "./components/SettingsPanel"
 import { RunsPanel } from "./components/RunsPanel"
 import { HomePanel } from "./components/ProjectsPanel"
+import { TriggersPanel } from "./components/TriggersPanel"
 import { ReactFlowProvider } from "@xyflow/react"
 import { useStore } from "@/store"
 import { useNarrowViewport } from "@/lib/useNarrowViewport"
@@ -33,7 +34,6 @@ function App() {
               isFavorite: project.is_favorite,
               lastAccessedAt: project.last_accessed_at ?? null,
               activeConversationId: project.active_conversation_id ?? null,
-              flowBindings: project.flow_bindings ?? {},
             })),
           )
         }
@@ -63,6 +63,8 @@ function App() {
                 </div>
                 <Terminal />
               </div>
+            ) : viewMode === 'triggers' ? (
+              <TriggersPanel />
             ) : viewMode === 'settings' ? (
               <SettingsPanel />
             ) : isHomeMode ? (

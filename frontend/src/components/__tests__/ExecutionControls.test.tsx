@@ -121,7 +121,6 @@ describe('Execution controls behavior', () => {
       activeFlow: 'implement-spec.dot',
       projectSessionsByPath: {
         '/tmp/project': {
-          activeFlow: 'implement-spec.dot',
           workingDir: '/tmp/project',
           conversationId: null,
           projectEventLog: [],
@@ -183,7 +182,6 @@ describe('Execution controls behavior', () => {
       executionFlow: 'run-opened.dot',
       projectSessionsByPath: {
         '/tmp/project': {
-          activeFlow: 'preferred.dot',
           workingDir: '/tmp/project',
           conversationId: null,
           projectEventLog: [],
@@ -272,7 +270,6 @@ describe('Execution controls behavior', () => {
       },
       projectSessionsByPath: {
         '/tmp/project': {
-          activeFlow: 'implement-review-loop.dot',
           workingDir: '/tmp/project',
           conversationId: null,
           projectEventLog: [],

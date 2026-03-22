@@ -2,7 +2,6 @@ import {
     ApiSchemaError,
     asOptionalNullableString,
     asOptionalString,
-    asStringRecord,
     asUnknownRecord,
     expectObjectRecord,
     expectString,
@@ -29,7 +28,7 @@ export interface ConversationTurnResponse {
     content: string
     timestamp: string
     status: 'pending' | 'streaming' | 'complete' | 'failed'
-    kind: 'message' | 'spec_edit_proposal' | 'flow_run_request' | 'execution_card'
+    kind: 'message' | 'spec_edit_proposal' | 'flow_run_request' | 'flow_launch' | 'execution_card'
     artifact_id?: string | null
     parent_turn_id?: string | null
     error?: string | null
@@ -39,7 +38,7 @@ export interface ConversationSegmentResponse {
     id: string
     turn_id: string
     order: number
-    kind: 'assistant_message' | 'reasoning' | 'tool_call' | 'spec_edit_proposal' | 'flow_run_request' | 'execution_card'
+    kind: 'assistant_message' | 'reasoning' | 'tool_call' | 'spec_edit_proposal' | 'flow_run_request' | 'flow_launch' | 'execution_card'
     role: 'assistant' | 'system'
     status: 'pending' | 'streaming' | 'complete' | 'failed' | 'running'
     timestamp: string
@@ -133,6 +132,24 @@ export interface FlowRunRequestResponse {
     review_message?: string | null
 }
 
+export interface FlowLaunchResponse {
+    id: string
+    created_at: string
+    updated_at: string
+    flow_name: string
+    summary: string
+    project_path: string
+    conversation_id: string
+    source_turn_id: string
+    status: 'pending' | 'launch_failed' | 'launched'
+    source_segment_id?: string | null
+    goal?: string | null
+    launch_context?: Record<string, unknown> | null
+    model?: string | null
+    run_id?: string | null
+    launch_error?: string | null
+}
+
 export interface ConversationSnapshotResponse {
     schema_version: number
     conversation_id: string
@@ -146,6 +163,7 @@ export interface ConversationSnapshotResponse {
     event_log: WorkflowEventResponse[]
     spec_edit_proposals: SpecEditProposalResponse[]
     flow_run_requests: FlowRunRequestResponse[]
+    flow_launches: FlowLaunchResponse[]
     execution_cards: ExecutionCardResponse[]
     execution_workflow: {
         run_id?: string | null
@@ -188,12 +206,42 @@ export interface ProjectRecordResponse {
     last_accessed_at?: string | null
     is_favorite: boolean
     active_conversation_id?: string | null
-    flow_bindings?: Record<string, string>
 }
 
-export interface ProjectFlowBindingsResponse {
-    project_path: string
-    flow_bindings: Record<string, string>
+export type TriggerSourceType = 'schedule' | 'poll' | 'webhook' | 'workspace_event' | 'flow_event'
+
+export interface TriggerActionResponse {
+    flow_name: string
+    project_path?: string | null
+    static_context?: Record<string, unknown>
+}
+
+export interface TriggerStateResponse {
+    last_fired_at?: string | null
+    last_result?: string | null
+    last_error?: string | null
+    next_run_at?: string | null
+    recent_history: Array<{
+        timestamp: string
+        status: string
+        message: string
+        run_id?: string | null
+        dedupe_key?: string | null
+    }>
+}
+
+export interface TriggerResponse {
+    id: string
+    name: string
+    enabled: boolean
+    protected: boolean
+    source_type: TriggerSourceType
+    created_at: string
+    updated_at: string
+    action: TriggerActionResponse
+    source: Record<string, unknown>
+    state: TriggerStateResponse
+    webhook_secret?: string | null
 }
 
 export type FlowLaunchPolicy = 'agent_requestable' | 'trigger_only' | 'disabled'
@@ -344,7 +392,7 @@ function parseConversationTurnResponse(value: unknown, _endpoint: string): Conve
     if (role !== 'user' && role !== 'assistant' && role !== 'system') {
         return null
     }
-    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'flow_run_request' || record.kind === 'execution_card' || record.kind === 'message'
+    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'flow_run_request' || record.kind === 'flow_launch' || record.kind === 'execution_card' || record.kind === 'message'
         ? record.kind
         : 'message'
     if (typeof record.id !== 'string' || typeof record.content !== 'string' || typeof record.timestamp !== 'string') {
@@ -389,6 +437,7 @@ function parseConversationSegmentResponse(value: unknown): ConversationSegmentRe
         || record.kind === 'tool_call'
         || record.kind === 'spec_edit_proposal'
         || record.kind === 'flow_run_request'
+        || record.kind === 'flow_launch'
         || record.kind === 'execution_card'
         ? record.kind
         : null
@@ -591,6 +640,44 @@ function parseFlowRunRequestResponse(value: unknown): FlowRunRequestResponse | n
     }
 }
 
+function parseFlowLaunchResponse(value: unknown): FlowLaunchResponse | null {
+    const record = asUnknownRecord(value)
+    if (
+        !record
+        || typeof record.id !== 'string'
+        || typeof record.created_at !== 'string'
+        || typeof record.updated_at !== 'string'
+        || typeof record.flow_name !== 'string'
+        || typeof record.summary !== 'string'
+        || typeof record.project_path !== 'string'
+        || typeof record.conversation_id !== 'string'
+        || typeof record.source_turn_id !== 'string'
+    ) {
+        return null
+    }
+    const status = record.status === 'launch_failed'
+        || record.status === 'launched'
+        ? record.status
+        : 'pending'
+    return {
+        id: record.id,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        flow_name: record.flow_name,
+        summary: record.summary,
+        project_path: record.project_path,
+        conversation_id: record.conversation_id,
+        source_turn_id: record.source_turn_id,
+        status,
+        source_segment_id: asOptionalNullableString(record.source_segment_id),
+        goal: asOptionalNullableString(record.goal),
+        launch_context: asUnknownRecord(record.launch_context),
+        model: asOptionalNullableString(record.model),
+        run_id: asOptionalNullableString(record.run_id),
+        launch_error: asOptionalNullableString(record.launch_error),
+    }
+}
+
 function parseConversationSummaryResponse(value: unknown, _endpoint: string): ConversationSummaryResponse | null {
     const record = asUnknownRecord(value)
     if (
@@ -633,18 +720,6 @@ function parseProjectRecordResponse(value: unknown, _endpoint: string): ProjectR
         last_accessed_at: asOptionalNullableString(record.last_accessed_at),
         is_favorite: record.is_favorite === true,
         active_conversation_id: asOptionalNullableString(record.active_conversation_id),
-        flow_bindings: asStringRecord(record.flow_bindings) ?? {},
-    }
-}
-
-export function parseProjectFlowBindingsResponse(
-    payload: unknown,
-    endpoint = '/workspace/api/projects/flow-bindings',
-): ProjectFlowBindingsResponse {
-    const record = expectObjectRecord(payload, endpoint)
-    return {
-        project_path: expectString(record.project_path, endpoint, 'project_path'),
-        flow_bindings: asStringRecord(record.flow_bindings) ?? {},
     }
 }
 
@@ -734,6 +809,69 @@ export function parseProjectMetadataResponse(
     }
 }
 
+function parseTriggerStateResponse(value: unknown, endpoint: string): TriggerStateResponse {
+    const record = expectObjectRecord(value, endpoint)
+    const recentHistory = Array.isArray(record.recent_history)
+        ? record.recent_history
+            .map((entry) => asUnknownRecord(entry))
+            .filter((entry): entry is Record<string, unknown> => entry !== null)
+            .filter((entry) => typeof entry.timestamp === 'string' && typeof entry.status === 'string' && typeof entry.message === 'string')
+            .map((entry) => ({
+                timestamp: String(entry.timestamp),
+                status: String(entry.status),
+                message: String(entry.message),
+                run_id: asOptionalNullableString(entry.run_id),
+                dedupe_key: asOptionalNullableString(entry.dedupe_key),
+            }))
+        : []
+    return {
+        last_fired_at: asOptionalNullableString(record.last_fired_at),
+        last_result: asOptionalNullableString(record.last_result),
+        last_error: asOptionalNullableString(record.last_error),
+        next_run_at: asOptionalNullableString(record.next_run_at),
+        recent_history: recentHistory,
+    }
+}
+
+export function parseTriggerResponse(payload: unknown, endpoint = '/workspace/api/triggers'): TriggerResponse {
+    const record = expectObjectRecord(payload, endpoint)
+    const sourceType = expectString(record.source_type, endpoint, 'source_type')
+    if (
+        sourceType !== 'schedule'
+        && sourceType !== 'poll'
+        && sourceType !== 'webhook'
+        && sourceType !== 'workspace_event'
+        && sourceType !== 'flow_event'
+    ) {
+        throw new ApiSchemaError(endpoint, `Unsupported trigger source_type "${sourceType}".`)
+    }
+    const actionRecord = expectObjectRecord(record.action, endpoint)
+    return {
+        id: expectString(record.id, endpoint, 'id'),
+        name: expectString(record.name, endpoint, 'name'),
+        enabled: record.enabled === true,
+        protected: record.protected === true,
+        source_type: sourceType,
+        created_at: expectString(record.created_at, endpoint, 'created_at'),
+        updated_at: expectString(record.updated_at, endpoint, 'updated_at'),
+        action: {
+            flow_name: expectString(actionRecord.flow_name, endpoint, 'action.flow_name'),
+            project_path: asOptionalNullableString(actionRecord.project_path),
+            static_context: asUnknownRecord(actionRecord.static_context) ?? {},
+        },
+        source: asUnknownRecord(record.source) ?? {},
+        state: parseTriggerStateResponse(record.state, endpoint),
+        webhook_secret: asOptionalNullableString(record.webhook_secret),
+    }
+}
+
+export function parseTriggerListResponse(payload: unknown, endpoint = '/workspace/api/triggers'): TriggerResponse[] {
+    if (!Array.isArray(payload)) {
+        throw new ApiSchemaError(endpoint, 'Expected an array of triggers.')
+    }
+    return payload.map((entry) => parseTriggerResponse(entry, endpoint))
+}
+
 export function parseConversationSnapshotResponse(
     payload: unknown,
     endpoint = '/workspace/api/conversations/{id}',
@@ -768,6 +906,11 @@ export function parseConversationSnapshotResponse(
             .map((entry) => parseFlowRunRequestResponse(entry))
             .filter((entry): entry is FlowRunRequestResponse => entry !== null)
         : []
+    const flow_launches = Array.isArray(record.flow_launches)
+        ? record.flow_launches
+            .map((entry) => parseFlowLaunchResponse(entry))
+            .filter((entry): entry is FlowLaunchResponse => entry !== null)
+        : []
     const execution_cards = Array.isArray(record.execution_cards)
         ? record.execution_cards
             .map((entry) => parseExecutionCardResponse(entry))
@@ -786,6 +929,7 @@ export function parseConversationSnapshotResponse(
         event_log,
         spec_edit_proposals,
         flow_run_requests,
+        flow_launches,
         execution_cards,
         execution_workflow: {
             run_id: asOptionalNullableString(executionWorkflowRecord.run_id),
@@ -924,44 +1068,72 @@ export async function updateProjectStateValidated(payload: {
     )
 }
 
-export async function fetchProjectFlowBindingsValidated(projectPath: string): Promise<ProjectFlowBindingsResponse> {
-    const url = workspaceUrl(`/projects/flow-bindings?project_path=${encodeURIComponent(projectPath)}`)
-    return fetchJsonWithValidation(url, undefined, '/workspace/api/projects/flow-bindings', parseProjectFlowBindingsResponse)
+export async function fetchTriggerListValidated(): Promise<TriggerResponse[]> {
+    return fetchJsonWithValidation(workspaceUrl('/triggers'), undefined, '/workspace/api/triggers', parseTriggerListResponse)
 }
 
-export async function updateProjectFlowBindingValidated(
-    projectPath: string,
-    trigger: string,
-    flowName: string,
-): Promise<ProjectFlowBindingsResponse> {
-    const url = workspaceUrl(`/projects/flow-bindings/${encodeURIComponent(trigger)}`)
+export async function fetchTriggerValidated(triggerId: string): Promise<TriggerResponse> {
+    const url = workspaceUrl(`/triggers/${encodeURIComponent(triggerId)}`)
+    return fetchJsonWithValidation(url, undefined, '/workspace/api/triggers/{id}', parseTriggerResponse)
+}
+
+export async function createTriggerValidated(payload: {
+    name: string
+    enabled: boolean
+    source_type: TriggerSourceType
+    action: Record<string, unknown>
+    source: Record<string, unknown>
+}): Promise<TriggerResponse> {
     return fetchJsonWithValidation(
-        url,
+        workspaceUrl('/triggers'),
         {
-            method: 'PUT',
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                project_path: projectPath,
-                flow_name: flowName,
-            }),
+            body: JSON.stringify(payload),
         },
-        '/workspace/api/projects/flow-bindings/{trigger}',
-        parseProjectFlowBindingsResponse,
+        '/workspace/api/triggers',
+        parseTriggerResponse,
     )
 }
 
-export async function deleteProjectFlowBindingValidated(
-    projectPath: string,
-    trigger: string,
-): Promise<ProjectFlowBindingsResponse> {
-    const url = workspaceUrl(`/projects/flow-bindings/${encodeURIComponent(trigger)}?project_path=${encodeURIComponent(projectPath)}`)
+export async function updateTriggerValidated(
+    triggerId: string,
+    payload: {
+        name?: string
+        enabled?: boolean
+        action?: Record<string, unknown>
+        source?: Record<string, unknown>
+        regenerate_webhook_secret?: boolean
+    },
+): Promise<TriggerResponse> {
+    const url = workspaceUrl(`/triggers/${encodeURIComponent(triggerId)}`)
+    return fetchJsonWithValidation(
+        url,
+        {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        },
+        '/workspace/api/triggers/{id}',
+        parseTriggerResponse,
+    )
+}
+
+export async function deleteTriggerValidated(triggerId: string): Promise<{ status: 'deleted'; id: string }> {
+    const url = workspaceUrl(`/triggers/${encodeURIComponent(triggerId)}`)
     return fetchJsonWithValidation(
         url,
         {
             method: 'DELETE',
         },
-        '/workspace/api/projects/flow-bindings/{trigger}',
-        parseProjectFlowBindingsResponse,
+        '/workspace/api/triggers/{id}',
+        (payload, endpoint) => {
+            const record = expectObjectRecord(payload, endpoint)
+            return {
+                status: expectString(record.status, endpoint, 'status') === 'deleted' ? 'deleted' : 'deleted',
+                id: expectString(record.id, endpoint, 'id'),
+            }
+        },
     )
 }
 

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from argparse import Namespace
+import io
 import json
 from pathlib import Path
-import io
 
 import spark.authoring_assets as authoring_assets
 import spark.cli as spark_cli
 import spark.starter_assets as starter_assets
-import workspace.cli as workspace_cli
+import spark_server.cli as spark_server_cli
 
 
 def test_run_serve_uses_import_string_when_reload_enabled(monkeypatch, tmp_path: Path) -> None:
@@ -31,7 +31,7 @@ def test_run_serve_uses_import_string_when_reload_enabled(monkeypatch, tmp_path:
     args.ui_dir.mkdir(parents=True, exist_ok=True)
     (args.ui_dir / "index.html").write_text("<html></html>", encoding="utf-8")
 
-    result = spark_cli._run_serve(args)
+    result = spark_server_cli._run_serve(args)
 
     assert result == 0
     assert calls == [
@@ -63,11 +63,11 @@ def test_run_serve_preserves_runtime_path_env_for_reload(monkeypatch, tmp_path: 
         command="serve",
     )
 
-    spark_cli._run_serve(args)
+    spark_server_cli._run_serve(args)
 
-    assert spark_cli.os.environ["SPARK_HOME"] == str(data_dir.resolve(strict=False))
-    assert spark_cli.os.environ["SPARK_FLOWS_DIR"] == str(flows_dir.resolve(strict=False))
-    assert spark_cli.os.environ["SPARK_UI_DIR"] == str(ui_dir.resolve(strict=False))
+    assert spark_server_cli.os.environ["SPARK_HOME"] == str(data_dir.resolve(strict=False))
+    assert spark_server_cli.os.environ["SPARK_FLOWS_DIR"] == str(flows_dir.resolve(strict=False))
+    assert spark_server_cli.os.environ["SPARK_UI_DIR"] == str(ui_dir.resolve(strict=False))
 
 
 def test_run_init_seeds_missing_starter_flows_without_overwriting_existing(
@@ -89,7 +89,7 @@ def test_run_init_seeds_missing_starter_flows_without_overwriting_existing(
         ),
     )
 
-    result = spark_cli.main(
+    result = spark_server_cli.main(
         [
             "init",
             "--data-dir",
@@ -125,7 +125,7 @@ def test_run_init_force_overwrites_existing_starter_flows(
         ),
     )
 
-    result = spark_cli.main(
+    result = spark_server_cli.main(
         [
             "init",
             "--data-dir",
@@ -175,7 +175,7 @@ def test_packaged_authoring_references_match_repo_sources() -> None:
     ).read_text(encoding="utf-8")
 
 
-def test_run_workspace_spec_proposal_posts_payload_and_prints_response(
+def test_agent_spec_proposal_posts_payload_and_prints_response(
     monkeypatch,
     tmp_path: Path,
     capsys,
@@ -222,28 +222,27 @@ def test_run_workspace_spec_proposal_posts_payload_and_prints_response(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def post(self, url: str, json: dict[str, object]) -> FakeResponse:
-            calls.append((url, json))
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
+            calls.append((f"{method} {url}", json or {}))
             return FakeResponse()
 
-    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = workspace_cli.main(
+    result = spark_cli.main(
         [
+            "convo",
             "spec-proposal",
             "--conversation",
             "amber-otter",
             "--json",
             str(payload_path),
-            "--base-url",
-            "http://127.0.0.1:8000",
         ]
     )
 
     assert result == 0
     assert calls == [
         (
-            "http://127.0.0.1:8000/workspace/api/conversations/by-handle/amber-otter/spec-edit-proposals",
+            "POST http://127.0.0.1:8000/workspace/api/conversations/by-handle/amber-otter/spec-edit-proposals",
             {
                 "summary": "Clarify the approval gate.",
                 "changes": [
@@ -259,34 +258,46 @@ def test_run_workspace_spec_proposal_posts_payload_and_prints_response(
     assert json.loads(capsys.readouterr().out)["proposal_id"] == "proposal-123"
 
 
-def test_run_workspace_spec_proposal_rejects_payload_context_fields(
-    tmp_path: Path,
-    capsys,
-) -> None:
+def test_agent_spec_proposal_rejects_payload_context_fields(tmp_path: Path, capsys) -> None:
     payload_path = tmp_path / "proposal.json"
     payload_path.write_text(
         json.dumps(
             {
+                "summary": "Clarify approval.",
                 "conversation_id": "conversation-123",
-                "summary": "Wrong payload shape",
-                "changes": [],
+                "changes": [
+                    {
+                        "path": "specs/spark-workspace.md#proposal-review",
+                        "before": "A",
+                        "after": "B",
+                    }
+                ],
             }
         ),
         encoding="utf-8",
     )
 
-    result = workspace_cli.main(["spec-proposal", "--conversation", "amber-otter", "--json", str(payload_path)])
+    result = spark_cli.main(
+        ["convo", "spec-proposal", "--conversation", "amber-otter", "--json", str(payload_path)]
+    )
 
-    assert result == 1
-    stderr = json.loads(capsys.readouterr().err)
-    assert stderr["ok"] is False
-    assert "--conversation" in stderr["error"]
+    assert result == spark_cli.EXIT_GENERAL_FAILURE
+    assert "Unexpected payload field" in capsys.readouterr().err
 
 
-def test_run_workspace_spec_proposal_reads_payload_from_stdin(
-    monkeypatch,
-    capsys,
-) -> None:
+def test_agent_spec_proposal_reads_payload_from_stdin(monkeypatch, capsys) -> None:
+    payload = {
+        "summary": "Clarify the approval gate.",
+        "changes": [
+            {
+                "path": "specs/spark-workspace.md#proposal-review",
+                "before": "Planning begins immediately.",
+                "after": "Planning begins only after approval.",
+            }
+        ],
+        "rationale": "Ground the workflow in explicit approval.",
+    }
+
     class FakeResponse:
         status_code = 200
         is_error = False
@@ -294,13 +305,13 @@ def test_run_workspace_spec_proposal_reads_payload_from_stdin(
         def json(self) -> dict[str, object]:
             return {
                 "ok": True,
-                "conversation_id": "conversation-stdin",
+                "conversation_id": "conversation-123",
                 "conversation_handle": "quiet-river",
-                "proposal_id": "proposal-stdin",
-                "segment_id": "segment-artifact-proposal-stdin",
+                "proposal_id": "proposal-123",
+                "segment_id": "segment-artifact-proposal-123",
             }
 
-    calls: list[tuple[str, dict[str, object]]] = []
+    calls: list[dict[str, object]] = []
 
     class FakeClient:
         def __init__(self, timeout: float) -> None:
@@ -312,69 +323,26 @@ def test_run_workspace_spec_proposal_reads_payload_from_stdin(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def post(self, url: str, json: dict[str, object]) -> FakeResponse:
-            calls.append((url, json))
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
+            calls.append({"method": method, "url": url, "json": json})
             return FakeResponse()
 
-    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
     monkeypatch.setattr(
-        workspace_cli.sys,
+        spark_cli.sys,
         "stdin",
-        io.StringIO(
-            json.dumps(
-                {
-                    "summary": "Read from stdin.",
-                    "changes": [
-                        {
-                            "path": "specs/spark-workspace.md#proposal-review",
-                            "before": "Old text.",
-                            "after": "New text.",
-                        }
-                    ],
-                }
-            )
-        ),
+        io.StringIO(json.dumps(payload)),
+        raising=False,
     )
 
-    result = workspace_cli.main(["spec-proposal", "--conversation", "quiet-river", "--json", "-"])
+    result = spark_cli.main(["convo", "spec-proposal", "--conversation", "quiet-river", "--json", "-"])
 
     assert result == 0
-    assert calls == [
-        (
-            "http://127.0.0.1:8000/workspace/api/conversations/by-handle/quiet-river/spec-edit-proposals",
-            {
-                "summary": "Read from stdin.",
-                "changes": [
-                    {
-                        "path": "specs/spark-workspace.md#proposal-review",
-                        "before": "Old text.",
-                        "after": "New text.",
-                    }
-                ],
-            },
-        )
-    ]
-    assert json.loads(capsys.readouterr().out)["proposal_id"] == "proposal-stdin"
+    assert calls[0]["json"] == payload
+    assert json.loads(capsys.readouterr().out)["proposal_id"] == "proposal-123"
 
 
-def test_run_workspace_flow_run_posts_payload_and_prints_response(
-    monkeypatch,
-    tmp_path: Path,
-    capsys,
-) -> None:
-    goal_path = tmp_path / "goal.txt"
-    goal_path.write_text("Implement the approved scope.", encoding="utf-8")
-    launch_context_path = tmp_path / "launch-context.json"
-    launch_context_path.write_text(
-        json.dumps(
-            {
-                "context.request.summary": "Implement the approved scope.",
-                "context.request.target_paths": ["src/workspace", "tests/api"],
-            }
-        ),
-        encoding="utf-8",
-    )
-
+def test_agent_run_request_posts_payload_and_prints_response(monkeypatch, capsys) -> None:
     class FakeResponse:
         status_code = 200
         is_error = False
@@ -400,70 +368,82 @@ def test_run_workspace_flow_run_posts_payload_and_prints_response(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def post(self, url: str, json: dict[str, object]) -> FakeResponse:
-            calls.append((url, json))
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
+            calls.append((f"{method} {url}", json or {}))
             return FakeResponse()
 
-    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = workspace_cli.main(
+    result = spark_cli.main(
         [
-            "flow-run",
+            "convo",
+            "run-request",
             "--conversation",
             "amber-otter",
             "--flow",
             "implement-spec.dot",
             "--summary",
             "Run implementation for the approved scope",
-            "--goal-file",
-            str(goal_path),
-            "--launch-context-file",
-            str(launch_context_path),
+            "--goal",
+            "Implement the approved work items.",
+            "--launch-context-json",
+            '{"context.request.summary":"Implement the approved work items."}',
             "--model",
-            "gpt-5.4",
-            "--base-url",
-            "http://127.0.0.1:8000",
+            "gpt-5",
         ]
     )
 
     assert result == 0
     assert calls == [
         (
-            "http://127.0.0.1:8000/workspace/api/conversations/by-handle/amber-otter/flow-run-requests",
+            "POST http://127.0.0.1:8000/workspace/api/conversations/by-handle/amber-otter/flow-run-requests",
             {
                 "flow_name": "implement-spec.dot",
                 "summary": "Run implementation for the approved scope",
-                "goal": "Implement the approved scope.",
-                "launch_context": {
-                    "context.request.summary": "Implement the approved scope.",
-                    "context.request.target_paths": ["src/workspace", "tests/api"],
-                },
-                "model": "gpt-5.4",
+                "goal": "Implement the approved work items.",
+                "launch_context": {"context.request.summary": "Implement the approved work items."},
+                "model": "gpt-5",
             },
         )
     ]
     assert json.loads(capsys.readouterr().out)["flow_run_request_id"] == "flow-run-request-123"
 
 
-def test_workspace_list_flows_defaults_to_json(
-    monkeypatch,
-    capsys,
-) -> None:
+def test_agent_run_launch_requires_project_without_conversation(capsys) -> None:
+    result = spark_cli.main(
+        [
+            "run",
+            "launch",
+            "--flow",
+            "implement-spec.dot",
+            "--summary",
+            "Launch directly",
+        ]
+    )
+
+    assert result == spark_cli.EXIT_GENERAL_FAILURE
+    assert "--project when --conversation is omitted" in capsys.readouterr().err
+
+
+def test_agent_run_launch_posts_payload_and_prints_response(monkeypatch, capsys) -> None:
     class FakeResponse:
         status_code = 200
         is_error = False
-        text = ""
 
-        def json(self) -> list[dict[str, object]]:
-            return [
-                {
-                    "name": "implement-spec.dot",
-                    "title": "Implement Spec",
-                    "description": "Execute an approved plan.",
-                }
-            ]
+        def json(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "status": "started",
+                "run_id": "run-123",
+                "flow_name": "implement-spec.dot",
+                "project_path": "/tmp/project",
+                "conversation_id": "conversation-123",
+                "conversation_handle": "amber-otter",
+                "flow_launch_id": "flow-launch-123",
+                "segment_id": "segment-artifact-flow-launch-123",
+            }
 
-    calls: list[tuple[str, str, object | None]] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
     class FakeClient:
         def __init__(self, timeout: float) -> None:
@@ -475,47 +455,104 @@ def test_workspace_list_flows_defaults_to_json(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def request(self, method: str, url: str, json: object | None = None) -> FakeResponse:
-            calls.append((method, url, json))
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
+            calls.append((f"{method} {url}", json or {}))
             return FakeResponse()
 
-    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = workspace_cli.main(["list-flows", "--base-url", "http://127.0.0.1:8000"])
+    result = spark_cli.main(
+        [
+            "run",
+            "launch",
+            "--flow",
+            "implement-spec.dot",
+            "--summary",
+            "Launch directly",
+            "--conversation",
+            "amber-otter",
+            "--project",
+            "/tmp/project",
+            "--goal",
+            "Implement the approved work items.",
+        ]
+    )
 
     assert result == 0
-    assert calls == [("GET", "http://127.0.0.1:8000/workspace/api/flows?surface=agent", None)]
-    assert json.loads(capsys.readouterr().out) == [
-        {
-            "description": "Execute an approved plan.",
-            "name": "implement-spec.dot",
-            "title": "Implement Spec",
-        }
+    assert calls == [
+        (
+            "POST http://127.0.0.1:8000/workspace/api/runs/launch",
+            {
+                "flow_name": "implement-spec.dot",
+                "summary": "Launch directly",
+                "goal": "Implement the approved work items.",
+                "conversation_handle": "amber-otter",
+                "project_path": "/tmp/project",
+            },
+        )
     ]
+    assert json.loads(capsys.readouterr().out)["flow_launch_id"] == "flow-launch-123"
 
 
-def test_workspace_describe_flow_text_mode_formats_human_readable_output(
-    monkeypatch,
-    capsys,
-) -> None:
+def test_agent_flow_list_defaults_to_json(monkeypatch, capsys) -> None:
     class FakeResponse:
         status_code = 200
         is_error = False
-        text = ""
 
-        def json(self) -> dict[str, object]:
+        def json(self) -> object:
+            return [
+                {
+                    "name": "implement-spec.dot",
+                    "title": "Implement spec",
+                    "description": "Execute approved work items.",
+                    "launch_policy": "agent_requestable",
+                    "effective_launch_policy": "agent_requestable",
+                }
+            ]
+
+    class FakeClient:
+        def __init__(self, timeout: float) -> None:
+            assert timeout == 30.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
+            assert method == "GET"
+            assert json is None
+            assert url == "http://127.0.0.1:8000/workspace/api/flows?surface=agent"
+            return FakeResponse()
+
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
+
+    result = spark_cli.main(["flow", "list", "--base-url", "http://127.0.0.1:8000"])
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["name"] == "implement-spec.dot"
+
+
+def test_agent_describe_flow_text_mode_formats_human_readable_output(monkeypatch, capsys) -> None:
+    class FakeResponse:
+        status_code = 200
+        is_error = False
+
+        def json(self) -> object:
             return {
                 "name": "implement-spec.dot",
                 "title": "Implement Spec",
-                "description": "Execute an approved plan.",
+                "description": "Execute approved work items.",
                 "effective_launch_policy": "agent_requestable",
                 "graph_label": "Implement Spec",
-                "graph_goal": "Execute plan",
-                "node_count": 4,
-                "edge_count": 3,
+                "graph_goal": "Implement approved changes",
+                "node_count": 5,
+                "edge_count": 4,
                 "features": {
-                    "has_human_gate": False,
-                    "has_manager_loop": True,
+                    "has_human_gate": True,
+                    "has_manager_loop": False,
                 },
             }
 
@@ -529,63 +566,39 @@ def test_workspace_describe_flow_text_mode_formats_human_readable_output(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def request(self, method: str, url: str, json: object | None = None) -> FakeResponse:
-            assert method == "GET"
-            assert json is None
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
             assert url == "http://127.0.0.1:8000/workspace/api/flows/implement-spec.dot?surface=agent"
             return FakeResponse()
 
-    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = workspace_cli.main(
-        [
-            "describe-flow",
-            "--flow",
-            "implement-spec.dot",
-            "--text",
-            "--base-url",
-            "http://127.0.0.1:8000",
-        ]
-    )
+    result = spark_cli.main(["flow", "describe", "--flow", "implement-spec.dot", "--text"])
 
     assert result == 0
     output = capsys.readouterr().out
     assert "Name: implement-spec.dot" in output
-    assert "Title: Implement Spec" in output
     assert "Launch Policy: agent_requestable" in output
-    assert "Has Manager Loop: True" in output
 
 
-def test_workspace_validate_flow_text_mode_formats_diagnostics(
-    monkeypatch,
-    capsys,
-) -> None:
+def test_agent_validate_flow_text_mode_formats_diagnostics(monkeypatch, capsys) -> None:
     class FakeResponse:
         status_code = 200
         is_error = False
-        text = ""
 
-        def json(self) -> dict[str, object]:
+        def json(self) -> object:
             return {
-                "name": "draft.dot",
-                "path": "/tmp/flows/draft.dot",
-                "status": "validation_error",
+                "name": "implement-spec.dot",
+                "path": "/flows/implement-spec.dot",
+                "status": "invalid",
                 "diagnostics": [
                     {
-                        "rule_id": "start_node",
                         "severity": "error",
-                        "message": "Graph must define a start node.",
-                        "line": 1,
+                        "rule_id": "missing-edge",
+                        "message": "Missing edge.",
+                        "line": 7,
                     }
                 ],
-                "errors": [
-                    {
-                        "rule_id": "start_node",
-                        "severity": "error",
-                        "message": "Graph must define a start node.",
-                        "line": 1,
-                    }
-                ],
+                "errors": ["Missing edge."],
             }
 
     class FakeClient:
@@ -598,43 +611,25 @@ def test_workspace_validate_flow_text_mode_formats_diagnostics(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def request(self, method: str, url: str, json: object | None = None) -> FakeResponse:
-            assert method == "GET"
-            assert json is None
-            assert url == "http://127.0.0.1:8000/workspace/api/flows/draft.dot/validate"
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
+            assert url == "http://127.0.0.1:8000/workspace/api/flows/implement-spec.dot/validate"
             return FakeResponse()
 
-    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = workspace_cli.main(
-        [
-            "validate-flow",
-            "--flow",
-            "draft.dot",
-            "--text",
-            "--base-url",
-            "http://127.0.0.1:8000",
-        ]
-    )
+    result = spark_cli.main(["flow", "validate", "--flow", "implement-spec.dot", "--text"])
 
     assert result == 0
     output = capsys.readouterr().out
-    assert "Name: draft.dot" in output
-    assert "Path: /tmp/flows/draft.dot" in output
-    assert "Status: validation_error" in output
-    assert "Diagnostics: 1" in output
-    assert "Errors: 1" in output
-    assert "- ERROR start_node line 1: Graph must define a start node." in output
+    assert "Status: invalid" in output
+    assert "- ERROR missing-edge line 7: Missing edge." in output
 
 
-def test_workspace_get_flow_defaults_to_json_wrapper(
-    monkeypatch,
-    capsys,
-) -> None:
+def test_agent_get_flow_defaults_to_json_wrapper(monkeypatch, capsys) -> None:
     class FakeResponse:
         status_code = 200
         is_error = False
-        text = 'digraph G { start -> done; }\n'
+        text = "digraph G {\n  a -> b;\n}\n"
 
     class FakeClient:
         def __init__(self, timeout: float) -> None:
@@ -646,40 +641,27 @@ def test_workspace_get_flow_defaults_to_json_wrapper(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def request(self, method: str, url: str) -> FakeResponse:
-            assert method == "GET"
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
             assert url == "http://127.0.0.1:8000/workspace/api/flows/implement-spec.dot/raw?surface=agent"
             return FakeResponse()
 
-    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = workspace_cli.main(
-        [
-            "get-flow",
-            "--flow",
-            "implement-spec.dot",
-            "--base-url",
-            "http://127.0.0.1:8000",
-        ]
-    )
+    result = spark_cli.main(["flow", "get", "--flow", "implement-spec.dot"])
 
     assert result == 0
-    assert json.loads(capsys.readouterr().out) == {
-        "content": 'digraph G { start -> done; }\n',
-        "name": "implement-spec.dot",
-    }
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["name"] == "implement-spec.dot"
+    assert "a -> b" in payload["content"]
 
 
-def test_workspace_flow_discovery_returns_not_found_exit_code_on_404(
-    monkeypatch,
-    capsys,
-) -> None:
+def test_agent_flow_discovery_returns_not_found_exit_code_on_404(monkeypatch, capsys) -> None:
     class FakeResponse:
         status_code = 404
         is_error = True
-        text = '{"detail":"Unknown flow: missing.dot"}'
+        text = "Not found"
 
-        def json(self) -> dict[str, object]:
+        def json(self) -> object:
             return {"detail": "Unknown flow: missing.dot"}
 
     class FakeClient:
@@ -692,19 +674,83 @@ def test_workspace_flow_discovery_returns_not_found_exit_code_on_404(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def request(self, method: str, url: str, json: object | None = None) -> FakeResponse:
-            assert method == "GET"
-            assert json is None
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
             return FakeResponse()
 
-    monkeypatch.setattr(workspace_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = workspace_cli.main(["describe-flow", "--flow", "missing.dot"])
+    result = spark_cli.main(["flow", "describe", "--flow", "missing.dot"])
 
-    assert result == workspace_cli.EXIT_NOT_FOUND
-    stderr = json.loads(capsys.readouterr().err)
-    assert stderr == {
-        "ok": False,
-        "status_code": 404,
-        "error": "Unknown flow: missing.dot",
-    }
+    assert result == spark_cli.EXIT_NOT_FOUND
+    assert "Unknown flow: missing.dot" in capsys.readouterr().err
+
+
+def test_agent_trigger_create_and_delete_map_to_workspace_api(monkeypatch, tmp_path: Path, capsys) -> None:
+    payload_path = tmp_path / "trigger.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "name": "Daily build",
+                "enabled": True,
+                "source_type": "schedule",
+                "source": {"kind": "interval", "interval_seconds": 60},
+                "action": {"flow_name": "implement-spec.dot"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeResponse:
+        def __init__(self, payload: object) -> None:
+            self.status_code = 200
+            self.is_error = False
+            self._payload = payload
+
+        def json(self) -> object:
+            return self._payload
+
+    calls: list[tuple[str, str, dict[str, object] | None]] = []
+
+    class FakeClient:
+        def __init__(self, timeout: float) -> None:
+            assert timeout == 30.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def request(self, method: str, url: str, json: dict[str, object] | None = None):
+            calls.append((method, url, json))
+            if method == "POST":
+                return FakeResponse({"id": "trigger-123"})
+            return FakeResponse({"status": "deleted", "id": "trigger-123"})
+
+    monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
+
+    create_result = spark_cli.main(["trigger", "create", "--json", str(payload_path)])
+    delete_result = spark_cli.main(["trigger", "delete", "--id", "trigger-123"])
+
+    assert create_result == 0
+    assert delete_result == 0
+    assert calls == [
+        (
+            "POST",
+            "http://127.0.0.1:8000/workspace/api/triggers",
+            {
+                "name": "Daily build",
+                "enabled": True,
+                "source_type": "schedule",
+                "source": {"kind": "interval", "interval_seconds": 60},
+                "action": {"flow_name": "implement-spec.dot"},
+            },
+        ),
+        (
+            "DELETE",
+            "http://127.0.0.1:8000/workspace/api/triggers/trigger-123",
+            None,
+        ),
+    ]
+    output = capsys.readouterr().out
+    assert '"id": "trigger-123"' in output

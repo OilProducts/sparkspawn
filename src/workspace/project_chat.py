@@ -439,7 +439,7 @@ class ProjectChatService:
                 "dot_authoring_guide_path": str(self._authoring_guide_path),
                 "flow_extensions_spec_path": str(self._flow_extensions_spec_path),
                 "attractor_spec_path": str(self._attractor_spec_path),
-                "flow_validation_command": "spark-workspace validate-flow --flow <name> --text",
+                "flow_validation_command": "spark flow validate --flow <name> --text",
                 "recent_conversation": history_text,
                 "latest_user_message": message,
             },
@@ -890,7 +890,7 @@ class ProjectChatService:
             raise ValueError("Project path is required.")
         normalized_payload = _normalize_spec_edit_proposal_payload(
             payload,
-            source_name="spark-workspace spec-proposal",
+            source_name="spark convo spec-proposal",
         )
         return self._reviews.create_spec_edit_proposal(
             conversation_id,
@@ -910,6 +910,9 @@ class ProjectChatService:
             "conversation_handle": conversation_handle,
         }
 
+    def resolve_conversation_handle(self, conversation_handle: str) -> tuple[str, str]:
+        return self._repository.resolve_conversation_handle(conversation_handle)
+
     def create_flow_run_request(
         self,
         conversation_id: str,
@@ -921,7 +924,7 @@ class ProjectChatService:
             raise ValueError("Project path is required.")
         normalized_payload = _normalize_flow_run_request_payload(
             payload,
-            source_name="spark-workspace flow-run",
+            source_name="spark convo run-request",
         )
         return self._reviews.create_flow_run_request(
             conversation_id,
@@ -936,6 +939,37 @@ class ProjectChatService:
     ) -> dict[str, object]:
         conversation_id, project_path = self._repository.resolve_conversation_handle(conversation_handle)
         result = self.create_flow_run_request(conversation_id, project_path, payload)
+        return {
+            **result,
+            "conversation_handle": conversation_handle,
+        }
+
+    def create_flow_launch(
+        self,
+        conversation_id: str,
+        project_path: str,
+        payload: dict[str, Any],
+    ) -> dict[str, object]:
+        normalized_project_path = _normalize_project_path(project_path)
+        if not normalized_project_path:
+            raise ValueError("Project path is required.")
+        normalized_payload = _normalize_flow_run_request_payload(
+            payload,
+            source_name="spark run launch",
+        )
+        return self._reviews.create_flow_launch(
+            conversation_id,
+            normalized_project_path,
+            normalized_payload,
+        )
+
+    def create_flow_launch_by_handle(
+        self,
+        conversation_handle: str,
+        payload: dict[str, Any],
+    ) -> dict[str, object]:
+        conversation_id, project_path = self._repository.resolve_conversation_handle(conversation_handle)
+        result = self.create_flow_launch(conversation_id, project_path, payload)
         return {
             **result,
             "conversation_handle": conversation_handle,
@@ -1043,6 +1077,24 @@ class ProjectChatService:
         error: str,
     ) -> dict[str, Any]:
         return self._reviews.fail_flow_run_request_launch(conversation_id, request_id, flow_name, error)
+
+    def note_flow_launch_started(
+        self,
+        conversation_id: str,
+        launch_id: str,
+        run_id: str,
+        flow_name: str,
+    ) -> dict[str, Any]:
+        return self._reviews.note_flow_launch_started(conversation_id, launch_id, run_id, flow_name)
+
+    def fail_flow_launch(
+        self,
+        conversation_id: str,
+        launch_id: str,
+        flow_name: str,
+        error: str,
+    ) -> dict[str, Any]:
+        return self._reviews.fail_flow_launch(conversation_id, launch_id, flow_name, error)
 
     def review_execution_card(
         self,

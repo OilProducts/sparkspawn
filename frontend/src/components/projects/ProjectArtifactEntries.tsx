@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp } from "lucide-react"
 
-import type { ExecutionCardResponse, FlowRunRequestResponse, SpecEditProposalResponse } from "@/lib/workspaceClient"
+import type { ExecutionCardResponse, FlowLaunchResponse, FlowRunRequestResponse, SpecEditProposalResponse } from "@/lib/workspaceClient"
 
 import type { ProjectGitMetadata } from "@/components/projects/presentation"
 
@@ -188,7 +188,7 @@ type ProjectFlowRunRequestEntryProps = {
     isLatestFlowRunRequest: boolean
     pendingFlowRunRequestId: string | null
     onReviewFlowRunRequest: (request: FlowRunRequestResponse, disposition: "approved" | "rejected") => void | Promise<void>
-    onOpenFlowRun: (request: FlowRunRequestResponse) => void
+    onOpenFlowRun: (request: { run_id?: string | null; flow_name: string }) => void
     formatConversationTimestamp: (value: string) => string
     getFlowRunRequestStatusPresentation: (status: FlowRunRequestResponse["status"]) => { label: string; tone: SurfaceTone }
     getSurfaceToneClassName: (tone: SurfaceTone) => string
@@ -316,6 +316,105 @@ export function ProjectFlowRunRequestEntry({
                     </button>
                 </div>
             ) : null}
+        </div>
+    )
+}
+
+type ProjectFlowLaunchEntryProps = {
+    flowLaunch: FlowLaunchResponse | null
+    isLatestFlowLaunch: boolean
+    onOpenFlowRun: (request: { run_id?: string | null; flow_name: string }) => void
+    formatConversationTimestamp: (value: string) => string
+    getFlowLaunchStatusPresentation: (status: FlowLaunchResponse["status"]) => { label: string; tone: SurfaceTone }
+    getSurfaceToneClassName: (tone: SurfaceTone) => string
+}
+
+export function ProjectFlowLaunchEntry({
+    flowLaunch,
+    isLatestFlowLaunch,
+    onOpenFlowRun,
+    formatConversationTimestamp,
+    getFlowLaunchStatusPresentation,
+    getSurfaceToneClassName,
+}: ProjectFlowLaunchEntryProps) {
+    if (!flowLaunch) {
+        return (
+            <div className="w-full rounded-md border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+                Flow launch artifact unavailable. Refresh the project chat to reload it.
+            </div>
+        )
+    }
+
+    const statusPresentation = getFlowLaunchStatusPresentation(flowLaunch.status)
+    const launchContextText = flowLaunch.launch_context
+        ? JSON.stringify(flowLaunch.launch_context, null, 2)
+        : null
+
+    return (
+        <div
+            data-testid={isLatestFlowLaunch ? "project-flow-launch-surface" : undefined}
+            className="w-full rounded-md border border-sky-500/20 bg-sky-500/[0.05] px-4 py-3"
+        >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
+                            Flow launch
+                        </p>
+                        <span className={getSurfaceToneClassName(statusPresentation.tone)}>
+                            {statusPresentation.label}
+                        </span>
+                    </div>
+                    <p className="text-sm font-medium text-foreground">{flowLaunch.summary}</p>
+                </div>
+                <div className="space-y-1 text-right text-[11px] text-muted-foreground">
+                    <p className="font-mono text-foreground">{flowLaunch.id}</p>
+                    <p>Updated {formatConversationTimestamp(flowLaunch.updated_at)}</p>
+                </div>
+            </div>
+            <div className="mt-3 space-y-2 text-[11px] text-muted-foreground">
+                <p>
+                    Flow: <span className="font-mono text-foreground">{flowLaunch.flow_name}</span>
+                </p>
+                {flowLaunch.goal ? (
+                    <p className="whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-1 text-[11px] text-muted-foreground">
+                        {flowLaunch.goal}
+                    </p>
+                ) : null}
+                {launchContextText ? (
+                    <div className="space-y-1">
+                        <p>Launch context:</p>
+                        <pre className="overflow-x-auto whitespace-pre-wrap rounded border border-border/60 bg-background/80 px-2 py-2 font-mono text-[10px] text-muted-foreground">
+                            {launchContextText}
+                        </pre>
+                    </div>
+                ) : null}
+                {flowLaunch.model ? (
+                    <p>
+                        Model override: <span className="font-mono text-foreground">{flowLaunch.model}</span>
+                    </p>
+                ) : null}
+                {flowLaunch.launch_error ? (
+                    <p className="text-destructive">
+                        Launch error: {flowLaunch.launch_error}
+                    </p>
+                ) : null}
+                {flowLaunch.run_id ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span>
+                            Run: <span className="font-mono text-foreground">{flowLaunch.run_id}</span>
+                        </span>
+                        <button
+                            type="button"
+                            data-testid={isLatestFlowLaunch ? "project-flow-launch-open-run-button" : undefined}
+                            onClick={() => onOpenFlowRun(flowLaunch)}
+                            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                            Open run
+                        </button>
+                    </div>
+                ) : null}
+            </div>
         </div>
     )
 }

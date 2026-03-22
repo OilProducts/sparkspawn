@@ -227,7 +227,6 @@ const resetContractState = () => {
     },
     projectSessionsByPath: {
       '/tmp/project-contract-behavior': {
-        activeFlow: 'contract-behavior.dot',
         workingDir: DEFAULT_WORKING_DIRECTORY,
         conversationId: null,
         specId: null,
@@ -305,12 +304,14 @@ const renderSidebarWithValidation = (nodes: Node[], edges: Edge[]) =>
   renderWithFlowProvider(<SidebarValidationHarness nodes={nodes} edges={edges} />)
 
 const setViewportWidth = (width: number) => {
-  Object.defineProperty(window, 'innerWidth', {
-    configurable: true,
-    writable: true,
-    value: width,
+  act(() => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: width,
+    })
+    window.dispatchEvent(new Event('resize'))
   })
-  window.dispatchEvent(new Event('resize'))
 }
 
 describe('Frontend contract behavior', () => {
@@ -5391,7 +5392,6 @@ digraph contract_behavior {
       directoryPath: '/tmp/persisted-project',
       isFavorite: true,
       lastAccessedAt: '2026-03-04T00:00:00.000Z',
-      flowBindings: {},
     })
     expect(restoredStore.getState().projectSessionsByPath['/tmp/persisted-project']?.conversationId).toBe(
       'conversation-persisted-project',

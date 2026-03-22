@@ -8,7 +8,7 @@ This note captures the current model mismatch between Spark's intended architect
 - `project`: one registered local repository/directory used as execution and artifact context
 - `flows`: shared workspace/global authoring assets
 - `launch policy`: workspace-global policy
-- `trigger behavior`: workspace-global product policy unless explicitly designed otherwise
+- `triggers`: workspace-owned automation definitions with optional project targets
 - `conversations`, `spec proposals`, `execution cards`, and relevant runs: project-scoped
 
 ## Major Mismatches and Correct Fixes
@@ -107,26 +107,30 @@ Correct fix:
 ### 7. Trigger bindings are still project-owned
 
 Status:
-- deferred to a separate trigger design pass
+- complete on 2026-03-22
 
 Current problem:
-- Trigger-to-flow bindings still live on project records and under `/api/projects/flow-bindings`.
+- Trigger-to-flow bindings lived on project records and under `/api/projects/flow-bindings`.
 
 Correct fix:
 - Stop storing trigger bindings on project records.
-- If trigger routing remains configurable, move it to workspace-global config under `SPARK_HOME/config`.
-- If some triggers are fixed product behavior, keep them as workspace-level defaults with optional global override only if needed.
-- Treat trigger routing as workspace/product policy, not project identity.
-
-Open design question:
-- What should the trigger system actually be allowed to express?
-- This needs a dedicated design pass before implementation changes.
+- Store trigger definitions under `SPARK_HOME/config/triggers/<id>.toml`.
+- Store runtime trigger state under `SPARK_HOME/workspace/trigger-state/<id>.json`.
+- Expose workspace-owned triggers through `/workspace/api/triggers` plus shared webhook ingress at `/workspace/api/webhooks`.
+- Use protected `workspace_event` triggers for the built-in approval/review hooks:
+  - `spec_edit_approved`
+  - `execution_card_approved`
+  - `execution_card_rejected`
+  - `execution_card_revision_requested`
+- Support custom `schedule`, `poll`, `webhook`, and `flow_event` triggers.
+- Treat project as an optional execution target on the trigger action, not the owner of trigger identity.
+- Surface trigger administration in a first-class Triggers tab rather than project settings.
+- Perform local/manual migration of the repo's existing project bindings into protected triggers; do not ship automatic migration logic.
 
 ### 8. Docs still mix "project-scoped" and "workspace-global"
 
 Status:
-- complete on 2026-03-22 for the project/workspace boundary cleanup
-- trigger ownership wording remains intentionally unchanged pending item 7
+- complete on 2026-03-22
 
 Current problem:
 - Specs and README still describe Spark in language that blurs workspace-global and project-scoped responsibilities.
@@ -137,17 +141,17 @@ Correct fix:
   - project = execution/artifact context
   - flows = shared workspace assets
   - launch policy = workspace-global
-  - trigger ownership stays on the existing project-scoped model until item 7 is redesigned
+  - triggers = workspace-owned automation definitions with optional project targets
   - conversations/review artifacts/runs = project-scoped
 
 ## Recommended Sequence
 
-1. Fix the frontend state model first:
-   - mismatches 1, 2, 3, 4, 5, 6
-2. Redesign and then fix trigger-binding ownership:
-   - mismatch 7
+1. Fix the frontend state model:
+   - completed on 2026-03-22 for mismatches 1, 2, 3, 4, 5, 6
+2. Replace project-owned trigger bindings with workspace-owned triggers:
+   - completed on 2026-03-22 for mismatch 7
 3. Rewrite docs to match the corrected model:
-   - mismatch 8
+   - completed on 2026-03-22 for mismatch 8
 
 ## Highest-Leverage First Change
 
@@ -245,85 +249,63 @@ Runtime state should be tracked separately from definitions:
 - retry/backoff state
 - recent failures
 
-### Clean-Core Recommendation
+### Implemented V1 Shape
 
-Do not aim for "maximally flexible" v1 behavior.
+The implemented v1 trigger subsystem keeps the core intentionally small:
 
-Aim for an extensible core with a limited initial trigger set:
+- workspace-owned trigger definitions
+- separate persisted runtime state
+- `launch_flow` as the only action type
+- optional project target on the action
+- protected system triggers plus custom triggers
 
-- schedule triggers
-- polling triggers
-- flow-completion or flow-event triggers
-- webhook/push triggers
+Supported trigger sources in v1:
 
-All of these should be workspace-owned.
-Each may optionally specify a project target.
+- `workspace_event`
+- `schedule`
+- `poll`
+- `webhook`
+- `flow_event`
 
-### Required Execution Controls
+### Implemented Runtime Controls
 
-Any trigger system should also define:
+The implemented controls are:
 
-- concurrency policy
-- cooldown/debounce
-- retry/backoff
-- dedupe/idempotency
-- enable/disable
-- audit/history visibility
+- single-flight concurrency per trigger
+- source-specific dedupe markers
+- enabled/disabled state
+- persisted last result / last error / next run visibility
+- recent execution history
+
+V1 intentionally does not add a general retry/backoff or cooldown layer beyond normal schedule/poll cadence.
 
 ### Definition vs Runtime Ownership
 
-Keep configuration and mutable runtime state separate.
+Definitions and runtime state are stored separately:
 
-Trigger definition/config should include:
+- definitions in `SPARK_HOME/config/triggers`
+- runtime state in `SPARK_HOME/workspace/trigger-state`
 
-- trigger id
-- name
-- source type
-- source-specific config
-- optional scope/target
-- conditions
-- action definition
-- enabled/disabled state
+This keeps mutable runtime bookkeeping out of project records and out of the trigger definition file itself.
 
-Runtime state should include:
+### Shared Webhook Ingress
 
-- last run
-- next run
-- in-flight status
-- dedupe keys
-- retry/backoff state
-- recent execution history
+Webhook triggers use one shared ingress endpoint:
 
-Do not hide runtime state inside the trigger definition itself, and do not attach either of these to project records by default.
+- `POST /workspace/api/webhooks`
 
-### V1 Guardrails
+Each webhook trigger owns:
 
-The first implementation should be intentionally smaller than the full design space.
+- `webhook_key` for routing
+- `webhook_secret` for authentication
 
-Good v1 targets:
-
-- recurring schedule triggers
-- one-shot scheduled triggers
-- polling triggers
-- flow-event triggers
-- webhook/push triggers
-- optional project target on launch
-
-Avoid in v1 unless a concrete use case forces it:
-
-- deeply nested boolean condition trees
-- arbitrary scripting inside trigger definitions
-- many trigger-specific special cases in project records
-- multiple ownership models for the same trigger
-
-The architecture should be extensible, but the first implementation should stay legible.
+The webhook payload becomes launch context input for the trigger-fired flow.
 
 ### Implication for Mismatch #7
 
-The fix for mismatch #7 is not merely moving `project.flow_bindings` elsewhere.
-
-The real fix is:
+The completed fix for mismatch #7 is:
 
 - replace project-owned trigger bindings with a workspace-owned trigger subsystem
 - treat project as an optional execution target
 - treat flows as reusable actions rather than project-owned bindings
+- move trigger administration into a first-class workspace UI surface

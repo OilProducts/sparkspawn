@@ -1,4 +1,3 @@
 [console_scripts]
 spark = spark.cli:main
-spark-ui-release-gate = spark_app.ui_release_gate:main
-spark-workspace = workspace.cli:main
+spark-server = spark_server.cli:main

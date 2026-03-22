@@ -1,11 +1,13 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import type {
     ExecutionCardResponse,
+    FlowLaunchResponse,
     FlowRunRequestResponse,
     SpecEditProposalResponse,
 } from '@/lib/workspaceClient'
 import {
     ProjectExecutionCardEntry,
+    ProjectFlowLaunchEntry,
     ProjectFlowRunRequestEntry,
     ProjectSpecEditProposalEntry,
 } from '@/components/projects/ProjectArtifactEntries'
@@ -15,6 +17,7 @@ import {
     buildProposalChangeKey,
     buildProposalDiffLines,
     getExecutionCardStatusPresentation,
+    getFlowLaunchStatusPresentation,
     getFlowRunRequestStatusPresentation,
     getSpecEditStatusPresentation,
     getSurfaceToneClassName,
@@ -30,9 +33,11 @@ interface ProjectConversationHistoryProps {
     activeConversationHistory: ConversationTimelineEntry[]
     activeSpecEditProposalsById: Map<string, SpecEditProposalResponse>
     activeFlowRunRequestsById: Map<string, FlowRunRequestResponse>
+    activeFlowLaunchesById: Map<string, FlowLaunchResponse>
     activeExecutionCardsById: Map<string, ExecutionCardResponse>
     latestSpecEditProposalId: string | null
     latestFlowRunRequestId: string | null
+    latestFlowLaunchId: string | null
     latestExecutionCardId: string | null
     activeProjectGitMetadata: ProjectGitMetadata
     expandedToolCalls: Record<string, boolean>
@@ -51,7 +56,7 @@ interface ProjectConversationHistoryProps {
         flowRunRequest: FlowRunRequestResponse,
         disposition: 'approved' | 'rejected',
     ) => void | Promise<void>
-    onOpenFlowRun: (flowRunRequest: FlowRunRequestResponse) => void
+    onOpenFlowRun: (request: { run_id?: string | null; flow_name: string }) => void
     onReviewExecutionCard: (
         executionCard: ExecutionCardResponse,
         disposition: 'approved' | 'rejected' | 'revision_requested',
@@ -64,9 +69,11 @@ export function ProjectConversationHistory({
     activeConversationHistory,
     activeSpecEditProposalsById,
     activeFlowRunRequestsById,
+    activeFlowLaunchesById,
     activeExecutionCardsById,
     latestSpecEditProposalId,
     latestFlowRunRequestId,
+    latestFlowLaunchId,
     latestExecutionCardId,
     activeProjectGitMetadata,
     expandedToolCalls,
@@ -281,6 +288,27 @@ export function ProjectConversationHistory({
                                         onOpenFlowRun={onOpenFlowRun}
                                         formatConversationTimestamp={formatConversationTimestamp}
                                         getFlowRunRequestStatusPresentation={getFlowRunRequestStatusPresentation}
+                                        getSurfaceToneClassName={getSurfaceToneClassName}
+                                    />
+                                </li>
+                            )
+                        }
+
+                        if (entry.kind === 'flow_launch') {
+                            const flowLaunch = activeFlowLaunchesById.get(entry.artifactId) || null
+                            const isLatestFlowLaunch = flowLaunch?.id === latestFlowLaunchId
+                            return (
+                                <li
+                                    key={key}
+                                    data-testid={isLatestFlowLaunch ? 'project-flow-launch-history-row' : undefined}
+                                    className="flex justify-start"
+                                >
+                                    <ProjectFlowLaunchEntry
+                                        flowLaunch={flowLaunch}
+                                        isLatestFlowLaunch={isLatestFlowLaunch}
+                                        onOpenFlowRun={onOpenFlowRun}
+                                        formatConversationTimestamp={formatConversationTimestamp}
+                                        getFlowLaunchStatusPresentation={getFlowLaunchStatusPresentation}
                                         getSurfaceToneClassName={getSurfaceToneClassName}
                                     />
                                 </li>

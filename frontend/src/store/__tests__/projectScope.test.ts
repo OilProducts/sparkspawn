@@ -151,7 +151,6 @@ describe('project scope store behavior', () => {
       directoryPath: '/tmp/project-a',
       isFavorite: false,
       lastAccessedAt: null,
-      flowBindings: {},
     })
     expect(next.projectSessionsByPath['/tmp/project-a']?.activeFlow).toBeUndefined()
     expect(next.activeFlow).toBeNull()

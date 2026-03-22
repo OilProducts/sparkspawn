@@ -1,4 +1,4 @@
-export type ViewMode = 'home' | 'projects' | 'editor' | 'execution' | 'settings' | 'runs'
+export type ViewMode = 'home' | 'projects' | 'editor' | 'execution' | 'triggers' | 'settings' | 'runs'
 export type NodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'waiting'
 export type DiagnosticSeverity = 'error' | 'warning' | 'info'
 export type RuntimeStatus =
@@ -62,7 +62,6 @@ export interface RegisteredProject {
     directoryPath: string
     isFavorite: boolean
     lastAccessedAt: string | null
-    flowBindings?: Record<string, string>
 }
 
 export interface ProjectRegistrationResult {
@@ -133,7 +132,6 @@ export interface HydratedProjectRecord {
     isFavorite: boolean
     lastAccessedAt: string | null
     activeConversationId?: string | null
-    flowBindings?: Record<string, string>
 }
 
 export interface WorkspaceSlice {

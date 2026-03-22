@@ -138,7 +138,6 @@ describe('ProjectsPanel', () => {
             last_accessed_at: null,
             is_favorite: false,
             active_conversation_id: null,
-            flow_bindings: {},
           }),
           {
             status: 200,
@@ -158,7 +157,6 @@ describe('ProjectsPanel', () => {
               last_accessed_at: null,
               is_favorite: false,
               active_conversation_id: null,
-              flow_bindings: {},
             },
           ]),
           {

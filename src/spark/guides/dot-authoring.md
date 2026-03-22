@@ -15,7 +15,7 @@ It is intentionally more operational than the specs. For exact runtime semantics
 After changing a flow, validate it before claiming the edit is finished:
 
 ```bash
-spark-workspace validate-flow --flow <name> --text
+spark flow validate --flow <name> --text
 ```
 
 Use the exact flow file name after saving the `.dot` file into the flow library.
@@ -466,4 +466,4 @@ Before you finish a flow edit:
 2. Confirm graph metadata uses `spark.title` and `spark.description` when the flow should be catalog-friendly.
 3. Keep launch expectations in `spark.launch_inputs` when direct execution should render a form.
 4. Keep node read/write context contracts in DOT metadata when they matter to future editors.
-5. Validate with `spark-workspace validate-flow --flow <name> --text`.
+5. Validate with `spark flow validate --flow <name> --text`.

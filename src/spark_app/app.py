@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import shutil
 import subprocess
 import sys
@@ -13,13 +14,20 @@ import attractor.api.server as attractor_server
 from spark_app.ui import resolve_ui_asset_path, resolve_ui_index_path
 from workspace.attractor_client import AttractorApiClient
 from workspace.api import WorkspaceApiDependencies, create_workspace_router
+from workspace.triggers import TriggerRuntime
 
 
 DEFAULT_EXECUTION_PLANNING_FLOW = "plan-generation.dot"
 DEFAULT_EXECUTION_DISPATCH_FLOW = "implement-spec.dot"
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-workspace_app = FastAPI(title="Spark Workspace API", docs_url="/docs", redoc_url=None, openapi_url="/openapi.json")
+TRIGGER_RUNTIME = TriggerRuntime(
+    get_settings=attractor_server.get_settings,
+    get_attractor_client=lambda: AttractorApiClient(
+        base_url="http://attractor.internal",
+        app=attractor_server.attractor_app,
+    ),
+)
 
 
 def _pick_directory_with_osascript(prompt: str) -> Path | None:
@@ -87,6 +95,24 @@ def _pick_project_directory(prompt: str = "Select Spark project directory") -> P
     raise RuntimeError(picker_errors[-1] if picker_errors else "No native directory picker is available in this runtime.")
 
 
+@asynccontextmanager
+async def _workspace_lifespan(_: FastAPI):
+    await TRIGGER_RUNTIME.start()
+    try:
+        yield
+    finally:
+        await TRIGGER_RUNTIME.stop()
+
+
+workspace_app = FastAPI(
+    title="Spark Workspace API",
+    docs_url="/docs",
+    redoc_url=None,
+    openapi_url="/openapi.json",
+    lifespan=_workspace_lifespan,
+)
+
+
 WORKSPACE_ROUTER = create_workspace_router(
     WorkspaceApiDependencies(
         get_settings=attractor_server.get_settings,
@@ -98,12 +124,15 @@ WORKSPACE_ROUTER = create_workspace_router(
         resolve_project_git_branch=lambda runtime_path: pipeline_runs.resolve_project_git_branch(runtime_path),
         resolve_project_git_commit=lambda runtime_path: pipeline_runs.resolve_project_git_commit(runtime_path),
         pick_project_directory=lambda: _pick_project_directory(),
+        get_trigger_runtime=lambda: TRIGGER_RUNTIME,
         default_execution_planning_flow=DEFAULT_EXECUTION_PLANNING_FLOW,
         default_execution_dispatch_flow=DEFAULT_EXECUTION_DISPATCH_FLOW,
     )
 )
 
 workspace_app.include_router(WORKSPACE_ROUTER)
+
+
 app.mount("/attractor", attractor_server.attractor_app)
 app.mount("/workspace", workspace_app)
 

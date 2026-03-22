@@ -65,6 +65,7 @@ class ProjectPaths:
     workflow_dir: Path
     proposals_dir: Path
     flow_run_requests_dir: Path
+    flow_launches_dir: Path
     execution_cards_dir: Path
 
 
@@ -78,7 +79,6 @@ class ProjectRecord:
     last_accessed_at: str | None
     is_favorite: bool
     active_conversation_id: str | None
-    flow_bindings: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -101,6 +101,7 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
     workflow_dir = project_root / "workflow"
     proposals_dir = project_root / "proposals"
     flow_run_requests_dir = project_root / "flow-run-requests"
+    flow_launches_dir = project_root / "flow-launches"
     execution_cards_dir = project_root / "execution-cards"
 
     for directory in (
@@ -109,6 +110,7 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
         workflow_dir,
         proposals_dir,
         flow_run_requests_dir,
+        flow_launches_dir,
         execution_cards_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
@@ -129,7 +131,6 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
             "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
             "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
             "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
-            "flow_bindings": _read_flow_bindings(payload),
         },
     )
 
@@ -143,6 +144,7 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
         workflow_dir=workflow_dir,
         proposals_dir=proposals_dir,
         flow_run_requests_dir=flow_run_requests_dir,
+        flow_launches_dir=flow_launches_dir,
         execution_cards_dir=execution_cards_dir,
     )
 
@@ -168,6 +170,7 @@ def read_project_paths_by_id(home_dir: Path, project_id: str) -> ProjectPaths | 
         workflow_dir=root / "workflow",
         proposals_dir=root / "proposals",
         flow_run_requests_dir=root / "flow-run-requests",
+        flow_launches_dir=root / "flow-launches",
         execution_cards_dir=root / "execution-cards",
     )
 
@@ -218,7 +221,6 @@ def update_project_record(
         "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
         "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
         "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
-        "flow_bindings": _read_flow_bindings(payload),
     }
     if last_accessed_at is not _UNSET:
         next_payload["last_accessed_at"] = _normalize_optional_string(last_accessed_at)
@@ -399,50 +401,6 @@ def delete_project_record(home_dir: Path, project_path: str) -> DeletedProjectRe
     return deleted
 
 
-def set_project_flow_binding(home_dir: Path, project_path: str, trigger: str, flow_name: str) -> ProjectRecord:
-    project_paths = ensure_project_paths(home_dir, project_path)
-    payload = _read_project_record(project_paths.project_file)
-    next_flow_bindings = _read_flow_bindings(payload)
-    next_flow_bindings[trigger] = flow_name
-    _write_project_record(
-        project_paths.project_file,
-        {
-            "project_id": project_paths.project_id,
-            "project_path": project_paths.project_path,
-            "display_name": str(payload.get("display_name", "") or project_paths.display_name),
-            "created_at": str(payload.get("created_at", "") or _iso_now()),
-            "last_opened_at": str(payload.get("last_opened_at", "") or _iso_now()),
-            "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
-            "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
-            "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
-            "flow_bindings": next_flow_bindings,
-        },
-    )
-    return _build_project_record(project_paths)
-
-
-def delete_project_flow_binding(home_dir: Path, project_path: str, trigger: str) -> ProjectRecord:
-    project_paths = ensure_project_paths(home_dir, project_path)
-    payload = _read_project_record(project_paths.project_file)
-    next_flow_bindings = _read_flow_bindings(payload)
-    next_flow_bindings.pop(trigger, None)
-    _write_project_record(
-        project_paths.project_file,
-        {
-            "project_id": project_paths.project_id,
-            "project_path": project_paths.project_path,
-            "display_name": str(payload.get("display_name", "") or project_paths.display_name),
-            "created_at": str(payload.get("created_at", "") or _iso_now()),
-            "last_opened_at": str(payload.get("last_opened_at", "") or _iso_now()),
-            "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
-            "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
-            "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
-            "flow_bindings": next_flow_bindings,
-        },
-    )
-    return _build_project_record(project_paths)
-
-
 def _read_project_record(path: Path) -> dict[str, object]:
     if not path.exists():
         return {}
@@ -469,6 +427,28 @@ def _read_optional_bool(payload: dict[str, object], key: str, *, default: bool) 
     if isinstance(value, bool):
         return value
     return default
+
+
+def read_legacy_project_flow_bindings(home_dir: Path, project_path: str) -> dict[str, str]:
+    project_paths = ensure_project_paths(home_dir, project_path)
+    return _read_flow_bindings(_read_project_record(project_paths.project_file))
+
+
+def clear_legacy_project_flow_bindings(home_dir: Path, project_path: str) -> ProjectRecord:
+    project_paths = ensure_project_paths(home_dir, project_path)
+    payload = _read_project_record(project_paths.project_file)
+    next_payload: dict[str, Any] = {
+        "project_id": project_paths.project_id,
+        "project_path": project_paths.project_path,
+        "display_name": str(payload.get("display_name", "") or project_paths.display_name),
+        "created_at": str(payload.get("created_at", "") or _iso_now()),
+        "last_opened_at": str(payload.get("last_opened_at", "") or _iso_now()),
+        "last_accessed_at": _read_optional_string(payload, "last_accessed_at"),
+        "is_favorite": _read_optional_bool(payload, "is_favorite", default=False),
+        "active_conversation_id": _read_optional_string(payload, "active_conversation_id"),
+    }
+    _write_project_record(project_paths.project_file, next_payload)
+    return _build_project_record(project_paths)
 
 
 def _read_flow_bindings(payload: dict[str, object]) -> dict[str, str]:
@@ -498,7 +478,6 @@ def _build_project_record(project_paths: ProjectPaths) -> ProjectRecord:
         last_accessed_at=_read_optional_string(payload, "last_accessed_at"),
         is_favorite=_read_optional_bool(payload, "is_favorite", default=False),
         active_conversation_id=_read_optional_string(payload, "active_conversation_id"),
-        flow_bindings=_read_flow_bindings(payload),
     )
 
 
@@ -524,15 +503,6 @@ def _write_project_record(path: Path, payload: dict[str, Any]) -> None:
     lines.append(f"is_favorite = {_toml_bool(bool(payload.get('is_favorite', False)))}")
     if payload.get("active_conversation_id"):
         lines.append(f"active_conversation_id = {_toml_string(str(payload['active_conversation_id']))}")
-    flow_bindings = payload.get("flow_bindings")
-    if isinstance(flow_bindings, dict) and flow_bindings:
-        lines.append("")
-        lines.append("[flow_bindings]")
-        for trigger in sorted(flow_bindings.keys()):
-            flow_name = flow_bindings.get(trigger)
-            if not isinstance(trigger, str) or not isinstance(flow_name, str):
-                continue
-            lines.append(f"{trigger} = {_toml_string(flow_name)}")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 

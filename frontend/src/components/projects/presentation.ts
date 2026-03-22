@@ -1,5 +1,6 @@
 import type {
     ExecutionCardResponse,
+    FlowLaunchResponse,
     FlowRunRequestResponse,
     SpecEditProposalResponse,
 } from '@/lib/workspaceClient'
@@ -63,6 +64,16 @@ export const getFlowRunRequestStatusPresentation = (status: FlowRunRequestRespon
         return { label: 'Launch failed', tone: 'danger' as const }
     }
     return { label: 'Pending review', tone: 'warning' as const }
+}
+
+export const getFlowLaunchStatusPresentation = (status: FlowLaunchResponse['status']) => {
+    if (status === 'launched') {
+        return { label: 'Launched', tone: 'success' as const }
+    }
+    if (status === 'launch_failed') {
+        return { label: 'Launch failed', tone: 'danger' as const }
+    }
+    return { label: 'Launching', tone: 'info' as const }
 }
 
 export const getToolCallStatusPresentation = (status: 'running' | 'completed' | 'failed') => {

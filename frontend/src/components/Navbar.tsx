@@ -3,7 +3,7 @@ import { useStore, type ViewMode } from "@/store"
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { Settings2 } from "lucide-react"
 
-const NAV_MODE_ORDER: ViewMode[] = ['home', 'editor', 'execution', 'settings', 'runs']
+const NAV_MODE_ORDER: ViewMode[] = ['home', 'editor', 'execution', 'triggers', 'settings', 'runs']
 
 export function Navbar() {
     const { viewMode, setViewMode } = useStore()
@@ -80,6 +80,15 @@ export function Navbar() {
                             }`}
                     >
                         Execution
+                    </button>
+                    <button
+                        data-testid="nav-mode-triggers"
+                        onClick={() => setViewMode('triggers')}
+                        onKeyDown={(event) => onViewModeKeyDown(event, 'triggers')}
+                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1 ${viewMode === 'triggers' ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'
+                            }`}
+                    >
+                        Triggers
                     </button>
                     <button
                         data-testid="nav-mode-settings"

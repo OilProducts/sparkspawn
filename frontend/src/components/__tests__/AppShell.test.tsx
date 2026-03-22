@@ -88,7 +88,7 @@ describe('App shell behavior', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders shell regions and switches among projects/settings/runs modes', async () => {
+  it('renders shell regions and switches among projects/triggers/settings/runs modes', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -99,6 +99,10 @@ describe('App shell behavior', () => {
     expect(screen.getByTestId('top-nav-active-project')).toHaveTextContent('No active project')
     expect(screen.queryByTestId('top-nav-active-flow')).not.toBeInTheDocument()
     expect(screen.queryByTestId('top-nav-run-context')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('nav-mode-triggers'))
+    expect(useStore.getState().viewMode).toBe('triggers')
+    expect(screen.getByTestId('triggers-panel')).toBeVisible()
 
     await user.click(screen.getByTestId('nav-mode-settings'))
     expect(useStore.getState().viewMode).toBe('settings')
