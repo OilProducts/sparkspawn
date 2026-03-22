@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from sparkspawn_common import codex_app_server
+from spark_common import codex_app_server
 from workspace.project_chat_common import (
     as_non_empty_string,
     build_codex_runtime_environment,
@@ -164,7 +164,7 @@ class CodexAppServerChatSession:
         init_response = self._send_request(
             "initialize",
             {
-                "clientInfo": {"name": "sparkspawn", "version": "0.1"},
+                "clientInfo": {"name": "spark", "version": "0.1"},
                 "capabilities": {
                     "experimentalApi": True,
                 },

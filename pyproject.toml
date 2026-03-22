@@ -3,7 +3,7 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sparkspawn"
+name = "spark"
 version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.10"
@@ -16,9 +16,9 @@ dependencies = [
 ]
 
 [project.scripts]
-sparkspawn = "sparkspawn.cli:main"
-sparkspawn-workspace = "workspace.cli:main"
-sparkspawn-ui-release-gate = "sparkspawn_app.ui_release_gate:main"
+spark = "spark.cli:main"
+spark-workspace = "workspace.cli:main"
+spark-ui-release-gate = "spark_app.ui_release_gate:main"
 
 [tool.setuptools]
 include-package-data = true
@@ -26,11 +26,11 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["attractor*", "workspace*", "sparkspawn*", "sparkspawn_app*", "sparkspawn_common*"]
+include = ["attractor*", "workspace*", "spark*", "spark_app*", "spark_common*"]
 
 [tool.setuptools.package-data]
-sparkspawn = ["starter_flows/*.dot", "guides/*.md"]
-sparkspawn_app = ["ui_dist/**"]
+spark = ["starter_flows/*.dot", "guides/*.md"]
+spark_app = ["ui_dist/**"]
 
 [dependency-groups]
 dev = [

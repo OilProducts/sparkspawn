@@ -1,7 +1,7 @@
 # TODO
 
 - [ ] Item 13.3-02 follow-up: keep medium-graph optimization behavior in production, but gate/hide profiling-debug UI readouts in normal production UX (expose via a developer/debug flag).
-- [ ] Audit Spark Spawn against the original Attractor spec/API to identify true runtime/editor contract drift versus product-layer extensions.
+- [ ] Audit Spark against the original Attractor spec/API to identify true runtime/editor contract drift versus product-layer extensions.
 - [ ] Align failure routing with the Attractor spec’s documented failure order so `FAIL` does not fall through ordinary unconditional edges before checking fail-specific routing.
 - [ ] Decide whether `tool_hooks.pre` / `tool_hooks.post` should apply only to `tool_command` nodes or also to codergen/LLM tool usage, then align the implementation and Attractor spec.
 - [ ] Reconcile exit-node execution with the Attractor spec: either dispatch exit nodes through the registered exit handler or update the spec to describe the current executor short-circuit behavior.

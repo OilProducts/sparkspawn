@@ -19,7 +19,7 @@ const resetExecutionState = () => {
     runtimeStatus: 'idle',
     humanGate: null,
     projectRegistry: {},
-    projectScopedWorkspaces: {},
+    projectSessionsByPath: {},
     projectRegistrationError: null,
     recentProjectPaths: [],
     diagnostics: [],
@@ -119,7 +119,7 @@ describe('Execution controls behavior', () => {
       viewMode: 'execution',
       activeProjectPath: '/tmp/project',
       activeFlow: 'implement-spec.dot',
-      projectScopedWorkspaces: {
+      projectSessionsByPath: {
         '/tmp/project': {
           activeFlow: 'implement-spec.dot',
           workingDir: '/tmp/project',
@@ -181,7 +181,7 @@ describe('Execution controls behavior', () => {
       activeProjectPath: '/tmp/project',
       activeFlow: 'preferred.dot',
       executionFlow: 'run-opened.dot',
-      projectScopedWorkspaces: {
+      projectSessionsByPath: {
         '/tmp/project': {
           activeFlow: 'preferred.dot',
           workingDir: '/tmp/project',
@@ -253,7 +253,7 @@ describe('Execution controls behavior', () => {
       activeProjectPath: '/tmp/project',
       activeFlow: 'implement-review-loop.dot',
       graphAttrs: {
-        'sparkspawn.launch_inputs': JSON.stringify([
+        'spark.launch_inputs': JSON.stringify([
           {
             key: 'context.request.summary',
             label: 'Request Summary',
@@ -270,7 +270,7 @@ describe('Execution controls behavior', () => {
           },
         ]),
       },
-      projectScopedWorkspaces: {
+      projectSessionsByPath: {
         '/tmp/project': {
           activeFlow: 'implement-review-loop.dot',
           workingDir: '/tmp/project',

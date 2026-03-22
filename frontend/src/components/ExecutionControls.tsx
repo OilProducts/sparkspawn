@@ -88,7 +88,7 @@ export function ExecutionControls() {
     const viewMode = useStore((state) => state.viewMode)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const activeProjectScope = useStore((state) =>
-        state.activeProjectPath ? state.projectScopedWorkspaces[state.activeProjectPath] : null
+        state.activeProjectPath ? state.projectSessionsByPath[state.activeProjectPath] : null
     )
     const activeFlow = useStore((state) => state.activeFlow)
     const executionFlow = useStore((state) => state.executionFlow)
@@ -111,7 +111,7 @@ export function ExecutionControls() {
     const [launchInputValues, setLaunchInputValues] = useState<LaunchInputFormValues>({})
     const executionFlowName = executionFlow || activeFlow
     const parsedLaunchInputs = useMemo(
-        () => parseLaunchInputDefinitions(graphAttrs['sparkspawn.launch_inputs']),
+        () => parseLaunchInputDefinitions(graphAttrs['spark.launch_inputs']),
         [graphAttrs],
     )
     const runInitiationForm = {

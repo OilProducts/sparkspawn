@@ -29,7 +29,7 @@ describe('flowLoadDebug', () => {
 
         recordFlowLoadDebug('preview:request', 'demo.dot', { source: 'load-source' })
 
-        expect(window.__sparkspawnFlowLoadDebug).toEqual([])
+        expect(window.__sparkFlowLoadDebug).toEqual([])
         expect(console.debug).not.toHaveBeenCalled()
     })
 
@@ -43,8 +43,8 @@ describe('flowLoadDebug', () => {
         })
 
         expect(isFlowLoadDebugEnabled()).toBe(true)
-        expect(window.__sparkspawnFlowLoadDebug).toHaveLength(1)
-        expect(window.__sparkspawnFlowLoadDebug?.[0]).toMatchObject({
+        expect(window.__sparkFlowLoadDebug).toHaveLength(1)
+        expect(window.__sparkFlowLoadDebug?.[0]).toMatchObject({
             event: 'preview:request',
             flowName: 'demo.dot',
             details: {
@@ -69,9 +69,9 @@ describe('flowLoadDebug', () => {
         }
 
         expect(isFlowLoadDebugEnabled()).toBe(true)
-        expect(window.__sparkspawnFlowLoadDebug).toHaveLength(200)
-        expect(window.__sparkspawnFlowLoadDebug?.[0]?.details).toEqual({ index: 5 })
-        expect(window.__sparkspawnFlowLoadDebug?.[199]?.details).toEqual({ index: 204 })
+        expect(window.__sparkFlowLoadDebug).toHaveLength(200)
+        expect(window.__sparkFlowLoadDebug?.[0]?.details).toEqual({ index: 5 })
+        expect(window.__sparkFlowLoadDebug?.[199]?.details).toEqual({ index: 204 })
     })
 
     it('summarizes diagnostic counts and rule ids', () => {

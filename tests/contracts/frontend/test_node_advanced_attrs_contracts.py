@@ -30,8 +30,8 @@ const nodes = [
       reasoning_effort: 'high',
       auto_status: true,
       allow_partial: true,
-      'sparkspawn.reads_context': '["context.request.summary","context.review.required_changes"]',
-      'sparkspawn.writes_context': '["context.plan.summary"]'
+      'spark.reads_context': '["context.request.summary","context.review.required_changes"]',
+      'spark.writes_context': '["context.plan.summary"]'
     }
   },
   {
@@ -92,6 +92,6 @@ def test_node_advanced_attrs_round_trip_through_preview_item_6_2_02() -> None:
     assert task_node["reasoning_effort"] == "high"
     assert task_node["auto_status"] is True
     assert task_node["allow_partial"] is True
-    assert task_node["sparkspawn.reads_context"] == '["context.request.summary","context.review.required_changes"]'
-    assert task_node["sparkspawn.writes_context"] == '["context.plan.summary"]'
+    assert task_node["spark.reads_context"] == '["context.request.summary","context.review.required_changes"]'
+    assert task_node["spark.writes_context"] == '["context.plan.summary"]'
     assert gate_node["human.default_choice"] == "fix"

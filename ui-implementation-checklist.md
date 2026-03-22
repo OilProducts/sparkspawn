@@ -1,6 +1,6 @@
-# Spark Spawn UI Implementation Checklist
+# Spark UI Implementation Checklist
 
-Companion to `/Users/chris/tinker/sparkspawn/specs/sparkspawn-ui-ux.md` and `/Users/chris/tinker/sparkspawn/specs/sparkspawn-workspace.md`.
+Companion to `/Users/chris/projects/spark/specs/spark-ui-ux.md` and `/Users/chris/projects/spark/specs/spark-workspace.md`.
 
 Use this as the execution plan and verification ledger for full UI spec coverage. Tasks are ordered to match the UI spec section/subsection sequence.
 
@@ -23,7 +23,7 @@ Status key:
 - [x] [1.2-03] Add release criteria that fail when any required spec feature is unavailable in UI.
 
 ### 1.3 Non-Goals
-- [x] [1.3-01] Define the UI/runtime semantic boundary in `specs/sparkspawn-ui-ux.md` and `specs/sparkspawn-workspace.md` so UI work does not alter engine semantics.
+- [x] [1.3-01] Define the UI/runtime semantic boundary in `specs/spark-ui-ux.md` and `specs/spark-workspace.md` so UI work does not alter engine semantics.
 - [x] [1.3-02] Add safeguards that prevent invalid DOT synthesis from form states.
 - [x] [1.3-03] Keep advanced feature access enabled (no simplified mode removing required spec controls).
 
@@ -31,7 +31,7 @@ Status key:
 
 ## 2. Design Principles
 
-- [x] [2-01] Implement spec-first behavior mapping for UI controls and tests with direct references back to `specs/sparkspawn-ui-ux.md`, `specs/sparkspawn-workspace.md`, and `specs/attractor-spec.md`.
+- [x] [2-01] Implement spec-first behavior mapping for UI controls and tests with direct references back to `specs/spark-ui-ux.md`, `specs/spark-workspace.md`, and `specs/attractor-spec.md`.
 - [x] [2-02] Add no-silent-loss save protections and user-visible failure states.
 - [x] [2-03] Ensure progressive disclosure for advanced fields while preserving full editability.
 - [x] [2-04] Add explainability views for routing, retry, and failure decisions.
@@ -330,7 +330,7 @@ Status key:
 
 ### 11.5 Project Workspace Persistence
 - [x] [11.5-01] Persist project registry across sessions with unique-directory enforcement.
-  - Evidence (2026-03-04): Evaluator `pass`; added persisted project-registry load/save hydration (`sparkspawn.project_registry_state`) with normalized absolute-path dedupe and duplicate-directory enforcement retained in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) and screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
+  - Evidence (2026-03-04): Evaluator `pass`; added persisted project-registry load/save hydration (`spark.project_registry_state`) with normalized absolute-path dedupe and duplicate-directory enforcement retained in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) and screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
 - [x] [11.5-02] Persist and restore project-scoped conversation/spec/plan linkage.
   - Evidence (2026-03-04): Evaluator `pass`; normalized project-key hydration now restores persisted `conversationId`/`specId`/`planId` linkage for project-scoped workspaces in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.02` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) with screenshot-based visual QA review using `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
 - [x] [11.5-03] Rehydrate last active project context safely on reopen.
@@ -350,7 +350,7 @@ Status key:
 
 ### 12.1 Required Endpoints
 - [x] [12.1-01] Verify UI coverage for all required endpoints listed in UI spec section 12.1.
-  - Evidence (2026-03-04): Evaluator `pass`; added frontend contract `CID:12.1.01` that asserts runtime coverage for every `sparkspawn-ui-ux.md` run-inspection endpoint expectation in `frontend/src/components/__tests__/ContractBehavior.test.tsx`, bridged by `tests/contracts/frontend/test_api_integration_contracts.py`, plus runtime `GET /pipelines/{id}/questions` integration in `frontend/src/components/RunsPanel.tsx` with screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-editor-shell.png`, `frontend/artifacts/ui-smoke/06-execution-panel.png`, `frontend/artifacts/ui-smoke/08-runs-panel.png`, `frontend/artifacts/ui-smoke/10a-human-gate-discoverability.png`, and `frontend/artifacts/ui-smoke/10b-human-gate-discoverability-runs.png`.
+  - Evidence (2026-03-04): Evaluator `pass`; added frontend contract `CID:12.1.01` that asserts runtime coverage for every `spark-ui-ux.md` run-inspection endpoint expectation in `frontend/src/components/__tests__/ContractBehavior.test.tsx`, bridged by `tests/contracts/frontend/test_api_integration_contracts.py`, plus runtime `GET /pipelines/{id}/questions` integration in `frontend/src/components/RunsPanel.tsx` with screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-editor-shell.png`, `frontend/artifacts/ui-smoke/06-execution-panel.png`, `frontend/artifacts/ui-smoke/08-runs-panel.png`, `frontend/artifacts/ui-smoke/10a-human-gate-discoverability.png`, and `frontend/artifacts/ui-smoke/10b-human-gate-discoverability-runs.png`.
 - [x] [12.1-02] Add typed client adapters and runtime schema validation for endpoint responses.
   - Evidence (2026-03-04): Evaluator `pass`; added typed API adapters + runtime schema guards in `frontend/src/lib/apiClient.ts` (including `/pipelines/{id}/graph`), wired endpoint consumers across `Editor`, `Navbar`, `ProjectsPanel`, `RunStream`, `RunsPanel`, `Terminal`, `TaskNode`, and `Sidebar`, and extended frontend contract `CID:12.1.02` with behavior-level parser assertions (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`), validated by `just test` (`593 passed`) plus screenshot-based visual QA on `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, `frontend/artifacts/ui-smoke/08b-runs-panel-populated-summary.png`, `frontend/artifacts/ui-smoke/08i-runs-panel-event-timeline.png`, and `frontend/artifacts/ui-smoke/19b-semantic-equivalence-round-trip-saved.png` (ui-smoke command reported backend `ECONNREFUSED` on `127.0.0.1:8000` for unrelated scenarios).
 - [x] [12.1-03] Add endpoint-level integration tests for happy path and common error cases.
@@ -607,11 +607,11 @@ Status key:
 - [ ] [1.2-02] Add CI acceptance checks proving the full journey works without raw DOT fallback.
   Deferred because the required full-journey UI surfaces (project registration/selection and project-scoped conversation/spec/plan flow) are not yet implemented, so a CI proof would be non-representative.
 - [ ] [3.1-02] Add role-oriented smoke tests (project onboarding, authoring, live operation, post-run audit).
-  Deferred because project onboarding and active-project workflow surfaces from `sparkspawn-ui-ux.md` are not yet implemented, so role smoke tests would be partial and misleading.
+  Deferred because project onboarding and active-project workflow surfaces from `spark-ui-ux.md` are not yet implemented, so role smoke tests would be partial and misleading.
 - [ ] [3.2-01] Implement workflow guardrails from create/open to iterate/re-run as explicit state machine transitions.
   Deferred because the required project-scoped workflow surfaces (project registry/Git gating, conversation/spec loop, and spec->plan->build chain) are not yet implemented in the UI.
 - [ ] [3.2-02] Add test coverage for the full 12-step primary workflow sequence (project registration/selection through re-run).
-  Deferred because the project registration/Git gating and project-scoped conversation/spec/plan/run surfaces required by `sparkspawn-ui-ux.md` are not yet implemented for behavioral end-to-end coverage.
+  Deferred because the project registration/Git gating and project-scoped conversation/spec/plan/run surfaces required by `spark-ui-ux.md` are not yet implemented for behavioral end-to-end coverage.
 - [ ] [3.2-03] Ensure every step has a first-class UI surface (no hidden or CLI-only transition).
   Deferred because the required project-scoped conversation/spec/plan/build surfaces are not implemented yet, so the workflow still has unavoidable non-UI transitions.
 - [ ] [3.2-04] Add explicit workflow coverage for project-scoped AI conversation -> spec refinement -> plan generation/approval -> build execution chain.
@@ -639,6 +639,6 @@ Status key:
 - [ ] [8.5-02] Persist generated implementation plans to project files with visible status/provenance.
   Deferred because the current API/UI contract has no project-scoped plan artifact write/read endpoint (only flow save and pipeline launch), so file persistence with visible status/provenance cannot be implemented correctly yet.
 - [ ] [12.4-01] Integrate project-scoped conversation turn/history contract in UI client adapters.
-  Deferred because `sparkspawn-workspace.md` section 12.4 requires backend workflow-orchestration contracts, but the current API surface has no project-scoped conversation turn/history endpoint to integrate or validate against.
+  Deferred because `spark-workspace.md` section 12.4 requires backend workflow-orchestration contracts, but the current API surface has no project-scoped conversation turn/history endpoint to integrate or validate against.
 - [ ] [12.4-02] Integrate spec-edit proposal/apply/reject contract with schema validation.
   Deferred because the current backend API surface does not expose a project-scoped spec-edit proposal/apply/reject contract endpoint for validated client adapters.

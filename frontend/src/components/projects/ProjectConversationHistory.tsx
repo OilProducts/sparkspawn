@@ -307,7 +307,7 @@ export function ProjectConversationHistory({
                                 >
                                     <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
                                         {entry.role === 'assistant'
-                                            ? (entry.presentation === 'thinking' ? 'Thinking' : 'Spark Spawn')
+                                            ? (entry.presentation === 'thinking' ? 'Thinking' : 'Spark')
                                             : entry.role}
                                     </p>
                                     <p className={`whitespace-pre-wrap text-xs leading-5 ${entry.presentation === 'thinking' ? 'italic' : ''}`}>

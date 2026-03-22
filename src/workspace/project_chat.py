@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from sparkspawn.authoring_assets import (
+from spark.authoring_assets import (
     attractor_spec_path,
     dot_authoring_guide_path,
     flow_extensions_spec_path,
@@ -439,7 +439,7 @@ class ProjectChatService:
                 "dot_authoring_guide_path": str(self._authoring_guide_path),
                 "flow_extensions_spec_path": str(self._flow_extensions_spec_path),
                 "attractor_spec_path": str(self._attractor_spec_path),
-                "flow_validation_command": "sparkspawn-workspace validate-flow --flow <name> --text",
+                "flow_validation_command": "spark-workspace validate-flow --flow <name> --text",
                 "recent_conversation": history_text,
                 "latest_user_message": message,
             },
@@ -890,7 +890,7 @@ class ProjectChatService:
             raise ValueError("Project path is required.")
         normalized_payload = _normalize_spec_edit_proposal_payload(
             payload,
-            source_name="sparkspawn-workspace spec-proposal",
+            source_name="spark-workspace spec-proposal",
         )
         return self._reviews.create_spec_edit_proposal(
             conversation_id,
@@ -921,7 +921,7 @@ class ProjectChatService:
             raise ValueError("Project path is required.")
         normalized_payload = _normalize_flow_run_request_payload(
             payload,
-            source_name="sparkspawn-workspace flow-run",
+            source_name="spark-workspace flow-run",
         )
         return self._reviews.create_flow_run_request(
             conversation_id,

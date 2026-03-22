@@ -14,7 +14,7 @@ const seedRouteState = async (page: Page) => {
   await page.addInitScript(
     ({ projectPath, flowName }) => {
       window.localStorage.setItem(
-        'sparkspawn.ui_route_state',
+        'spark.ui_route_state',
         JSON.stringify({
           viewMode: 'projects',
           activeProjectPath: projectPath,
@@ -22,7 +22,7 @@ const seedRouteState = async (page: Page) => {
         }),
       )
       window.localStorage.setItem(
-        'sparkspawn.project_registry_state',
+        'spark.project_registry_state',
         JSON.stringify({
           [projectPath]: {
             directoryPath: projectPath,

@@ -49,7 +49,7 @@ def test_list_workspace_flows_human_surface_returns_all_flows_with_metadata_fall
         "rich.dot",
         """
 digraph rich {
-  graph [label="Graph Label", goal="Graph goal", sparkspawn.title="Workspace Title", sparkspawn.description="Workspace description"];
+  graph [label="Graph Label", goal="Graph goal", spark.title="Workspace Title", spark.description="Workspace description"];
   start [shape=Mdiamond];
   done [shape=Msquare];
   start -> done;

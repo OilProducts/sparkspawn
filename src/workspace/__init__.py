@@ -1,1 +1,1 @@
-"""Spark Spawn workspace package."""
+"""Spark workspace package."""

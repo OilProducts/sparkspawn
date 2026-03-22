@@ -225,7 +225,7 @@ const resetContractState = () => {
         lastAccessedAt: null,
       },
     },
-    projectScopedWorkspaces: {
+    projectSessionsByPath: {
       '/tmp/project-contract-behavior': {
         activeFlow: 'contract-behavior.dot',
         workingDir: DEFAULT_WORKING_DIRECTORY,
@@ -1224,7 +1224,7 @@ describe('Frontend contract behavior', () => {
     })
 
     localStorageMock.setItem(
-      'sparkspawn.project_registry_state',
+      'spark.project_registry_state',
       JSON.stringify({
         '/tmp/project-contract-behavior': {
           directoryPath: '/tmp/project-contract-behavior',
@@ -1234,7 +1234,7 @@ describe('Frontend contract behavior', () => {
       }),
     )
     localStorageMock.setItem(
-      'sparkspawn.ui_route_state',
+      'spark.ui_route_state',
       JSON.stringify({
         viewMode: 'projects',
         activeProjectPath: '/tmp/project-contract-behavior',
@@ -1247,10 +1247,10 @@ describe('Frontend contract behavior', () => {
 
     const nextState = restoredStore.getState()
     expect(nextState.activeProjectPath).toBe('/tmp/project-contract-behavior')
-    expect(nextState.projectScopedWorkspaces['/tmp/project-contract-behavior']).toBeDefined()
-    expect(nextState.projectScopedWorkspaces['/tmp/project-contract-behavior/./']).toBeUndefined()
+    expect(nextState.projectSessionsByPath['/tmp/project-contract-behavior']).toBeDefined()
+    expect(nextState.projectSessionsByPath['/tmp/project-contract-behavior/./']).toBeUndefined()
 
-    const persistedRouteStateRaw = localStorageMock.getItem('sparkspawn.ui_route_state')
+    const persistedRouteStateRaw = localStorageMock.getItem('spark.ui_route_state')
     expect(persistedRouteStateRaw).toBeTruthy()
     const persistedRouteState = JSON.parse(String(persistedRouteStateRaw)) as { activeProjectPath: string | null; activeFlow?: string | null }
     expect(persistedRouteState.activeProjectPath).toBe('/tmp/project-contract-behavior')
@@ -1293,10 +1293,10 @@ describe('Frontend contract behavior', () => {
     vi.resetModules()
     const { useStore: restoredStore } = await import('@/store')
     restoredStore.setState((state) => ({
-      projectScopedWorkspaces: {
-        ...state.projectScopedWorkspaces,
+      projectSessionsByPath: {
+        ...state.projectSessionsByPath,
         '/tmp/project-a': {
-          ...state.projectScopedWorkspaces['/tmp/project-a'],
+          ...state.projectSessionsByPath['/tmp/project-a'],
           activeFlow: null,
           workingDir: '/tmp/project-a',
           conversationId: 'conversation-a',
@@ -1309,7 +1309,7 @@ describe('Frontend contract behavior', () => {
           planProvenance: null,
         },
         '/tmp/project-b': {
-          ...state.projectScopedWorkspaces['/tmp/project-b'],
+          ...state.projectSessionsByPath['/tmp/project-b'],
           activeFlow: null,
           workingDir: '/tmp/project-b',
           conversationId: 'conversation-b',
@@ -1323,7 +1323,7 @@ describe('Frontend contract behavior', () => {
         },
       },
     }))
-    const projectAState = restoredStore.getState().getProjectScopedArtifactState('/tmp/project-a')
+    const projectAState = restoredStore.getState().getProjectSessionArtifactState('/tmp/project-a')
     expect(projectAState).toEqual({
       conversationId: 'conversation-a',
       specId: 'spec-a',
@@ -1332,7 +1332,7 @@ describe('Frontend contract behavior', () => {
       planStatus: 'rejected',
     })
 
-    const projectBState = restoredStore.getState().getProjectScopedArtifactState('/tmp/project-b/./')
+    const projectBState = restoredStore.getState().getProjectSessionArtifactState('/tmp/project-b/./')
     expect(projectBState).toEqual({
       conversationId: 'conversation-b',
       specId: 'spec-b',
@@ -1341,7 +1341,7 @@ describe('Frontend contract behavior', () => {
       planStatus: 'revision-requested',
     })
 
-    expect(restoredStore.getState().getProjectScopedArtifactState('/tmp/project-missing')).toBeNull()
+    expect(restoredStore.getState().getProjectSessionArtifactState('/tmp/project-missing')).toBeNull()
   })
 
   it('[CID:12.4.03] routes execution-planning status updates to the workflow event log instead of chat history', async () => {
@@ -1537,10 +1537,10 @@ describe('Frontend contract behavior', () => {
         viewMode: 'projects',
         activeProjectPath: '/tmp/project-contract-behavior',
         activeFlow: 'contract-behavior.dot',
-        projectScopedWorkspaces: {
-          ...state.projectScopedWorkspaces,
+        projectSessionsByPath: {
+          ...state.projectSessionsByPath,
           '/tmp/project-contract-behavior': {
-            ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
+            ...state.projectSessionsByPath['/tmp/project-contract-behavior'],
             specId: null,
             specStatus: 'draft',
           },
@@ -1561,7 +1561,7 @@ describe('Frontend contract behavior', () => {
     })
     await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
 
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/project-contract-behavior']?.conversationId
     expect(conversationId).toBeTruthy()
 
     const failureSnapshot = conversationSnapshot({
@@ -1599,7 +1599,7 @@ describe('Frontend contract behavior', () => {
     const requestedUrls = fetchMock.mock.calls.map(([input]) => requestUrl(input as RequestInfo | URL))
     expect(requestedUrls.some((url) => url.includes(`/workspace/api/conversations/${encodeURIComponent(conversationId!)}/spec-edit-proposals/proposal-contract/approve`))).toBe(true)
     expect(screen.getByTestId('project-ai-conversation-history-list')).not.toHaveTextContent('Execution planning failed')
-    expect(useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.planStatus).toBe('draft')
+    expect(useStore.getState().projectSessionsByPath['/tmp/project-contract-behavior']?.planStatus).toBe('draft')
     expect(useStore.getState().viewMode).toBe('projects')
   })
 
@@ -1754,10 +1754,10 @@ describe('Frontend contract behavior', () => {
         viewMode: 'projects',
         activeProjectPath: '/tmp/project-contract-behavior',
         activeFlow: 'contract-behavior.dot',
-        projectScopedWorkspaces: {
-          ...state.projectScopedWorkspaces,
+        projectSessionsByPath: {
+          ...state.projectSessionsByPath,
           '/tmp/project-contract-behavior': {
-            ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
+            ...state.projectSessionsByPath['/tmp/project-contract-behavior'],
             conversationId,
           },
         },
@@ -1778,7 +1778,7 @@ describe('Frontend contract behavior', () => {
     await user.click(screen.getByTestId('project-plan-request-revision-button'))
 
     await waitFor(() => {
-      expect(useStore.getState().projectScopedWorkspaces['/tmp/project-contract-behavior']?.planStatus).toBe('revision-requested')
+      expect(useStore.getState().projectSessionsByPath['/tmp/project-contract-behavior']?.planStatus).toBe('revision-requested')
     })
 
     expect(reviewBodies).toEqual([
@@ -1821,10 +1821,10 @@ describe('Frontend contract behavior', () => {
         viewMode: 'execution',
         activeProjectPath: '/tmp/project-contract-behavior',
         activeFlow: 'contract-behavior.dot',
-        projectScopedWorkspaces: {
-          ...state.projectScopedWorkspaces,
+        projectSessionsByPath: {
+          ...state.projectSessionsByPath,
           '/tmp/project-contract-behavior': {
-            ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
+            ...state.projectSessionsByPath['/tmp/project-contract-behavior'],
             planId: 'plan-contract-behavior',
             planStatus: 'draft',
           },
@@ -1848,10 +1848,10 @@ describe('Frontend contract behavior', () => {
     act(() => {
       useStore.setState((state) => ({
         ...state,
-        projectScopedWorkspaces: {
-          ...state.projectScopedWorkspaces,
+        projectSessionsByPath: {
+          ...state.projectSessionsByPath,
           '/tmp/project-contract-behavior': {
-            ...state.projectScopedWorkspaces['/tmp/project-contract-behavior'],
+            ...state.projectSessionsByPath['/tmp/project-contract-behavior'],
             planStatus: 'approved',
           },
         },
@@ -5321,7 +5321,7 @@ digraph contract_behavior {
     })
   })
 
-  it('[CID:11.5.01] ignores browser-persisted project and workflow state that now belongs to Spark Spawn storage', async () => {
+  it('[CID:11.5.01] ignores browser-persisted project and workflow state that now belongs to Spark storage', async () => {
     vi.resetModules()
     const storage = new Map<string, string>()
     const localStorageMock = {
@@ -5342,14 +5342,14 @@ digraph contract_behavior {
       value: localStorageMock,
     })
 
-    localStorageMock.setItem('sparkspawn.project_registry_state', JSON.stringify({
+    localStorageMock.setItem('spark.project_registry_state', JSON.stringify({
       '/tmp/persisted-project': {
         directoryPath: '/tmp/persisted-project',
         isFavorite: true,
         lastAccessedAt: '2026-03-04T00:00:00.000Z',
       },
     }))
-    localStorageMock.setItem('sparkspawn.project_conversation_state', JSON.stringify({
+    localStorageMock.setItem('spark.project_conversation_state', JSON.stringify({
       '/tmp/persisted-project': {
         conversationId: 'conversation-persisted-project',
         specId: 'spec-persisted-project',
@@ -5358,7 +5358,7 @@ digraph contract_behavior {
         planStatus: 'approved',
       },
     }))
-    localStorageMock.setItem('sparkspawn.ui_route_state', JSON.stringify({
+    localStorageMock.setItem('spark.ui_route_state', JSON.stringify({
       viewMode: 'projects',
       activeProjectPath: '/tmp/persisted-project',
       selectedRunId: null,
@@ -5368,9 +5368,9 @@ digraph contract_behavior {
     const restoredState = restoredStore.getState()
 
     expect(restoredState.projectRegistry).toEqual({})
-    expect(restoredState.projectScopedWorkspaces['/tmp/persisted-project']?.conversationId).toBeNull()
-    expect(restoredState.projectScopedWorkspaces['/tmp/persisted-project']?.specId).toBeNull()
-    expect(restoredState.projectScopedWorkspaces['/tmp/persisted-project']?.planId).toBeNull()
+    expect(restoredState.projectSessionsByPath['/tmp/persisted-project']?.conversationId).toBeNull()
+    expect(restoredState.projectSessionsByPath['/tmp/persisted-project']?.specId).toBeNull()
+    expect(restoredState.projectSessionsByPath['/tmp/persisted-project']?.planId).toBeNull()
     expect(restoredState.activeProjectPath).toBe('/tmp/persisted-project')
   })
 
@@ -5393,7 +5393,7 @@ digraph contract_behavior {
       lastAccessedAt: '2026-03-04T00:00:00.000Z',
       flowBindings: {},
     })
-    expect(restoredStore.getState().projectScopedWorkspaces['/tmp/persisted-project']?.conversationId).toBe(
+    expect(restoredStore.getState().projectSessionsByPath['/tmp/persisted-project']?.conversationId).toBe(
       'conversation-persisted-project',
     )
   })

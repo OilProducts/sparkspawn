@@ -22,8 +22,8 @@ from attractor.graph_prep import (
     normalize_graph_attr_aliases,
     resolve_default_max_retries_value,
 )
-from sparkspawn_common.runtime import build_project_id, normalize_project_path
-from sparkspawn_common.settings import Settings
+from spark_common.runtime import build_project_id, normalize_project_path
+from spark_common.settings import Settings
 
 
 def runs_root(get_settings: Callable[[], Settings]) -> Path:

@@ -220,10 +220,10 @@ def _build_flow_summary(flow_path: Path, launch_policy: str | None) -> FlowSumma
 def _resolve_flow_metadata(graph: DotGraph, flow_name: str) -> tuple[str, str, str, str]:
     graph_label = _graph_attr_string(graph, "label")
     graph_goal = _graph_attr_string(graph, "goal")
-    sparkspawn_title = _graph_attr_string(graph, "sparkspawn.title")
-    sparkspawn_description = _graph_attr_string(graph, "sparkspawn.description")
-    title = sparkspawn_title or graph_label or Path(flow_name).stem
-    description = sparkspawn_description or graph_goal or ""
+    spark_title = _graph_attr_string(graph, "spark.title")
+    spark_description = _graph_attr_string(graph, "spark.description")
+    title = spark_title or graph_label or Path(flow_name).stem
+    description = spark_description or graph_goal or ""
     return title, description, graph_label, graph_goal
 
 

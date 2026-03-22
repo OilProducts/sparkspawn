@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 import io
 
-import sparkspawn.authoring_assets as authoring_assets
-import sparkspawn.cli as spark_cli
-import sparkspawn.starter_assets as starter_assets
+import spark.authoring_assets as authoring_assets
+import spark.cli as spark_cli
+import spark.starter_assets as starter_assets
 import workspace.cli as workspace_cli
 
 
@@ -36,7 +36,7 @@ def test_run_serve_uses_import_string_when_reload_enabled(monkeypatch, tmp_path:
     assert result == 0
     assert calls == [
         {
-            "app": "sparkspawn_app.app:app",
+            "app": "spark_app.app:app",
             "host": "127.0.0.1",
             "port": 8000,
             "reload": True,
@@ -65,9 +65,9 @@ def test_run_serve_preserves_runtime_path_env_for_reload(monkeypatch, tmp_path: 
 
     spark_cli._run_serve(args)
 
-    assert spark_cli.os.environ["SPARKSPAWN_HOME"] == str(data_dir.resolve(strict=False))
-    assert spark_cli.os.environ["SPARKSPAWN_FLOWS_DIR"] == str(flows_dir.resolve(strict=False))
-    assert spark_cli.os.environ["SPARKSPAWN_UI_DIR"] == str(ui_dir.resolve(strict=False))
+    assert spark_cli.os.environ["SPARK_HOME"] == str(data_dir.resolve(strict=False))
+    assert spark_cli.os.environ["SPARK_FLOWS_DIR"] == str(flows_dir.resolve(strict=False))
+    assert spark_cli.os.environ["SPARK_UI_DIR"] == str(ui_dir.resolve(strict=False))
 
 
 def test_run_init_seeds_missing_starter_flows_without_overwriting_existing(
@@ -146,7 +146,7 @@ def test_run_init_force_overwrites_existing_starter_flows(
 def test_packaged_starter_flows_match_repo_starter_flows() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     repo_starter_dir = repo_root / "starter-flows"
-    packaged_starter_dir = repo_root / "src" / "sparkspawn" / "starter_flows"
+    packaged_starter_dir = repo_root / "src" / "spark" / "starter_flows"
 
     repo_payload = {
         path.name: path.read_text(encoding="utf-8")
@@ -166,12 +166,12 @@ def test_packaged_authoring_references_match_repo_sources() -> None:
     packaged_attractor_spec = authoring_assets.attractor_spec_path()
     packaged_flow_extensions_spec = authoring_assets.flow_extensions_spec_path()
 
-    assert packaged_guide.read_text(encoding="utf-8").startswith("# Spark Spawn DOT Authoring Guide")
+    assert packaged_guide.read_text(encoding="utf-8").startswith("# Spark DOT Authoring Guide")
     assert packaged_attractor_spec.read_text(encoding="utf-8") == (
         repo_root / "specs" / "attractor-spec.md"
     ).read_text(encoding="utf-8")
     assert packaged_flow_extensions_spec.read_text(encoding="utf-8") == (
-        repo_root / "specs" / "sparkspawn-flow-extensions.md"
+        repo_root / "specs" / "spark-flow-extensions.md"
     ).read_text(encoding="utf-8")
 
 
@@ -187,7 +187,7 @@ def test_run_workspace_spec_proposal_posts_payload_and_prints_response(
                 "summary": "Clarify the approval gate.",
                 "changes": [
                     {
-                        "path": "specs/sparkspawn-workspace.md#proposal-review",
+                        "path": "specs/spark-workspace.md#proposal-review",
                         "before": "Planning begins immediately.",
                         "after": "Planning begins only after approval.",
                     }
@@ -248,7 +248,7 @@ def test_run_workspace_spec_proposal_posts_payload_and_prints_response(
                 "summary": "Clarify the approval gate.",
                 "changes": [
                     {
-                        "path": "specs/sparkspawn-workspace.md#proposal-review",
+                        "path": "specs/spark-workspace.md#proposal-review",
                         "before": "Planning begins immediately.",
                         "after": "Planning begins only after approval.",
                     }
@@ -326,7 +326,7 @@ def test_run_workspace_spec_proposal_reads_payload_from_stdin(
                     "summary": "Read from stdin.",
                     "changes": [
                         {
-                            "path": "specs/sparkspawn-workspace.md#proposal-review",
+                            "path": "specs/spark-workspace.md#proposal-review",
                             "before": "Old text.",
                             "after": "New text.",
                         }
@@ -346,7 +346,7 @@ def test_run_workspace_spec_proposal_reads_payload_from_stdin(
                 "summary": "Read from stdin.",
                 "changes": [
                     {
-                        "path": "specs/sparkspawn-workspace.md#proposal-review",
+                        "path": "specs/spark-workspace.md#proposal-review",
                         "before": "Old text.",
                         "after": "New text.",
                     }

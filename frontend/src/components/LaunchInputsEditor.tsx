@@ -48,7 +48,7 @@ export function LaunchInputsEditor({ entries, error, onChange }: LaunchInputsEdi
                     Launch Inputs
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                    Define the `context.*` values Spark Spawn should collect before launching this flow.
+                    Define the `context.*` values Spark should collect before launching this flow.
                 </p>
             </div>
             {entries.length === 0 ? (

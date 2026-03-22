@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 import attractor.api.server as server
-import sparkspawn_common.codex_app_server as codex_app_server
-from sparkspawn.authoring_assets import (
+import spark_common.codex_app_server as codex_app_server
+from spark.authoring_assets import (
     attractor_spec_path,
     dot_authoring_guide_path,
     flow_extensions_spec_path,
@@ -92,7 +92,7 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
             id="proposal-1",
             created_at="2026-03-08T12:01:00Z",
             summary="Summary",
-            changes=[project_chat_models.SpecEditProposalChange(path="specs/sparkspawn-ui-ux.md", before="old", after="new")],
+            changes=[project_chat_models.SpecEditProposalChange(path="specs/spark-ui-ux.md", before="old", after="new")],
             status="approved",
         ),
         "Needs refinement",
@@ -118,7 +118,7 @@ def test_project_chat_prompt_includes_flow_authoring_boundary(tmp_path: Path) ->
     assert f"`{dot_authoring_guide_path()}`" in prompt
     assert f"`{flow_extensions_spec_path()}`" in prompt
     assert f"`{attractor_spec_path()}`" in prompt
-    assert "sparkspawn-workspace validate-flow --flow <name> --text" in prompt
+    assert "spark-workspace validate-flow --flow <name> --text" in prompt
 
 
 def test_project_chat_service_rejects_malformed_prompt_templates(tmp_path: Path) -> None:
@@ -827,7 +827,7 @@ def test_chat_session_initialize_enables_experimental_api(monkeypatch) -> None:
         (
             "initialize",
             {
-                "clientInfo": {"name": "sparkspawn", "version": "0.1"},
+                "clientInfo": {"name": "spark", "version": "0.1"},
                 "capabilities": {
                     "experimentalApi": True,
                 },
@@ -1130,7 +1130,7 @@ def test_create_spec_edit_proposal_places_artifact_on_latest_assistant_turn(tmp_
             "summary": "Clarify the approval gate.",
             "changes": [
                 {
-                    "path": "specs/sparkspawn-workspace.md#proposal-review",
+                    "path": "specs/spark-workspace.md#proposal-review",
                     "before": "Planning begins immediately.",
                     "after": "Planning begins only after approval.",
                 }
@@ -1186,7 +1186,7 @@ def test_create_spec_edit_proposal_by_handle_route_resolves_conversation(
             "summary": "Capture the approved spec gate.",
             "changes": [
                 {
-                    "path": "specs/sparkspawn-workspace.md#proposal-review",
+                    "path": "specs/spark-workspace.md#proposal-review",
                     "before": "Planning begins immediately.",
                     "after": "Planning begins only after the proposal is approved.",
                 }
@@ -2312,7 +2312,7 @@ def test_list_project_conversations_endpoint_returns_project_threads(product_api
 def test_delete_project_conversation_endpoint_removes_thread_state(product_api_client, tmp_path: Path) -> None:
     service = server.PROJECT_CHAT
     conversation_id = "conversation-delete-me"
-    project_paths = ensure_project_paths(tmp_path / ".sparkspawn", str(tmp_path))
+    project_paths = ensure_project_paths(tmp_path / ".spark", str(tmp_path))
     service._write_state(
         project_chat.ConversationState(
             conversation_id=conversation_id,
@@ -2344,7 +2344,7 @@ def test_delete_project_conversation_endpoint_removes_thread_state(product_api_c
         "project_path": str(tmp_path.resolve()),
     }
     assert not (project_paths.conversations_dir / conversation_id).exists()
-    handle_index = json.loads(conversation_handles_path(tmp_path / ".sparkspawn").read_text(encoding="utf-8"))
+    handle_index = json.loads(conversation_handles_path(tmp_path / ".spark").read_text(encoding="utf-8"))
     assert conversation_id not in handle_index["conversation_ids"]
 
     list_response = product_api_client.get("/workspace/api/projects/conversations", params={"project_path": str(tmp_path)})

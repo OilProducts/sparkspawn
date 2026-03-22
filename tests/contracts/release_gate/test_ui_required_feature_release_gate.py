@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from sparkspawn_app.ui_release_gate import (
+from spark_app.ui_release_gate import (
     extract_required_ui_feature_rows,
     enforce_required_ui_feature_release_gate,
     main,

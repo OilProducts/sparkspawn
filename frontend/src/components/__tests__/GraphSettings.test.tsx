@@ -27,7 +27,7 @@ const resetGraphSettingsState = () => {
         lastAccessedAt: null,
       },
     },
-    projectScopedWorkspaces: {
+    projectSessionsByPath: {
       '/tmp/project-graph-settings': {
         activeFlow: 'implement-spec.dot',
         workingDir: DEFAULT_WORKING_DIRECTORY,
@@ -198,8 +198,8 @@ describe('Graph and settings behavior', () => {
     const user = userEvent.setup()
     act(() => {
       useStore.getState().setGraphAttrs({
-        'sparkspawn.title': '  Execution Planning  ',
-        'sparkspawn.description': '  Turn approved spec edits into execution plans.  ',
+        'spark.title': '  Execution Planning  ',
+        'spark.description': '  Turn approved spec edits into execution plans.  ',
         custom_attr: 'keep me',
       } as any)
     })
@@ -215,15 +215,15 @@ describe('Graph and settings behavior', () => {
     expect(screen.getByTestId('graph-extension-attrs-editor')).toBeVisible()
     expect(screen.getByTestId('graph-extension-attrs-list')).toBeVisible()
     expect(screen.getByTestId('graph-extension-attr-key-0')).toHaveValue('custom_attr')
-    expect(screen.queryByText('sparkspawn.title')).not.toBeInTheDocument()
-    expect(screen.queryByText('sparkspawn.description')).not.toBeInTheDocument()
+    expect(screen.queryByText('spark.title')).not.toBeInTheDocument()
+    expect(screen.queryByText('spark.description')).not.toBeInTheDocument()
 
     const dot = generateDot('implement-spec.dot', [], [], useStore.getState().graphAttrs)
-    expect(dot).toContain('sparkspawn.title="Execution Planning"')
-    expect(dot).toContain('sparkspawn.description="Turn approved spec edits into execution plans."')
+    expect(dot).toContain('spark.title="Execution Planning"')
+    expect(dot).toContain('spark.description="Turn approved spec edits into execution plans."')
   })
 
-  it('persists launch input declarations as DOT-backed Spark Spawn metadata', async () => {
+  it('persists launch input declarations as DOT-backed Spark metadata', async () => {
     const user = userEvent.setup()
     wrapWithFlowProvider(<GraphSettings inline />)
 
@@ -241,7 +241,7 @@ describe('Graph and settings behavior', () => {
     await user.click(screen.getByTestId('graph-launch-input-required-0'))
 
     expect(screen.queryByTestId('graph-launch-inputs-error')).not.toBeInTheDocument()
-    expect(useStore.getState().graphAttrs['sparkspawn.launch_inputs']).toBe(
+    expect(useStore.getState().graphAttrs['spark.launch_inputs']).toBe(
       JSON.stringify([
         {
           key: 'context.request.acceptance_criteria',
@@ -254,7 +254,7 @@ describe('Graph and settings behavior', () => {
     )
 
     const dot = generateDot('implement-spec.dot', [], [], useStore.getState().graphAttrs)
-    expect(dot).toContain('sparkspawn.launch_inputs=')
+    expect(dot).toContain('spark.launch_inputs=')
     expect(dot).toContain('context.request.acceptance_criteria')
   })
 

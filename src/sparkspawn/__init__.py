@@ -1,1 +1,0 @@
-"""Spark Spawn package."""

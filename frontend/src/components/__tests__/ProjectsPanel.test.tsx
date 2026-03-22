@@ -95,7 +95,7 @@ const resetProjectScopeState = () => {
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
     projectRegistry: {},
-    projectScopedWorkspaces: {},
+    projectSessionsByPath: {},
     projectRegistrationError: null,
     recentProjectPaths: [],
   }))
@@ -597,7 +597,7 @@ describe('ProjectsPanel', () => {
           return new Response(
             JSON.stringify(withSnapshotSchema({
               conversation_id: 'conversation-home-project-1',
-              project_path: '/System/Volumes/Data/home/chris/tinker/sparkspawn',
+              project_path: '/System/Volumes/Data/home/chris/tinker/spark',
               title: 'Reply with a one-line acknowledgement only.',
               created_at: '2026-03-07T15:55:00Z',
               updated_at: '2026-03-07T15:55:04Z',
@@ -642,8 +642,8 @@ describe('ProjectsPanel', () => {
       }),
     )
 
-    useStore.getState().registerProject('/home/chris/tinker/sparkspawn')
-    useStore.getState().setActiveProjectPath('/home/chris/tinker/sparkspawn')
+    useStore.getState().registerProject('/home/chris/tinker/spark')
+    useStore.getState().setActiveProjectPath('/home/chris/tinker/spark')
 
     render(<ProjectsPanel />)
 
@@ -1228,7 +1228,7 @@ describe('ProjectsPanel', () => {
 
     await user.type(screen.getByTestId('project-ai-conversation-input'), 'Stream this reply.')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     await waitFor(() => {
@@ -1391,7 +1391,7 @@ describe('ProjectsPanel', () => {
 
     await user.type(screen.getByTestId('project-ai-conversation-input'), 'Keep the streamed thinking visible.')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     await waitFor(() => {
@@ -1667,7 +1667,7 @@ describe('ProjectsPanel', () => {
 
     useStore.getState().registerProject('/tmp/chat-project')
     useStore.getState().setActiveProjectPath('/tmp/chat-project')
-    useStore.getState().updateProjectScopedWorkspace('/tmp/chat-project', {
+    useStore.getState().updateProjectSessionState('/tmp/chat-project', {
       conversationId: 'conversation-flow-run',
     })
 
@@ -1759,7 +1759,7 @@ describe('ProjectsPanel', () => {
 
     await user.type(screen.getByTestId('project-ai-conversation-input'), 'Stream this reply.')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     await waitFor(() => {
@@ -1995,7 +1995,7 @@ describe('ProjectsPanel', () => {
 
     await user.type(screen.getByTestId('project-ai-conversation-input'), 'Draft a spec.')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     await waitFor(() => {
@@ -2353,7 +2353,7 @@ describe('ProjectsPanel', () => {
 
     await user.type(screen.getByTestId('project-ai-conversation-input'), 'Can you use the spec proposal too?')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     await waitFor(() => {
@@ -2602,7 +2602,7 @@ describe('ProjectsPanel', () => {
 
     await user.type(screen.getByTestId('project-ai-conversation-input'), 'Can you use the spec proposal too?')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     await waitFor(() => {
@@ -2809,7 +2809,7 @@ describe('ProjectsPanel', () => {
 
     await user.type(screen.getByTestId('project-ai-conversation-input'), 'Test interleaved streaming.')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/chat-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     await waitFor(() => {
@@ -3589,7 +3589,7 @@ describe('ProjectsPanel', () => {
     act(() => {
       useStore.getState().registerProject('/tmp/chat-scroll-project')
       useStore.getState().setActiveProjectPath('/tmp/chat-scroll-project')
-      useStore.getState().updateProjectScopedWorkspace('/tmp/chat-scroll-project', {
+      useStore.getState().updateProjectSessionState('/tmp/chat-scroll-project', {
         conversationId: 'conversation-scroll-1',
       })
     })

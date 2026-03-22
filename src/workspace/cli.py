@@ -24,19 +24,19 @@ SPEC_PROPOSAL_CREATE_EXAMPLE = """{
   "summary": "Clarify the approval gate before planning begins.",
   "changes": [
     {
-      "path": "specs/sparkspawn-workspace.md#proposal-review",
+      "path": "specs/spark-workspace.md#proposal-review",
       "before": "Planning begins immediately after a proposal is drafted.",
       "after": "Planning begins only after the user approves the proposal."
     }
   ],
   "rationale": "Ground the workflow in an explicit user approval step."
 }"""
-SPEC_PROPOSAL_CREATE_STDIN_EXAMPLE = """cat <<'EOF' | sparkspawn-workspace spec-proposal --json -
+SPEC_PROPOSAL_CREATE_STDIN_EXAMPLE = """cat <<'EOF' | spark-workspace spec-proposal --json -
 {
   "summary": "Clarify the approval gate before planning begins.",
   "changes": [
     {
-      "path": "specs/sparkspawn-workspace.md#proposal-review",
+      "path": "specs/spark-workspace.md#proposal-review",
       "before": "Planning begins immediately after a proposal is drafted.",
       "after": "Planning begins only after the user approves the proposal."
     }
@@ -50,22 +50,22 @@ cat >"$payload_file" <<'EOF'
   "summary": "Clarify the approval gate before planning begins.",
   "changes": [
     {
-      "path": "specs/sparkspawn-workspace.md#proposal-review",
+      "path": "specs/spark-workspace.md#proposal-review",
       "before": "Planning begins immediately after a proposal is drafted.",
       "after": "Planning begins only after the user approves the proposal."
     }
   ]
 }
 EOF
-sparkspawn-workspace spec-proposal --conversation amber-otter --json "$payload_file"'''
-FLOW_RUN_STDIN_EXAMPLE = """cat <<'EOF' | sparkspawn-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --goal -
+spark-workspace spec-proposal --conversation amber-otter --json "$payload_file"'''
+FLOW_RUN_STDIN_EXAMPLE = """cat <<'EOF' | spark-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --goal -
 Implement the approved work items from the current conversation state.
 EOF"""
 FLOW_RUN_TEMPFILE_EXAMPLE = '''goal_file=$(mktemp)
 cat >"$goal_file" <<'EOF'
 Implement the approved work items from the current conversation state.
 EOF
-sparkspawn-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --goal-file "$goal_file"'''
+spark-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --goal-file "$goal_file"'''
 FLOW_RUN_LAUNCH_CONTEXT_EXAMPLE = '''launch_context_file=$(mktemp)
 cat >"$launch_context_file" <<'EOF'
 {
@@ -80,17 +80,17 @@ cat >"$launch_context_file" <<'EOF'
   ]
 }
 EOF
-sparkspawn-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --launch-context-file "$launch_context_file"'''
-LIST_FLOWS_TEXT_EXAMPLE = "sparkspawn-workspace list-flows --text"
-DESCRIBE_FLOW_TEXT_EXAMPLE = "sparkspawn-workspace describe-flow --flow implement-spec.dot --text"
-GET_FLOW_TEXT_EXAMPLE = "sparkspawn-workspace get-flow --flow implement-spec.dot --text"
-VALIDATE_FLOW_TEXT_EXAMPLE = "sparkspawn-workspace validate-flow --flow implement-spec.dot --text"
+spark-workspace flow-run --conversation amber-otter --flow implement-spec.dot --summary "Run implementation for the approved scope" --launch-context-file "$launch_context_file"'''
+LIST_FLOWS_TEXT_EXAMPLE = "spark-workspace list-flows --text"
+DESCRIBE_FLOW_TEXT_EXAMPLE = "spark-workspace describe-flow --flow implement-spec.dot --text"
+GET_FLOW_TEXT_EXAMPLE = "spark-workspace get-flow --flow implement-spec.dot --text"
+VALIDATE_FLOW_TEXT_EXAMPLE = "spark-workspace validate-flow --flow implement-spec.dot --text"
 
 
 def _build_workspace_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="sparkspawn-workspace",
-        description="Spark Spawn workspace agent CLI",
+        prog="spark-workspace",
+        description="Spark workspace agent CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -134,8 +134,8 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
     )
     spec_proposal.add_argument(
         "--base-url",
-        default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
-        help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
+        default=os.environ.get("SPARK_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help=f"Spark server base URL (default: {DEFAULT_API_BASE_URL}).",
     )
 
     flow_run = subparsers.add_parser(
@@ -204,8 +204,8 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
     )
     flow_run.add_argument(
         "--base-url",
-        default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
-        help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
+        default=os.environ.get("SPARK_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help=f"Spark server base URL (default: {DEFAULT_API_BASE_URL}).",
     )
 
     list_flows = subparsers.add_parser(
@@ -226,8 +226,8 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
     )
     list_flows.add_argument(
         "--base-url",
-        default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
-        help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
+        default=os.environ.get("SPARK_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help=f"Spark server base URL (default: {DEFAULT_API_BASE_URL}).",
     )
 
     describe_flow = subparsers.add_parser(
@@ -253,8 +253,8 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
     )
     describe_flow.add_argument(
         "--base-url",
-        default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
-        help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
+        default=os.environ.get("SPARK_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help=f"Spark server base URL (default: {DEFAULT_API_BASE_URL}).",
     )
 
     get_flow = subparsers.add_parser(
@@ -280,8 +280,8 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
     )
     get_flow.add_argument(
         "--base-url",
-        default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
-        help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
+        default=os.environ.get("SPARK_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help=f"Spark server base URL (default: {DEFAULT_API_BASE_URL}).",
     )
 
     validate_flow = subparsers.add_parser(
@@ -308,8 +308,8 @@ def _build_workspace_parser() -> argparse.ArgumentParser:
     )
     validate_flow.add_argument(
         "--base-url",
-        default=os.environ.get("SPARKSPAWN_API_BASE_URL", DEFAULT_API_BASE_URL),
-        help=f"Sparkspawn server base URL (default: {DEFAULT_API_BASE_URL}).",
+        default=os.environ.get("SPARK_API_BASE_URL", DEFAULT_API_BASE_URL),
+        help=f"Spark server base URL (default: {DEFAULT_API_BASE_URL}).",
     )
 
     return parser
@@ -376,7 +376,7 @@ def _run_spec_proposal(args: argparse.Namespace) -> int:
         elif "turn_id" in unexpected_keys:
             error = (
                 "Do not include turn_id in the JSON payload. "
-                "Spark Spawn places the proposal on the correct assistant turn automatically."
+                "Spark places the proposal on the correct assistant turn automatically."
             )
         elif "project_path" in unexpected_keys:
             error = (
@@ -408,7 +408,7 @@ def _run_spec_proposal(args: argparse.Namespace) -> int:
     try:
         payload = normalize_spec_edit_proposal_payload(
             payload,
-            source_name="sparkspawn-workspace spec-proposal",
+            source_name="spark-workspace spec-proposal",
         )
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)
@@ -508,7 +508,7 @@ def _run_flow_run(args: argparse.Namespace) -> int:
                 "launch_context": launch_context,
                 "model": args.model,
             },
-            source_name="sparkspawn-workspace flow-run",
+            source_name="spark-workspace flow-run",
         )
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)

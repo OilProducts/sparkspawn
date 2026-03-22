@@ -56,14 +56,14 @@ class TestContextLocking:
 class TestContextHelpers:
     def test_set_get_and_get_string(self):
         context = Context()
-        context.set("name", "sparkspawn")
+        context.set("name", "spark")
         context.set("attempts", 3)
         context.set("empty", None)
 
-        assert context.get("name") == "sparkspawn"
+        assert context.get("name") == "spark"
         assert context.get("missing") is None
         assert context.get("missing", "fallback") == "fallback"
-        assert context.get_string("name") == "sparkspawn"
+        assert context.get_string("name") == "spark"
         assert context.get_string("attempts") == "3"
         assert context.get_string("empty", "none") == "none"
         assert context.get_string("missing", "fallback") == "fallback"

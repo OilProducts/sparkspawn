@@ -1,7 +1,7 @@
 import type { DiagnosticEntry } from '@/state/store-types'
 
 export const FLOW_LOAD_DEBUG_QUERY_PARAM = 'debugFlowLoad'
-export const FLOW_LOAD_DEBUG_STORAGE_KEY = 'sparkspawn.debug.flow_load'
+export const FLOW_LOAD_DEBUG_STORAGE_KEY = 'spark.debug.flow_load'
 const FLOW_LOAD_DEBUG_TRACE_LIMIT = 200
 
 export type FlowLoadDebugEvent = {
@@ -13,7 +13,7 @@ export type FlowLoadDebugEvent = {
 
 declare global {
     interface Window {
-        __sparkspawnFlowLoadDebug?: FlowLoadDebugEvent[]
+        __sparkFlowLoadDebug?: FlowLoadDebugEvent[]
     }
 }
 
@@ -36,17 +36,17 @@ const ensureFlowLoadDebugTrace = () => {
     if (typeof window === 'undefined') {
         return null
     }
-    if (!window.__sparkspawnFlowLoadDebug) {
-        window.__sparkspawnFlowLoadDebug = []
+    if (!window.__sparkFlowLoadDebug) {
+        window.__sparkFlowLoadDebug = []
     }
-    return window.__sparkspawnFlowLoadDebug
+    return window.__sparkFlowLoadDebug
 }
 
 export const clearFlowLoadDebugTrace = () => {
     if (typeof window === 'undefined') {
         return
     }
-    window.__sparkspawnFlowLoadDebug = []
+    window.__sparkFlowLoadDebug = []
 }
 
 export const summarizeDiagnosticsForFlowLoadDebug = (diagnostics?: DiagnosticEntry[]) => {

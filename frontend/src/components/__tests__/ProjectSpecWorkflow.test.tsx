@@ -18,7 +18,7 @@ const resetProjectWorkflowState = () => {
     workingDir: DEFAULT_WORKING_DIRECTORY,
     model: 'gpt-5.3',
     projectRegistry: {},
-    projectScopedWorkspaces: {},
+    projectSessionsByPath: {},
     projectRegistrationError: null,
     recentProjectPaths: [],
     diagnostics: [],
@@ -402,13 +402,13 @@ describe('Project-scoped workflow behavior', () => {
       expect(screen.getByTestId('project-spec-edit-proposal-preview')).toBeVisible()
     })
 
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/workflow-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/workflow-project']?.conversationId
     expect(conversationId).toMatch(/^conversation-/)
 
     const confirmSpy = vi.spyOn(window, 'confirm')
     confirmSpy.mockReturnValueOnce(false)
     await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
-    expect(useStore.getState().projectScopedWorkspaces['/tmp/workflow-project']?.specId).toBeNull()
+    expect(useStore.getState().projectSessionsByPath['/tmp/workflow-project']?.specId).toBeNull()
 
     confirmSpy.mockReturnValueOnce(true)
     await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
@@ -417,7 +417,7 @@ describe('Project-scoped workflow behavior', () => {
       expect(screen.getByTestId('project-spec-edit-proposal-preview')).toHaveTextContent('Applied')
     })
 
-    const projectScope = useStore.getState().projectScopedWorkspaces['/tmp/workflow-project']
+    const projectScope = useStore.getState().projectSessionsByPath['/tmp/workflow-project']
     expect(projectScope.specId).toBe('spec-edit-workflow-project-001')
     expect(projectScope.specStatus).toBe('approved')
     expect(projectScope.projectEventLog).toEqual(
@@ -522,10 +522,10 @@ describe('Project-scoped workflow behavior', () => {
     expect(screen.queryByTestId('project-spec-edit-proposal-apply-button')).not.toBeInTheDocument()
   })
 
-  it('does not render a synthetic spec card for sparkspawn without backend artifact state', async () => {
+  it('does not render a synthetic spec card for spark without backend artifact state', async () => {
     act(() => {
-      useStore.getState().registerProject('/tmp/sparkspawn')
-      useStore.getState().setActiveProjectPath('/tmp/sparkspawn')
+      useStore.getState().registerProject('/tmp/spark')
+      useStore.getState().setActiveProjectPath('/tmp/spark')
     })
 
     render(<ProjectsPanel />)
@@ -557,7 +557,7 @@ describe('Project-scoped workflow behavior', () => {
     })
     await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
 
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/plan-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/plan-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     await waitFor(() => {
@@ -645,7 +645,7 @@ describe('Project-scoped workflow behavior', () => {
     })
 
     const state = useStore.getState()
-    const scope = state.projectScopedWorkspaces['/tmp/plan-project']
+    const scope = state.projectSessionsByPath['/tmp/plan-project']
     expect(scope.planId).toBe('execution-card-plan-project-001')
     expect(scope.planStatus).toBe('draft')
     expect(scope.planProvenance).toEqual(
@@ -678,7 +678,7 @@ describe('Project-scoped workflow behavior', () => {
     })
     await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
 
-    const conversationId = useStore.getState().projectScopedWorkspaces['/tmp/event-log-project']?.conversationId
+    const conversationId = useStore.getState().projectSessionsByPath['/tmp/event-log-project']?.conversationId
     expect(conversationId).toBeTruthy()
 
     const currentSnapshot = cloneSnapshot(conversationSnapshots[conversationId!])

@@ -8,11 +8,11 @@ import shutil
 import tomllib
 from typing import Any
 
-from sparkspawn_common.logging import get_sparkspawn_logger
-from sparkspawn_common.runtime import build_project_id, normalize_project_path
+from spark_common.logging import get_spark_logger
+from spark_common.runtime import build_project_id, normalize_project_path
 
 
-LOGGER = get_sparkspawn_logger("workspace.storage")
+LOGGER = get_spark_logger("workspace.storage")
 
 
 def _iso_now() -> str:

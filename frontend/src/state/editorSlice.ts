@@ -6,7 +6,7 @@ import {
     loadUiDefaults,
     normalizeGraphAttrs,
     normalizeGraphAttrValue,
-    resolveProjectScopedWorkspace,
+    resolveProjectSessionState,
     saveUiDefaults,
     validateGraphAttrValue,
 } from './store-helpers'
@@ -54,20 +54,20 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     workingDir: initialWorkspaceEditorState.workingDir || DEFAULT_WORKING_DIRECTORY,
     setWorkingDir: (value) =>
         set((state) => {
-            const nextProjectScopedWorkspaces = { ...state.projectScopedWorkspaces }
+            const nextProjectSessionStates = { ...state.projectSessionsByPath }
             if (state.activeProjectPath) {
-                const scoped = resolveProjectScopedWorkspace(
-                    nextProjectScopedWorkspaces[state.activeProjectPath],
+                const scoped = resolveProjectSessionState(
+                    nextProjectSessionStates[state.activeProjectPath],
                     state.activeProjectPath,
                 )
-                nextProjectScopedWorkspaces[state.activeProjectPath] = {
+                nextProjectSessionStates[state.activeProjectPath] = {
                     ...scoped,
                     workingDir: value,
                 }
             }
             return {
                 workingDir: value,
-                projectScopedWorkspaces: nextProjectScopedWorkspaces,
+                projectSessionsByPath: nextProjectSessionStates,
             }
         }),
     model: '',

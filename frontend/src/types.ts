@@ -1,6 +1,6 @@
 export type ViewMode = 'home' | 'projects' | 'editor' | 'execution' | 'settings' | 'runs';
 
-export interface SparkspawnState {
+export interface SparkState {
     viewMode: ViewMode;
     setViewMode: (mode: ViewMode) => void;
     activeFlow: string | null;

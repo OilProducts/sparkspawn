@@ -11,8 +11,8 @@ from typing import Any, Callable, Optional
 from attractor.engine.context import Context
 from attractor.engine.outcome import Outcome, OutcomeStatus
 from attractor.handlers.base import CodergenBackend
-from sparkspawn_common import codex_app_server
-from sparkspawn_common.runtime import build_codex_runtime_environment, resolve_runtime_workspace_path
+from spark_common import codex_app_server
+from spark_common.runtime import build_codex_runtime_environment, resolve_runtime_workspace_path
 
 _STRUCTURED_OUTCOME_KEYS = {
     "outcome",
@@ -180,7 +180,7 @@ class CodexAppServerBackend(CodergenBackend):
         try:
             init_id = send_request(
                 "initialize",
-                {"clientInfo": {"name": "sparkspawn", "version": "0.1"}},
+                {"clientInfo": {"name": "spark", "version": "0.1"}},
             )
             init_response = wait_for_response(init_id)
             if not init_response or init_response.get("error"):

@@ -12,7 +12,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from attractor.api.flow_sources import resolve_flow_path
-from sparkspawn_common.runtime import normalize_project_path, resolve_runtime_workspace_path
+from spark_common.runtime import normalize_project_path, resolve_runtime_workspace_path
 from workspace.attractor_client import AttractorApiClient, AttractorApiError
 from workspace.flow_catalog import (
     ALLOWED_LAUNCH_POLICIES,
@@ -507,7 +507,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"Unknown flow: {flow_name}") from exc
-        return PlainTextResponse(raw_content, media_type="text/vnd.graphviz", headers={"X-Sparkspawn-Flow-Name": resolved_flow_name})
+        return PlainTextResponse(raw_content, media_type="text/vnd.graphviz", headers={"X-Spark-Flow-Name": resolved_flow_name})
 
     @router.get("/api/flows/{flow_name}/validate")
     async def validate_workspace_flow(flow_name: str):

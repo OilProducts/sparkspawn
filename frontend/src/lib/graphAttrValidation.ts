@@ -1,8 +1,8 @@
 import type { GraphAttrs } from '../store'
 
 const GRAPH_ATTR_STRING_KEYS: (keyof GraphAttrs)[] = [
-    'sparkspawn.title',
-    'sparkspawn.description',
+    'spark.title',
+    'spark.description',
     'goal',
     'label',
     'retry_target',

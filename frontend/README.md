@@ -1,6 +1,6 @@
-# Spark Spawn Frontend
+# Spark Frontend
 
-This directory contains the React 19 + Vite frontend for Spark Spawn.
+This directory contains the React 19 + Vite frontend for Spark.
 
 The UI is responsible for:
 
@@ -42,7 +42,7 @@ From the repo root, `just run` is the normal full-stack workflow.
 ## Build Output
 
 Production assets are emitted to `frontend/dist/`.
-To bundle them into the Python package, sync them into [src/attractor/ui_dist/](/Users/chris/tinker/sparkspawn/src/attractor/ui_dist) from the repo root:
+To bundle them into the Python package, sync them into [src/attractor/ui_dist/](/Users/chris/projects/spark/src/attractor/ui_dist) from the repo root:
 
 ```bash
 ./scripts/sync_ui_dist.sh
@@ -56,5 +56,5 @@ just sync-ui-dist
 
 ## Related Docs
 
-- Root project overview: [README.md](/Users/chris/tinker/sparkspawn/README.md)
-- UI workflow acceptance assets: [tests/acceptance/agent-workflows/README.md](/Users/chris/tinker/sparkspawn/tests/acceptance/agent-workflows/README.md)
+- Root project overview: [README.md](/Users/chris/projects/spark/README.md)
+- UI workflow acceptance assets: [tests/acceptance/agent-workflows/README.md](/Users/chris/projects/spark/tests/acceptance/agent-workflows/README.md)

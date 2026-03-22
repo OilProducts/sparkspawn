@@ -7,8 +7,8 @@ import re
 import time
 from typing import Any, Optional
 
-from sparkspawn_common.launch_context import normalize_launch_context
-from sparkspawn_common.runtime import (
+from spark_common.launch_context import normalize_launch_context
+from spark_common.runtime import (
     build_codex_runtime_environment as _build_codex_runtime_environment,
     normalize_project_path,
     resolve_runtime_workspace_path as _resolve_runtime_workspace_path,
@@ -178,7 +178,7 @@ def build_conversation_preview(turns: list[ConversationTurn]) -> Optional[str]:
 
 
 def is_project_chat_debug_enabled() -> bool:
-    value = str(os.environ.get("SPARKSPAWN_DEBUG_PROJECT_CHAT", "")).strip().lower()
+    value = str(os.environ.get("SPARK_DEBUG_PROJECT_CHAT", "")).strip().lower()
     return value in {"1", "true", "yes", "on"}
 
 

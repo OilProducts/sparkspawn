@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest'
 
 describe('graphAttrValidation', () => {
   it('normalizes graph attrs using key-specific rules', () => {
-    expect(normalizeGraphAttrValue('sparkspawn.title', '  Execution Planning  ')).toBe('Execution Planning')
-    expect(normalizeGraphAttrValue('sparkspawn.description', '  Turn spec edits into plans.  ')).toBe(
+    expect(normalizeGraphAttrValue('spark.title', '  Execution Planning  ')).toBe('Execution Planning')
+    expect(normalizeGraphAttrValue('spark.description', '  Turn spec edits into plans.  ')).toBe(
       'Turn spec edits into plans.',
     )
     expect(normalizeGraphAttrValue('goal', '  Ship release  ')).toBe('Ship release')

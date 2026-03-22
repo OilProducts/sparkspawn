@@ -10,7 +10,7 @@ import attractor.api.codex_backends as codex_backends_module
 import attractor.api.server as server
 from attractor.engine import Context, load_checkpoint
 from attractor.engine.outcome import Outcome, OutcomeStatus
-from sparkspawn_common.runtime import (
+from spark_common.runtime import (
     build_codex_runtime_environment,
     build_project_id,
     resolve_runtime_workspace_path,
@@ -156,7 +156,7 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
     run_id = payload["run_id"]
     run_root = server._run_root(run_id)
     assert run_root.exists()
-    assert run_root == tmp_path / ".sparkspawn" / "attractor" / "runs" / build_project_id(str((tmp_path / "work").resolve())) / run_id
+    assert run_root == tmp_path / ".spark" / "attractor" / "runs" / build_project_id(str((tmp_path / "work").resolve())) / run_id
 
     checkpoint = load_checkpoint(run_root / "state.json")
     assert checkpoint is not None
@@ -236,9 +236,9 @@ def test_resolve_runtime_workspace_path_maps_host_repo_root_override_to_runtime_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime_repo_root = Path(server.__file__).resolve().parents[3]
-    monkeypatch.setenv("ATTRACTOR_HOST_REPO_ROOT", "/Users/chris/tinker/sparkspawn")
+    monkeypatch.setenv("ATTRACTOR_HOST_REPO_ROOT", "/Users/chris/projects/spark")
     monkeypatch.setenv("ATTRACTOR_RUNTIME_REPO_ROOT", str(runtime_repo_root))
-    translated = resolve_runtime_workspace_path("/home/chris/tinker/sparkspawn/frontend")
+    translated = resolve_runtime_workspace_path("/home/chris/tinker/spark/frontend")
 
     assert translated == str((runtime_repo_root / "frontend").resolve(strict=False))
 

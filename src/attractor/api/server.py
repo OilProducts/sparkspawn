@@ -77,9 +77,9 @@ from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, AnswerValue, Question
-from sparkspawn_common.launch_context import normalize_launch_context
-from sparkspawn_common.runtime import resolve_runtime_workspace_path
-from sparkspawn_common.settings import Settings, resolve_settings, validate_settings
+from spark_common.launch_context import normalize_launch_context
+from spark_common.runtime import resolve_runtime_workspace_path
+from spark_common.settings import Settings, resolve_settings, validate_settings
 from workspace.project_chat import ProjectChatService
 
 

@@ -6,14 +6,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
-import sparkspawn_app.app as product_app
+import spark_app.app as product_app
 
 
 @pytest.fixture(autouse=True)
 def _reset_api_server_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("SPARKSPAWN_UI_DIR", raising=False)
+    monkeypatch.delenv("SPARK_UI_DIR", raising=False)
     server.configure_runtime_paths(
-        data_dir=tmp_path / ".sparkspawn",
+        data_dir=tmp_path / ".spark",
         runs_dir=None,
         flows_dir=tmp_path / "flows",
         ui_dir=None,
