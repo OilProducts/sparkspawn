@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNodes, useReactFlow } from '@xyflow/react'
 import { useStore, type DiagnosticEntry } from '@/store'
 import { generateDot } from '@/lib/dotUtils'
@@ -6,9 +6,9 @@ import { extractDebugErrorSummary, recordFlowLoadDebug } from '@/lib/flowLoadDeb
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions'
 import { GRAPH_FIDELITY_OPTIONS, getToolHookCommandWarning } from '@/lib/graphAttrValidation'
 import { resolveGraphFieldDiagnostics } from '@/lib/inspectorFieldDiagnostics'
-import { saveFlowContent } from '@/lib/flowPersistence'
 import { resolveModelStylesheetPreview, type ModelValueSource } from '@/lib/modelStylesheetPreview'
 import { toExtensionAttrEntries } from '@/lib/extensionAttrs'
+import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler'
 import {
     fetchWorkspaceFlowValidated,
     updateWorkspaceFlowLaunchPolicyValidated,
@@ -99,8 +99,6 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const uiDefaults = useStore((state) => state.uiDefaults)
     const { getNodes, getEdges, setNodes } = useReactFlow()
     const flowNodes = useNodes()
-    const saveTimer = useRef<number | null>(null)
-    const hasPendingSave = useRef(false)
     const autosaveScopeRef = useRef<string | null>(null)
     const lastHandledGraphAttrsVersionRef = useRef(graphAttrsUserEditVersion)
     const activeFlowRef = useRef<string | null>(activeFlow)
@@ -191,17 +189,21 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
         uiDefaults.reasoning_effort,
     ])
 
+    const { clearPendingSave, saveNow, scheduleSave } = useFlowSaveScheduler<typeof flowNodes>({
+        flowName: activeFlow,
+        debounceMs: 200,
+        buildContent: (nextNodes, currentFlowName) => generateDot(
+            currentFlowName,
+            nextNodes ?? getNodes(),
+            getEdges(),
+            graphAttrs,
+        ),
+    })
+
     useEffect(() => {
         setLaunchInputDrafts(parsedLaunchInputs.entries)
         setLaunchInputDraftError(parsedLaunchInputs.error)
     }, [parsedLaunchInputs.entries, parsedLaunchInputs.error])
-
-    const flushPendingSave = useCallback(() => {
-        if (!activeFlow || !hasPendingSave.current) return
-        hasPendingSave.current = false
-        const dot = generateDot(activeFlow, getNodes(), getEdges(), graphAttrs)
-        void saveFlowContent(activeFlow, dot)
-    }, [activeFlow, getNodes, getEdges, graphAttrs])
 
     const applyDefaultsToNodes = () => {
         if (!activeFlow) return
@@ -223,9 +225,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
         }))
 
         setNodes(updatedNodes)
-
-        const dot = generateDot(activeFlow, updatedNodes, getEdges(), graphAttrs)
-        void saveFlowContent(activeFlow, dot)
+        saveNow(updatedNodes)
     }
 
     const handleLaunchInputDefinitionsChange = (entries: LaunchInputDefinition[]) => {
@@ -343,47 +343,22 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
         if (!activeFlow) {
             autosaveScopeRef.current = null
             lastHandledGraphAttrsVersionRef.current = graphAttrsUserEditVersion
-            hasPendingSave.current = false
+            clearPendingSave()
             return
         }
         const autosaveScope = activeFlow
         if (autosaveScopeRef.current !== autosaveScope) {
             autosaveScopeRef.current = autosaveScope
             lastHandledGraphAttrsVersionRef.current = graphAttrsUserEditVersion
-            hasPendingSave.current = false
+            clearPendingSave()
             return
         }
         if (graphAttrsUserEditVersion === lastHandledGraphAttrsVersionRef.current) {
             return
         }
         lastHandledGraphAttrsVersionRef.current = graphAttrsUserEditVersion
-        hasPendingSave.current = true
-        if (saveTimer.current) {
-            window.clearTimeout(saveTimer.current)
-        }
-        saveTimer.current = window.setTimeout(() => {
-            hasPendingSave.current = false
-            const dot = generateDot(activeFlow, getNodes(), getEdges(), graphAttrs)
-            void saveFlowContent(activeFlow, dot)
-        }, 200)
-
-        return () => {
-            if (saveTimer.current) {
-                window.clearTimeout(saveTimer.current)
-            }
-        }
-    }, [activeFlow, graphAttrs, graphAttrsUserEditVersion, getNodes, getEdges])
-
-    useEffect(() => {
-        const handleBeforeUnload = () => {
-            flushPendingSave()
-        }
-        window.addEventListener('beforeunload', handleBeforeUnload)
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload)
-            flushPendingSave()
-        }
-    }, [flushPendingSave])
+        scheduleSave()
+    }, [activeFlow, clearPendingSave, graphAttrsUserEditVersion, scheduleSave])
 
     const renderFieldDiagnostics = (field: string, testId: string) => {
         const diagnosticsForField = graphFieldDiagnostics[field] || []

@@ -1,6 +1,6 @@
 import { useStore, type DiagnosticEntry } from "@/store"
 import { FilePlus, Trash2 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } from "@xyflow/react"
 import { generateDot, sanitizeGraphId } from "@/lib/dotUtils"
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
@@ -11,6 +11,7 @@ import { toExtensionAttrEntries } from "@/lib/extensionAttrs"
 import { saveFlowContent } from "@/lib/flowPersistence"
 import { deleteFlowValidated, fetchFlowListValidated } from '@/lib/attractorClient'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
+import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler'
 import { InspectorScaffold, InspectorEmptyState } from './InspectorScaffold'
 import { GraphSettings } from './GraphSettings'
 import { AdvancedKeyValueEditor } from './AdvancedKeyValueEditor'
@@ -23,6 +24,10 @@ import {
 
 type InspectorScope = 'none' | 'graph' | 'node' | 'edge'
 const INSPECTOR_SAVE_DEBOUNCE_MS = 600
+type FlowGraphSnapshot = {
+    nodes: Node[]
+    edges: Edge[]
+}
 const CORE_NODE_ATTR_KEYS = new Set<string>([
     'label',
     'shape',
@@ -111,9 +116,17 @@ export function Sidebar() {
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
     const nodes = useReactFlowStore((state) => state.nodes)
     const edges = useReactFlowStore((state) => state.edges)
-    const saveTimer = useRef<number | null>(null)
-    const pendingSaveRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
     const displayedFlow = viewMode === 'execution' ? executionFlow || activeFlow : activeFlow
+    const { scheduleSave } = useFlowSaveScheduler<FlowGraphSnapshot>({
+        flowName: displayedFlow,
+        debounceMs: INSPECTOR_SAVE_DEBOUNCE_MS,
+        buildContent: (snapshot, currentFlowName) => generateDot(
+            currentFlowName,
+            snapshot?.nodes || [],
+            snapshot?.edges || [],
+            graphAttrs,
+        ),
+    })
 
     const loadFlows = async () => {
         try {
@@ -171,33 +184,6 @@ export function Sidebar() {
         await loadFlows();
     };
 
-    const scheduleSave = (nextNodes: Node[], nextEdges: Edge[]) => {
-        if (!displayedFlow) return
-
-        pendingSaveRef.current = { nodes: nextNodes, edges: nextEdges }
-        if (saveTimer.current) {
-            window.clearTimeout(saveTimer.current)
-        }
-
-        saveTimer.current = window.setTimeout(() => {
-            pendingSaveRef.current = null
-            const dot = generateDot(displayedFlow, nextNodes, nextEdges, graphAttrs)
-            void saveFlowContent(displayedFlow, dot)
-        }, INSPECTOR_SAVE_DEBOUNCE_MS)
-    }
-
-    const flushPendingSave = useCallback(() => {
-        if (!displayedFlow || !pendingSaveRef.current) return
-        if (saveTimer.current) {
-            window.clearTimeout(saveTimer.current)
-            saveTimer.current = null
-        }
-        const pending = pendingSaveRef.current
-        pendingSaveRef.current = null
-        const dot = generateDot(displayedFlow, pending.nodes, pending.edges, graphAttrs)
-        void saveFlowContent(displayedFlow, dot)
-    }, [displayedFlow, graphAttrs])
-
     const updateNodeProperty = (nodeId: string, key: string, value: string | boolean) => {
         if (!displayedFlow) return;
 
@@ -213,7 +199,7 @@ export function Sidebar() {
         });
 
         if (newNodes.length > 0) {
-            scheduleSave(newNodes, getEdges());
+            scheduleSave({ nodes: newNodes, edges: getEdges() });
         }
     }
 
@@ -315,7 +301,7 @@ export function Sidebar() {
         });
 
         if (newEdges.length > 0) {
-            scheduleSave(getNodes(), newEdges);
+            scheduleSave({ nodes: getNodes(), edges: newEdges });
         }
     };
 
@@ -338,7 +324,7 @@ export function Sidebar() {
             return newNodes
         })
         if (newNodes.length > 0) {
-            scheduleSave(newNodes, getEdges())
+            scheduleSave({ nodes: newNodes, edges: getEdges() })
         }
     }
 
@@ -403,7 +389,7 @@ export function Sidebar() {
             return newEdges
         })
         if (newEdges.length > 0) {
-            scheduleSave(getNodes(), newEdges)
+            scheduleSave({ nodes: getNodes(), edges: newEdges })
         }
     }
 
@@ -458,17 +444,6 @@ export function Sidebar() {
             </div>
         )
     }
-
-    useEffect(() => {
-        const handleBeforeUnload = () => {
-            flushPendingSave()
-        }
-        window.addEventListener('beforeunload', handleBeforeUnload)
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload)
-            flushPendingSave()
-        }
-    }, [flushPendingSave])
 
     return (
         <nav

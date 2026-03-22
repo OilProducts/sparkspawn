@@ -34,6 +34,7 @@ import {
     saveFlowContentExpectingSemanticEquivalence,
 } from '@/lib/flowPersistence';
 import { CANVAS_INTERACTION_BUDGET_MS } from '@/lib/performanceBudgets';
+import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler';
 
 const nodeTypes = {
     customTask: TaskNode,
@@ -62,8 +63,9 @@ const ELK_OPTIONS = {
 type PreviewResponse = PreviewResponsePayload
 
 type EditorMode = 'structured' | 'raw'
-type SaveFlowOptions = {
-    expectSemanticEquivalence?: boolean
+type FlowGraphSnapshot = {
+    nodes: Node[]
+    edges: Edge[]
 }
 
 type PreviewDebugContext = {
@@ -137,8 +139,6 @@ export function Editor() {
     const [edges, setEdges] = useEdgesState<Edge>([]);
     const hydratedRef = useRef(false);
     const previewTimer = useRef<number | null>(null);
-    const saveTimer = useRef<number | null>(null);
-    const pendingSaveRef = useRef<{ nodes: Node[]; edges: Edge[]; options?: SaveFlowOptions } | null>(null);
     const activeFlowLoadIdRef = useRef(0);
     const rawDotEntryDraftRef = useRef<string>('');
     const rawHandoffInFlightRef = useRef(false);
@@ -186,38 +186,16 @@ export function Editor() {
         });
     }, [setNodes, setSelectedEdgeId, setSelectedNodeId]);
 
-    const saveFlow = useCallback((nextNodes: Node[], nextEdges: Edge[], options?: SaveFlowOptions) => {
-        if (!flowName) return;
-        const dot = generateDot(flowName, nextNodes, nextEdges, graphAttrs);
-        if (options) {
-            void saveFlowContent(flowName, dot, options);
-            return;
-        }
-        void saveFlowContent(flowName, dot);
-    }, [flowName, graphAttrs]);
-
-    const scheduleSave = useCallback((nextNodes: Node[], nextEdges: Edge[], options?: SaveFlowOptions) => {
-        if (!flowName) return;
-        pendingSaveRef.current = { nodes: nextNodes, edges: nextEdges, options };
-        if (saveTimer.current) {
-            window.clearTimeout(saveTimer.current);
-        }
-        saveTimer.current = window.setTimeout(() => {
-            pendingSaveRef.current = null;
-            saveFlow(nextNodes, nextEdges, options);
-        }, 250);
-    }, [flowName, saveFlow]);
-
-    const flushPendingSave = useCallback(() => {
-        if (!flowName || !pendingSaveRef.current) return;
-        if (saveTimer.current) {
-            window.clearTimeout(saveTimer.current);
-            saveTimer.current = null;
-        }
-        const pending = pendingSaveRef.current;
-        pendingSaveRef.current = null;
-        saveFlow(pending.nodes, pending.edges, pending.options);
-    }, [flowName, saveFlow]);
+    const { flushPendingSave, scheduleSave } = useFlowSaveScheduler<FlowGraphSnapshot>({
+        flowName,
+        debounceMs: 250,
+        buildContent: (snapshot, currentFlowName) => generateDot(
+            currentFlowName,
+            snapshot?.nodes || [],
+            snapshot?.edges || [],
+            graphAttrs,
+        ),
+    })
 
     const hydrateFromPreview = useCallback(async (
         preview: PreviewResponse,
@@ -548,17 +526,6 @@ export function Editor() {
         previewDebounceMs,
     ]);
 
-    useEffect(() => {
-        const handleBeforeUnload = () => {
-            flushPendingSave();
-        };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            flushPendingSave();
-        };
-    }, [flushPendingSave]);
-
     // Handle new connections via UI
     const onNodesChange = useCallback((changes: NodeChange<Node>[]) => {
         setNodes((currentNodes) => {
@@ -600,9 +567,9 @@ export function Editor() {
                         (change) => change.type === 'position' || change.type === 'dimensions'
                     );
                 if (shouldExpectSemanticEquivalence) {
-                    scheduleSave(nextNodes, edges, EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS);
+                    scheduleSave({ nodes: nextNodes, edges }, EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS);
                 } else {
-                    scheduleSave(nextNodes, edges);
+                    scheduleSave({ nodes: nextNodes, edges });
                 }
             }
             return nextNodes;
@@ -621,7 +588,7 @@ export function Editor() {
                 : updatedEdges;
             const shouldSave = changes.some((change) => change.type !== 'select');
             if (shouldSave) {
-                scheduleSave(nodes, nextEdges);
+                scheduleSave({ nodes, edges: nextEdges });
             }
             return nextEdges;
         });
@@ -634,7 +601,7 @@ export function Editor() {
                     { ...params, type: EDGE_TYPE, interactionWidth: EDGE_INTERACTION_WIDTH },
                     currentEdges
                 );
-                scheduleSave(nodes, newEdges);
+                scheduleSave({ nodes, edges: newEdges });
                 return newEdges;
             });
         },
@@ -663,7 +630,7 @@ export function Editor() {
 
         setNodes(nds => {
             const newNodes = [...nds, newNode];
-            scheduleSave(newNodes, edges);
+            scheduleSave({ nodes: newNodes, edges });
             return newNodes;
         });
     }, [flowName, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
