@@ -456,7 +456,7 @@ Do not assume an undocumented attribute is portable just because it round-trips.
 - `implement-review-loop.dot`: review-driven retry loop
 - `human-review-loop.dot`: human approval / revise loop
 - `parallel-review.dot`: fan-out / fan-in flow
-- `supervised-implementation.dot`: parent/child composition
+- `supervision/supervised-implementation.dot`: parent/child composition
 
 ## Authoring Checklist
 

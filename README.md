@@ -43,7 +43,7 @@ Start with the smallest flow that matches the job:
 - [starter-flows/implement-spec.dot](/Users/chris/projects/spark/starter-flows/implement-spec.dot): spec-driven orchestration that keeps flow-authored queue state under `.spark/specflow/`
 - [starter-flows/human-review-loop.dot](/Users/chris/projects/spark/starter-flows/human-review-loop.dot): explicit human approval or requested fixes
 - [starter-flows/parallel-review.dot](/Users/chris/projects/spark/starter-flows/parallel-review.dot): fan-out / fan-in structure
-- [starter-flows/supervised-implementation.dot](/Users/chris/projects/spark/starter-flows/supervised-implementation.dot): parent/child composition with `stack.manager_loop`
+- [starter-flows/supervision/supervised-implementation.dot](/Users/chris/projects/spark/starter-flows/supervision/supervised-implementation.dot): parent/child composition with `stack.manager_loop`
 
 Use the flow `goal` as the user-facing stated goal for the run:
 
@@ -143,7 +143,7 @@ npm --prefix frontend install
 Initialize the runtime tree and seed starter flows:
 
 ```bash
-uv run spark init
+uv run spark-server init
 ```
 
 Run the full stack locally:
@@ -172,13 +172,13 @@ That starts the backend on port `8000` and the frontend on port `5173` via `dock
 Start the server directly:
 
 ```bash
-uv run spark serve --host 127.0.0.1 --port 8000
+uv run spark-server serve --host 127.0.0.1 --port 8000
 ```
 
 Useful development flags:
 
 ```bash
-uv run spark serve \
+uv run spark-server serve \
   --host 127.0.0.1 \
   --port 8000 \
   --reload \
@@ -289,7 +289,7 @@ pip install dist/*.whl
 - The agent-facing CLI exposes curated flow discovery commands with JSON default output: `spark flow list`, `spark flow describe --flow <name>`, and `spark flow get --flow <name>`.
 - The editor supports both structured editing and raw DOT editing, including semantic-equivalence safety checks during handoff.
 - The Runs view is intended for historical inspection, diagnostics, artifact browsing, and replaying execution context.
-- Starter flow templates live in [starter-flows/plan-generation.dot](/Users/chris/projects/spark/starter-flows/plan-generation.dot), [starter-flows/parallel-review.dot](/Users/chris/projects/spark/starter-flows/parallel-review.dot), [starter-flows/simple-linear.dot](/Users/chris/projects/spark/starter-flows/simple-linear.dot), [starter-flows/human-review-loop.dot](/Users/chris/projects/spark/starter-flows/human-review-loop.dot), [starter-flows/implement-review-loop.dot](/Users/chris/projects/spark/starter-flows/implement-review-loop.dot), [starter-flows/implement-spec.dot](/Users/chris/projects/spark/starter-flows/implement-spec.dot), [starter-flows/implementation-worker.dot](/Users/chris/projects/spark/starter-flows/implementation-worker.dot), and [starter-flows/supervised-implementation.dot](/Users/chris/projects/spark/starter-flows/supervised-implementation.dot).
+- Starter flow templates live in [starter-flows/plan-generation.dot](/Users/chris/projects/spark/starter-flows/plan-generation.dot), [starter-flows/parallel-review.dot](/Users/chris/projects/spark/starter-flows/parallel-review.dot), [starter-flows/simple-linear.dot](/Users/chris/projects/spark/starter-flows/simple-linear.dot), [starter-flows/human-review-loop.dot](/Users/chris/projects/spark/starter-flows/human-review-loop.dot), [starter-flows/implement-review-loop.dot](/Users/chris/projects/spark/starter-flows/implement-review-loop.dot), [starter-flows/implement-spec.dot](/Users/chris/projects/spark/starter-flows/implement-spec.dot), [starter-flows/supervision/implementation-worker.dot](/Users/chris/projects/spark/starter-flows/supervision/implementation-worker.dot), and [starter-flows/supervision/supervised-implementation.dot](/Users/chris/projects/spark/starter-flows/supervision/supervised-implementation.dot).
 - Repo-only advanced/test fixtures live under [tests/fixtures/flows/](/Users/chris/projects/spark/tests/fixtures/flows).
 
 ## Project Status

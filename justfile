@@ -7,7 +7,7 @@ run:
   #!/usr/bin/env bash
   set -euo pipefail
   trap 'kill "${backend_pid:-}" "${frontend_pid:-}" 2>/dev/null || true; wait || true' EXIT INT TERM
-  uv run spark serve --host 127.0.0.1 --port 8000 --reload &
+  uv run spark-server serve --host 127.0.0.1 --port 8000 --reload &
   backend_pid=$!
   npm --prefix frontend run dev -- --host 127.0.0.1 &
   frontend_pid=$!
