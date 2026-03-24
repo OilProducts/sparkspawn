@@ -89,7 +89,7 @@ function resolveInspectorScope({
     return 'none'
 }
 
-export function Sidebar() {
+export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
     const activeFlow = useStore((state) => state.activeFlow)
     const executionFlow = useStore((state) => state.executionFlow)
     const setActiveFlow = useStore((state) => state.setActiveFlow)
@@ -442,8 +442,9 @@ export function Sidebar() {
             data-inspector-active-scope={activeInspectorScope}
             data-responsive-layout={isNarrowViewport ? 'stacked' : 'split'}
             className={`bg-background flex flex-col shrink-0 overflow-hidden z-40 ${
-                isNarrowViewport ? 'w-full max-h-[46vh] border-b' : 'w-72 border-r'
+                isNarrowViewport ? 'w-full max-h-[46vh] border-b' : 'border-r'
             }`}
+            style={isNarrowViewport ? undefined : { width: `${desktopWidthPx}px` }}
         >
             <div className="px-4 pb-2 pt-4">
                 <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-foreground">

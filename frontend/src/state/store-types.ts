@@ -116,6 +116,7 @@ export interface EditorViewSession {
     selectedNodeId: string | null
     selectedEdgeId: string | null
     viewport: CanvasViewportState | null
+    sidebarWidth: number
     graphAttrs: GraphAttrs
     diagnostics: DiagnosticEntry[]
     hasValidationErrors: boolean
@@ -225,6 +226,8 @@ export interface RunInspectorSlice {
 }
 
 export interface EditorSlice {
+    editorSidebarWidth: number
+    setEditorSidebarWidth: (width: number) => void
     selectedNodeId: string | null
     setSelectedNodeId: (id: string | null) => void
     selectedEdgeId: string | null

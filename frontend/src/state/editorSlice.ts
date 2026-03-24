@@ -13,6 +13,10 @@ import {
 import type { AppState, EditorSlice } from './store-types'
 import { initialWorkspaceEditorState } from './workspaceSlice'
 
+const DEFAULT_EDITOR_SIDEBAR_WIDTH = 288
+const MIN_EDITOR_SIDEBAR_WIDTH = 256
+const MAX_EDITOR_SIDEBAR_WIDTH = 560
+
 const graphAttrsEqual = (left: Record<string, unknown>, right: Record<string, unknown>) => {
     const leftKeys = Object.keys(left)
     const rightKeys = Object.keys(right)
@@ -47,6 +51,20 @@ const deriveNextGraphAttrState = (
 }
 
 export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (set) => ({
+    editorSidebarWidth: DEFAULT_EDITOR_SIDEBAR_WIDTH,
+    setEditorSidebarWidth: (width) =>
+        set((state) => {
+            const nextWidth = Math.min(
+                Math.max(Math.round(width), MIN_EDITOR_SIDEBAR_WIDTH),
+                MAX_EDITOR_SIDEBAR_WIDTH,
+            )
+            if (nextWidth === state.editorSidebarWidth) {
+                return state
+            }
+            return {
+                editorSidebarWidth: nextWidth,
+            }
+        }),
     selectedNodeId: null,
     setSelectedNodeId: (id) => set({ selectedNodeId: id }),
     selectedEdgeId: null,

@@ -1,10 +1,20 @@
 import App from '@/App'
 import { useStore } from '@/store'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const DEFAULT_WORKING_DIRECTORY = './test-app'
+const DEFAULT_EDITOR_SIDEBAR_WIDTH = 288
+
+const setViewportWidth = (width: number) => {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: width,
+  })
+  window.dispatchEvent(new Event('resize'))
+}
 
 const resetAppShellState = () => {
   useStore.setState((state) => ({
@@ -31,6 +41,7 @@ const resetAppShellState = () => {
     recentProjectPaths: [],
     graphAttrs: {},
     graphAttrErrors: {},
+    editorSidebarWidth: DEFAULT_EDITOR_SIDEBAR_WIDTH,
     saveState: 'idle',
     saveStateVersion: 0,
     saveErrorMessage: null,
@@ -275,6 +286,47 @@ describe('App shell behavior', () => {
     })
 
     expect(screen.getByTestId('top-nav-active-project')).toHaveTextContent('/tmp/project-shell')
+  })
+
+  it('lets the operator resize the editor sidebar without affecting execution width', async () => {
+    const user = userEvent.setup()
+    setViewportWidth(1366)
+    render(<App />)
+
+    await user.click(screen.getByTestId('nav-mode-editor'))
+
+    const inspectorPanel = screen.getByTestId('inspector-panel') as HTMLElement
+    const resizeHandle = screen.getByTestId('editor-sidebar-resize-handle')
+    const editorWorkspaceLayout = screen.getByTestId('editor-workspace').firstElementChild as HTMLDivElement
+
+    vi.spyOn(editorWorkspaceLayout, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 1200,
+      bottom: 720,
+      left: 0,
+      width: 1200,
+      height: 720,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    expect(inspectorPanel.style.width).toBe(`${DEFAULT_EDITOR_SIDEBAR_WIDTH}px`)
+
+    fireEvent.pointerDown(resizeHandle, { clientX: DEFAULT_EDITOR_SIDEBAR_WIDTH })
+    fireEvent.pointerMove(window, { clientX: 360 })
+    fireEvent.pointerUp(window)
+
+    expect(useStore.getState().editorSidebarWidth).toBe(360)
+    expect(inspectorPanel.style.width).toBe('360px')
+
+    await user.click(screen.getByTestId('nav-mode-execution'))
+    const executionFlowPanel = screen.getByTestId('execution-flow-panel')
+    expect(executionFlowPanel.className).toContain('w-72')
+    expect(executionFlowPanel).not.toHaveStyle({ width: '360px' })
+
+    await user.click(screen.getByTestId('nav-mode-editor'))
+    expect(screen.getByTestId('inspector-panel').style.width).toBe('360px')
   })
 
   it('keeps the shell mounted when selecting a flow in editor mode', async () => {
