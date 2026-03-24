@@ -190,7 +190,7 @@ def test_retry_loop_uses_computed_delay_for_retry_event():
 
     result = executor.run()
 
-    assert result.status == "success"
+    assert result.status == "completed"
     retry_events = [event for event in events if event["type"] == "StageRetrying"]
     assert len(retry_events) == 1
     assert retry_events[0]["attempt"] == 1

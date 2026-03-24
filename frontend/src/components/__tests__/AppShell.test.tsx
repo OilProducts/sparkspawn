@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const DEFAULT_WORKING_DIRECTORY = './test-app'
 const DEFAULT_EDITOR_SIDEBAR_WIDTH = 288
+const LINEAR_FLOW_NAME = 'test-linear.dot'
+const REVIEW_FLOW_NAME = 'test-review-loop.dot'
+const NESTED_LINEAR_FLOW_NAME = 'team/review/test-linear.dot'
 
 const setViewportWidth = (width: number) => {
   Object.defineProperty(window, 'innerWidth', {
@@ -60,9 +63,9 @@ const installCanvasWorkspaceFetchMock = () => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = resolveRequestUrl(input)
-      if (url.includes('/attractor/api/flows/simple-linear.dot')) {
+      if (url.includes(`/attractor/api/flows/${LINEAR_FLOW_NAME}`)) {
         return new Response(JSON.stringify({
-          name: 'simple-linear.dot',
+          name: LINEAR_FLOW_NAME,
           content: [
             'digraph simple_linear {',
             '  graph [label="Simple Linear Workflow", goal="Inspect the repo."];',
@@ -78,9 +81,9 @@ const installCanvasWorkspaceFetchMock = () => {
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (url.includes('/attractor/api/flows/implement-review-loop.dot')) {
+      if (url.includes(`/attractor/api/flows/${REVIEW_FLOW_NAME}`)) {
         return new Response(JSON.stringify({
-          name: 'implement-review-loop.dot',
+          name: REVIEW_FLOW_NAME,
           content: [
             'digraph implement_review_loop {',
             '  graph [',
@@ -100,7 +103,7 @@ const installCanvasWorkspaceFetchMock = () => {
         })
       }
       if (url.includes('/attractor/api/flows')) {
-        return new Response(JSON.stringify(['simple-linear.dot', 'implement-review-loop.dot']), {
+        return new Response(JSON.stringify([LINEAR_FLOW_NAME, REVIEW_FLOW_NAME]), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -335,9 +338,9 @@ describe('App shell behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/attractor/api/flows/simple-linear.dot')) {
+        if (url.includes(`/attractor/api/flows/${LINEAR_FLOW_NAME}`)) {
           return new Response(JSON.stringify({
-            name: 'simple-linear.dot',
+            name: LINEAR_FLOW_NAME,
             content: [
               'digraph simple_linear {',
               '  graph [label="Simple Linear Workflow", goal="Inspect the repo."];',
@@ -354,7 +357,7 @@ describe('App shell behavior', () => {
           })
         }
         if (url.includes('/attractor/api/flows')) {
-          return new Response(JSON.stringify(['simple-linear.dot']), {
+          return new Response(JSON.stringify([LINEAR_FLOW_NAME]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -497,9 +500,9 @@ describe('App shell behavior', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/workspace/api/flows/simple-linear.dot?surface=human')) {
+        if (url.includes(`/workspace/api/flows/${LINEAR_FLOW_NAME}?surface=human`)) {
           return new Response(JSON.stringify({
-            name: 'simple-linear.dot',
+            name: LINEAR_FLOW_NAME,
             title: 'Simple Linear Workflow',
             description: 'A minimal starter flow.',
             launch_policy: null,
@@ -539,7 +542,7 @@ describe('App shell behavior', () => {
     render(<App />)
     await user.click(screen.getByTestId('nav-mode-editor'))
     const editorFlowTree = await screen.findByTestId('editor-flow-tree')
-    await user.click(within(editorFlowTree).getByRole('button', { name: 'simple-linear.dot' }))
+    await user.click(within(editorFlowTree).getByRole('button', { name: LINEAR_FLOW_NAME }))
 
     await waitFor(() => {
       expect(screen.getByTestId('app-shell')).toBeVisible()
@@ -557,10 +560,10 @@ describe('App shell behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/attractor/api/flows/team/review/simple-linear.dot')) {
+        if (url.includes(`/attractor/api/flows/${NESTED_LINEAR_FLOW_NAME}`)) {
           sawNestedAttractorFlowRequest = true
           return new Response(JSON.stringify({
-            name: 'team/review/simple-linear.dot',
+            name: NESTED_LINEAR_FLOW_NAME,
             content: [
               'digraph simple_linear {',
               '  graph [label="Team Review Flow", goal="Inspect nested flow loading."];',
@@ -577,7 +580,7 @@ describe('App shell behavior', () => {
           })
         }
         if (url.includes('/attractor/api/flows')) {
-          return new Response(JSON.stringify(['team/review/simple-linear.dot']), {
+          return new Response(JSON.stringify([NESTED_LINEAR_FLOW_NAME]), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -608,10 +611,10 @@ describe('App shell behavior', () => {
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/workspace/api/flows/team/review/simple-linear.dot?surface=human')) {
+        if (url.includes(`/workspace/api/flows/${NESTED_LINEAR_FLOW_NAME}?surface=human`)) {
           sawNestedWorkspaceFlowRequest = true
           return new Response(JSON.stringify({
-            name: 'team/review/simple-linear.dot',
+            name: NESTED_LINEAR_FLOW_NAME,
             title: 'Team Review Flow',
             description: 'A nested flow used to verify tree-based selection.',
             launch_policy: null,
@@ -655,7 +658,7 @@ describe('App shell behavior', () => {
     expect(within(editorFlowTree).getByText('team')).toBeVisible()
     expect(within(editorFlowTree).getByText('review')).toBeVisible()
 
-    await user.click(within(editorFlowTree).getByRole('button', { name: 'team/review/simple-linear.dot' }))
+    await user.click(within(editorFlowTree).getByRole('button', { name: NESTED_LINEAR_FLOW_NAME }))
 
     await waitFor(() => {
       expect(screen.getByTestId('editor-mode-toggle')).toBeVisible()
@@ -672,7 +675,7 @@ describe('App shell behavior', () => {
 
     await user.click(screen.getByTestId('nav-mode-execution'))
     const executionFlowTree = await screen.findByTestId('execution-flow-tree')
-    await user.click(within(executionFlowTree).getByRole('button', { name: 'implement-review-loop.dot' }))
+    await user.click(within(executionFlowTree).getByRole('button', { name: REVIEW_FLOW_NAME }))
     expect(await screen.findByTestId('execution-launch-inputs')).toBeVisible()
 
     await user.type(
@@ -687,7 +690,7 @@ describe('App shell behavior', () => {
     expect(screen.getByTestId('execution-workspace').className).toContain('hidden')
 
     const editorFlowTree = await screen.findByTestId('editor-flow-tree')
-    await user.click(within(editorFlowTree).getByRole('button', { name: 'simple-linear.dot' }))
+    await user.click(within(editorFlowTree).getByRole('button', { name: LINEAR_FLOW_NAME }))
     await waitFor(() => {
       expect(screen.getByTestId('editor-mode-toggle')).toBeVisible()
     })
@@ -710,7 +713,7 @@ describe('App shell behavior', () => {
 
     await user.click(screen.getByTestId('nav-mode-execution'))
     const executionFlowTree = await screen.findByTestId('execution-flow-tree')
-    await user.click(within(executionFlowTree).getByRole('button', { name: 'implement-review-loop.dot' }))
+    await user.click(within(executionFlowTree).getByRole('button', { name: REVIEW_FLOW_NAME }))
 
     const executionCanvasPanel = await screen.findByTestId('execution-canvas-panel')
     const executionFooterControls = screen.getByTestId('execution-footer-controls')

@@ -64,7 +64,7 @@ def test_get_pipeline_uses_checkpoint_progress_for_persisted_run(
     start_payload = _start_pipeline(attractor_api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])
     final_status = _wait_for_pipeline_terminal_status(attractor_api_client, run_id)
-    assert final_status == "success"
+    assert final_status == "completed"
 
     run_root = server._run_root(run_id)
     _write_checkpoint(run_root, current_node="done", completed_nodes=["start", "plan"])
@@ -74,7 +74,8 @@ def test_get_pipeline_uses_checkpoint_progress_for_persisted_run(
     assert response.status_code == 200
     payload = response.json()
     assert payload["pipeline_id"] == run_id
-    assert payload["status"] == "success"
+    assert payload["status"] == "completed"
+    assert payload["outcome"] == "success"
     assert payload["completed_nodes"] == ["start", "plan"]
     assert payload["progress"] == {
         "current_node": "done",

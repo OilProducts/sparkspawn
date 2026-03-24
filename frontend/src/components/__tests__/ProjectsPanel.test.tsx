@@ -1580,7 +1580,7 @@ describe('ProjectsPanel', () => {
           id: 'flow-run-request-inline',
           created_at: '2026-03-09T21:00:02Z',
           updated_at: '2026-03-09T21:00:02Z',
-          flow_name: 'implement-spec.dot',
+          flow_name: 'test-dispatch.dot',
           summary: 'Run implementation for the approved scope.',
           project_path: '/tmp/chat-project',
           conversation_id: 'conversation-flow-run',
@@ -1692,7 +1692,7 @@ describe('ProjectsPanel', () => {
 
     await waitFor(() => {
       expect(useStore.getState().selectedRunId).toBe('run-flow-123')
-      expect(useStore.getState().executionFlow).toBe('implement-spec.dot')
+      expect(useStore.getState().executionFlow).toBe('test-dispatch.dot')
       expect(useStore.getState().viewMode).toBe('execution')
     })
   })

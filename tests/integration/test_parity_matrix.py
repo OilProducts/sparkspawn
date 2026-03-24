@@ -49,6 +49,8 @@ class _ContextReaderHandler:
 
 
 class TestParityMatrixSubset:
+    REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "flows" / "parallel-review-reference.dot"
+
     def test_parse_simple_linear_pipeline(self):
         dot = """
         digraph G {
@@ -89,7 +91,7 @@ class TestParityMatrixSubset:
         backend = _Backend({"start": True, "plan": True, "implement": True})
         registry = build_default_registry(codergen_backend=backend)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.completed_nodes == ["start", "plan", "implement"]
 
     def test_execute_conditional_branching_success_fail_paths(self):
@@ -110,7 +112,7 @@ class TestParityMatrixSubset:
         backend = _Backend({"start": True, "gate": False, "fix": True})
         registry = build_default_registry(codergen_backend=backend)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert "fix" in result.completed_nodes
 
     def test_retry_on_failure_max_retries(self):
@@ -130,7 +132,7 @@ class TestParityMatrixSubset:
         registry.register("flaky", flaky)
 
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert flaky.calls == 3
 
     def test_wait_human_routes_on_selection(self):
@@ -152,7 +154,7 @@ class TestParityMatrixSubset:
         interviewer = QueueInterviewer([Answer(selected_values=["Fix"])])
         registry = build_default_registry(codergen_backend=_Backend({"start": True, "fix": True}), interviewer=interviewer)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert "fix" in result.completed_nodes
 
     def test_human_gate_fixture_routes_by_labeled_options(self):
@@ -164,7 +166,7 @@ class TestParityMatrixSubset:
         registry = build_default_registry(codergen_backend=backend, interviewer=interviewer)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.completed_nodes.count("review_gate") == 2
         assert "fixes" in result.completed_nodes
         assert "ship_it" in result.completed_nodes
@@ -186,7 +188,7 @@ class TestParityMatrixSubset:
         registry.register("ctx.read", _ContextReaderHandler())
 
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
 
     def test_stylesheet_and_goal_variable_transforms(self):
         graph = parse_dot(
@@ -210,7 +212,7 @@ class TestParityMatrixSubset:
         assert graph.nodes["task"].attrs["llm_model"].value == "gpt-5"
 
     def test_reference_workflow_includes_llm_conditions_human_and_parallel(self):
-        flow_path = Path(__file__).resolve().parents[2] / "starter-flows" / "parallel-review.dot"
+        flow_path = self.REFERENCE_WORKFLOW_FIXTURE
         assert flow_path.exists(), f"Missing reference workflow: {flow_path}"
 
         graph = parse_dot(flow_path.read_text(encoding="utf-8"))
@@ -241,7 +243,7 @@ class TestParityMatrixSubset:
         )
         registry = build_default_registry(codergen_backend=backend, interviewer=interviewer)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert "plan" in result.completed_nodes
         assert "implement" in result.completed_nodes
         assert "approval" in result.completed_nodes
@@ -254,7 +256,7 @@ class TestParityMatrixSubset:
         assert {"branch_docs", "branch_tests"}.issubset(branch_ids)
 
     def test_reference_workflow_cancel_branch_exits_before_parallel(self):
-        flow_path = Path(__file__).resolve().parents[2] / "starter-flows" / "parallel-review.dot"
+        flow_path = self.REFERENCE_WORKFLOW_FIXTURE
         graph = parse_dot(flow_path.read_text(encoding="utf-8"))
 
         interviewer = QueueInterviewer([Answer(selected_values=["Cancel"])])
@@ -268,7 +270,7 @@ class TestParityMatrixSubset:
         registry = build_default_registry(codergen_backend=backend, interviewer=interviewer)
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert "approval" in result.completed_nodes
         assert "parallel_work" not in result.completed_nodes
         assert "branch_docs" not in result.completed_nodes
@@ -293,5 +295,5 @@ class TestParityMatrixSubset:
         graph = parse_dot(dot)
         registry = build_default_registry(codergen_backend=_Backend({}))
         result = PipelineExecutor(graph, HandlerRunner(graph, registry)).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert len(result.completed_nodes) == 11

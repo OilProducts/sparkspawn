@@ -11,6 +11,9 @@ import spark.starter_assets as starter_assets
 import spark_server.cli as spark_server_cli
 
 
+TEST_AGENT_FLOW = "test-dispatch.dot"
+
+
 def test_run_serve_uses_import_string_when_reload_enabled(monkeypatch, tmp_path: Path) -> None:
     calls: list[dict[str, object]] = []
 
@@ -415,7 +418,7 @@ def test_agent_run_request_posts_payload_and_prints_response(monkeypatch, capsys
             "--conversation",
             "amber-otter",
             "--flow",
-            "implement-spec.dot",
+            TEST_AGENT_FLOW,
             "--summary",
             "Run implementation for the approved scope",
             "--goal",
@@ -432,7 +435,7 @@ def test_agent_run_request_posts_payload_and_prints_response(monkeypatch, capsys
         (
             "POST http://127.0.0.1:8000/workspace/api/conversations/by-handle/amber-otter/flow-run-requests",
             {
-                "flow_name": "implement-spec.dot",
+                "flow_name": TEST_AGENT_FLOW,
                 "summary": "Run implementation for the approved scope",
                 "goal": "Implement the approved work items.",
                 "launch_context": {"context.request.summary": "Implement the approved work items."},
@@ -449,7 +452,7 @@ def test_agent_run_launch_requires_project_without_conversation(capsys) -> None:
             "run",
             "launch",
             "--flow",
-            "implement-spec.dot",
+            TEST_AGENT_FLOW,
             "--summary",
             "Launch directly",
         ]
@@ -469,7 +472,7 @@ def test_agent_run_launch_posts_payload_and_prints_response(monkeypatch, capsys)
                 "ok": True,
                 "status": "started",
                 "run_id": "run-123",
-                "flow_name": "implement-spec.dot",
+                "flow_name": TEST_AGENT_FLOW,
                 "project_path": "/tmp/project",
                 "conversation_id": "conversation-123",
                 "conversation_handle": "amber-otter",
@@ -500,7 +503,7 @@ def test_agent_run_launch_posts_payload_and_prints_response(monkeypatch, capsys)
             "run",
             "launch",
             "--flow",
-            "implement-spec.dot",
+            TEST_AGENT_FLOW,
             "--summary",
             "Launch directly",
             "--conversation",
@@ -517,7 +520,7 @@ def test_agent_run_launch_posts_payload_and_prints_response(monkeypatch, capsys)
         (
             "POST http://127.0.0.1:8000/workspace/api/runs/launch",
             {
-                "flow_name": "implement-spec.dot",
+                "flow_name": TEST_AGENT_FLOW,
                 "summary": "Launch directly",
                 "goal": "Implement the approved work items.",
                 "conversation_handle": "amber-otter",
@@ -536,7 +539,7 @@ def test_agent_flow_list_defaults_to_json(monkeypatch, capsys) -> None:
         def json(self) -> object:
             return [
                 {
-                    "name": "implement-spec.dot",
+                    "name": TEST_AGENT_FLOW,
                     "title": "Implement spec",
                     "description": "Execute approved work items.",
                     "launch_policy": "agent_requestable",
@@ -566,7 +569,7 @@ def test_agent_flow_list_defaults_to_json(monkeypatch, capsys) -> None:
 
     assert result == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload[0]["name"] == "implement-spec.dot"
+    assert payload[0]["name"] == TEST_AGENT_FLOW
 
 
 def test_agent_describe_flow_text_mode_formats_human_readable_output(monkeypatch, capsys) -> None:
@@ -576,7 +579,7 @@ def test_agent_describe_flow_text_mode_formats_human_readable_output(monkeypatch
 
         def json(self) -> object:
             return {
-                "name": "implement-spec.dot",
+                "name": TEST_AGENT_FLOW,
                 "title": "Implement Spec",
                 "description": "Execute approved work items.",
                 "effective_launch_policy": "agent_requestable",
@@ -601,16 +604,16 @@ def test_agent_describe_flow_text_mode_formats_human_readable_output(monkeypatch
             return None
 
         def request(self, method: str, url: str, json: dict[str, object] | None = None):
-            assert url == "http://127.0.0.1:8000/workspace/api/flows/implement-spec.dot?surface=agent"
+            assert url == f"http://127.0.0.1:8000/workspace/api/flows/{TEST_AGENT_FLOW}?surface=agent"
             return FakeResponse()
 
     monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = spark_cli.main(["flow", "describe", "--flow", "implement-spec.dot", "--text"])
+    result = spark_cli.main(["flow", "describe", "--flow", TEST_AGENT_FLOW, "--text"])
 
     assert result == 0
     output = capsys.readouterr().out
-    assert "Name: implement-spec.dot" in output
+    assert f"Name: {TEST_AGENT_FLOW}" in output
     assert "Launch Policy: agent_requestable" in output
 
 
@@ -621,8 +624,8 @@ def test_agent_validate_flow_text_mode_formats_diagnostics(monkeypatch, capsys) 
 
         def json(self) -> object:
             return {
-                "name": "implement-spec.dot",
-                "path": "/flows/implement-spec.dot",
+                "name": TEST_AGENT_FLOW,
+                "path": f"/flows/{TEST_AGENT_FLOW}",
                 "status": "invalid",
                 "diagnostics": [
                     {
@@ -646,12 +649,12 @@ def test_agent_validate_flow_text_mode_formats_diagnostics(monkeypatch, capsys) 
             return None
 
         def request(self, method: str, url: str, json: dict[str, object] | None = None):
-            assert url == "http://127.0.0.1:8000/workspace/api/flows/implement-spec.dot/validate"
+            assert url == f"http://127.0.0.1:8000/workspace/api/flows/{TEST_AGENT_FLOW}/validate"
             return FakeResponse()
 
     monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = spark_cli.main(["flow", "validate", "--flow", "implement-spec.dot", "--text"])
+    result = spark_cli.main(["flow", "validate", "--flow", TEST_AGENT_FLOW, "--text"])
 
     assert result == 0
     output = capsys.readouterr().out
@@ -676,16 +679,16 @@ def test_agent_get_flow_defaults_to_json_wrapper(monkeypatch, capsys) -> None:
             return None
 
         def request(self, method: str, url: str, json: dict[str, object] | None = None):
-            assert url == "http://127.0.0.1:8000/workspace/api/flows/implement-spec.dot/raw?surface=agent"
+            assert url == f"http://127.0.0.1:8000/workspace/api/flows/{TEST_AGENT_FLOW}/raw?surface=agent"
             return FakeResponse()
 
     monkeypatch.setattr(spark_cli.httpx, "Client", FakeClient)
 
-    result = spark_cli.main(["flow", "get", "--flow", "implement-spec.dot"])
+    result = spark_cli.main(["flow", "get", "--flow", TEST_AGENT_FLOW])
 
     assert result == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["name"] == "implement-spec.dot"
+    assert payload["name"] == TEST_AGENT_FLOW
     assert "a -> b" in payload["content"]
 
 
@@ -728,7 +731,7 @@ def test_agent_trigger_create_and_delete_map_to_workspace_api(monkeypatch, tmp_p
                 "enabled": True,
                 "source_type": "schedule",
                 "source": {"kind": "interval", "interval_seconds": 60},
-                "action": {"flow_name": "implement-spec.dot"},
+                "action": {"flow_name": TEST_AGENT_FLOW},
             }
         ),
         encoding="utf-8",
@@ -777,7 +780,7 @@ def test_agent_trigger_create_and_delete_map_to_workspace_api(monkeypatch, tmp_p
                 "enabled": True,
                 "source_type": "schedule",
                 "source": {"kind": "interval", "interval_seconds": 60},
-                "action": {"flow_name": "implement-spec.dot"},
+                "action": {"flow_name": TEST_AGENT_FLOW},
             },
         ),
         (

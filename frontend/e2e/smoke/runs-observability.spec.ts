@@ -22,8 +22,8 @@ test("run summary panel renders populated metadata for item 9.1-01", async ({ pa
           {
             run_id: runId,
             flow_name: "SmokeFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -46,8 +46,8 @@ test("run summary panel renders populated metadata for item 9.1-01", async ({ pa
 
   await expect(page.getByTestId("run-summary-panel")).toBeVisible()
   await expect(page.getByTestId("run-summary-panel")).toContainText(runId)
-  await expect(page.getByTestId("run-summary-status")).toContainText("success")
-  await expect(page.getByTestId("run-summary-result")).toContainText("success")
+  await expect(page.getByTestId("run-summary-status")).toContainText("Completed")
+  await expect(page.getByTestId("run-summary-outcome")).toContainText("Success")
   await expect(page.getByTestId("run-summary-flow-name")).toContainText("SmokeFlow")
   await expect(page.getByTestId("run-summary-model")).toContainText("gpt-5")
   await expect(page.getByTestId("run-summary-working-directory")).toContainText(`${projectPath}/workspace`)
@@ -78,8 +78,8 @@ test("run summary metadata refresh and stale-state indicator for item 9.1-02", a
           {
             run_id: runId,
             flow_name: "RefreshFlow",
-            status: refreshCount >= 2 ? "success" : "running",
-            result: refreshCount >= 2 ? "success" : "running",
+            status: refreshCount >= 2 ? "completed" : "running",
+            outcome: refreshCount >= 2 ? "success" : null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -131,8 +131,8 @@ test("run history rows include project identity and git metadata for item 9.6-02
           {
             run_id: runId,
             flow_name: "TraceabilityFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "feature/traceability",
@@ -172,8 +172,8 @@ test("run history rows link associated spec and plan artifacts when available fo
           {
             run_id: runId,
             flow_name: "TraceabilityLinksFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "feature/traceability-links",
@@ -215,8 +215,8 @@ test("run checkpoint viewer fetches checkpoint payload for item 9.2-01", async (
           {
             run_id: runId,
             flow_name: "CheckpointFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -279,7 +279,7 @@ test("run checkpoint viewer handles unavailable checkpoint for item 9.2-03", asy
             run_id: runId,
             flow_name: "CheckpointMissingFlow",
             status: "running",
-            result: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -335,8 +335,8 @@ test("run context viewer supports searchable key/value inspection for item 9.3-0
           {
             run_id: runId,
             flow_name: "ContextFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -431,8 +431,8 @@ test("run context viewer renders typed scalar and structured values for item 9.3
           {
             run_id: runId,
             flow_name: "ContextTypedFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -518,8 +518,8 @@ test("run context viewer exposes copy/export actions for item 9.3-03", async ({ 
           {
             run_id: runId,
             flow_name: "ContextCopyExportFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -666,7 +666,7 @@ test("pending human gates are discoverable in execution and runs views for item 
             run_id: runId,
             flow_name: "HumanGateFlow",
             status: "running",
-            result: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -830,7 +830,7 @@ test("pending human gates render YES_NO and CONFIRMATION semantics for item 10.2
             run_id: runId,
             flow_name: "HumanGateSemanticTypesFlow",
             status: "running",
-            result: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -993,7 +993,7 @@ test("pending human gates render FREEFORM interaction and submit text answers fo
             run_id: runId,
             flow_name: "HumanGateFreeformFlow",
             status: "running",
-            result: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -1147,7 +1147,7 @@ test("run event timeline renders typed lifecycle and runtime events for item 9.4
             run_id: runId,
             flow_name: "TimelineFlow",
             status: "running",
-            result: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -1276,7 +1276,7 @@ test("run event timeline filtering supports type, node/stage, category, and seve
             run_id: runId,
             flow_name: "TimelineFilterFlow",
             status: "running",
-            result: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -1415,7 +1415,7 @@ test("run event timeline groups and correlates retry and interview sequences for
             run_id: runId,
             flow_name: "TimelineCorrelationFlow",
             status: "running",
-            result: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -1510,7 +1510,7 @@ test("run event timeline replays stream history and appends live events for item
 
         // Simulate a live append that arrives after replay completion.
         setTimeout(() => {
-          emit({ type: "PipelineCompleted", result: "success" })
+          emit({ type: "PipelineCompleted", status: "completed", outcome: "success" })
         }, 500)
       }
 
@@ -1540,7 +1540,7 @@ test("run event timeline replays stream history and appends live events for item
             run_id: runId,
             flow_name: "TimelineReplayFlow",
             status: "running",
-            result: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -1612,8 +1612,8 @@ test("run artifact browser lists run outputs and supports view/download for item
           {
             run_id: runId,
             flow_name: "ArtifactFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -1746,8 +1746,8 @@ test("run graphviz viewer renders /pipelines/{id}/graph output for item 9.5-02",
           {
             run_id: runId,
             flow_name: "GraphvizFlow",
-            status: "success",
-            result: "success",
+            status: "completed",
+            outcome: "success",
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
@@ -1844,7 +1844,7 @@ test("run artifact browser handles missing files and partial run states for item
             run_id: runId,
             flow_name: "ArtifactMissingFlow",
             status: "failed",
-            result: "failed",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",

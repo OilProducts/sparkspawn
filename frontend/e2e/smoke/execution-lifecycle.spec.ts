@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   cleanupSmokeFlowsForPage,
-  cloneFlowForSmokeTest,
+  createFlowForSmokeTest,
   deleteFlowAfterSmoke,
   ensureScreenshotDir,
   screenshotPath,
@@ -24,7 +24,7 @@ test("warning-only diagnostics still allow execute with explicit banner for item
   const projectPath = `/tmp/ui-smoke-project-warning-only-${Date.now()}`
   const promptToken = `warning-only-${Date.now()}`
   const warningMessage = `Warning-only diagnostic ${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-warning-only")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-warning-only")
 
   try {
     await page.route("**/attractor/preview", async (route) => {
@@ -92,7 +92,7 @@ test("diagnostics transitions toggle execute blocking and warning state for item
   const errorToken = `diagnostic-error-${Date.now()}`
   const warningToken = `diagnostic-warning-${Date.now()}`
   const cleanToken = `diagnostic-clean-${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-diagnostic-transition")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-diagnostic-transition")
 
   try {
     await page.route("**/attractor/preview", async (route) => {
@@ -204,7 +204,7 @@ test("diagnostics transitions toggle execute blocking and warning state for item
 
 test("planning/build failures show diagnostics and rerun affordances for item 8.5-05", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-workflow-failure-${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-workflow-failure")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-workflow-failure")
 
   try {
     await page.goto("/")

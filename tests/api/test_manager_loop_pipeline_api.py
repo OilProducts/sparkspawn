@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from tests.api._support import wait_for_pipeline_completion
+from tests.support.flow_fixtures import seed_flow_fixture
 
 
 def test_pipeline_flow_name_resolves_relative_manager_child_paths_from_parent_flow_dir(
@@ -13,38 +14,15 @@ def test_pipeline_flow_name_resolves_relative_manager_child_paths_from_parent_fl
 ) -> None:
     flows_dir = tmp_path / "flows"
     flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / "implementation-worker.dot").write_text(
-        """
-        digraph implementation_worker {
-            start [shape=Mdiamond]
-            done [shape=Msquare]
-
-            start -> done
-        }
-        """,
-        encoding="utf-8",
-    )
-    (flows_dir / "supervised-implementation.dot").write_text(
-        """
-        digraph supervised_implementation {
-            graph [stack.child_dotfile="implementation-worker.dot"]
-            done [shape=Msquare]
-            manager [shape=house, type="stack.manager_loop", manager.actions=""]
-            start [shape=Mdiamond]
-
-            manager -> done [condition="outcome=success"]
-            start -> manager
-        }
-        """,
-        encoding="utf-8",
-    )
+    seed_flow_fixture(flows_dir, "supervision/implementation-worker.dot", as_name="test-supervision/implementation-worker.dot")
+    seed_flow_fixture(flows_dir, "supervision/supervised-manager.dot", as_name="test-supervision/supervised-manager.dot")
     workdir = tmp_path / "project"
     workdir.mkdir(parents=True, exist_ok=True)
 
     response = attractor_api_client.post(
         "/pipelines",
         json={
-            "flow_name": "supervised-implementation.dot",
+            "flow_name": "test-supervision/supervised-manager.dot",
             "working_directory": str(workdir),
             "backend": "codex-app-server",
         },
@@ -56,4 +34,5 @@ def test_pipeline_flow_name_resolves_relative_manager_child_paths_from_parent_fl
 
     final_payload = wait_for_pipeline_completion(attractor_api_client, payload["run_id"])
 
-    assert final_payload["status"] == "success"
+    assert final_payload["status"] == "completed"
+    assert final_payload["outcome"] == "success"

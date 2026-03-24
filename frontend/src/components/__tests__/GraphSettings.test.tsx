@@ -10,13 +10,14 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const DEFAULT_WORKING_DIRECTORY = './test-app'
+const TEST_GRAPH_FLOW = 'test-graph.dot'
 
 const resetGraphSettingsState = () => {
   useStore.setState((state) => ({
     ...state,
     viewMode: 'editor',
     activeProjectPath: '/tmp/project-graph-settings',
-    activeFlow: 'implement-spec.dot',
+    activeFlow: TEST_GRAPH_FLOW,
     executionFlow: null,
     selectedRunId: null,
     workingDir: DEFAULT_WORKING_DIRECTORY,
@@ -75,7 +76,7 @@ describe('Graph and settings behavior', () => {
         if (url.includes('/workspace/api/flows/') && url.includes('/launch-policy') && method === 'PUT') {
           return new Response(
             JSON.stringify({
-              name: 'implement-spec.dot',
+              name: TEST_GRAPH_FLOW,
               launch_policy: 'agent_requestable',
               effective_launch_policy: 'agent_requestable',
               allowed_launch_policies: ['agent_requestable', 'trigger_only', 'disabled'],
@@ -89,7 +90,7 @@ describe('Graph and settings behavior', () => {
         if (url.includes('/workspace/api/flows/')) {
           return new Response(
             JSON.stringify({
-              name: 'implement-spec.dot',
+              name: TEST_GRAPH_FLOW,
               title: 'Implement Spec',
               description: 'Turn approved spec edits into execution plans.',
               launch_policy: null,
@@ -217,7 +218,7 @@ describe('Graph and settings behavior', () => {
     expect(screen.queryByText('spark.title')).not.toBeInTheDocument()
     expect(screen.queryByText('spark.description')).not.toBeInTheDocument()
 
-    const dot = generateDot('implement-spec.dot', [], [], useStore.getState().graphAttrs)
+    const dot = generateDot(TEST_GRAPH_FLOW, [], [], useStore.getState().graphAttrs)
     expect(dot).toContain('spark.title="Execution Planning"')
     expect(dot).toContain('spark.description="Turn approved spec edits into execution plans."')
   })
@@ -252,7 +253,7 @@ describe('Graph and settings behavior', () => {
       ]),
     )
 
-    const dot = generateDot('implement-spec.dot', [], [], useStore.getState().graphAttrs)
+    const dot = generateDot(TEST_GRAPH_FLOW, [], [], useStore.getState().graphAttrs)
     expect(dot).toContain('spark.launch_inputs=')
     expect(dot).toContain('context.request.acceptance_criteria')
   })

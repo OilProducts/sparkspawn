@@ -8,15 +8,15 @@ from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 import workspace.triggers as workspace_triggers
+from tests.support.flow_fixtures import seed_flow_fixture
 
 
-def _write_flow(
-    name: str,
-    content: str = "digraph G { start [shape=Mdiamond]; done [shape=Msquare]; start -> done; }\n",
-) -> None:
-    flows_dir = server.get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / name).write_text(content, encoding="utf-8")
+TEST_PLANNING_FLOW = "test-planning.dot"
+TEST_DISPATCH_FLOW = "test-dispatch.dot"
+
+
+def _seed_flow(name: str) -> None:
+    seed_flow_fixture(server.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
 
 
 def test_create_and_list_custom_schedule_trigger(
@@ -25,7 +25,7 @@ def test_create_and_list_custom_schedule_trigger(
 ) -> None:
     project_dir = (tmp_path / "schedule-project").resolve()
     project_dir.mkdir()
-    _write_flow("plan-generation.dot")
+    _seed_flow(TEST_PLANNING_FLOW)
 
     create_response = product_api_client.post(
         "/workspace/api/triggers",
@@ -34,7 +34,7 @@ def test_create_and_list_custom_schedule_trigger(
             "enabled": True,
             "source_type": "schedule",
             "action": {
-                "flow_name": "plan-generation.dot",
+                "flow_name": TEST_PLANNING_FLOW,
                 "project_path": str(project_dir),
                 "static_context": {"origin": "test"},
             },
@@ -49,7 +49,7 @@ def test_create_and_list_custom_schedule_trigger(
     created_payload = create_response.json()
     assert created_payload["name"] == "Daily planning"
     assert created_payload["source_type"] == "schedule"
-    assert created_payload["action"]["flow_name"] == "plan-generation.dot"
+    assert created_payload["action"]["flow_name"] == TEST_PLANNING_FLOW
     assert created_payload["action"]["project_path"] == str(project_dir)
     assert created_payload["state"]["next_run_at"]
 
@@ -65,7 +65,7 @@ def test_webhook_trigger_accepts_valid_secret_and_launches_flow(
 ) -> None:
     project_dir = (tmp_path / "webhook-project").resolve()
     project_dir.mkdir()
-    _write_flow("webhook.dot")
+    _seed_flow("webhook.dot")
 
     create_response = product_api_client.post(
         "/workspace/api/triggers",
@@ -127,8 +127,8 @@ def test_protected_trigger_only_allows_enable_and_flow_target_changes(
 ) -> None:
     project_dir = (tmp_path / "protected-project").resolve()
     project_dir.mkdir()
-    _write_flow("plan-generation.dot")
-    _write_flow("implement-spec.dot")
+    _seed_flow(TEST_PLANNING_FLOW)
+    _seed_flow(TEST_DISPATCH_FLOW)
 
     definition, _ = workspace_triggers.create_trigger_definition(
         server.get_settings().config_dir,
@@ -136,7 +136,7 @@ def test_protected_trigger_only_allows_enable_and_flow_target_changes(
         enabled=True,
         source_type="workspace_event",
         action={
-            "flow_name": "plan-generation.dot",
+            "flow_name": TEST_PLANNING_FLOW,
             "project_path": str(project_dir),
             "static_context": {},
         },
@@ -148,13 +148,13 @@ def test_protected_trigger_only_allows_enable_and_flow_target_changes(
         f"/workspace/api/triggers/{definition.id}",
         json={
             "enabled": False,
-            "action": {"flow_name": "implement-spec.dot"},
+            "action": {"flow_name": TEST_DISPATCH_FLOW},
         },
     )
     assert update_response.status_code == 200
     updated_payload = update_response.json()
     assert updated_payload["enabled"] is False
-    assert updated_payload["action"]["flow_name"] == "implement-spec.dot"
+    assert updated_payload["action"]["flow_name"] == TEST_DISPATCH_FLOW
 
     invalid_project_target_response = product_api_client.patch(
         f"/workspace/api/triggers/{definition.id}",

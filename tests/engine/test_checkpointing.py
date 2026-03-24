@@ -41,7 +41,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
 
             required_root_entries = [
                 logs_root / "checkpoint.json",
@@ -88,7 +88,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             assert logs_root.is_dir()
             assert (logs_root / "checkpoint.json").exists()
             assert (logs_root / "manifest.json").exists()
@@ -135,7 +135,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             assert result.node_outcomes["plan"].status == OutcomeStatus.SUCCESS
             status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
             assert status_payload["outcome"] == "success"
@@ -171,7 +171,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             assert result.node_outcomes["plan"].status == OutcomeStatus.SUCCESS
             status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
             assert status_payload["outcome"] == "success"
@@ -210,7 +210,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
             assert status_payload["outcome"] == "success"
             assert status_payload["preferred_next_label"] == ""
@@ -251,7 +251,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             plan_outcome = result.node_outcomes["plan"]
             assert plan_outcome.status == OutcomeStatus.FAIL
             assert "invalid outcome status" in plan_outcome.failure_reason
@@ -291,7 +291,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             plan_outcome = result.node_outcomes["plan"]
             assert plan_outcome.status == OutcomeStatus.FAIL
             assert "invalid outcome status" in plan_outcome.failure_reason
@@ -334,7 +334,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             assert result.context["context.visible"] == "yes"
             assert result.context["_attractor.node_outcomes"]["plan"] == "success"
 
@@ -369,7 +369,7 @@ class TestCheckpointAndArtifacts:
                 checkpoint_file=str(checkpoint_file),
             ).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             assert result.current_node == "done"
 
             # Artifacts for non-terminal stages.
@@ -414,7 +414,7 @@ class TestCheckpointAndArtifacts:
                 checkpoint_file=str(checkpoint_file),
             ).run(context)
 
-            assert result.status == "success"
+            assert result.status == "completed"
             raw_checkpoint = json.loads(checkpoint_file.read_text(encoding="utf-8"))
             assert raw_checkpoint["current_node"] == "done"
             assert raw_checkpoint["completed_nodes"] == ["start"]
@@ -452,7 +452,7 @@ class TestCheckpointAndArtifacts:
 
             result = PipelineExecutor(graph, runner, logs_root=str(logs_root)).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             status_payload = json.loads((logs_root / "work" / "status.json").read_text(encoding="utf-8"))
             assert status_payload["outcome"] == "success"
             assert status_payload["status_transitions"] == ["retry", "success"]
@@ -495,7 +495,7 @@ class TestCheckpointAndArtifacts:
             assert paused.completed_nodes == ["start"]
 
             resumed = executor.run(Context(), resume=True)
-            assert resumed.status == "success"
+            assert resumed.status == "completed"
             assert resumed.current_node == "done"
 
             # start executes once; resume continues at plan.
@@ -541,7 +541,7 @@ class TestCheckpointAndArtifacts:
             )
 
             resumed = executor.run(Context(), resume=True)
-            assert resumed.status == "success"
+            assert resumed.status == "completed"
             assert resumed.current_node == "done"
             assert resumed.completed_nodes == ["start", "plan", "review"]
             assert calls == ["review"]
@@ -581,7 +581,7 @@ class TestCheckpointAndArtifacts:
             assert paused.status == "paused"
 
             resumed = executor.run(Context(), resume=True)
-            assert resumed.status == "success"
+            assert resumed.status == "completed"
             assert seen_fidelity == ["full", "summary:high", "full"]
 
     def test_resume_restores_retry_counters_and_checkpoint_context_exactly(self):
@@ -635,7 +635,7 @@ class TestCheckpointAndArtifacts:
                 resume=True,
             )
 
-            assert resumed.status == "fail"
+            assert resumed.status == "failed"
             assert resumed.current_node == "work"
             assert attempts["work"] == 1
             assert seen_resume_markers == ["from-checkpoint"]
@@ -668,7 +668,7 @@ class TestCheckpointAndArtifacts:
 
             result = executor.run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             assert result.current_node == "plan"
             assert result.completed_nodes == ["start", "plan"]
 
@@ -704,7 +704,7 @@ class TestCheckpointAndArtifacts:
 
             result = executor.run(Context())
 
-            assert result.status == "fail"
+            assert result.status == "failed"
             assert result.current_node == "start"
             assert result.failure_reason == "runner exploded"
 
@@ -753,7 +753,7 @@ class TestCheckpointAndArtifacts:
         control = ClosableControl()
         run_result = PipelineExecutor(graph, runner, control=control).run(Context())
 
-        assert run_result.status == "success"
+        assert run_result.status == "completed"
         assert runner.closed == 1
         assert control.closed == 1
 
@@ -761,7 +761,7 @@ class TestCheckpointAndArtifacts:
         control = ClosableControl()
         run_from_result = PipelineExecutor(graph, runner, control=control).run_from("start", Context())
 
-        assert run_from_result.status == "success"
+        assert run_from_result.status == "completed"
         assert runner.closed == 1
         assert control.closed == 1
 
@@ -788,7 +788,7 @@ class TestCheckpointAndArtifacts:
                 logs_root=str(logs_root),
             ).run_from("start", Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             terminal_status_path = logs_root / "done" / "status.json"
             assert terminal_status_path.is_file()
             terminal_status = json.loads(terminal_status_path.read_text(encoding="utf-8"))
@@ -827,7 +827,7 @@ class TestCheckpointAndArtifacts:
                 checkpoint_file=str(checkpoint_file),
             ).run_from("start", Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             assert ("start", ["start"]) in snapshots
             assert ("plan", ["start", "plan"]) in snapshots
 
@@ -885,7 +885,7 @@ class TestCheckpointAndArtifacts:
                 checkpoint_file=str(checkpoint_file),
             ).run_from("start", Context(values={"context.seed": "ready"}))
 
-            assert result.status == "success"
+            assert result.status == "completed"
             retry_snapshots = [snap for snap in snapshots if snap.current_node == "work" and snap.retry_counts]
             assert retry_snapshots, "expected checkpoint persistence for work retry attempt"
             retry_snapshot = retry_snapshots[0]

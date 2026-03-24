@@ -23,6 +23,9 @@ def _reset_api_server_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     server.HUMAN_BROKER = server.HumanGateBroker()
     server.EVENT_HUB = server.PipelineEventHub()
     server.RUNTIME.status = "idle"
+    server.RUNTIME.outcome = None
+    server.RUNTIME.outcome_reason_code = None
+    server.RUNTIME.outcome_reason_message = None
     server.RUNTIME.last_error = ""
     server.RUNTIME.last_working_directory = ""
     server.RUNTIME.last_model = ""

@@ -62,7 +62,8 @@ class TestParallelHandler:
         assert context.get("shared_ref", "") == ""
         branch_results = context.get("parallel.results", [])
         assert len(branch_results) == 2
-        assert all(item.get("status") == "success" for item in branch_results)
+        assert all(item.get("status") == "completed" for item in branch_results)
+        assert all(item.get("outcome") == "success" for item in branch_results)
 
     def test_parallel_handler_respects_max_parallel_bound(self):
         graph = parse_dot(
@@ -102,6 +103,8 @@ class TestParallelHandler:
         branch_results = outcome.context_updates.get("parallel.results", [])
         assert isinstance(branch_results, list)
         assert len(branch_results) == 4
+        assert all(item.get("status") == "completed" for item in branch_results)
+        assert all(item.get("outcome") == "success" for item in branch_results)
 
     def test_custom_handler_without_thread_safe_marker_is_serialized_under_parallel_execution(self):
         graph = parse_dot(
@@ -340,5 +343,5 @@ class TestParallelHandler:
         branch_results = outcome.context_updates.get("parallel.results", [])
         assert isinstance(branch_results, list)
         assert len(branch_results) == expected_result_count
-        fail_count = sum(1 for result in branch_results if result.get("status") == "fail")
+        fail_count = sum(1 for result in branch_results if result.get("status") == "failed")
         assert fail_count == expected_failures

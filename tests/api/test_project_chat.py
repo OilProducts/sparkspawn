@@ -19,8 +19,17 @@ import workspace.project_chat as project_chat
 import workspace.project_chat_models as project_chat_models
 import workspace.project_chat_session as project_chat_session
 import workspace.attractor_client as attractor_client
+from tests.support.flow_fixtures import seed_flow_fixture
 from workspace.prompt_templates import PROMPTS_FILE_NAME
 from workspace.storage import conversation_handles_path, ensure_project_paths
+
+
+TEST_PLANNING_FLOW = "test-planning.dot"
+TEST_DISPATCH_FLOW = "test-dispatch.dot"
+
+
+def _seed_flow(name: str) -> None:
+    seed_flow_fixture(server.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
 
 
 def test_extract_command_text_handles_list_and_string_payloads() -> None:
@@ -1277,7 +1286,7 @@ def test_create_flow_run_request_places_artifact_on_latest_assistant_turn(tmp_pa
         conversation_id,
         project_path,
         {
-            "flow_name": "implement-spec.dot",
+            "flow_name": TEST_DISPATCH_FLOW,
             "summary": "Run implementation for the approved scope.",
             "goal": "Implement the approved scope.",
             "launch_context": {
@@ -1296,7 +1305,7 @@ def test_create_flow_run_request_places_artifact_on_latest_assistant_turn(tmp_pa
     )
     assert request_segment["turn_id"] == "turn-assistant-newer"
     assert request_segment["artifact_id"] == result["flow_run_request_id"]
-    assert snapshot["flow_run_requests"][0]["flow_name"] == "implement-spec.dot"
+    assert snapshot["flow_run_requests"][0]["flow_name"] == TEST_DISPATCH_FLOW
     assert snapshot["flow_run_requests"][0]["summary"] == "Run implementation for the approved scope."
     assert snapshot["flow_run_requests"][0]["launch_context"] == {
         "context.request.summary": "Implement the approved scope.",
@@ -1336,9 +1345,7 @@ def test_flow_run_request_routes_create_and_approve_launch(
     server.PROJECT_CHAT._write_state(state)
     snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
 
-    flows_dir = server.get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / "implement-spec.dot").write_text("digraph implement_spec { start -> done; }\n", encoding="utf-8")
+    _seed_flow(TEST_DISPATCH_FLOW)
 
     start_calls: list[dict[str, object | None]] = []
 
@@ -1373,7 +1380,7 @@ def test_flow_run_request_routes_create_and_approve_launch(
     create_response = product_api_client.post(
         f"/workspace/api/conversations/by-handle/{snapshot['conversation_handle']}/flow-run-requests",
         json={
-            "flow_name": "implement-spec.dot",
+            "flow_name": TEST_DISPATCH_FLOW,
             "summary": "Run implementation for the approved scope.",
             "goal": "Implement the approved scope.",
             "launch_context": {
@@ -1413,7 +1420,7 @@ def test_flow_run_request_routes_create_and_approve_launch(
     assert start_calls == [
         {
             "run_id": None,
-            "flow_name": "implement-spec.dot",
+            "flow_name": TEST_DISPATCH_FLOW,
             "working_directory": str(project_dir),
             "model": "gpt-5.4",
             "goal": "Implement the approved scope.",
@@ -1462,9 +1469,7 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
     server.PROJECT_CHAT._write_state(state)
     snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
 
-    flows_dir = server.get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / "implement-spec.dot").write_text("digraph implement_spec { start -> done; }\n", encoding="utf-8")
+    _seed_flow(TEST_DISPATCH_FLOW)
 
     start_calls: list[dict[str, object | None]] = []
 
@@ -1499,7 +1504,7 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
     launch_response = product_api_client.post(
         "/workspace/api/runs/launch",
         json={
-            "flow_name": "implement-spec.dot",
+            "flow_name": TEST_DISPATCH_FLOW,
             "summary": "Launch implementation immediately.",
             "conversation_handle": snapshot["conversation_handle"],
             "project_path": str(project_dir),
@@ -1534,7 +1539,7 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
     assert start_calls == [
         {
             "run_id": None,
-            "flow_name": "implement-spec.dot",
+            "flow_name": TEST_DISPATCH_FLOW,
             "working_directory": str(project_dir),
             "model": "gpt-5.4",
             "goal": "Implement the approved scope.",
@@ -1626,7 +1631,7 @@ def test_complete_execution_workflow_creates_execution_card_and_clears_matching_
         execution_workflow=project_chat_models.ExecutionWorkflowState(
             run_id="workflow-123",
             status="running",
-            flow_source="plan-generation.dot",
+            flow_source=TEST_PLANNING_FLOW,
         ),
     )
 
@@ -1635,8 +1640,8 @@ def test_complete_execution_workflow_creates_execution_card_and_clears_matching_
     execution_card = service.complete_execution_workflow(
         "conversation-test",
         "proposal-1",
-        "plan-generation.dot",
-        "implement-spec.dot",
+        TEST_PLANNING_FLOW,
+        TEST_DISPATCH_FLOW,
         "workflow-123",
         json.dumps(
             {
@@ -1657,7 +1662,7 @@ def test_complete_execution_workflow_creates_execution_card_and_clears_matching_
     )
 
     assert execution_card.source_workflow_run_id == "workflow-123"
-    assert execution_card.flow_source == "implement-spec.dot"
+    assert execution_card.flow_source == TEST_DISPATCH_FLOW
     snapshot = service.get_snapshot("conversation-test", str(tmp_path))
     assert snapshot["execution_workflow"]["status"] == "idle"
     assert snapshot["execution_cards"][0]["id"] == execution_card.id
@@ -1675,7 +1680,7 @@ def test_fail_execution_workflow_marks_matching_run_failed(tmp_path: Path) -> No
         execution_workflow=project_chat_models.ExecutionWorkflowState(
             run_id="workflow-123",
             status="running",
-            flow_source="plan-generation.dot",
+            flow_source=TEST_PLANNING_FLOW,
         ),
     )
     service._write_state(state)
@@ -1683,7 +1688,7 @@ def test_fail_execution_workflow_marks_matching_run_failed(tmp_path: Path) -> No
     snapshot = service.fail_execution_workflow(
         "conversation-test",
         "workflow-123",
-        "plan-generation.dot",
+        TEST_PLANNING_FLOW,
         "boom",
     )
 
@@ -1719,10 +1724,12 @@ def test_note_execution_card_dispatched_records_event(tmp_path: Path) -> None:
         "conversation-test",
         "execution-card-1",
         "run-123",
-        "implement-spec.dot",
+        TEST_DISPATCH_FLOW,
     )
 
-    assert snapshot["event_log"][-1]["message"] == "Dispatched execution card execution-card-1 as run run-123 using implement-spec.dot."
+    assert snapshot["event_log"][-1]["message"] == (
+        f"Dispatched execution card execution-card-1 as run run-123 using {TEST_DISPATCH_FLOW}."
+    )
 
 
 def test_chat_session_emits_assistant_completed_from_item_completed(monkeypatch) -> None:

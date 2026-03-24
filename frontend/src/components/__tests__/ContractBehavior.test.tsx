@@ -491,7 +491,7 @@ describe('Frontend contract behavior', () => {
     expect(() => parseFlowPayloadResponse({})).toThrow(ApiSchemaError)
     expect(parseWorkspaceFlowListResponse([
       {
-        name: 'plan-generation.dot',
+        name: 'test-planning.dot',
         title: 'Execution Planning',
         description: 'Turn an approved spec edit proposal into an execution plan.',
         launch_policy: null,
@@ -499,7 +499,7 @@ describe('Frontend contract behavior', () => {
       },
     ])).toMatchObject([
       {
-        name: 'plan-generation.dot',
+        name: 'test-planning.dot',
         title: 'Execution Planning',
         description: 'Turn an approved spec edit proposal into an execution plan.',
         launch_policy: null,
@@ -508,13 +508,13 @@ describe('Frontend contract behavior', () => {
     ])
     expect(() => parseWorkspaceFlowListResponse({})).toThrow(ApiSchemaError)
     expect(parseWorkspaceFlowResponse({
-      name: 'plan-generation.dot',
+      name: 'test-planning.dot',
       title: 'Execution Planning',
       description: 'Turn an approved spec edit proposal into an execution plan.',
       launch_policy: 'trigger_only',
       effective_launch_policy: 'trigger_only',
     })).toMatchObject({
-      name: 'plan-generation.dot',
+      name: 'test-planning.dot',
       launch_policy: 'trigger_only',
       effective_launch_policy: 'trigger_only',
     })
@@ -623,7 +623,7 @@ describe('Frontend contract behavior', () => {
         expectedUrl: '/workspace/api/flows?surface=human',
         response: jsonResponse([
           {
-            name: 'plan-generation.dot',
+            name: 'test-planning.dot',
             title: 'Execution Planning',
             description: 'Turn approved spec edits into execution plans.',
             launch_policy: null,
@@ -633,7 +633,7 @@ describe('Frontend contract behavior', () => {
         assertResult: (result) =>
           expect(result).toMatchObject([
             {
-              name: 'plan-generation.dot',
+              name: 'test-planning.dot',
               title: 'Execution Planning',
               description: 'Turn approved spec edits into execution plans.',
               launch_policy: null,

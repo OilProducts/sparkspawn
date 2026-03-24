@@ -12,7 +12,7 @@ from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.interviewer import Answer, QueueInterviewer
 
 BRANCHING_CONDITION_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "branching_condition_workflow.dot"
-REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[2] / "starter-flows" / "parallel-review.dot"
+REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "flows" / "parallel-review-reference.dot"
 
 
 class _WorkflowBackend:
@@ -85,7 +85,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == expected_route
 
     def test_loop_restart_relaunches_from_edge_target_with_fresh_result_state(self):
@@ -112,7 +112,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls == ["start", "loop", "work"]
         assert result.current_node == "done"
         assert result.route_trace == ["work", "done"]
@@ -143,7 +143,7 @@ class TestExecutor:
 
             result = PipelineExecutor(graph, runner, logs_root=str(logs_root)).run(Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             assert (logs_root / "start" / "status.json").exists()
             assert (logs_root / "loop" / "status.json").exists()
 
@@ -179,7 +179,7 @@ class TestExecutor:
             for event in events
             if event.get("type") == "PipelineStarted"
         ]
-        assert result.status == "success"
+        assert result.status == "completed"
         assert started_nodes == ["start", "work"]
 
     def test_executor_resolves_runtime_thread_id_from_node_attr_for_full_fidelity(self):
@@ -203,7 +203,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_thread_ids == ["start", "work-thread"]
 
     def test_executor_resolves_runtime_fidelity_from_graph_default(self):
@@ -227,7 +227,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_fidelity == ["summary:medium", "summary:medium"]
 
     def test_executor_node_fidelity_overrides_graph_default(self):
@@ -251,7 +251,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_fidelity == ["summary:medium", "full"]
 
     def test_executor_edge_fidelity_overrides_node_and_graph_defaults(self):
@@ -275,7 +275,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_fidelity == ["summary:medium", "full"]
 
     def test_executor_enforces_node_timeout_for_callable_runner(self):
@@ -297,7 +297,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "fail"
+        assert result.status == "failed"
         assert "handler timed out after" in result.failure_reason
 
     def test_executor_target_node_thread_id_overrides_edge_thread_id(self):
@@ -321,7 +321,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_thread_ids == ["start", "work-thread"]
 
     def test_executor_uses_edge_thread_id_when_full_fidelity_node_has_no_thread_id(self):
@@ -345,7 +345,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_thread_ids == ["start", "edge-thread"]
 
     def test_executor_uses_graph_thread_id_when_full_fidelity_has_no_node_or_edge_thread_id(self):
@@ -369,7 +369,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_thread_ids == ["graph-thread", "graph-thread"]
 
     def test_executor_uses_subgraph_derived_class_for_full_fidelity_thread_fallback(self):
@@ -398,7 +398,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_thread_ids == ["start", "loop-a"]
 
     @pytest.mark.parametrize(
@@ -445,7 +445,7 @@ class TestExecutor:
         initial_context = Context(values={"internal.run_id": "run-123"})
         result = PipelineExecutor(graph, runner).run(initial_context)
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert expected_snippet in seen_payload
         assert "goal=Ship docs" in seen_payload
         assert "run_id=run-123" in seen_payload
@@ -474,7 +474,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context(values={"internal.run_id": "run-123"}))
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_payload == ""
 
     def test_executor_carries_review_feedback_into_next_implement_pass(self):
@@ -499,7 +499,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context(values={"internal.run_id": "run-123"}))
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert backend.review_calls == 2
         assert len(backend.prompts["implement"]) == 2
         assert "Current stage task:\n\nImplement the requested change." in backend.prompts["implement"][1]
@@ -527,7 +527,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.context["graph.goal"] == "Ship docs"
         assert seen_goals == ["Ship docs", "Ship docs"]
 
@@ -564,7 +564,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert snapshots == [
             {
                 "node_id": "start",
@@ -620,7 +620,7 @@ class TestExecutor:
             ).run(Context())
 
             event_types = [event["type"] for event in events]
-            assert result.status == "success"
+            assert result.status == "completed"
             assert event_types[0] == "PipelineStarted"
             assert event_types[-1] == "PipelineCompleted"
             assert event_types.count("StageStarted") == 2
@@ -648,7 +648,7 @@ class TestExecutor:
         result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
 
         event_types = [event["type"] for event in events]
-        assert result.status == "success"
+        assert result.status == "completed"
         assert "CheckpointSaved" not in event_types
 
     def test_pipeline_started_and_completed_events_include_lifecycle_payload(self):
@@ -673,7 +673,7 @@ class TestExecutor:
         started = next(event for event in events if event["type"] == "PipelineStarted")
         completed = next(event for event in events if event["type"] == "PipelineCompleted")
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert started["name"] == "ReleaseFlow"
         assert started["id"] == "ReleaseFlow"
         assert isinstance(completed["duration"], (int, float))
@@ -700,7 +700,7 @@ class TestExecutor:
         result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
         failed = next(event for event in events if event["type"] == "PipelineFailed")
 
-        assert result.status == "fail"
+        assert result.status == "failed"
         assert failed["error"] == "boom"
         assert isinstance(failed["duration"], (int, float))
         assert float(failed["duration"]) >= 0.0
@@ -731,7 +731,7 @@ class TestExecutor:
         result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
 
         retry_events = [event for event in events if event["type"] == "StageRetrying"]
-        assert result.status == "success"
+        assert result.status == "completed"
         assert len(retry_events) == 1
         assert retry_events[0]["node_id"] == "work"
         assert retry_events[0]["name"] == "work"
@@ -762,7 +762,7 @@ class TestExecutor:
         stage_started = [event for event in events if event["type"] == "StageStarted"]
         stage_completed = [event for event in events if event["type"] == "StageCompleted"]
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert [event["name"] for event in stage_started] == ["start", "work"]
         assert [event["name"] for event in stage_completed] == ["start", "work"]
         assert [event["index"] for event in stage_started] == [0, 1]
@@ -798,7 +798,7 @@ class TestExecutor:
         stage_failed = [event for event in events if event["type"] == "StageFailed"]
         retry_events = [event for event in events if event["type"] == "StageRetrying"]
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert len(stage_failed) == 1
         assert stage_failed[0]["name"] == "work"
         assert stage_failed[0]["node_id"] == "work"
@@ -828,7 +828,7 @@ class TestExecutor:
         result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
 
         stage_failed = [event for event in events if event["type"] == "StageFailed" and event["node_id"] == "work"]
-        assert result.status == "fail"
+        assert result.status == "failed"
         assert stage_failed
         assert all(event["name"] == "work" for event in stage_failed)
         assert all(event["index"] == 1 for event in stage_failed)
@@ -853,7 +853,7 @@ class TestExecutor:
         result = PipelineExecutor(graph, runner, on_event=events.append).run(Context())
 
         event_types = [event["type"] for event in events]
-        assert result.status == "success"
+        assert result.status == "completed"
         assert "InterviewStarted" in event_types
         assert "InterviewCompleted" in event_types
         assert "ParallelStarted" in event_types
@@ -897,7 +897,7 @@ class TestExecutor:
         branch_started = [event for event in events if event["type"] == "ParallelBranchStarted"]
         branch_completed = [event for event in events if event["type"] == "ParallelBranchCompleted"]
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert parallel_started["branch_count"] == 2
         assert len(branch_started) == 2
         assert len(branch_completed) == 2
@@ -966,10 +966,13 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "fail"
+        assert result.status == "completed"
+        assert result.outcome == "failure"
+        assert result.outcome_reason_code == "goal_gate_unsatisfied"
+        assert result.outcome_reason_message == "Goal gate unsatisfied and no retry target"
         assert result.current_node == "done"
         assert result.route_trace == ["start", "review", "done"]
-        assert result.failure_reason == "Goal gate unsatisfied and no retry target"
+        assert result.failure_reason == ""
 
     def test_goal_gate_does_not_block_exit_for_unvisited_goal_gate_nodes(self):
         graph = parse_dot(
@@ -988,7 +991,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, lambda *_: Outcome(status=OutcomeStatus.SUCCESS)).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.current_node == "done"
 
     def test_run_from_returns_success_when_non_fail_stage_has_no_route(self):
@@ -1007,7 +1010,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run_from("work", Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.current_node == "work"
         assert result.completed_nodes == ["work"]
         assert result.route_trace == ["work"]
@@ -1030,7 +1033,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, lambda *_: Outcome(status=OutcomeStatus.SUCCESS)).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["entry", "work", "done"]
 
     def test_shape_exit_takes_precedence_over_end_id_fallback(self):
@@ -1051,7 +1054,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, lambda *_: Outcome(status=OutcomeStatus.SUCCESS)).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.current_node == "done"
         assert result.route_trace == ["start", "review", "end", "done"]
 
@@ -1119,7 +1122,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.current_node == "done"
         assert result.completed_nodes == ["start", "plan", "fix"]
         assert result.context.get("needs_fix") == "true"
@@ -1154,7 +1157,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.context["context.custom.flag"] == "set"
         assert result.context["outcome"] == "success"
         assert result.context["preferred_label"] == "Approve"
@@ -1183,7 +1186,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert seen_prompts["plan"] == "Plan from label"
         assert seen_prompts["gate"] == ""
 
@@ -1213,7 +1216,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "plan", "gate", "fix", "done"]
 
     def test_conditional_node_routes_using_prior_stage_preferred_label(self):
@@ -1242,7 +1245,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "plan", "gate", "fix", "done"]
 
     def test_conditional_node_preserves_prior_stage_preferred_label_exactly(self):
@@ -1273,7 +1276,7 @@ class TestExecutor:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "plan", "gate", "spaced", "done"]
 
     def test_executor_requires_single_start(self):

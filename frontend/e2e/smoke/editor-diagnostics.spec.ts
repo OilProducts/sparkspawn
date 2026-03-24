@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   cleanupSmokeFlowsForPage,
-  cloneFlowForSmokeTest,
+  createFlowForSmokeTest,
   deleteFlowAfterSmoke,
   ensureScreenshotDir,
   screenshotPath,
@@ -21,7 +21,7 @@ test.afterEach(async ({ page }) => {
 })
 
 test("primary UI shells render and can be navigated", async ({ page }) => {
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-shell")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-shell")
 
   try {
     await page.goto("/")
@@ -104,7 +104,7 @@ test("prompt edits trigger live preview diagnostics before blur for item 5.1-03"
   const projectPath = `/tmp/ui-smoke-project-live-${Date.now()}`
   const promptToken = `live-prompt-${Date.now()}`
   const diagnosticMessage = `Live prompt diagnostic ${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-live-prompt")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-live-prompt")
 
   try {
     await page.route("**/attractor/preview", async (route) => {
@@ -167,7 +167,7 @@ test("prompt edits trigger live preview diagnostics before blur for item 5.1-03"
 
 test("medium graph performance profile renders optimizations for item 13.3-02", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-medium-${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-medium-graph")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-medium-graph")
   const nodeCount = 30
   const nodes = Array.from({ length: nodeCount }, (_, index) => ({
     id: `node_${index}`,
@@ -222,7 +222,7 @@ test("validation panel supports filter and sort controls for item 7.1-01", async
   const warningLateMessage = `Validation warning late ${Date.now()}`
   const warningEarlyMessage = `Validation warning early ${Date.now()}`
   const errorMessage = `Validation error ${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-validation-panel")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-validation-panel")
 
   try {
     await page.route("**/attractor/preview", async (route) => {
@@ -310,7 +310,7 @@ test("inline node and edge diagnostic badges render for item 7.1-02", async ({ p
   const promptToken = `inline-badges-${Date.now()}`
   const nodeDiagnosticMessage = `Node diagnostic ${Date.now()}`
   const edgeDiagnosticMessage = `Edge diagnostic ${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-inline-badges")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-inline-badges")
   let nodeId: string | null = null
 
   try {
@@ -391,7 +391,7 @@ test("inspector field-level diagnostics map to matching fields for item 7.1-03",
   const edgeDiagnosticMessage = `Condition syntax is invalid ${Date.now()}`
   const nodeFallbackDiagnosticMessage = `Fallback retry target missing ${Date.now()}`
   const edgeFidelityDiagnosticMessage = `Edge fidelity value not recognized ${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-field-diags")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-field-diags")
   let selectedNodeId: string | null = null
   const selectedEdgeSource = "audit_human_gate"
   const selectedEdgeTarget = "audit_rework"
@@ -495,7 +495,7 @@ test("validation diagnostics navigate to matching canvas entities for item 7.3-0
   const edgeDiagnosticMessage = `Edge navigation diagnostic ${Date.now()}`
   const edgeSource = "audit_human_gate"
   const edgeTarget = "audit_rework"
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-diagnostic-nav")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-diagnostic-nav")
   let selectedNodeId: string | null = null
 
   try {
@@ -582,7 +582,7 @@ test("stylesheet parse diagnostics render in graph settings for item 6.5-02", as
   const projectPath = `/tmp/ui-smoke-project-stylesheet-${Date.now()}`
   const stylesheetToken = ".bad$class { llm_model: gpt-5; }"
   const diagnosticMessage = `Stylesheet syntax diagnostic ${Date.now()}`
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-stylesheet-diagnostics")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-stylesheet-diagnostics")
 
   try {
     await page.route("**/attractor/preview", async (route) => {
@@ -645,7 +645,7 @@ test("stylesheet parse diagnostics render in graph settings for item 6.5-02", as
 test("stylesheet selector/effective previews render in graph settings for item 6.5-03", async ({ page }) => {
   const projectPath = `/tmp/ui-smoke-project-stylesheet-preview-${Date.now()}`
   const stylesheetToken = "* { llm_provider: openai; } .critical { llm_model: gpt-5.2; }"
-  const flowName = await cloneFlowForSmokeTest(page, "ui-smoke-stylesheet-preview")
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-stylesheet-preview")
 
   try {
     await page.goto("/")

@@ -21,7 +21,7 @@ const nodes = [
       type: 'stack.manager_loop',
       'manager.poll_interval': '25ms',
       'manager.max_cycles': '3',
-      'manager.stop_condition': 'child.status == "success"',
+      'manager.stop_condition': 'child.outcome == "success"',
       'manager.actions': 'observe,steer'
     }
   }
@@ -89,7 +89,7 @@ def test_manager_loop_attrs_round_trip_through_preview_item_6_2_01() -> None:
     assert manager_node["type"] == "stack.manager_loop"
     assert manager_node["manager.poll_interval"] == "25ms"
     assert manager_node["manager.max_cycles"] == 3
-    assert manager_node["manager.stop_condition"] == 'child.status == "success"'
+    assert manager_node["manager.stop_condition"] == 'child.outcome == "success"'
     assert manager_node["manager.actions"] == "observe,steer"
 
 

@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { ensureScreenshotDir, screenshotPath } from '../fixtures/smoke-helpers'
 
 const MOBILE_PROJECT_PATH = '/tmp/ui-smoke-mobile-project'
-const MOBILE_FLOW_NAME = 'implement-spec.dot'
+const MOBILE_FLOW_NAME = 'mobile-smoke.dot'
 const MOBILE_RUN_ID = 'run-mobile-ops'
 const MOBILE_FLOW_DOT = `digraph G {
   start [label="Start"]
@@ -146,7 +146,7 @@ const stubResponsiveSmokeApis = async (page: Page) => {
             {
               run_id: MOBILE_RUN_ID,
               status: 'running',
-              result: null,
+              outcome: null,
               flow_name: MOBILE_FLOW_NAME,
               started_at: '2026-03-11T10:00:00Z',
               ended_at: null,

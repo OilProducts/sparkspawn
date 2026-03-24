@@ -37,7 +37,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 3
 
     def test_legacy_graph_default_max_retry_alias_still_applies_when_node_omits_max_retries(self):
@@ -66,7 +66,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 3
 
     def test_retry_status_retries_same_node(self):
@@ -92,7 +92,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 2
 
     def test_fail_edge_after_retry_exhaustion(self):
@@ -120,7 +120,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 2
         assert "fix" in result.completed_nodes
 
@@ -146,7 +146,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 2
         assert result.node_outcomes["task"].status is OutcomeStatus.PARTIAL_SUCCESS
 
@@ -177,7 +177,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 2
         assert result.node_outcomes["task"].status is OutcomeStatus.PARTIAL_SUCCESS
 
@@ -217,7 +217,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 4
         assert result.route_trace == ["start", "task", "requeue", "task", "done"]
 
@@ -256,7 +256,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 4
         assert result.route_trace == ["start", "task", "requeue", "task", "done"]
         assert result.node_outcomes["task"].status is OutcomeStatus.PARTIAL_SUCCESS
@@ -287,7 +287,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 3
         assert result.route_trace == ["start", "task", "fix", "done"]
         assert result.node_outcomes["task"].status is OutcomeStatus.FAIL
@@ -318,7 +318,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 3
         assert "fix" in result.completed_nodes
 
@@ -343,7 +343,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert "fix" in result.completed_nodes
 
     def test_failure_routing_uses_fallback_retry_target_before_unconditional_edge(self):
@@ -367,7 +367,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "task", "fix", "done"]
 
     def test_failure_routing_prefers_retry_target_over_fallback_retry_target(self):
@@ -392,7 +392,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "task", "fix", "done"]
 
     def test_failure_routing_prefers_outcome_fail_edge_over_other_true_conditions(self):
@@ -421,7 +421,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(context)
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "task", "done"]
 
     def test_goal_gate_enforced_at_exit(self):
@@ -448,7 +448,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["implement"] == 2
 
     def test_goal_gate_allows_partial_success_at_exit(self):
@@ -471,7 +471,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
 
     def test_goal_gate_without_recorded_outcome_allows_exit(self):
         graph = parse_dot(
@@ -492,7 +492,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "plan", "done"]
 
     def test_goal_gate_recovery_uses_graph_level_retry_target(self):
@@ -520,7 +520,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["implement"] == 2
 
     def test_goal_gate_recovery_uses_graph_level_fallback_retry_target(self):
@@ -548,7 +548,7 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["implement"] == 2
 
     def test_goal_gate_failure_without_retry_target_fails_at_exit(self):
@@ -571,9 +571,12 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "fail"
+        assert result.status == "completed"
+        assert result.outcome == "failure"
+        assert result.outcome_reason_code == "goal_gate_unsatisfied"
+        assert result.outcome_reason_message == "Goal gate unsatisfied and no retry target"
         assert result.route_trace == ["start", "implement", "done"]
-        assert result.failure_reason == "Goal gate unsatisfied and no retry target"
+        assert result.failure_reason == ""
 
     def test_goal_gate_tracking_survives_context_update_overwrites(self):
         graph = parse_dot(
@@ -607,9 +610,12 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "fail"
+        assert result.status == "completed"
+        assert result.outcome == "failure"
+        assert result.outcome_reason_code == "goal_gate_unsatisfied"
+        assert result.outcome_reason_message == "Goal gate unsatisfied and no retry target"
         assert result.route_trace == ["start", "gate", "after", "done"]
-        assert result.failure_reason == "Goal gate unsatisfied and no retry target"
+        assert result.failure_reason == ""
 
     def test_goal_gate_failure_with_only_invalid_retry_targets_fails_at_exit(self):
         graph = parse_dot(
@@ -638,9 +644,12 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run(Context())
-        assert result.status == "fail"
+        assert result.status == "completed"
+        assert result.outcome == "failure"
+        assert result.outcome_reason_code == "goal_gate_unsatisfied"
+        assert result.outcome_reason_message == "Goal gate unsatisfied and no retry target"
         assert result.route_trace == ["start", "implement", "done"]
-        assert result.failure_reason == "Goal gate unsatisfied and no retry target"
+        assert result.failure_reason == ""
 
     def test_goal_gate_failure_without_retry_target_fails_at_exit_in_run_from(self):
         graph = parse_dot(
@@ -662,9 +671,12 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run_from("start", Context())
-        assert result.status == "fail"
+        assert result.status == "completed"
+        assert result.outcome == "failure"
+        assert result.outcome_reason_code == "goal_gate_unsatisfied"
+        assert result.outcome_reason_message == "Goal gate unsatisfied and no retry target"
         assert result.route_trace == ["start", "implement", "done"]
-        assert result.failure_reason == "Goal gate unsatisfied and no retry target"
+        assert result.failure_reason == ""
 
     def test_goal_gate_enforced_when_terminal_is_in_run_from_stop_nodes(self):
         graph = parse_dot(
@@ -686,9 +698,12 @@ class TestRetryAndGoalGate:
             return Outcome(status=OutcomeStatus.SUCCESS)
 
         result = PipelineExecutor(graph, runner).run_from("start", Context(), stop_nodes={"done"})
-        assert result.status == "fail"
+        assert result.status == "completed"
+        assert result.outcome == "failure"
+        assert result.outcome_reason_code == "goal_gate_unsatisfied"
+        assert result.outcome_reason_message == "Goal gate unsatisfied and no retry target"
         assert result.route_trace == ["start", "implement", "done"]
-        assert result.failure_reason == "Goal gate unsatisfied and no retry target"
+        assert result.failure_reason == ""
 
     def test_goal_gate_check_ignores_unvisited_gate_statuses_seeded_in_context(self):
         graph = parse_dot(
@@ -708,7 +723,7 @@ class TestRetryAndGoalGate:
         context = Context(values={"_attractor.node_outcomes": {"skipped_gate": "fail"}})
         result = PipelineExecutor(graph, lambda *_: Outcome(status=OutcomeStatus.SUCCESS)).run(context)
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "task", "done"]
 
     def test_run_from_goal_gate_recovery_checkpoints_retry_target_before_stage_execution(self):
@@ -748,7 +763,7 @@ class TestRetryAndGoalGate:
                 on_event=events.append,
             ).run_from("start", Context())
 
-            assert result.status == "success"
+            assert result.status == "completed"
             stage_started_fix_index = next(
                 i
                 for i, event in enumerate(events)
@@ -785,7 +800,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "fail"
+        assert result.status == "failed"
         assert result.route_trace == ["start", "task"]
         assert result.failure_reason == "permanent"
 
@@ -812,7 +827,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run_from("start", Context())
 
-        assert result.status == "fail"
+        assert result.status == "failed"
         assert result.route_trace == ["start", "task"]
         assert result.failure_reason == "permanent"
 
@@ -842,7 +857,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 2
         assert result.node_outcomes["task"].status is OutcomeStatus.FAIL
         assert result.node_outcomes["task"].failure_reason == "transient backend outage"
@@ -874,7 +889,7 @@ class TestRetryAndGoalGate:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert calls["task"] == 1
         assert result.route_trace == ["start", "task", "fix", "done"]
         assert result.node_outcomes["task"].failure_reason == "401 unauthorized"

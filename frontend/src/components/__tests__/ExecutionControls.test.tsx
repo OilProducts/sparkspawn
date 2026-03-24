@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const DEFAULT_WORKING_DIRECTORY = './test-app'
 const DEFAULT_VIEWPORT_WIDTH = 1280
+const TEST_LINEAR_FLOW = 'test-linear.dot'
+const TEST_REVIEW_FLOW = 'test-review-loop.dot'
+const TEST_SPEC_FLOW = 'test-spec-implementation.dot'
 
 const setViewportWidth = (width: number) => {
   Object.defineProperty(window, 'innerWidth', {
@@ -58,7 +61,7 @@ describe('Execution controls behavior', () => {
     const payload = buildPipelineStartPayload(
       {
         projectPath: '/tmp/project',
-        flowSource: 'implement-spec.dot',
+        flowSource: TEST_SPEC_FLOW,
         workingDirectory: '/tmp/project',
         backend: 'codex-app-server',
         model: 'gpt-5',
@@ -73,7 +76,7 @@ describe('Execution controls behavior', () => {
       working_directory: '/tmp/project',
       backend: 'codex-app-server',
       model: 'gpt-5',
-      flow_name: 'implement-spec.dot',
+      flow_name: TEST_SPEC_FLOW,
       spec_id: 'spec-123',
       plan_id: 'plan-456',
     })
@@ -83,7 +86,7 @@ describe('Execution controls behavior', () => {
     const payload = buildPipelineStartPayload(
       {
         projectPath: '/tmp/project',
-        flowSource: 'implement-review-loop.dot',
+        flowSource: TEST_REVIEW_FLOW,
         workingDirectory: '/tmp/project',
         backend: 'codex-app-server',
         model: 'gpt-5',
@@ -106,7 +109,7 @@ describe('Execution controls behavior', () => {
         'context.request.summary': 'Add a health check endpoint.',
         'context.request.acceptance_criteria': ['GET /healthz returns 200'],
       },
-      flow_name: 'implement-review-loop.dot',
+      flow_name: TEST_REVIEW_FLOW,
       spec_id: null,
       plan_id: null,
     })
@@ -124,12 +127,12 @@ describe('Execution controls behavior', () => {
     expect(screen.queryByTestId('execution-footer-controls')).not.toBeInTheDocument()
   })
 
-  it('shows launch controls in execution mode before a run starts', () => {
+  it('shows only the canvas execute action for flows without launch inputs before a run starts', () => {
     useStore.setState((state) => ({
       ...state,
       viewMode: 'execution',
       activeProjectPath: '/tmp/project',
-      activeFlow: 'implement-spec.dot',
+      executionFlow: TEST_LINEAR_FLOW,
       projectSessionsByPath: {
         '/tmp/project': {
           workingDir: '/tmp/project',
@@ -147,8 +150,10 @@ describe('Execution controls behavior', () => {
 
     render(<ExecutionControls />)
 
-    expect(screen.getByTestId('execution-footer-controls')).toBeVisible()
     expect(screen.getByTestId('execute-button')).toBeVisible()
+    expect(screen.getByTestId('execution-canvas-primary-action')).toBeVisible()
+    expect(screen.queryByTestId('execution-footer-controls')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('execution-launch-inputs')).not.toBeInTheDocument()
     expect(screen.queryByTestId('execution-footer-run-status')).not.toBeInTheDocument()
   })
 
@@ -233,9 +238,9 @@ describe('Execution controls behavior', () => {
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (url.endsWith('/attractor/api/flows/implement-review-loop.dot')) {
+      if (url.endsWith(`/attractor/api/flows/${TEST_REVIEW_FLOW}`)) {
         return new Response(JSON.stringify({
-          name: 'implement-review-loop.dot',
+          name: TEST_REVIEW_FLOW,
           content: 'digraph implement_review_loop { start -> done }',
         }), {
           status: 200,
@@ -260,7 +265,7 @@ describe('Execution controls behavior', () => {
       ...state,
       viewMode: 'execution',
       activeProjectPath: '/tmp/project',
-      executionFlow: 'implement-review-loop.dot',
+      executionFlow: TEST_REVIEW_FLOW,
       executionGraphAttrs: {
         'spark.launch_inputs': JSON.stringify([
           {
@@ -304,7 +309,14 @@ describe('Execution controls behavior', () => {
     render(<ExecutionControls />)
 
     expect(screen.getByTestId('execution-launch-inputs')).toBeVisible()
-    expect(screen.getByTestId('execution-launch-inputs')).toHaveClass('max-w-3xl')
+    expect(screen.getByTestId('execution-footer-controls')).toHaveClass('max-w-3xl')
+    expect(screen.getByTestId('execution-launch-inputs')).toHaveClass('w-full')
+    expect(screen.getByTestId('execution-launch-inputs-toolbar')).toBeVisible()
+    expect(screen.getByTestId('execution-launch-inputs-toolbar')).toHaveClass('justify-between')
+    expect(screen.getByTestId('execution-launch-inputs-title')).toHaveTextContent('Launch Inputs')
+    expect(screen.queryByTestId('execution-launch-inputs-summary')).not.toBeInTheDocument()
+    expect(screen.getByTestId('execution-launch-inputs-toggle')).toHaveAttribute('aria-label', 'Collapse launch inputs')
+    expect(screen.getByTestId('execution-launch-inputs-toggle')).not.toHaveClass('border')
     expect(screen.getByTestId('execution-launch-inputs-body')).toHaveClass('max-h-[min(42vh,20rem)]')
     expect(screen.getByTestId('execution-canvas-primary-action')).toHaveClass('top-4', 'right-4')
     expect(screen.getByTestId('execution-canvas-primary-action')).toContainElement(screen.getByTestId('execute-button'))
@@ -357,6 +369,78 @@ describe('Execution controls behavior', () => {
         'Response body contains status ok',
       ],
     })
+  })
+
+  it('lets the operator collapse and re-expand launch inputs without losing draft values', async () => {
+    const user = userEvent.setup()
+
+    useStore.setState((state) => ({
+      ...state,
+      viewMode: 'execution',
+      activeProjectPath: '/tmp/project',
+      executionFlow: TEST_SPEC_FLOW,
+      executionGraphAttrs: {
+        'spark.launch_inputs': JSON.stringify([
+          {
+            key: 'context.request.spec_path',
+            label: 'Spec Path',
+            type: 'string',
+            description: 'Path to the written spec in the repo.',
+            required: true,
+          },
+          {
+            key: 'context.request.constraints',
+            label: 'Constraints',
+            type: 'string[]',
+            description: 'Optional constraints.',
+            required: false,
+          },
+          {
+            key: 'context.request.validation_command',
+            label: 'Validation Command',
+            type: 'string',
+            description: 'Optional validation shell command.',
+            required: false,
+          },
+        ]),
+      },
+      projectSessionsByPath: {
+        '/tmp/project': {
+          workingDir: '/tmp/project',
+          conversationId: null,
+          projectEventLog: [],
+          specId: null,
+          specStatus: null,
+          specProvenance: null,
+          planId: null,
+          planStatus: 'draft',
+          planProvenance: null,
+        },
+      },
+    }))
+
+    render(<ExecutionControls />)
+
+    await user.type(
+      screen.getByTestId('execution-launch-input-context.request.spec_path'),
+      'specs/feature.md',
+    )
+    await user.click(screen.getByTestId('execution-launch-inputs-toggle'))
+
+    expect(screen.queryByTestId('execution-launch-inputs-body')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('execution-launch-inputs-summary')).not.toBeInTheDocument()
+    expect(screen.getByTestId('execution-launch-inputs-title')).toHaveTextContent('Launch Inputs')
+    expect(screen.getByTestId('execution-launch-inputs-toggle')).toHaveAttribute('aria-label', 'Expand launch inputs')
+    expect(screen.getByTestId('execution-footer-controls')).toHaveClass('max-w-3xl')
+    expect(screen.getByTestId('execution-footer-controls')).not.toHaveClass('w-auto')
+
+    await user.click(screen.getByTestId('execution-launch-inputs-toggle'))
+
+    expect(screen.getByTestId('execution-launch-inputs-body')).toBeVisible()
+    expect(screen.getByTestId('execution-footer-controls')).toHaveClass('max-w-3xl')
+    expect(screen.getByTestId('execution-footer-controls')).not.toHaveClass('w-auto')
+    expect(screen.getByTestId('execution-launch-inputs-toggle')).toHaveAttribute('aria-label', 'Collapse launch inputs')
+    expect(screen.getByTestId('execution-launch-input-context.request.spec_path')).toHaveValue('specs/feature.md')
   })
 
   it('renders runtime state and disables unsupported pause/resume controls', () => {

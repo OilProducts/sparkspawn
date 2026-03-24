@@ -8,6 +8,7 @@ const jsonResponse = (payload: unknown) =>
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   })
+const TEST_TRIGGER_FLOW = 'test-planning.dot'
 
 const resolveRequestUrl = (input: RequestInfo | URL): string => {
   if (typeof input === 'string') return input
@@ -43,7 +44,7 @@ describe('TriggersPanel', () => {
               source_type: 'schedule',
               created_at: '2026-03-22T00:00:00Z',
               updated_at: '2026-03-22T00:00:00Z',
-              action: { flow_name: 'plan-generation.dot', project_path: null, static_context: {} },
+              action: { flow_name: TEST_TRIGGER_FLOW, project_path: null, static_context: {} },
               source: { kind: 'interval', interval_seconds: 300 },
               state: { last_fired_at: null, last_result: null, last_error: null, next_run_at: '2026-03-22T00:05:00Z', recent_history: [] },
             },
@@ -60,7 +61,7 @@ describe('TriggersPanel', () => {
           source_type: 'schedule',
           created_at: '2026-03-22T00:00:00Z',
           updated_at: '2026-03-22T00:00:00Z',
-          action: { flow_name: 'plan-generation.dot', project_path: null, static_context: {} },
+          action: { flow_name: TEST_TRIGGER_FLOW, project_path: null, static_context: {} },
           source: { kind: 'interval', interval_seconds: 300 },
           state: { last_fired_at: null, last_result: null, last_error: null, next_run_at: '2026-03-22T00:05:00Z', recent_history: [] },
         })
@@ -73,7 +74,7 @@ describe('TriggersPanel', () => {
 
     await user.type(screen.getByLabelText('Name'), 'Created schedule')
     await user.clear(screen.getByLabelText('Target Flow'))
-    await user.type(screen.getByLabelText('Target Flow'), 'plan-generation.dot')
+    await user.type(screen.getByLabelText('Target Flow'), TEST_TRIGGER_FLOW)
     await user.click(screen.getByTestId('trigger-create-button'))
 
     await waitFor(() => {

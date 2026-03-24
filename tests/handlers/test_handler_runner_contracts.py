@@ -62,7 +62,7 @@ class TestHandlerRunnerContracts:
 
         result = PipelineExecutor(graph, runner, logs_root=str(tmp_path)).run(context)
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert len(capture_handler.calls) == 1
         runtime = capture_handler.calls[0]
         assert runtime.node is graph.nodes["capture"]
@@ -119,7 +119,7 @@ class TestHandlerRunnerContracts:
 
         result = PipelineExecutor(graph, runner).run(Context())
 
-        assert result.status == "success"
+        assert result.status == "completed"
         assert result.route_trace == ["start", "risky", "recover", "done"]
         assert result.node_outcomes["risky"].status is OutcomeStatus.FAIL
         assert result.node_outcomes["risky"].failure_reason == "handler terminated abruptly"

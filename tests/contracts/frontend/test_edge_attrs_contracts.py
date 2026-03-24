@@ -136,7 +136,7 @@ def test_edge_attr_serialization_and_execution_side_effect_visibility_item_6_3_0
 
     result_true = PipelineExecutor(graph, runner).run(Context(values={"tests_passed": True}))
 
-    assert result_true.status == "success"
+    assert result_true.status == "completed"
     assert seen_runtime_true == ["start", "route", "work"]
     assert result_true.route_trace == ["work", "done"]
     assert result_true.completed_nodes == ["work"]
@@ -150,7 +150,7 @@ def test_edge_attr_serialization_and_execution_side_effect_visibility_item_6_3_0
 
     result_false = PipelineExecutor(graph, runner_false).run(Context(values={"tests_passed": False}))
 
-    assert result_false.status == "success"
+    assert result_false.status == "completed"
     assert seen_runtime_false == ["start", "route"]
     assert result_false.route_trace == ["start", "route", "done"]
     assert result_false.completed_nodes == ["start", "route"]

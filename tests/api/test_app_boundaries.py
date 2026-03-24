@@ -9,7 +9,7 @@ import attractor.api.server as server
 
 def test_attractor_subapp_exposes_status_endpoint(attractor_api_client: TestClient) -> None:
     server.RUNTIME.status = "running"
-    server.RUNTIME.last_flow_name = "implement-spec.dot"
+    server.RUNTIME.last_flow_name = "test-dispatch.dot"
     server.RUNTIME.last_run_id = "run-123"
 
     response = attractor_api_client.get("/status")
@@ -17,7 +17,7 @@ def test_attractor_subapp_exposes_status_endpoint(attractor_api_client: TestClie
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "running"
-    assert payload["last_flow_name"] == "implement-spec.dot"
+    assert payload["last_flow_name"] == "test-dispatch.dot"
     assert payload["last_run_id"] == "run-123"
     assert {"last_error", "last_working_directory", "last_model", "last_completed_nodes"} <= set(payload)
 

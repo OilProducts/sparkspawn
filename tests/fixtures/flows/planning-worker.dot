@@ -1,0 +1,8 @@
+digraph planning_worker {
+  graph [goal="Generate a tracker-ready execution card JSON.", label="Planning Worker"];
+  done [label="Done", shape="Msquare"];
+  generate_execution_card [label="Generate Execution Card", prompt="$goal", shape="box"];
+  start [label="Start", shape="Mdiamond"];
+  generate_execution_card -> done;
+  start -> generate_execution_card;
+}

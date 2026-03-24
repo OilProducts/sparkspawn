@@ -77,7 +77,7 @@ def _generate_dot_with_all_handler_types() -> str:
                 "type": "stack.manager_loop",
                 "manager.poll_interval": "25ms",
                 "manager.max_cycles": "3",
-                "manager.stop_condition": 'child.status == "success"',
+                "manager.stop_condition": 'child.outcome == "success"',
                 "manager.actions": "observe,steer",
             },
         },
@@ -146,5 +146,5 @@ def test_node_attributes_round_trip_across_all_handler_types_item_6_2_04() -> No
     assert nodes_by_id["fanin"]["prompt"] == "Merge branch outputs"
     assert nodes_by_id["manager"]["manager.poll_interval"] == "25ms"
     assert nodes_by_id["manager"]["manager.max_cycles"] == 3
-    assert nodes_by_id["manager"]["manager.stop_condition"] == 'child.status == "success"'
+    assert nodes_by_id["manager"]["manager.stop_condition"] == 'child.outcome == "success"'
     assert nodes_by_id["manager"]["manager.actions"] == "observe,steer"

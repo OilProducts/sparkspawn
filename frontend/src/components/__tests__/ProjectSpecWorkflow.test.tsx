@@ -542,7 +542,7 @@ describe('Project-scoped workflow behavior', () => {
     act(() => {
       useStore.getState().registerProject('/tmp/plan-project')
       useStore.getState().setActiveProjectPath('/tmp/plan-project')
-      useStore.getState().setActiveFlow('plan-generation.dot')
+      useStore.getState().setActiveFlow('test-planning.dot')
     })
 
     render(<ProjectsPanel />)
@@ -615,7 +615,7 @@ describe('Project-scoped workflow behavior', () => {
           source_workflow_run_id: 'workflow-plan-101',
           created_at: '2026-03-06T15:02:00Z',
           updated_at: '2026-03-06T15:02:00Z',
-          flow_source: 'plan-generation.dot',
+          flow_source: 'test-planning.dot',
           work_items: [
             {
               id: 'WORK-1',
@@ -632,7 +632,7 @@ describe('Project-scoped workflow behavior', () => {
         run_id: 'workflow-plan-101',
         status: 'idle',
         error: null,
-        flow_source: 'plan-generation.dot',
+        flow_source: 'test-planning.dot',
       },
     })
 
@@ -664,7 +664,7 @@ describe('Project-scoped workflow behavior', () => {
     act(() => {
       useStore.getState().registerProject('/tmp/event-log-project')
       useStore.getState().setActiveProjectPath('/tmp/event-log-project')
-      useStore.getState().setActiveFlow('plan-generation.dot')
+      useStore.getState().setActiveFlow('test-planning.dot')
     })
 
     render(<ProjectsPanel />)
@@ -697,7 +697,7 @@ describe('Project-scoped workflow behavior', () => {
         run_id: 'workflow-plan-101',
         status: 'failed',
         error: 'app-server session dropped before completion.',
-        flow_source: 'plan-generation.dot',
+        flow_source: 'test-planning.dot',
       },
     })
 

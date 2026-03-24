@@ -55,7 +55,14 @@ def test_cancel_pipeline_requests_cancel_for_active_run(
     assert server.RUNTIME.last_error == "cancel_requested_by_user"
 
     history = server.EVENT_HUB.history(run_id)
-    assert {"type": "runtime", "status": "cancel_requested", "run_id": run_id} in history
+    assert {
+        "type": "runtime",
+        "status": "cancel_requested",
+        "outcome": None,
+        "outcome_reason_code": None,
+        "outcome_reason_message": None,
+        "run_id": run_id,
+    } in history
     assert {
         "type": "log",
         "msg": "[System] Cancel requested. Stopping after current node.",
@@ -71,7 +78,7 @@ def test_cancel_pipeline_ignores_non_running_known_pipeline(
     start_payload = _start_pipeline(attractor_api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])
     final_status = _wait_for_pipeline_terminal_status(attractor_api_client, run_id)
-    assert final_status == "success"
+    assert final_status == "completed"
 
     response = attractor_api_client.post(f"/pipelines/{run_id}/cancel")
     assert response.status_code == 200

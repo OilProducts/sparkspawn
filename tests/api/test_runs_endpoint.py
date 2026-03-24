@@ -11,12 +11,23 @@ import workspace.project_chat as project_chat
 import workspace.project_chat_models as project_chat_models
 import workspace.triggers as workspace_triggers
 import attractor.api.server as server
+from tests.support.flow_fixtures import seed_flow_fixture
 
 
-def _write_flow(name: str, content: str = "digraph G { start [shape=Mdiamond]; done [shape=Msquare]; start -> done; }\n") -> None:
-    flows_dir = server.get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / name).write_text(content, encoding="utf-8")
+TEST_PLANNING_FLOW = "test-planning.dot"
+TEST_DISPATCH_FLOW = "test-dispatch.dot"
+
+
+def _seed_flow(name: str) -> None:
+    seed_flow_fixture(server.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
+
+
+def _seed_planning_flow(name: str) -> None:
+    seed_flow_fixture(server.get_settings().flows_dir, "planning-worker.dot", as_name=name)
+
+
+def _seed_dispatch_flow(name: str) -> None:
+    seed_flow_fixture(server.get_settings().flows_dir, "dispatch-worker.dot", as_name=name)
 
 
 def test_list_runs_includes_project_and_git_metadata_fields(
@@ -30,8 +41,10 @@ def test_list_runs_includes_project_and_git_metadata_fields(
         server.RunRecord(
             run_id=run_id,
             flow_name="Flow",
-            status="success",
-            result="success",
+            status="completed",
+            outcome="success",
+            outcome_reason_code=None,
+            outcome_reason_message=None,
             working_directory=str(tmp_path / "work"),
             model="test-model",
             started_at="2026-01-01T00:00:00Z",
@@ -66,8 +79,10 @@ def test_list_runs_includes_spec_and_plan_artifact_links_when_available_item_9_6
         server.RunRecord(
             run_id=run_id,
             flow_name="Flow",
-            status="success",
-            result="success",
+            status="completed",
+            outcome="success",
+            outcome_reason_code=None,
+            outcome_reason_message=None,
             working_directory=str(tmp_path / "work"),
             model="test-model",
             started_at="2026-01-01T00:00:00Z",
@@ -99,8 +114,10 @@ def test_list_runs_filters_durable_history_by_project_item_9_6_01(
         server.RunRecord(
             run_id="run-in-project-root",
             flow_name="Flow A",
-            status="success",
-            result="success",
+            status="completed",
+            outcome="success",
+            outcome_reason_code=None,
+            outcome_reason_message=None,
             working_directory=str(tmp_path / "project-alpha"),
             model="test-model",
             started_at="2026-01-01T00:00:00Z",
@@ -112,8 +129,10 @@ def test_list_runs_filters_durable_history_by_project_item_9_6_01(
         server.RunRecord(
             run_id="run-in-project-child",
             flow_name="Flow B",
-            status="success",
-            result="success",
+            status="completed",
+            outcome="success",
+            outcome_reason_code=None,
+            outcome_reason_message=None,
             working_directory=str(tmp_path / "project-alpha" / "nested"),
             model="test-model",
             started_at="2026-01-01T00:02:00Z",
@@ -126,7 +145,9 @@ def test_list_runs_filters_durable_history_by_project_item_9_6_01(
             run_id="run-in-other-project",
             flow_name="Flow C",
             status="failed",
-            result="failed",
+            outcome=None,
+            outcome_reason_code=None,
+            outcome_reason_message=None,
             working_directory=str(tmp_path / "project-beta"),
             model="test-model",
             started_at="2026-01-01T00:04:00Z",
@@ -156,8 +177,10 @@ def test_list_runs_backfills_missing_timestamps_from_run_log_item_9_6_04(
         server.RunRecord(
             run_id=run_id,
             flow_name="Flow",
-            status="success",
-            result="success",
+            status="completed",
+            outcome="success",
+            outcome_reason_code=None,
+            outcome_reason_message=None,
             working_directory=str(tmp_path / "project"),
             model="test-model",
             started_at="",
@@ -203,8 +226,10 @@ def test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04(
             server.RunRecord(
                 run_id=run_id,
                 flow_name="Flow",
-                status="success",
-                result="success",
+                status="completed",
+                outcome="success",
+                outcome_reason_code=None,
+                outcome_reason_message=None,
                 working_directory=str(tmp_path / "project"),
                 model="test-model",
                 started_at="",
@@ -239,24 +264,7 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
 ) -> None:
     project_path = str(tmp_path / "project")
     Path(project_path).mkdir(parents=True, exist_ok=True)
-    flows_dir = server.get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / "plan-generation.dot").write_text(
-        "\n".join(
-            [
-                "digraph plan_generation {",
-                '  graph [goal=\"Generate a tracker-ready execution card JSON.\", label=\"Plan Generation\"];',
-                '  start [label=\"Start\", shape=Mdiamond];',
-                '  generate_execution_card [label=\"Generate Execution Card\", prompt=\"$goal\", shape=box];',
-                '  done [label=\"Done\", shape=Msquare];',
-                "  start -> generate_execution_card;",
-                "  generate_execution_card -> done;",
-                "}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    _seed_planning_flow(TEST_PLANNING_FLOW)
 
     class _Backend:
         def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
@@ -307,7 +315,7 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
         "/workspace/api/conversations/conversation-test/spec-edit-proposals/proposal-1/approve",
         json={
             "project_path": project_path,
-            "flow_source": "plan-generation.dot",
+            "flow_source": TEST_PLANNING_FLOW,
         },
     )
 
@@ -322,7 +330,7 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
         if terminal_status != "running":
             break
         time.sleep(0.01)
-    assert terminal_status == "success"
+    assert terminal_status == "completed"
 
     snapshot = {}
     for _ in range(200):
@@ -341,9 +349,9 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
 
     record = server._read_run_meta(server._run_meta_path(workflow_run_id))
     assert record is not None
-    assert record.flow_name == "plan-generation.dot"
+    assert record.flow_name == TEST_PLANNING_FLOW
     assert record.project_path == project_chat._normalize_project_path(project_path)
-    assert record.status == "success"
+    assert record.status == "completed"
     assert record.plan_id == snapshot["execution_cards"][0]["id"]
 
     checkpoint_response = product_api_client.get(f"/attractor/pipelines/{workflow_run_id}/checkpoint")
@@ -364,24 +372,7 @@ def test_execution_planning_approval_uses_project_trigger_binding_when_present(
 ) -> None:
     project_path = str(tmp_path / "project")
     Path(project_path).mkdir(parents=True, exist_ok=True)
-    flows_dir = server.get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / "custom-plan.dot").write_text(
-        "\n".join(
-            [
-                "digraph custom_plan {",
-                '  graph [goal=\"Generate a tracker-ready execution card JSON.\"];',
-                '  start [shape=\"Mdiamond\"];',
-                '  generate_execution_card [prompt=\"$goal\", shape=\"box\"];',
-                '  done [shape=\"Msquare\"];',
-                "  start -> generate_execution_card;",
-                "  generate_execution_card -> done;",
-                "}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    _seed_planning_flow("custom-plan.dot")
 
     class _Backend:
         def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
@@ -401,7 +392,6 @@ def test_execution_planning_approval_uses_project_trigger_binding_when_present(
         lambda backend_name, working_dir, emit, model=None: _Backend(),
     )
 
-    _write_flow("custom-plan.dot")
     product_api_client.post("/workspace/api/projects/register", json={"project_path": project_path})
     protected_trigger, _ = workspace_triggers.create_trigger_definition(
         server.get_settings().config_dir,
@@ -458,24 +448,7 @@ def test_approved_execution_card_launches_selected_flow_run(
 ) -> None:
     project_path = str(tmp_path / "project")
     Path(project_path).mkdir(parents=True, exist_ok=True)
-    flows_dir = server.get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / "implement-spec.dot").write_text(
-        "\n".join(
-            [
-                "digraph implement_spec {",
-                '  graph [goal="Implement the approved execution card."];',
-                '  start [shape="Mdiamond"];',
-                '  implement [prompt="Implement card", shape="box"];',
-                '  done [shape="Msquare"];',
-                "  start -> implement;",
-                "  implement -> done;",
-                "}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    _seed_dispatch_flow(TEST_DISPATCH_FLOW)
 
     class _Backend:
         def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
@@ -506,7 +479,7 @@ def test_approved_execution_card_launches_selected_flow_run(
                     created_at="2026-03-11T02:00:00Z",
                     updated_at="2026-03-11T02:00:00Z",
                     status="draft",
-                    flow_source="plan-generation.dot",
+                    flow_source=TEST_PLANNING_FLOW,
                     work_items=[],
                     review_feedback=[],
                 )
@@ -520,7 +493,7 @@ def test_approved_execution_card_launches_selected_flow_run(
             "project_path": project_path,
             "disposition": "approved",
             "message": "Approved for dispatch.",
-            "flow_source": "implement-spec.dot",
+            "flow_source": TEST_DISPATCH_FLOW,
         },
     )
 
@@ -532,7 +505,7 @@ def test_approved_execution_card_launches_selected_flow_run(
     matching_runs = [run for run in runs_payload if run["plan_id"] == "execution-card-1"]
     assert len(matching_runs) == 1
     launched_run = matching_runs[0]
-    assert launched_run["flow_name"] == "implement-spec.dot"
+    assert launched_run["flow_name"] == TEST_DISPATCH_FLOW
     assert launched_run["spec_id"] == "spec-edit-1"
 
     terminal_status = "running"
@@ -543,7 +516,7 @@ def test_approved_execution_card_launches_selected_flow_run(
         if terminal_status != "running":
             break
         time.sleep(0.01)
-    assert terminal_status == "success"
+    assert terminal_status == "completed"
 
     snapshot_response = product_api_client.get(
         "/workspace/api/conversations/conversation-test",
@@ -553,7 +526,7 @@ def test_approved_execution_card_launches_selected_flow_run(
     snapshot = snapshot_response.json()
     assert snapshot["execution_cards"][0]["status"] == "approved"
     assert snapshot["event_log"][-1]["message"] == (
-        f"Dispatched execution card execution-card-1 as run {launched_run['run_id']} using implement-spec.dot."
+        f"Dispatched execution card execution-card-1 as run {launched_run['run_id']} using {TEST_DISPATCH_FLOW}."
     )
 
 
@@ -564,24 +537,7 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
 ) -> None:
     project_path = str(tmp_path / "project")
     Path(project_path).mkdir(parents=True, exist_ok=True)
-    flows_dir = server.get_settings().flows_dir
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    (flows_dir / "custom-implement.dot").write_text(
-        "\n".join(
-            [
-                "digraph custom_implement {",
-                '  graph [goal=\"Implement the approved execution card.\"];',
-                '  start [shape=\"Mdiamond\"];',
-                '  implement [prompt=\"Implement card\", shape=\"box\"];',
-                '  done [shape=\"Msquare\"];',
-                "  start -> implement;",
-                "  implement -> done;",
-                "}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    _seed_dispatch_flow("custom-implement.dot")
 
     class _Backend:
         def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
@@ -594,7 +550,6 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
         lambda backend_name, working_dir, emit, model=None: _Backend(),
     )
 
-    _write_flow("custom-implement.dot")
     product_api_client.post("/workspace/api/projects/register", json={"project_path": project_path})
     protected_trigger, _ = workspace_triggers.create_trigger_definition(
         server.get_settings().config_dir,
@@ -629,7 +584,7 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
                     created_at="2026-03-11T02:00:00Z",
                     updated_at="2026-03-11T02:00:00Z",
                     status="draft",
-                    flow_source="plan-generation.dot",
+                    flow_source=TEST_PLANNING_FLOW,
                     work_items=[],
                     review_feedback=[],
                 )

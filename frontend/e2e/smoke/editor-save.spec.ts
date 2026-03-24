@@ -1,7 +1,5 @@
 import { expect, test } from '@playwright/test'
 import {
-  cloneFlowForSmokeTest,
-  deleteFlowAfterSmoke,
   ensureScreenshotDir,
   screenshotPath,
   stubProjectMetadata,

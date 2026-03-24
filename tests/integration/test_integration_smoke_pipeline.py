@@ -64,7 +64,7 @@ def test_spec_smoke_pipeline_parse_validate_execute_and_artifacts(tmp_path: Path
     registry = build_default_registry(codergen_backend=backend)
     result = PipelineExecutor(graph, HandlerRunner(graph, registry), logs_root=str(logs_root)).run(Context())
 
-    assert result.status == "success"
+    assert result.status == "completed"
     assert "implement" in result.completed_nodes
     assert [node_id for node_id, _ in backend.calls] == ["plan", "implement", "review"]
 

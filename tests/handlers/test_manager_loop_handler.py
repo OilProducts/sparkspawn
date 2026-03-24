@@ -202,7 +202,7 @@ class TestManagerLoopHandler:
         context = Context(
             values={
                 "context.stack.child.status": "failed",
-                "context.stack.child.outcome": "fail",
+                "context.stack.child.outcome": "failure",
             }
         )
 
@@ -241,6 +241,38 @@ class TestManagerLoopHandler:
 
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.notes == "Child completed"
+
+    def test_manager_loop_returns_fail_when_child_completes_with_failure_outcome(self, monkeypatch):
+        def _fake_sleep(seconds: float) -> None:
+            raise AssertionError(f"unexpected wait call: {seconds}")
+
+        monkeypatch.setattr("attractor.handlers.builtin.manager_loop.time.sleep", _fake_sleep)
+        graph = parse_dot(
+            """
+            digraph G {
+                manager [
+                    shape=house,
+                    manager.poll_interval=25ms,
+                    manager.max_cycles=5,
+                    manager.actions="wait"
+                ]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+        context = Context(
+            values={
+                "context.stack.child.status": "completed",
+                "context.stack.child.outcome": "failure",
+                "context.stack.child.outcome_reason_message": "blocked on human approval",
+            }
+        )
+
+        outcome = runner("manager", "", context)
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason == "blocked on human approval"
 
     def test_manager_loop_runs_autostarted_child_pipeline_from_stack_child_workdir(self, tmp_path):
         child_workdir = tmp_path / "child-workdir"
