@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { saveFlowContent, type SaveFlowOptions } from '@/lib/flowPersistence'
 
 interface PendingFlowSaveRequest {
@@ -28,11 +28,11 @@ export function useFlowSaveScheduler<T = void>({
         }
     }, [])
 
-    const executeSaveRequest = useEffectEvent((request: PendingFlowSaveRequest) => {
+    const executeSaveRequest = useCallback((request: PendingFlowSaveRequest) => {
         void saveFlowContent(request.flowName, request.content, request.options)
-    })
+    }, [])
 
-    const createSaveRequest = useEffectEvent((
+    const createSaveRequest = useCallback((
         payload: T | undefined,
         options?: SaveFlowOptions,
     ): PendingFlowSaveRequest | null => {
@@ -44,7 +44,7 @@ export function useFlowSaveScheduler<T = void>({
             content: buildContent(payload, flowName),
             options,
         }
-    })
+    }, [buildContent, flowName])
 
     const flushPendingSave = useCallback(() => {
         const pendingSave = pendingSaveRef.current
