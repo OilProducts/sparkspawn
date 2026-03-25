@@ -41,7 +41,7 @@ export interface ProjectRecordResponse {
     active_conversation_id?: string | null
 }
 
-function parseProjectRecordResponse(value: unknown, _endpoint: string): ProjectRecordResponse | null {
+function parseProjectRecordResponse(value: unknown): ProjectRecordResponse | null {
     const record = value && typeof value === 'object' && !Array.isArray(value)
         ? value as Record<string, unknown>
         : null
@@ -70,12 +70,12 @@ export function parseProjectRecordListResponse(payload: unknown, endpoint = '/wo
         throw new ApiSchemaError(endpoint, 'Expected an array of projects.')
     }
     return payload
-        .map((entry) => parseProjectRecordResponse(entry, endpoint))
+        .map((entry) => parseProjectRecordResponse(entry))
         .filter((entry): entry is ProjectRecordResponse => entry !== null)
 }
 
 export function parseProjectRecordResponsePayload(payload: unknown, endpoint = '/workspace/api/projects/register'): ProjectRecordResponse {
-    const record = parseProjectRecordResponse(payload, endpoint)
+    const record = parseProjectRecordResponse(payload)
     if (!record) {
         throw new ApiSchemaError(endpoint, 'Expected a project record response.')
     }

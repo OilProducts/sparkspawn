@@ -1,29 +1,26 @@
 import { useStore, type DiagnosticEntry } from "@/store"
-import { FilePlus } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useReactFlow, useStore as useReactFlowStore, type Edge, type Node } from "@xyflow/react"
 import { generateDot, sanitizeGraphId } from "@/lib/dotUtils"
-import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
 import { getHandlerType, getNodeFieldVisibility } from "@/lib/nodeVisibility"
 import { getToolHookCommandWarning } from "@/lib/graphAttrValidation"
 import { resolveEdgeFieldDiagnostics, resolveNodeFieldDiagnostics } from "@/lib/inspectorFieldDiagnostics"
 import { toExtensionAttrEntries } from "@/lib/extensionAttrs"
 import {
-    WORKFLOW_NODE_SHAPE_OPTIONS,
     getReactFlowNodeTypeForShape,
     getShapeNodeStyle,
     getShapeTypeMismatchWarning,
     normalizeWorkflowNodeShape,
 } from '@/lib/workflowNodeShape'
 import { saveFlowContent } from "@/lib/flowPersistence"
-import { deleteFlowValidated, fetchFlowListValidated } from '@/lib/attractorClient'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler'
-import { InspectorScaffold, InspectorEmptyState } from '@/components/InspectorScaffold'
-import { GraphSettings } from './GraphSettings'
-import { AdvancedKeyValueEditor } from '@/components/AdvancedKeyValueEditor'
-import { ContextKeyListEditor } from '@/components/ContextKeyListEditor'
-import { FlowTree } from '@/components/FlowTree'
+import { useDialogController } from '@/ui'
+import { deleteFlowCatalogEntry, loadFlowCatalog } from './services/flowCatalog'
+import { EdgeInspectorPanel } from './components/EdgeInspectorPanel'
+import { FlowBrowserPanel } from './components/FlowBrowserPanel'
+import { GraphInspectorPanel } from './components/GraphInspectorPanel'
+import { NodeInspectorPanel } from './components/NodeInspectorPanel'
 import {
     parseContextKeyDraft,
     parseContextKeyList,
@@ -97,6 +94,7 @@ function resolveInspectorScope({
 }
 
 export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
+    const { confirm, prompt } = useDialogController()
     const activeFlow = useStore((state) => state.activeFlow)
     const executionFlow = useStore((state) => state.executionFlow)
     const setActiveFlow = useStore((state) => state.setActiveFlow)
@@ -132,7 +130,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
 
     const loadFlows = async () => {
         try {
-            const data = await fetchFlowListValidated()
+            const data = await loadFlowCatalog()
             setFlows(data)
         } catch (error) {
             console.error(error)
@@ -140,11 +138,33 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
     }
 
     useEffect(() => {
-        void loadFlows()
+        let cancelled = false
+
+        void (async () => {
+            try {
+                const data = await loadFlowCatalog()
+                if (!cancelled) {
+                    setFlows(data)
+                }
+            } catch (error) {
+                console.error(error)
+            }
+        })()
+
+        return () => {
+            cancelled = true
+        }
     }, [])
 
     const createNewFlow = async () => {
-        const name = prompt("Enter flow path (e.g., demos/demo.dot)");
+        const name = await prompt({
+            title: 'Create flow',
+            description: 'Enter a flow path such as demos/demo.dot.',
+            label: 'Flow path',
+            placeholder: 'demos/demo.dot',
+            confirmLabel: 'Create',
+            requireInput: true,
+        })
         if (!name) return;
 
         // Auto-append .dot if missing
@@ -170,9 +190,16 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
 
     const handleDeleteFlow = async (e: React.MouseEvent, fileName: string) => {
         e.stopPropagation();
-        if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
+        const confirmed = await confirm({
+            title: 'Delete flow?',
+            description: `Are you sure you want to delete ${fileName}?`,
+            confirmLabel: 'Delete',
+            cancelLabel: 'Keep flow',
+            confirmVariant: 'destructive',
+        })
+        if (!confirmed) return;
 
-        await deleteFlowValidated(fileName);
+        await deleteFlowCatalogEntry(fileName);
 
         if (activeFlow === fileName) {
             setActiveFlow(null);
@@ -245,7 +272,6 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
         : []
     const conditionPreviewHasError = selectedEdgeConditionDiagnostics.some((diag) => diag.severity === 'error')
     const conditionPreviewHasWarning = selectedEdgeConditionDiagnostics.some((diag) => diag.severity === 'warning')
-    const isTrue = (value: unknown) => value === true || value === 'true';
     const handlerType = getHandlerType(
         (selectedNode?.data?.shape as string) || '',
         (selectedNode?.data?.type as string) || ''
@@ -280,8 +306,14 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
         selectedNodeId,
         selectedEdgeId,
     })
-    const activeTab = activeInspectorScope === 'edge' ? 'edge' : activeInspectorScope === 'node' ? 'edit' : 'flows'
     const inspectorTitle = activeInspectorScope === 'edge' ? 'Edge' : activeInspectorScope === 'node' ? 'Node' : activeInspectorScope === 'graph' ? 'Graph' : 'Flows'
+    const showGraphInspector = activeInspectorScope === 'graph'
+    const showNodeInspector = activeInspectorScope === 'node'
+    const showEdgeInspector = activeInspectorScope === 'edge'
+    const showSecondaryInspector = showGraphInspector || showNodeInspector || showEdgeInspector
+    const flowBrowserClassName = showSecondaryInspector
+        ? `${isNarrowViewport ? 'shrink-0 min-h-40 max-h-52' : 'shrink-0 min-h-44 max-h-[40%]'} border-b border-border/70`
+        : 'flex-1 min-h-0'
 
     useEffect(() => {
         const parsedReads = parseContextKeyList(selectedNodeReadsContextRaw)
@@ -471,603 +503,64 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
                 </div>
             </div>
 
-            {activeTab === 'flows' && (
-                <div className="flex-1 flex flex-col overflow-hidden">
-                    <div className="px-5 py-2 flex items-center justify-between">
-                        <h2 className="font-semibold text-sm tracking-tight">Saved Flows</h2>
-                        <button onClick={createNewFlow} className="h-8 px-2 text-muted-foreground hover:text-foreground" title="New Flow">
-                            <FilePlus className="w-4 h-4" />
-                        </button>
-                    </div>
-                    <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-4">
-                        <FlowTree
-                            dataTestId="editor-flow-tree"
-                            flows={flows}
-                            selectedFlow={activeFlow}
-                            onSelectFlow={setActiveFlow}
-                            onDeleteFlow={handleDeleteFlow}
-                        />
-                        {activeInspectorScope === 'graph' && (
-                            <GraphSettings inline />
-                        )}
-                    </div>
-                </div>
-            )}
+            <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
+                <FlowBrowserPanel
+                    className={flowBrowserClassName}
+                    activeFlow={activeFlow}
+                    flows={flows}
+                    onCreateFlow={createNewFlow}
+                    onDeleteFlow={handleDeleteFlow}
+                    onSelectFlow={setActiveFlow}
+                />
 
-            {activeTab === 'edit' && (
-                <div className="flex-1 overflow-y-auto px-5 pb-5 pt-3">
-                    <InspectorScaffold
-                        scopeLabel="Node"
-                        title="Configuration"
-                        description="Use the same inspect-edit flow as graph and edge inspectors."
-                        entityLabel="Node ID"
-                        entityValue={selectedNodeId || undefined}
-                    >
-                        {!selectedNodeId ? (
-                            <InspectorEmptyState message="Select a component on the canvas to inspect and edit its properties." />
-                        ) : (
-                            <div data-testid="node-structured-form" className="space-y-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-sm font-medium">Label</label>
-                                    <input
-                                        value={(selectedNode?.data?.label as string) || ''}
-                                        onChange={(e) => handlePropertyChange('label', e.target.value)}
-                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    />
-                                </div>
+                {showGraphInspector ? (
+                    <GraphInspectorPanel />
+                ) : null}
 
-                                <div className="space-y-1.5">
-                                    <label className="text-sm font-medium">Shape / Type</label>
-                                    <select
-                                        value={(selectedNode?.data?.shape as string) || 'box'}
-                                        onChange={(e) => handlePropertyChange('shape', e.target.value)}
-                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    >
-                                        {WORKFLOW_NODE_SHAPE_OPTIONS.map((option) => (
-                                            <option key={option.value} value={option.value}>
-                                                {option.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
+                {showNodeInspector ? (
+                    <NodeInspectorPanel
+                        selectedNodeId={selectedNodeId}
+                        selectedNode={selectedNode}
+                        graphAttrs={graphAttrs}
+                        visibility={visibility}
+                        readsContextDraft={readsContextDraft}
+                        readsContextError={readsContextError}
+                        writesContextDraft={writesContextDraft}
+                        writesContextError={writesContextError}
+                        showAdvanced={showAdvanced}
+                        nodeFieldDiagnostics={nodeFieldDiagnostics}
+                        selectedNodeExtensionEntries={selectedNodeExtensionEntries}
+                        selectedNodeToolHookPreWarning={selectedNodeToolHookPreWarning}
+                        selectedNodeToolHookPostWarning={selectedNodeToolHookPostWarning}
+                        selectedNodeShapeTypeMismatchWarning={selectedNodeShapeTypeMismatchWarning}
+                        onPropertyChange={handlePropertyChange}
+                        onOpenGraphChildSettings={openGraphChildSettings}
+                        onReadsContextChange={handleReadsContextChange}
+                        onWritesContextChange={handleWritesContextChange}
+                        onSetShowAdvanced={setShowAdvanced}
+                        onNodeExtensionValueChange={handleNodeExtensionValueChange}
+                        onNodeExtensionRemove={handleNodeExtensionRemove}
+                        onNodeExtensionAdd={handleNodeExtensionAdd}
+                        renderFieldDiagnostics={renderFieldDiagnostics}
+                    />
+                ) : null}
 
-                                {visibility.showPrompt && (
-                                    <div className="space-y-1.5 flex flex-col h-48">
-                                        <label className="text-sm font-medium">Prompt Instruction</label>
-                                        <textarea
-                                            value={(selectedNode?.data?.prompt as string) || ''}
-                                            onChange={(e) => handlePropertyChange('prompt', e.target.value)}
-                                            className="flex flex-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
-                                            placeholder="Enter system prompt instructions..."
-                                        />
-                                        {renderFieldDiagnostics('node', 'prompt', nodeFieldDiagnostics, 'node-field-diagnostics-prompt')}
-                                    </div>
-                                )}
-                                {(selectedNode?.data?.shape as string) !== 'Mdiamond' && (selectedNode?.data?.shape as string) !== 'Msquare' && (
-                                    <div className="space-y-3">
-                                        <ContextKeyListEditor
-                                            testId="node-reads-context-editor"
-                                            title="Reads Context"
-                                            description="Declare the `context.*` keys this node expects to consume from launch state or earlier stages."
-                                            value={readsContextDraft}
-                                            error={readsContextError}
-                                            onChange={handleReadsContextChange}
-                                        />
-                                        <ContextKeyListEditor
-                                            testId="node-writes-context-editor"
-                                            title="Writes Context"
-                                            description="Declare the `context.*` keys this node is expected to produce for later stages."
-                                            value={writesContextDraft}
-                                            error={writesContextError}
-                                            onChange={handleWritesContextChange}
-                                        />
-                                    </div>
-                                )}
-                                {visibility.showToolCommand && (
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium">Tool Command</label>
-                                        <input
-                                            value={(selectedNode?.data?.['tool.command'] as string) || ''}
-                                            onChange={(e) => handlePropertyChange('tool.command', e.target.value)}
-                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            placeholder="e.g. pytest -q"
-                                        />
-                                    </div>
-                                )}
-                                {visibility.showParallelOptions && (
-                                    <>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Join Policy</label>
-                                            <select
-                                                value={(selectedNode?.data?.join_policy as string) || 'wait_all'}
-                                                onChange={(e) => handlePropertyChange('join_policy', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            >
-                                                <option value="wait_all">Wait All</option>
-                                                <option value="first_success">First Success</option>
-                                                <option value="k_of_n">K of N</option>
-                                                <option value="quorum">Quorum</option>
-                                            </select>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Error Policy</label>
-                                            <select
-                                                value={(selectedNode?.data?.error_policy as string) || 'continue'}
-                                                onChange={(e) => handlePropertyChange('error_policy', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            >
-                                                <option value="continue">Continue</option>
-                                                <option value="fail_fast">Fail Fast</option>
-                                                <option value="ignore">Ignore</option>
-                                            </select>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Max Parallel</label>
-                                            <input
-                                                value={(selectedNode?.data?.max_parallel as number | string | undefined) ?? 4}
-                                                onChange={(e) => handlePropertyChange('max_parallel', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            />
-                                        </div>
-                                    </>
-                                )}
-                                {visibility.showManagerOptions && (
-                                    <>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Manager Poll Interval</label>
-                                            <input
-                                                value={(selectedNode?.data?.['manager.poll_interval'] as string) || ''}
-                                                onChange={(e) => handlePropertyChange('manager.poll_interval', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                placeholder="25ms"
-                                            />
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Manager Max Cycles</label>
-                                            <input
-                                                value={(selectedNode?.data?.['manager.max_cycles'] as number | string | undefined) ?? ''}
-                                                onChange={(e) => handlePropertyChange('manager.max_cycles', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                placeholder="3"
-                                            />
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Manager Stop Condition</label>
-                                            <input
-                                                value={(selectedNode?.data?.['manager.stop_condition'] as string) || ''}
-                                                onChange={(e) => handlePropertyChange('manager.stop_condition', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                placeholder='child.outcome == "success"'
-                                            />
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-sm font-medium">Manager Actions</label>
-                                            <input
-                                                value={(selectedNode?.data?.['manager.actions'] as string) || ''}
-                                                onChange={(e) => handlePropertyChange('manager.actions', e.target.value)}
-                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                placeholder="observe,steer"
-                                            />
-                                        </div>
-                                        <div
-                                            data-testid="manager-child-linkage"
-                                            className="space-y-2 rounded-md border border-border/80 bg-muted/20 px-3 py-2"
-                                        >
-                                            <div>
-                                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                                    Child Pipeline Linkage
-                                                </p>
-                                                <p className="mt-1 text-[11px] text-muted-foreground">
-                                                    Manager loops use <code>stack.child_dotfile</code> and <code>stack.child_workdir</code> from graph attributes.
-                                                </p>
-                                            </div>
-                                            <div className="space-y-1 text-[11px] text-foreground">
-                                                <p><span className="font-mono">stack.child_dotfile</span>: {graphAttrs['stack.child_dotfile'] || '(unset)'}</p>
-                                                <p><span className="font-mono">stack.child_workdir</span>: {graphAttrs['stack.child_workdir'] || '(unset)'}</p>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                data-testid="manager-open-child-settings"
-                                                onClick={openGraphChildSettings}
-                                                className="rounded border border-border bg-background px-2 py-1 text-[11px] font-medium text-foreground hover:bg-muted"
-                                            >
-                                                Open Graph Child Settings
-                                            </button>
-                                        </div>
-                                    </>
-                                )}
-                                {visibility.showHumanDefaultChoice && (
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium">Human Default Choice</label>
-                                        <input
-                                            value={(selectedNode?.data?.['human.default_choice'] as string) || ''}
-                                            onChange={(e) => handlePropertyChange('human.default_choice', e.target.value)}
-                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            placeholder="target node id"
-                                        />
-                                        <p
-                                            data-testid="human-default-choice-timeout-guidance"
-                                            className="text-xs text-muted-foreground"
-                                        >
-                                            Used when this gate times out without an explicit answer.
-                                        </p>
-                                    </div>
-                                )}
-                                {visibility.showTypeOverride && (
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium">Handler Type</label>
-                                        <input
-                                            value={(selectedNode?.data?.type as string) || ''}
-                                            onChange={(e) => handlePropertyChange('type', e.target.value)}
-                                            list="node-handler-type-options"
-                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            placeholder="optional override"
-                                        />
-                                        <datalist id="node-handler-type-options">
-                                            <option value="start">start</option>
-                                            <option value="exit">exit</option>
-                                            <option value="codergen">codergen</option>
-                                            <option value="wait.human">wait.human</option>
-                                            <option value="conditional">conditional</option>
-                                            <option value="parallel">parallel</option>
-                                            <option value="parallel.fan_in">parallel.fan_in</option>
-                                            <option value="tool">tool</option>
-                                            <option value="stack.manager_loop">stack.manager_loop</option>
-                                        </datalist>
-                                        {selectedNodeShapeTypeMismatchWarning && (
-                                            <p data-testid="node-shape-type-warning" className="text-xs text-amber-800">
-                                                {selectedNodeShapeTypeMismatchWarning}
-                                            </p>
-                                        )}
-                                        {renderFieldDiagnostics('node', 'type', nodeFieldDiagnostics, 'node-field-diagnostics-type')}
-                                    </div>
-                                )}
-                                {visibility.showAdvanced && (
-                                    <button
-                                        onClick={() => setShowAdvanced((prev) => !prev)}
-                                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                                    >
-                                        {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
-                                    </button>
-                                )}
-                                {visibility.showAdvanced && showAdvanced && (
-                                    <div className="space-y-4">
-                                        {visibility.showGeneralAdvanced && (
-                                            <>
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-sm font-medium">Max Retries</label>
-                                                        <input
-                                                            value={(selectedNode?.data?.max_retries as number | string | undefined) ?? ''}
-                                                            onChange={(e) => handlePropertyChange('max_retries', e.target.value)}
-                                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-sm font-medium">Timeout</label>
-                                                        <input
-                                                            value={(selectedNode?.data?.timeout as string) || ''}
-                                                            onChange={(e) => handlePropertyChange('timeout', e.target.value)}
-                                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                            placeholder="900s"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <input
-                                                        id={`goal-gate-${selectedNodeId}`}
-                                                        type="checkbox"
-                                                        checked={isTrue(selectedNode?.data?.goal_gate)}
-                                                        onChange={(e) => handlePropertyChange('goal_gate', e.target.checked)}
-                                                        className="h-4 w-4 rounded border border-input"
-                                                    />
-                                                    <label htmlFor={`goal-gate-${selectedNodeId}`} className="text-sm font-medium">
-                                                        Goal Gate
-                                                    </label>
-                                                </div>
-                                                {renderFieldDiagnostics('node', 'goal_gate', nodeFieldDiagnostics, 'node-field-diagnostics-goal_gate')}
-                                                <div className="space-y-1.5">
-                                                    <label className="text-sm font-medium">Retry Target</label>
-                                                    <input
-                                                        value={(selectedNode?.data?.retry_target as string) || ''}
-                                                        onChange={(e) => handlePropertyChange('retry_target', e.target.value)}
-                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                    />
-                                                    {renderFieldDiagnostics('node', 'retry_target', nodeFieldDiagnostics, 'node-field-diagnostics-retry_target')}
-                                                </div>
-                                                <div className="space-y-1.5">
-                                                    <label className="text-sm font-medium">Fallback Retry Target</label>
-                                                    <input
-                                                        value={(selectedNode?.data?.fallback_retry_target as string) || ''}
-                                                        onChange={(e) => handlePropertyChange('fallback_retry_target', e.target.value)}
-                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                    />
-                                                    {renderFieldDiagnostics('node', 'fallback_retry_target', nodeFieldDiagnostics, 'node-field-diagnostics-fallback_retry_target')}
-                                                </div>
-                                                {visibility.showToolCommand && (
-                                                    <>
-                                                        <div className="space-y-1.5">
-                                                            <label className="text-sm font-medium">Pre Hook Override</label>
-                                                            <input
-                                                                data-testid="node-attr-input-tool.hooks.pre"
-                                                                value={(selectedNode?.data?.['tool.hooks.pre'] as string) || ''}
-                                                                onChange={(e) => handlePropertyChange('tool.hooks.pre', e.target.value)}
-                                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                placeholder="e.g. ./hooks/pre.sh"
-                                                            />
-                                                            {selectedNodeToolHookPreWarning && (
-                                                                <p data-testid="node-attr-warning-tool.hooks.pre" className="text-xs text-amber-800">
-                                                                    {selectedNodeToolHookPreWarning}
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                        <div className="space-y-1.5">
-                                                            <label className="text-sm font-medium">Post Hook Override</label>
-                                                            <input
-                                                                data-testid="node-attr-input-tool.hooks.post"
-                                                                value={(selectedNode?.data?.['tool.hooks.post'] as string) || ''}
-                                                                onChange={(e) => handlePropertyChange('tool.hooks.post', e.target.value)}
-                                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                placeholder="e.g. ./hooks/post.sh"
-                                                            />
-                                                            {selectedNodeToolHookPostWarning && (
-                                                                <p data-testid="node-attr-warning-tool.hooks.post" className="text-xs text-amber-800">
-                                                                    {selectedNodeToolHookPostWarning}
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                        <div className="space-y-1.5">
-                                                            <label className="text-sm font-medium">Artifact Paths</label>
-                                                            <input
-                                                                data-testid="node-attr-input-tool.artifacts.paths"
-                                                                value={(selectedNode?.data?.['tool.artifacts.paths'] as string) || ''}
-                                                                onChange={(e) => handlePropertyChange('tool.artifacts.paths', e.target.value)}
-                                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                placeholder="e.g. dist/**,reports/*.json"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1.5">
-                                                            <label className="text-sm font-medium">Stdout Artifact</label>
-                                                            <input
-                                                                data-testid="node-attr-input-tool.artifacts.stdout"
-                                                                value={(selectedNode?.data?.['tool.artifacts.stdout'] as string) || ''}
-                                                                onChange={(e) => handlePropertyChange('tool.artifacts.stdout', e.target.value)}
-                                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                placeholder="e.g. stdout.txt"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1.5">
-                                                            <label className="text-sm font-medium">Stderr Artifact</label>
-                                                            <input
-                                                                data-testid="node-attr-input-tool.artifacts.stderr"
-                                                                value={(selectedNode?.data?.['tool.artifacts.stderr'] as string) || ''}
-                                                                onChange={(e) => handlePropertyChange('tool.artifacts.stderr', e.target.value)}
-                                                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                                placeholder="e.g. stderr.txt"
-                                                            />
-                                                        </div>
-                                                    </>
-                                                )}
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-sm font-medium">Fidelity</label>
-                                                        <input
-                                                            value={(selectedNode?.data?.fidelity as string) || ''}
-                                                            onChange={(e) => handlePropertyChange('fidelity', e.target.value)}
-                                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                            placeholder="full"
-                                                        />
-                                                        {renderFieldDiagnostics('node', 'fidelity', nodeFieldDiagnostics, 'node-field-diagnostics-fidelity')}
-                                                    </div>
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-sm font-medium">Thread ID</label>
-                                                        <input
-                                                            value={(selectedNode?.data?.thread_id as string) || ''}
-                                                            onChange={(e) => handlePropertyChange('thread_id', e.target.value)}
-                                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-1.5">
-                                                    <label className="text-sm font-medium">Class</label>
-                                                    <input
-                                                        value={(selectedNode?.data?.class as string) || ''}
-                                                        onChange={(e) => handlePropertyChange('class', e.target.value)}
-                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                    />
-                                                </div>
-                                            </>
-                                        )}
-                                        {visibility.showLlmSettings && (
-                                            <>
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-sm font-medium">LLM Model</label>
-                                                        <input
-                                                            value={(selectedNode?.data?.llm_model as string) || ''}
-                                                            onChange={(e) => handlePropertyChange('llm_model', e.target.value)}
-                                                            list="llm-model-options-panel"
-                                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                        />
-                                                        <datalist id="llm-model-options-panel">
-                                                            {getModelSuggestions((selectedNode?.data?.llm_provider as string) || '').map((model) => (
-                                                                <option key={model} value={model} />
-                                                            ))}
-                                                        </datalist>
-                                                    </div>
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-sm font-medium">LLM Provider</label>
-                                                        <input
-                                                            value={(selectedNode?.data?.llm_provider as string) || ''}
-                                                            onChange={(e) => handlePropertyChange('llm_provider', e.target.value)}
-                                                            list="llm-provider-options-panel"
-                                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                        />
-                                                        <datalist id="llm-provider-options-panel">
-                                                            {LLM_PROVIDER_OPTIONS.map((provider) => (
-                                                                <option key={provider} value={provider} />
-                                                            ))}
-                                                        </datalist>
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-1.5">
-                                                    <label className="text-sm font-medium">Reasoning Effort</label>
-                                                    <input
-                                                        value={(selectedNode?.data?.reasoning_effort as string) || ''}
-                                                        onChange={(e) => handlePropertyChange('reasoning_effort', e.target.value)}
-                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                        placeholder="high"
-                                                    />
-                                                </div>
-                                            </>
-                                        )}
-                                        {visibility.showGeneralAdvanced && (
-                                            <div className="flex items-center gap-4">
-                                                <label className="flex items-center gap-2 text-sm font-medium">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={isTrue(selectedNode?.data?.auto_status)}
-                                                        onChange={(e) => handlePropertyChange('auto_status', e.target.checked)}
-                                                        className="h-4 w-4 rounded border border-input"
-                                                    />
-                                                    Auto Status
-                                                </label>
-                                                <label className="flex items-center gap-2 text-sm font-medium">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={isTrue(selectedNode?.data?.allow_partial)}
-                                                        onChange={(e) => handlePropertyChange('allow_partial', e.target.checked)}
-                                                        className="h-4 w-4 rounded border border-input"
-                                                    />
-                                                    Allow Partial
-                                                </label>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                                <AdvancedKeyValueEditor
-                                    testIdPrefix="node"
-                                    entries={selectedNodeExtensionEntries}
-                                    onValueChange={handleNodeExtensionValueChange}
-                                    onRemove={handleNodeExtensionRemove}
-                                    onAdd={handleNodeExtensionAdd}
-                                    reservedKeys={CORE_NODE_ATTR_KEYS}
-                                />
-                            </div>
-                        )}
-                    </InspectorScaffold>
-                </div>
-            )}
-
-            {activeTab === 'edge' && (
-                <div className="flex-1 overflow-y-auto px-5 pb-5 pt-3">
-                    <InspectorScaffold
-                        scopeLabel="Edge"
-                        title="Properties"
-                        description="Use the same inspect-edit flow as graph and node inspectors."
-                        entityLabel="Edge"
-                        entityValue={selectedEdge ? `${selectedEdge.source} -> ${selectedEdge.target}` : undefined}
-                    >
-                        {!selectedEdge ? (
-                            <InspectorEmptyState message="Select an edge on the canvas to inspect and edit its properties." />
-                        ) : (
-                            <div data-testid="edge-structured-form" className="space-y-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-sm font-medium">Label</label>
-                                    <input
-                                        value={(selectedEdge.data?.label as string) || ''}
-                                        onChange={(e) => handleEdgePropertyChange('label', e.target.value)}
-                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        placeholder="e.g. Approve"
-                                    />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-sm font-medium">Condition</label>
-                                    <input
-                                        value={(selectedEdge.data?.condition as string) || ''}
-                                        onChange={(e) => handleEdgePropertyChange('condition', e.target.value)}
-                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        placeholder='e.g. outcome = "success"'
-                                    />
-                                    <div data-testid="edge-condition-syntax-hints" className="space-y-1 rounded-md border border-border/80 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-                                        <p>Use && to join clauses.</p>
-                                        <p>{'Supported keys: outcome, preferred_label, context.<path>'}</p>
-                                        <p>Operators: = or !=</p>
-                                    </div>
-                                    {renderFieldDiagnostics('edge', 'condition', edgeFieldDiagnostics, 'edge-field-diagnostics-condition')}
-                                    <div
-                                        data-testid="edge-condition-preview-feedback"
-                                        className={`rounded-md border px-3 py-2 text-[11px] ${
-                                            conditionPreviewHasError
-                                                ? 'border-destructive/40 bg-destructive/10 text-destructive'
-                                                : conditionPreviewHasWarning
-                                                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-800'
-                                                    : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
-                                        }`}
-                                    >
-                                        {selectedEdgeConditionDiagnostics.length > 0 ? (
-                                            <ul className="space-y-1">
-                                                {selectedEdgeConditionDiagnostics.map((diag, index) => (
-                                                    <li key={`${diag.rule_id}-${diag.message}-${index}`}>{diag.message}</li>
-                                                ))}
-                                            </ul>
-                                        ) : (
-                                            <p>Condition syntax looks valid in preview.</p>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-sm font-medium">Weight</label>
-                                    <input
-                                        value={(selectedEdge.data?.weight as number | string | undefined) ?? ''}
-                                        onChange={(e) => handleEdgePropertyChange('weight', e.target.value)}
-                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        placeholder="0"
-                                    />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-sm font-medium">Fidelity</label>
-                                    <input
-                                        value={(selectedEdge.data?.fidelity as string) || ''}
-                                        onChange={(e) => handleEdgePropertyChange('fidelity', e.target.value)}
-                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        placeholder="full | truncate | compact | summary:low"
-                                    />
-                                    {renderFieldDiagnostics('edge', 'fidelity', edgeFieldDiagnostics, 'edge-field-diagnostics-fidelity')}
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-sm font-medium">Thread ID</label>
-                                    <input
-                                        value={(selectedEdge.data?.thread_id as string) || ''}
-                                        onChange={(e) => handleEdgePropertyChange('thread_id', e.target.value)}
-                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    />
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        id="edge-loop-restart"
-                                        type="checkbox"
-                                        checked={Boolean(selectedEdge.data?.loop_restart)}
-                                        onChange={(e) => handleEdgePropertyChange('loop_restart', e.target.checked)}
-                                        className="h-4 w-4 rounded border border-input"
-                                    />
-                                    <label htmlFor="edge-loop-restart" className="text-sm font-medium">
-                                        Loop Restart
-                                    </label>
-                                </div>
-                                <AdvancedKeyValueEditor
-                                    testIdPrefix="edge"
-                                    entries={selectedEdgeExtensionEntries}
-                                    onValueChange={handleEdgeExtensionValueChange}
-                                    onRemove={handleEdgeExtensionRemove}
-                                    onAdd={handleEdgeExtensionAdd}
-                                    reservedKeys={CORE_EDGE_ATTR_KEYS}
-                                />
-                            </div>
-                        )}
-                    </InspectorScaffold>
-                </div>
-            )}
+                {showEdgeInspector ? (
+                    <EdgeInspectorPanel
+                        selectedEdge={selectedEdge}
+                        selectedEdgeExtensionEntries={selectedEdgeExtensionEntries}
+                        edgeFieldDiagnostics={edgeFieldDiagnostics}
+                        selectedEdgeConditionDiagnostics={selectedEdgeConditionDiagnostics}
+                        conditionPreviewHasError={conditionPreviewHasError}
+                        conditionPreviewHasWarning={conditionPreviewHasWarning}
+                        onPropertyChange={handleEdgePropertyChange}
+                        onExtensionValueChange={handleEdgeExtensionValueChange}
+                        onExtensionRemove={handleEdgeExtensionRemove}
+                        onExtensionAdd={handleEdgeExtensionAdd}
+                        renderFieldDiagnostics={renderFieldDiagnostics}
+                    />
+                ) : null}
+            </div>
         </nav>
     )
 }

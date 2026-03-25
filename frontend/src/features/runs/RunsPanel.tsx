@@ -1,11 +1,8 @@
 import { RefreshCcw } from 'lucide-react'
 import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
-import {
-    ApiHttpError,
-    fetchPipelineCancelValidated,
-} from '@/lib/attractorClient'
 import { useRunsList } from './hooks/useRunsList'
+import { useRunActions } from './hooks/useRunActions'
 import { useRunDetails } from './hooks/useRunDetails'
 import { useRunTimeline } from './hooks/useRunTimeline'
 import { RunArtifactsCard } from './components/RunArtifactsCard'
@@ -17,13 +14,6 @@ import { RunList } from './components/RunList'
 import { RunSummaryCard } from './components/RunSummaryCard'
 import type { RunRecord } from './model/shared'
 import { Button, InlineNotice, SectionHeader } from '@/ui'
-
-const logUnexpectedRunError = (error: unknown) => {
-    if (error instanceof ApiHttpError) {
-        return
-    }
-    console.error(error)
-}
 
 export function RunsPanel() {
     const isNarrowViewport = useNarrowViewport()
@@ -53,6 +43,10 @@ export function RunsPanel() {
         activeProjectPath,
         selectedRunId,
         viewMode,
+    })
+    const { requestCancel } = useRunActions({
+        fetchRuns,
+        setRuns,
     })
     const selectedRunTimelineId = selectedRunSummary?.run_id ?? null
     const {
@@ -147,36 +141,6 @@ export function RunsPanel() {
             setPlanId(artifactId)
         }
         setViewMode('home')
-    }
-
-    const requestCancel = async (runId: string, currentStatus: string) => {
-        if (currentStatus !== 'running') {
-            return
-        }
-        if (!window.confirm('Cancel this run? It will stop after the active node finishes.')) {
-            return
-        }
-        setRuns((current) =>
-            current.map((run) => (
-                run.run_id === runId
-                    ? { ...run, status: 'cancel_requested' }
-                    : run
-            ))
-        )
-        try {
-            await fetchPipelineCancelValidated(runId)
-            void fetchRuns()
-        } catch (err) {
-            logUnexpectedRunError(err)
-            setRuns((current) =>
-                current.map((run) => (
-                    run.run_id === runId
-                        ? { ...run, status: currentStatus }
-                        : run
-                ))
-            )
-            window.alert('Failed to cancel run')
-        }
     }
 
     return (

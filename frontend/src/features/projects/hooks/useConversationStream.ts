@@ -37,11 +37,19 @@ export function useConversationStream({
     const appendEventRef = useRef(appendLocalProjectEvent)
     const setPanelErrorRef = useRef(setPanelError)
 
-    snapshotHandlerRef.current = applyConversationSnapshot
-    eventHandlerRef.current = applyConversationStreamEvent
-    errorFormatterRef.current = formatErrorMessage
-    appendEventRef.current = appendLocalProjectEvent
-    setPanelErrorRef.current = setPanelError
+    useEffect(() => {
+        snapshotHandlerRef.current = applyConversationSnapshot
+        eventHandlerRef.current = applyConversationStreamEvent
+        errorFormatterRef.current = formatErrorMessage
+        appendEventRef.current = appendLocalProjectEvent
+        setPanelErrorRef.current = setPanelError
+    }, [
+        appendLocalProjectEvent,
+        applyConversationSnapshot,
+        applyConversationStreamEvent,
+        formatErrorMessage,
+        setPanelError,
+    ])
 
     useEffect(() => {
         if (!activeProjectPath || !activeConversationId) {

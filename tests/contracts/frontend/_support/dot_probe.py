@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -13,6 +16,153 @@ def _repo_paths() -> tuple[Path, Path]:
     return repo_root, frontend_dir
 
 
+def _persistent_temp_dir(prefix: str) -> Path:
+    temp_path = Path(tempfile.mkdtemp(prefix=prefix))
+    atexit.register(shutil.rmtree, temp_path, ignore_errors=True)
+    return temp_path
+
+
+def _build_project_probe_artifact(
+    *,
+    source_path: Path,
+    artifact_path: Path,
+    temp_prefix: str,
+    failure_context: str,
+) -> Path:
+    repo_root, frontend_dir = _repo_paths()
+    temp_path = _persistent_temp_dir(prefix=temp_prefix)
+    out_dir = temp_path / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    probe_tsconfig = temp_path / "tsconfig.json"
+    probe_tsconfig.write_text(
+        json.dumps(
+            {
+                "extends": (frontend_dir / "tsconfig.app.json").as_posix(),
+                "compilerOptions": {
+                    "noEmit": False,
+                    "noEmitOnError": False,
+                    "allowImportingTsExtensions": False,
+                    "outDir": "./out",
+                },
+                "include": [source_path.as_posix()],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    compile_result = subprocess.run(
+        [
+            "npm",
+            "--prefix",
+            str(frontend_dir),
+            "exec",
+            "--",
+            "tsc",
+            "--pretty",
+            "false",
+            "--project",
+            str(probe_tsconfig),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    compiled_js = out_dir / artifact_path
+    if not compiled_js.exists():
+        raise AssertionError(
+            f"Failed to compile {failure_context}.\n"
+            f"stdout:\n{compile_result.stdout}\n"
+            f"stderr:\n{compile_result.stderr}"
+        )
+    return compiled_js
+
+
+def _build_direct_probe_artifact(
+    *,
+    source_path: Path,
+    artifact_path: Path,
+    temp_prefix: str,
+    failure_context: str,
+) -> Path:
+    repo_root, frontend_dir = _repo_paths()
+    out_dir = _persistent_temp_dir(prefix=temp_prefix) / "compiled"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    compile_result = subprocess.run(
+        [
+            "npm",
+            "--prefix",
+            str(frontend_dir),
+            "exec",
+            "--",
+            "tsc",
+            "--pretty",
+            "false",
+            "--target",
+            "ES2022",
+            "--module",
+            "ESNext",
+            "--moduleResolution",
+            "bundler",
+            "--skipLibCheck",
+            "--outDir",
+            str(out_dir),
+            str(source_path),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    compiled_js = out_dir / artifact_path
+    if not compiled_js.exists():
+        raise AssertionError(
+            f"Failed to compile {failure_context}.\n"
+            f"stdout:\n{compile_result.stdout}\n"
+            f"stderr:\n{compile_result.stderr}"
+        )
+    return compiled_js
+
+
+@lru_cache(maxsize=1)
+def _compile_dot_utils_js() -> Path:
+    _, frontend_dir = _repo_paths()
+    return _build_project_probe_artifact(
+        source_path=frontend_dir / "src" / "lib" / "dotUtils.ts",
+        artifact_path=Path("lib") / "dotUtils.js",
+        temp_prefix=".tmp-dotutils-build-",
+        failure_context="dotUtils.ts probe artifact",
+    )
+
+
+@lru_cache(maxsize=1)
+def _compile_graph_attr_validation_js() -> Path:
+    _, frontend_dir = _repo_paths()
+    return _build_direct_probe_artifact(
+        source_path=frontend_dir / "src" / "lib" / "graphAttrValidation.ts",
+        artifact_path=Path("lib") / "graphAttrValidation.js",
+        temp_prefix=".tmp-graph-attr-validation-build-",
+        failure_context="graphAttrValidation.ts probe artifact",
+    )
+
+
+@lru_cache(maxsize=1)
+def _compile_canonical_flow_model_js() -> Path:
+    _, frontend_dir = _repo_paths()
+    return _build_project_probe_artifact(
+        source_path=frontend_dir / "src" / "lib" / "canonicalFlowModel.ts",
+        artifact_path=Path("lib") / "canonicalFlowModel.js",
+        temp_prefix=".tmp-canonical-flow-model-build-",
+        failure_context="canonicalFlowModel.ts probe artifact",
+    )
+
+
 def run_dot_utils_probe(
     probe_script: str,
     *,
@@ -20,73 +170,23 @@ def run_dot_utils_probe(
     error_context: str,
     env_extra: dict[str, str] | None = None,
 ) -> str:
-    repo_root, frontend_dir = _repo_paths()
+    _, frontend_dir = _repo_paths()
+    dot_utils_js = _compile_dot_utils_js()
 
-    with tempfile.TemporaryDirectory(prefix=temp_prefix) as temp_dir:
-        temp_path = Path(temp_dir)
-        out_dir = temp_path / "out"
-        out_dir.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["DOT_UTILS_JS_PATH"] = str(dot_utils_js)
+    if env_extra:
+        env.update(env_extra)
 
-        probe_tsconfig = temp_path / "tsconfig.json"
-        probe_tsconfig.write_text(
-            json.dumps(
-                {
-                    "extends": (frontend_dir / "tsconfig.app.json").as_posix(),
-                    "compilerOptions": {
-                        "noEmit": False,
-                        "noEmitOnError": False,
-                        "allowImportingTsExtensions": False,
-                        "outDir": "./out",
-                    },
-                    "include": [(frontend_dir / "src" / "lib" / "dotUtils.ts").as_posix()],
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
-        compile_result = subprocess.run(
-            [
-                "npm",
-                "--prefix",
-                str(frontend_dir),
-                "exec",
-                "--",
-                "tsc",
-                "--pretty",
-                "false",
-                "--project",
-                str(probe_tsconfig),
-            ],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        dot_utils_js = out_dir / "lib" / "dotUtils.js"
-        if not dot_utils_js.exists():
-            raise AssertionError(
-                f"Failed to compile dotUtils.ts for {error_context}.\n"
-                f"stdout:\n{compile_result.stdout}\n"
-                f"stderr:\n{compile_result.stderr}"
-            )
-
-        env = os.environ.copy()
-        env["DOT_UTILS_JS_PATH"] = str(dot_utils_js)
-        if env_extra:
-            env.update(env_extra)
-
-        probe_result = subprocess.run(
-            ["node", "--input-type=module", "-e", probe_script],
-            cwd=frontend_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        )
-        return probe_result.stdout
+    probe_result = subprocess.run(
+        ["node", "--input-type=module", "-e", probe_script],
+        cwd=frontend_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+    return probe_result.stdout
 
 
 def run_graph_attr_validation_probe(
@@ -95,59 +195,21 @@ def run_graph_attr_validation_probe(
     temp_prefix: str,
     error_context: str,
 ) -> str:
-    repo_root, frontend_dir = _repo_paths()
+    _, frontend_dir = _repo_paths()
+    graph_attr_validation_js = _compile_graph_attr_validation_js()
 
-    with tempfile.TemporaryDirectory(prefix=temp_prefix) as temp_dir:
-        out_dir = Path(temp_dir) / "compiled"
-        out_dir.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["GRAPH_ATTR_VALIDATION_JS_PATH"] = str(graph_attr_validation_js)
 
-        compile_result = subprocess.run(
-            [
-                "npm",
-                "--prefix",
-                str(frontend_dir),
-                "exec",
-                "--",
-                "tsc",
-                "--pretty",
-                "false",
-                "--target",
-                "ES2022",
-                "--module",
-                "ESNext",
-                "--moduleResolution",
-                "bundler",
-                "--skipLibCheck",
-                "--outDir",
-                str(out_dir),
-                str(frontend_dir / "src" / "lib" / "graphAttrValidation.ts"),
-            ],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        graph_attr_validation_js = out_dir / "lib" / "graphAttrValidation.js"
-        if not graph_attr_validation_js.exists():
-            raise AssertionError(
-                f"Failed to compile graphAttrValidation.ts for {error_context}.\n"
-                f"stdout:\n{compile_result.stdout}\n"
-                f"stderr:\n{compile_result.stderr}"
-            )
-
-        env = os.environ.copy()
-        env["GRAPH_ATTR_VALIDATION_JS_PATH"] = str(graph_attr_validation_js)
-
-        result = subprocess.run(
-            ["node", "--input-type=module", "-e", probe_script],
-            cwd=frontend_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        )
-        return result.stdout
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", probe_script],
+        cwd=frontend_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+    return result.stdout
 
 
 def run_canonical_flow_model_probe(
@@ -157,70 +219,20 @@ def run_canonical_flow_model_probe(
     error_context: str,
     env_extra: dict[str, str] | None = None,
 ) -> str:
-    repo_root, frontend_dir = _repo_paths()
+    _, frontend_dir = _repo_paths()
+    canonical_flow_model_js = _compile_canonical_flow_model_js()
 
-    with tempfile.TemporaryDirectory(prefix=temp_prefix) as temp_dir:
-        temp_path = Path(temp_dir)
-        out_dir = temp_path / "out"
-        out_dir.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["CANONICAL_FLOW_MODEL_JS_PATH"] = str(canonical_flow_model_js)
+    if env_extra:
+        env.update(env_extra)
 
-        probe_tsconfig = temp_path / "tsconfig.json"
-        probe_tsconfig.write_text(
-            json.dumps(
-                {
-                    "extends": (frontend_dir / "tsconfig.app.json").as_posix(),
-                    "compilerOptions": {
-                        "noEmit": False,
-                        "noEmitOnError": False,
-                        "allowImportingTsExtensions": False,
-                        "outDir": "./out",
-                    },
-                    "include": [(frontend_dir / "src" / "lib" / "canonicalFlowModel.ts").as_posix()],
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
-        compile_result = subprocess.run(
-            [
-                "npm",
-                "--prefix",
-                str(frontend_dir),
-                "exec",
-                "--",
-                "tsc",
-                "--pretty",
-                "false",
-                "--project",
-                str(probe_tsconfig),
-            ],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        canonical_flow_model_js = out_dir / "lib" / "canonicalFlowModel.js"
-        if not canonical_flow_model_js.exists():
-            raise AssertionError(
-                f"Failed to compile canonicalFlowModel.ts for {error_context}.\n"
-                f"stdout:\n{compile_result.stdout}\n"
-                f"stderr:\n{compile_result.stderr}"
-            )
-
-        env = os.environ.copy()
-        env["CANONICAL_FLOW_MODEL_JS_PATH"] = str(canonical_flow_model_js)
-        if env_extra:
-            env.update(env_extra)
-
-        probe_result = subprocess.run(
-            ["node", "--input-type=module", "-e", probe_script],
-            cwd=frontend_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        )
-        return probe_result.stdout
+    probe_result = subprocess.run(
+        ["node", "--input-type=module", "-e", probe_script],
+        cwd=frontend_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+    return probe_result.stdout

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useMemo, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 
 const DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT = 320
 const HOME_SIDEBAR_MIN_PRIMARY_HEIGHT = 208
@@ -20,10 +20,25 @@ function clampHomeSidebarPrimaryHeight(height: number, containerHeight: number) 
 export function useHomeSidebarLayout(isNarrowViewport: boolean, pinResetKey: string | null) {
     const [homeSidebarPrimaryHeight, setHomeSidebarPrimaryHeight] = useState(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT)
     const [isHomeSidebarResizing, setIsHomeSidebarResizing] = useState(false)
-    const [isConversationPinnedToBottom, setIsConversationPinnedToBottom] = useState(true)
+    const [conversationPinState, setConversationPinState] = useState<{
+        resetKey: string | null
+        pinned: boolean
+    }>({
+        resetKey: pinResetKey,
+        pinned: true,
+    })
     const homeSidebarRef = useRef<HTMLDivElement | null>(null)
     const homeSidebarResizeRef = useRef<{ startY: number; startHeight: number } | null>(null)
     const conversationBodyRef = useRef<HTMLDivElement | null>(null)
+    const effectiveIsHomeSidebarResizing = isHomeSidebarResizing && !isNarrowViewport
+    const isConversationPinnedToBottom = useMemo(
+        () => (
+            conversationPinState.resetKey === pinResetKey
+                ? conversationPinState.pinned
+                : true
+        ),
+        [conversationPinState, pinResetKey],
+    )
 
     const syncConversationPinnedState = () => {
         const node = conversationBodyRef.current
@@ -31,7 +46,10 @@ export function useHomeSidebarLayout(isNarrowViewport: boolean, pinResetKey: str
             return
         }
         const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight
-        setIsConversationPinnedToBottom(distanceFromBottom <= CONVERSATION_BOTTOM_THRESHOLD_PX)
+        setConversationPinState({
+            resetKey: pinResetKey,
+            pinned: distanceFromBottom <= CONVERSATION_BOTTOM_THRESHOLD_PX,
+        })
     }
 
     const scrollConversationToBottom = () => {
@@ -43,7 +61,10 @@ export function useHomeSidebarLayout(isNarrowViewport: boolean, pinResetKey: str
             top: node.scrollHeight,
             behavior: 'smooth',
         })
-        setIsConversationPinnedToBottom(true)
+        setConversationPinState({
+            resetKey: pinResetKey,
+            pinned: true,
+        })
     }
 
     const adjustHomeSidebarPrimaryHeight = (delta: number) => {
@@ -100,7 +121,6 @@ export function useHomeSidebarLayout(isNarrowViewport: boolean, pinResetKey: str
 
     useEffect(() => {
         if (isNarrowViewport) {
-            setIsHomeSidebarResizing(false)
             homeSidebarResizeRef.current = null
             return
         }
@@ -121,7 +141,7 @@ export function useHomeSidebarLayout(isNarrowViewport: boolean, pinResetKey: str
     }, [isNarrowViewport])
 
     useEffect(() => {
-        if (!isHomeSidebarResizing) {
+        if (!effectiveIsHomeSidebarResizing) {
             return
         }
 
@@ -152,18 +172,14 @@ export function useHomeSidebarLayout(isNarrowViewport: boolean, pinResetKey: str
             document.body.style.cursor = ''
             document.body.style.userSelect = ''
         }
-    }, [isHomeSidebarResizing])
-
-    useEffect(() => {
-        setIsConversationPinnedToBottom(true)
-    }, [pinResetKey])
+    }, [effectiveIsHomeSidebarResizing])
 
     return {
         conversationBodyRef,
         homeSidebarRef,
         homeSidebarPrimaryHeight,
         isConversationPinnedToBottom,
-        isHomeSidebarResizing,
+        isHomeSidebarResizing: effectiveIsHomeSidebarResizing,
         onHomeSidebarResizeKeyDown,
         onHomeSidebarResizePointerDown,
         scrollConversationToBottom,

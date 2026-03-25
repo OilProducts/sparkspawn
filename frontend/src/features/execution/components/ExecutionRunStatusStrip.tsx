@@ -1,4 +1,5 @@
 import { OctagonX } from 'lucide-react'
+import { Button } from '@/ui'
 
 interface ExecutionRunStatusStripProps {
     isNarrowViewport: boolean
@@ -74,32 +75,38 @@ export function ExecutionRunStatusStrip({
             {transitionHint ? (
                 <span className="text-xs text-muted-foreground">{transitionHint}</span>
             ) : null}
-            <button
+            <Button
                 data-testid="execution-footer-cancel-button"
                 onClick={onCancel}
                 disabled={!canCancel}
                 title={canCancel ? undefined : cancelDisabledReason}
-                className="inline-flex h-8 items-center gap-2 rounded-md bg-destructive px-2 text-xs font-semibold uppercase tracking-wide text-destructive-foreground transition-colors hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                variant="destructive"
+                size="sm"
+                className="gap-2 px-2 text-xs font-semibold uppercase tracking-wide"
             >
                 <OctagonX className="h-3.5 w-3.5" />
                 {cancelActionLabel}
-            </button>
-            <button
+            </Button>
+            <Button
                 data-testid="execution-footer-pause-button"
                 disabled={true}
                 title={unsupportedControlReason}
-                className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                variant="outline"
+                size="sm"
+                className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             >
                 Pause
-            </button>
-            <button
+            </Button>
+            <Button
                 data-testid="execution-footer-resume-button"
                 disabled={true}
                 title={unsupportedControlReason}
-                className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                variant="outline"
+                size="sm"
+                className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             >
                 Resume
-            </button>
+            </Button>
             <span
                 data-testid="execution-footer-unsupported-controls-reason"
                 className={`text-xs text-muted-foreground ${isNarrowViewport ? 'max-w-none' : 'max-w-xs'}`}

@@ -2,8 +2,8 @@ import type { HTMLAttributes, ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
 
-interface EmptyStateProps extends HTMLAttributes<HTMLDivElement> {
-  title?: string | null
+interface EmptyStateProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {
+  title?: ReactNode
   description: ReactNode
 }
 

@@ -5,7 +5,7 @@ import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { ExecutionCanvas } from './ExecutionCanvas'
 import { ExecutionControls } from './ExecutionControls'
 import { ExecutionSidebar } from './ExecutionSidebar'
-import { Terminal } from '@/components/Terminal'
+import { Terminal } from './components/Terminal'
 import { CanvasSessionModeProvider } from '@/features/workflow-canvas'
 
 export function ExecutionWorkspace({ isActive }: { isActive: boolean }) {

@@ -2,7 +2,6 @@ import type { Edge, Node } from '@xyflow/react'
 import ELK from 'elkjs/lib/elk.bundled.js'
 
 import type { GraphAttrs, UiDefaults } from '@/store'
-import type { PreviewResponsePayload } from '@/lib/attractorClient'
 import { buildCanonicalFlowModelFromPreviewGraph } from '@/lib/canonicalFlowModel'
 import {
     getNodeStyleDimension,
@@ -27,6 +26,7 @@ import {
     ToolNode,
 } from './TaskNode'
 import { ValidationEdge } from './ValidationEdge'
+import type { WorkflowCanvasPreviewResponse } from './model/types'
 
 export const nodeTypes = {
     customTask: TaskNode,
@@ -62,7 +62,7 @@ const ELK_OPTIONS = {
 
 const elk = new ELK()
 
-export type PreviewResponse = PreviewResponsePayload
+export type PreviewResponse = WorkflowCanvasPreviewResponse
 
 export type HydratedFlowGraph = {
     nodes: Node[]

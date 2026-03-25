@@ -3,11 +3,11 @@ import { useStore, type RuntimeStatus } from '@/store'
 import { buildPipelineStartPayload, type PipelineStartPayload } from '@/lib/pipelineStartPayload'
 import {
     ApiHttpError,
-    fetchFlowPayloadValidated,
-    fetchPipelineCancelValidated,
-    fetchPipelineStartValidated,
-} from '@/lib/attractorClient'
-import { fetchProjectMetadataValidated } from '@/lib/workspaceClient'
+    cancelExecutionRun,
+    loadExecutionFlowPayload,
+    loadExecutionProjectMetadata,
+    startExecutionRun,
+} from './services/executionRunService'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import {
     buildLaunchContextFromValues,
@@ -15,7 +15,7 @@ import {
     parseLaunchInputDefinitions,
     type LaunchInputFormValues,
 } from '@/lib/flowContracts'
-import { Separator } from '@/ui'
+import { Separator, useDialogController } from '@/ui'
 import { ExecutionActionOverlay } from './components/ExecutionActionOverlay'
 import { ExecutionLaunchInputsSurface } from './components/ExecutionLaunchInputsSurface'
 import { ExecutionNoticeStack } from './components/ExecutionNoticeStack'
@@ -89,6 +89,7 @@ const logUnexpectedExecutionError = (error: unknown) => {
 }
 
 export function ExecutionControls() {
+    const { alert, confirm } = useDialogController()
     const viewMode = useStore((state) => state.viewMode)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const activeProjectScope = useStore((state) =>
@@ -193,7 +194,7 @@ export function ExecutionControls() {
 
     const confirmGitPolicyGate = async () => {
         try {
-            const metadata = await fetchProjectMetadataValidated(runInitiationForm.projectPath)
+            const metadata = await loadExecutionProjectMetadata(runInitiationForm.projectPath)
             const branch = typeof metadata.branch === 'string' ? metadata.branch.trim() : ''
             if (branch) {
                 setRunStartGitPolicyWarning(null)
@@ -202,15 +203,24 @@ export function ExecutionControls() {
 
             const warning = 'Project Git policy check failed: active project is not a Git repository.'
             setRunStartGitPolicyWarning(warning)
-            const allowNonGitRun = window.confirm(`${warning} Continue with run start anyway?`)
-            return allowNonGitRun
+            return confirm({
+                title: 'Run without Git metadata?',
+                description: `${warning} Continue with run start anyway?`,
+                confirmLabel: 'Continue',
+                cancelLabel: 'Cancel',
+            })
         } catch (err) {
             const warning = 'Unable to verify project Git state before run start.'
             if (err instanceof ApiHttpError && err.detail) {
                 console.warn(err.detail)
             }
             setRunStartGitPolicyWarning(warning)
-            return window.confirm(`${warning} Continue with run start anyway?`)
+            return confirm({
+                title: 'Unable to verify Git state',
+                description: `${warning} Continue with run start anyway?`,
+                confirmLabel: 'Continue',
+                cancelLabel: 'Cancel',
+            })
         }
     }
 
@@ -236,7 +246,7 @@ export function ExecutionControls() {
                 return
             }
 
-            const flow = await fetchFlowPayloadValidated(runInitiationForm.flowSource)
+            const flow = await loadExecutionFlowPayload(runInitiationForm.flowSource)
             const resolvedWorkingDirectory = runInitiationForm.workingDirectory.trim() || runInitiationForm.projectPath
             const startPayload = buildPipelineStartPayload(
                 {
@@ -246,7 +256,7 @@ export function ExecutionControls() {
                 },
                 flow.content
             )
-            const runData = await fetchPipelineStartValidated(startPayload as PipelineStartPayload)
+            const runData = await startExecutionRun(startPayload as PipelineStartPayload)
             if (runData?.status !== 'started') {
                 const reason = runData?.error || runData?.status || 'Unknown run error'
                 throw new Error(`Run not started: ${reason}`)
@@ -276,20 +286,33 @@ export function ExecutionControls() {
 
     const requestCancel = async () => {
         if (!selectedRunId) {
-            window.alert('Run id is still loading. Please try cancel again in a moment.')
+            await alert({
+                title: 'Run id unavailable',
+                description: 'Run id is still loading. Please try cancel again in a moment.',
+            })
             return
         }
-        if (!window.confirm('Cancel this run? It will stop after the active node finishes.')) {
+        const confirmed = await confirm({
+            title: 'Cancel run?',
+            description: 'It will stop after the active node finishes.',
+            confirmLabel: 'Cancel run',
+            cancelLabel: 'Keep running',
+            confirmVariant: 'destructive',
+        })
+        if (!confirmed) {
             return
         }
         setRuntimeStatus('cancel_requested')
         setRuntimeOutcome(null)
         try {
-            await fetchPipelineCancelValidated(selectedRunId)
+            await cancelExecutionRun(selectedRunId)
         } catch (error) {
             logUnexpectedExecutionError(error)
             setRuntimeStatus('running')
-            window.alert('Failed to request cancel. Check backend logs for details.')
+            await alert({
+                title: 'Cancel request failed',
+                description: 'Failed to request cancel. Check backend logs for details.',
+            })
         }
     }
 

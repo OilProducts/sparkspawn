@@ -1,5 +1,5 @@
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
-import { HomeWorkspace } from '@/components/HomeWorkspace'
+import { HomeWorkspace } from './HomeWorkspace'
 import { Button, EmptyState, InlineNotice, Panel, PanelContent, PanelHeader, PanelTitle, Textarea } from '@/ui'
 
 interface ProjectConversationSurfaceProps {

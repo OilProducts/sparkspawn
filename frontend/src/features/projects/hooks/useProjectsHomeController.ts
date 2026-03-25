@@ -1,94 +1,47 @@
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useStore } from '@/store'
-import {
-    ApiHttpError,
-    type ConversationSegmentUpsertEventResponse,
-    type ConversationSnapshotResponse,
-    type ConversationSummaryResponse,
-    type ConversationTurnUpsertEventResponse,
-    deleteConversationValidated,
-    deleteProjectValidated,
-    fetchProjectConversationListValidated,
-    fetchProjectMetadataValidated,
-    fetchProjectRegistryValidated,
-    pickProjectDirectoryValidated,
-    registerProjectValidated,
-    updateProjectStateValidated,
-} from '@/lib/workspaceClient'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
-import type { ProjectGitMetadata } from '@/components/projects/presentation'
-import { buildConversationTimelineEntries } from '@/components/projects/conversationTimeline'
+import { useHomeSidebarLayout } from './useHomeSidebarLayout'
+import { useConversationStream } from './useConversationStream'
+import { useConversationComposer } from './useConversationComposer'
+import { useConversationReviews } from './useConversationReviews'
+import { useProjectConversationCache } from './useProjectConversationCache'
+import { useProjectGitMetadata } from './useProjectGitMetadata'
+import { useProjectsHomeInteractionState } from './useProjectsHomeInteractionState'
+import { usePersistProjectState } from './usePersistProjectState'
+import { useProjectRegistryActions } from './projectRegistryActions'
+import { useProjectThreadActions } from './projectThreadActions'
+import { debugProjectChat } from '../model/projectChatDebug'
+import { buildProjectsHomeViewModel } from '../model/projectsHomeViewModel'
+import type { ConversationTimelineEntry } from '../model/types'
 import {
-    type OptimisticSendState,
-} from '@/components/projects/conversationState'
-import { useHomeSidebarLayout } from '@/components/projects/hooks/useHomeSidebarLayout'
-import { useConversationStream } from '@/components/projects/hooks/useConversationStream'
-import { useConversationComposer } from '@/components/projects/hooks/useConversationComposer'
-import { useConversationReviews } from '@/components/projects/hooks/useConversationReviews'
-import {
-    applyConversationSnapshotToCache,
-    applyConversationStreamEventToCache,
-    asProjectGitMetadataField,
     buildOrderedProjects,
     buildProjectConversationId,
-    derivePlanStatusFromExecutionCard,
-    deriveProjectPathFromDirectorySelection,
-    EMPTY_PROJECT_CONVERSATION_CACHE_STATE,
-    EMPTY_PROJECT_GIT_METADATA,
     extractApiErrorMessage,
     formatConversationAgeShort,
     formatConversationTimestamp,
     formatProjectListLabel,
-    removeConversationFromCache,
-    removeProjectFromCache,
-    resolveProjectPathValidation,
-    setProjectConversationSummaryList,
-    toHydratedProjectRecord,
-    type ConversationStreamEvent,
-    type ProjectConversationCacheState,
-} from '@/components/projects/projectsHomeState'
+} from '../model/projectsHomeState'
 
-const isProjectChatDebugEnabled = () => {
-    if (typeof window === 'undefined') {
-        return false
+function buildConversationHistoryRevisionKey(history: ConversationTimelineEntry[]) {
+    const latestEntry = history.at(-1)
+    if (!latestEntry) {
+        return 'empty'
     }
-    try {
-        const params = new URLSearchParams(window.location.search)
-        if (params.get('debugProjectChat') === '1') {
-            return true
-        }
-        return window.localStorage.getItem('spark.debug.project_chat') === '1'
-    } catch {
-        return false
+    if (latestEntry.kind === 'message') {
+        return `${history.length}:${latestEntry.kind}:${latestEntry.id}:${latestEntry.status}:${latestEntry.content}:${latestEntry.timestamp}`
     }
-}
-
-const summarizeConversationTurnsForDebug = (turns: ConversationSnapshotResponse['turns']) => (
-    turns.map((turn, index) => ({
-        index,
-        id: turn.id,
-        role: turn.role,
-        kind: turn.kind,
-        status: turn.status,
-        artifactId: turn.artifact_id ?? null,
-        content: turn.content.slice(0, 120),
-    }))
-)
-
-const debugProjectChat = (message: string, details?: Record<string, unknown>) => {
-    if (!isProjectChatDebugEnabled()) {
-        return
+    if (latestEntry.kind === 'tool_call') {
+        return `${history.length}:${latestEntry.kind}:${latestEntry.id}:${latestEntry.toolCall.status}:${latestEntry.toolCall.output || ''}:${latestEntry.timestamp}`
     }
-    if (details) {
-        console.debug(`[project-chat] ${message}`, details)
-        return
+    if (latestEntry.kind === 'final_separator') {
+        return `${history.length}:${latestEntry.kind}:${latestEntry.id}:${latestEntry.label}:${latestEntry.timestamp}`
     }
-    console.debug(`[project-chat] ${message}`)
+    return `${history.length}:${latestEntry.kind}:${latestEntry.id}:${latestEntry.artifactId}:${latestEntry.timestamp}`
 }
 
 export function useProjectsHomeController() {
     const projectRegistry = useStore((state) => state.projectRegistry)
-    const hydrateProjectRegistry = useStore((state) => state.hydrateProjectRegistry)
     const upsertProjectRegistryEntry = useStore((state) => state.upsertProjectRegistryEntry)
     const projects = Object.values(projectRegistry)
     const recentProjectPaths = useStore((state) => state.recentProjectPaths)
@@ -108,90 +61,57 @@ export function useProjectsHomeController() {
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const setViewMode = useStore((state) => state.setViewMode)
 
-    const [projectGitMetadata, setProjectGitMetadata] = useState<Record<string, ProjectGitMetadata>>({})
-    const [conversationCache, setConversationCache] = useState<ProjectConversationCacheState>(
-        EMPTY_PROJECT_CONVERSATION_CACHE_STATE,
-    )
-    const [chatDraft, setChatDraft] = useState('')
-    const [panelError, setPanelError] = useState<string | null>(null)
-    const [optimisticSend, setOptimisticSend] = useState<OptimisticSendState | null>(null)
-    const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
-    const [pendingDeleteProjectPath, setPendingDeleteProjectPath] = useState<string | null>(null)
-    const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
-    const [expandedToolCalls, setExpandedToolCalls] = useState<Record<string, boolean>>({})
-    const [expandedThinkingEntries, setExpandedThinkingEntries] = useState<Record<string, boolean>>({})
-
     const projectDirectoryPickerInputRef = useRef<HTMLInputElement | null>(null)
-    const conversationCacheRef = useRef(conversationCache)
-    conversationCacheRef.current = conversationCache
-
-    const commitConversationCache = (
-        next:
-            | ProjectConversationCacheState
-            | ((current: ProjectConversationCacheState) => ProjectConversationCacheState),
-    ) => {
-        const resolved = typeof next === 'function'
-            ? next(conversationCacheRef.current)
-            : next
-        conversationCacheRef.current = resolved
-        setConversationCache(resolved)
-    }
+    const resetComposerRef = useRef<() => void>(() => {})
+    const persistProjectState = usePersistProjectState(upsertProjectRegistryEntry)
 
     const isNarrowViewport = useNarrowViewport()
+    const { projectGitMetadata, setProjectGitMetadata, ensureProjectGitRepository } = useProjectGitMetadata({
+        projectPaths: projects.map((project) => project.directoryPath),
+        setProjectRegistrationError,
+    })
     const activeProjectScope = activeProjectPath ? projectSessionsByPath[activeProjectPath] : null
-    const activeProjectLabel = activeProjectPath ? formatProjectListLabel(activeProjectPath) : null
-    const activeProjectGitMetadata = activeProjectPath
-        ? projectGitMetadata[activeProjectPath] || EMPTY_PROJECT_GIT_METADATA
-        : EMPTY_PROJECT_GIT_METADATA
     const activeConversationId = activeProjectScope?.conversationId ?? null
+    const {
+        applyConversationSnapshot,
+        applyConversationStreamEvent,
+        commitConversationCache,
+        conversationCache,
+        conversationCacheRef,
+        loadProjectConversationSummaries,
+        setConversationSummaryList,
+    } = useProjectConversationCache({
+        persistProjectState,
+        projectSessionsByPath,
+        setProjectGitMetadata,
+        updateProjectSessionState,
+    })
     const activeConversationSnapshot = activeConversationId
         ? conversationCache.snapshotsByConversationId[activeConversationId] || null
         : null
-    const activeProjectConversationSummaries = activeProjectPath
-        ? conversationCache.summariesByProjectPath[activeProjectPath] || []
-        : []
-    const activeProjectEventLog = activeProjectScope?.projectEventLog || []
-    const activeConversationHistory = useMemo(
-        () => buildConversationTimelineEntries(
-            activeConversationSnapshot,
-            optimisticSend && optimisticSend.conversationId === activeConversationId ? optimisticSend : null,
-        ),
-        [activeConversationId, activeConversationSnapshot, optimisticSend],
-    )
-    const activeSpecEditProposals = activeConversationSnapshot?.spec_edit_proposals || []
-    const activeFlowRunRequests = activeConversationSnapshot?.flow_run_requests || []
-    const activeFlowLaunches = activeConversationSnapshot?.flow_launches || []
-    const activeExecutionCards = activeConversationSnapshot?.execution_cards || []
-    const latestSpecEditProposalId = activeSpecEditProposals.length > 0
-        ? activeSpecEditProposals[activeSpecEditProposals.length - 1]?.id || null
-        : null
-    const latestFlowRunRequestId = activeFlowRunRequests.length > 0
-        ? activeFlowRunRequests[activeFlowRunRequests.length - 1]?.id || null
-        : null
-    const latestFlowLaunchId = activeFlowLaunches.length > 0
-        ? activeFlowLaunches[activeFlowLaunches.length - 1]?.id || null
-        : null
-    const latestExecutionCardId = activeExecutionCards.length > 0
-        ? activeExecutionCards[activeExecutionCards.length - 1]?.id || null
-        : null
-    const activeSpecEditProposalsById = new Map(activeSpecEditProposals.map((proposal) => [proposal.id, proposal]))
-    const activeFlowRunRequestsById = new Map(activeFlowRunRequests.map((request) => [request.id, request]))
-    const activeFlowLaunchesById = new Map(activeFlowLaunches.map((launch) => [launch.id, launch]))
-    const activeExecutionCardsById = new Map(activeExecutionCards.map((executionCard) => [executionCard.id, executionCard]))
-    const hasRenderableConversationHistory = activeConversationHistory.some((entry) => (
-        entry.kind === 'spec_edit_proposal'
-        || entry.kind === 'flow_run_request'
-        || entry.kind === 'flow_launch'
-        || entry.kind === 'execution_card'
-        || entry.kind === 'tool_call'
-        || entry.role === 'user'
-        || entry.role === 'assistant'
-    ))
-    const hasActiveAssistantTurn = (activeConversationSnapshot?.turns || []).some((turn) => (
-        turn.role === 'assistant' && (turn.status === 'pending' || turn.status === 'streaming')
-    ))
-    const isChatInputDisabled = hasActiveAssistantTurn
-    const chatSendButtonLabel = hasActiveAssistantTurn ? 'Thinking...' : 'Send'
+    const latestConversationSpecEditProposalId = activeConversationSnapshot?.spec_edit_proposals.at(-1)?.id || null
+    const {
+        chatDraft,
+        expandedProposalChanges,
+        expandedThinkingEntries,
+        expandedToolCalls,
+        optimisticSend,
+        panelError,
+        pendingDeleteConversationId,
+        pendingDeleteProjectPath,
+        setChatDraft,
+        setOptimisticSend,
+        setPanelError,
+        setPendingDeleteConversationId,
+        setPendingDeleteProjectPath,
+        toggleProposalChangeExpanded,
+        toggleThinkingEntryExpanded,
+        toggleToolCallExpanded,
+    } = useProjectsHomeInteractionState({
+        activeConversationId,
+        activeProjectPath,
+        latestSpecEditProposalId: latestConversationSpecEditProposalId,
+    })
     const {
         conversationBodyRef,
         homeSidebarRef,
@@ -203,52 +123,65 @@ export function useProjectsHomeController() {
         scrollConversationToBottom,
         syncConversationPinnedState,
     } = useHomeSidebarLayout(isNarrowViewport, activeProjectPath)
+    const isConversationPinnedToBottomRef = useRef(isConversationPinnedToBottom)
 
     const orderedProjects = useMemo(
         () => buildOrderedProjects(projects, projectRegistry, recentProjectPaths),
         [projectRegistry, projects, recentProjectPaths],
     )
+    const {
+        activeConversationHistory,
+        activeExecutionCardsById,
+        activeFlowLaunchesById,
+        activeFlowRunRequestsById,
+        activeProjectConversationSummaries,
+        activeProjectEventLog,
+        activeProjectGitMetadata,
+        activeProjectLabel,
+        activeSpecEditProposalsById,
+        chatSendButtonLabel,
+        hasRenderableConversationHistory,
+        isChatInputDisabled,
+        latestExecutionCardId,
+        latestFlowLaunchId,
+        latestFlowRunRequestId,
+        latestSpecEditProposalId,
+    } = useMemo(() => buildProjectsHomeViewModel({
+        activeConversationId,
+        activeConversationSnapshot,
+        activeProjectPath,
+        activeProjectScope,
+        conversationCache,
+        optimisticSend,
+        projectGitMetadata,
+    }), [
+        activeConversationId,
+        activeConversationSnapshot,
+        activeProjectPath,
+        activeProjectScope,
+        conversationCache,
+        optimisticSend,
+        projectGitMetadata,
+    ])
+    const conversationHistoryRevisionKey = useMemo(
+        () => buildConversationHistoryRevisionKey(activeConversationHistory),
+        [activeConversationHistory],
+    )
 
-    const appendLocalProjectEvent = (message: string) => {
+    const appendLocalProjectEvent = useCallback((message: string) => {
         appendProjectEventEntry({
             message,
             timestamp: new Date().toISOString(),
         })
-    }
+    }, [appendProjectEventEntry])
 
-    const setConversationSummaryList = (
-        projectPath: string,
-        summaries: ConversationSummaryResponse[],
-    ) => {
-        commitConversationCache((current) => setProjectConversationSummaryList(current, projectPath, summaries))
-    }
-
-    const persistProjectState = async (
-        projectPath: string,
-        patch: {
-            last_accessed_at?: string | null
-            active_conversation_id?: string | null
-            is_favorite?: boolean | null
-        },
-    ) => {
-        try {
-            const project = await updateProjectStateValidated({
-                project_path: projectPath,
-                ...patch,
-            })
-            upsertProjectRegistryEntry(toHydratedProjectRecord(project))
-        } catch {
-            // Keep the UI responsive if the background state sync fails.
-        }
-    }
-
-    const activateConversationThread = (projectPath: string, conversationId: string, source = 'unknown') => {
+    const activateConversationThread = useCallback((projectPath: string, conversationId: string, source = 'unknown') => {
         debugProjectChat('activate conversation thread', {
             source,
             projectPath,
             conversationId,
         })
-        resetComposer()
+        resetComposerRef.current()
         setConversationId(conversationId)
         updateProjectSessionState(projectPath, {
             conversationId,
@@ -263,131 +196,19 @@ export function useProjectsHomeController() {
             active_conversation_id: conversationId,
             last_accessed_at: new Date().toISOString(),
         })
-    }
+    }, [persistProjectState, setConversationId, updateProjectSessionState])
 
-    const loadProjectConversationSummaries = async (projectPath: string) => {
-        try {
-            const summaries = await fetchProjectConversationListValidated(projectPath)
-            setConversationSummaryList(projectPath, summaries)
-            return summaries
-        } catch {
-            return conversationCacheRef.current.summariesByProjectPath[projectPath] || []
+    const ensureConversationId = useCallback(() => {
+        if (!activeProjectPath) {
+            return null
         }
-    }
-
-    const applyConversationSnapshot = (
-        projectPath: string,
-        snapshot: ConversationSnapshotResponse,
-        source = 'unknown',
-        options?: {
-            forceWorkspaceSync?: boolean
-        },
-    ) => {
-        const latestProjectScope = useStore.getState().projectSessionsByPath[projectPath]
-        const shouldSyncActiveWorkspace = options?.forceWorkspaceSync === true
-            || latestProjectScope?.conversationId === snapshot.conversation_id
-        const { applied, cache, latestApprovedProposal, latestExecutionCard } = applyConversationSnapshotToCache(
-            conversationCacheRef.current,
-            projectPath,
-            snapshot,
-        )
-        if (!applied) {
-            debugProjectChat('skip stale conversation snapshot', {
-                source,
-                projectPath,
-                conversationId: snapshot.conversation_id,
-                snapshotUpdatedAt: snapshot.updated_at,
-            })
-            return
+        if (activeConversationId) {
+            return activeConversationId
         }
-        debugProjectChat('apply conversation snapshot', {
-            source,
-            projectPath,
-            snapshotProjectPath: snapshot.project_path,
-            conversationId: snapshot.conversation_id,
-            shouldSyncActiveWorkspace,
-            turnCount: snapshot.turns.length,
-            turns: summarizeConversationTurnsForDebug(snapshot.turns),
-        })
-        commitConversationCache(cache)
-
-        if (shouldSyncActiveWorkspace) {
-            updateProjectSessionState(projectPath, {
-                conversationId: snapshot.conversation_id,
-                projectEventLog: snapshot.event_log.map((entry) => ({
-                    message: entry.message,
-                    timestamp: entry.timestamp,
-                })),
-                specId: latestApprovedProposal?.canonical_spec_edit_id ?? null,
-                specStatus: latestApprovedProposal ? 'approved' : 'draft',
-                specProvenance: latestApprovedProposal
-                    ? {
-                        source: 'spec-edit-proposal',
-                        referenceId: latestApprovedProposal.id,
-                        capturedAt: latestApprovedProposal.approved_at || latestApprovedProposal.created_at,
-                        runId: null,
-                        gitBranch: latestApprovedProposal.git_branch ?? null,
-                        gitCommit: latestApprovedProposal.git_commit ?? null,
-                    }
-                    : null,
-                planId: latestExecutionCard?.id ?? null,
-                planStatus: derivePlanStatusFromExecutionCard(latestExecutionCard),
-                planProvenance: latestExecutionCard
-                    ? {
-                        source: 'execution-card',
-                        referenceId: latestExecutionCard.id,
-                        capturedAt: latestExecutionCard.updated_at,
-                        runId: latestExecutionCard.source_workflow_run_id,
-                        gitBranch: latestApprovedProposal?.git_branch ?? null,
-                        gitCommit: latestApprovedProposal?.git_commit ?? null,
-                    }
-                    : null,
-            })
-            if (latestProjectScope?.conversationId !== snapshot.conversation_id) {
-                void persistProjectState(projectPath, {
-                    active_conversation_id: snapshot.conversation_id,
-                    last_accessed_at: new Date().toISOString(),
-                })
-            }
-        }
-
-        if (latestApprovedProposal?.git_branch || latestApprovedProposal?.git_commit) {
-            setProjectGitMetadata((current) => ({
-                ...current,
-                [projectPath]: {
-                    branch: latestApprovedProposal.git_branch ?? current[projectPath]?.branch ?? null,
-                    commit: latestApprovedProposal.git_commit ?? current[projectPath]?.commit ?? null,
-                },
-            }))
-        }
-    }
-
-    const applyConversationStreamEvent = (
-        projectPath: string,
-        event: ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse,
-        source = 'unknown',
-    ) => {
-        debugProjectChat('apply conversation stream event', {
-            source,
-            projectPath,
-            eventType: event.type,
-            conversationId: event.conversation_id,
-        })
-        const { cache, snapshot } = applyConversationStreamEventToCache(
-            conversationCacheRef.current,
-            projectPath,
-            event as ConversationStreamEvent,
-        )
-        commitConversationCache(cache)
-        if (snapshot) {
-            debugProjectChat('apply merged stream snapshot', {
-                source,
-                projectPath,
-                conversationId: snapshot.conversation_id,
-                turnCount: snapshot.turns.length,
-            })
-        }
-    }
+        const conversationId = buildProjectConversationId(activeProjectPath)
+        activateConversationThread(activeProjectPath, conversationId, 'ensure-conversation')
+        return conversationId
+    }, [activeConversationId, activeProjectPath, activateConversationThread])
 
     useConversationStream({
         activeConversationId,
@@ -398,77 +219,6 @@ export function useProjectsHomeController() {
         formatErrorMessage: extractApiErrorMessage,
         setPanelError,
     })
-
-    useEffect(() => {
-        let isCancelled = false
-
-        const loadProjectRegistry = async () => {
-            try {
-                const projects = await fetchProjectRegistryValidated()
-                if (isCancelled) {
-                    return
-                }
-                hydrateProjectRegistry(projects.map(toHydratedProjectRecord))
-                setPanelError(null)
-            } catch (error) {
-                if (isCancelled) {
-                    return
-                }
-                setPanelError(extractApiErrorMessage(error, 'Unable to load available projects.'))
-            }
-        }
-
-        void loadProjectRegistry()
-        return () => {
-            isCancelled = true
-        }
-    }, [hydrateProjectRegistry])
-
-    useEffect(() => {
-        const projectPathsToFetch = projects
-            .map((project) => project.directoryPath)
-            .filter((projectPath) => !(projectPath in projectGitMetadata))
-        if (projectPathsToFetch.length === 0) {
-            return
-        }
-
-        let isCancelled = false
-        const loadBranches = async () => {
-            const entries = await Promise.all(
-                projectPathsToFetch.map(async (projectPath) => {
-                    try {
-                        const metadata = await fetchProjectMetadataValidated(projectPath)
-                        return [
-                            projectPath,
-                            {
-                                branch: asProjectGitMetadataField(metadata.branch),
-                                commit: asProjectGitMetadataField(metadata.commit),
-                            },
-                        ] as const
-                    } catch {
-                        return [projectPath, { ...EMPTY_PROJECT_GIT_METADATA }] as const
-                    }
-                }),
-            )
-
-            if (isCancelled) {
-                return
-            }
-
-            setProjectGitMetadata((current) => {
-                const next = { ...current }
-                entries.forEach(([projectPath, metadata]) => {
-                    next[projectPath] = metadata
-                })
-                return next
-            })
-        }
-
-        void loadBranches()
-        return () => {
-            isCancelled = true
-        }
-    }, [projectGitMetadata, projects])
 
     useEffect(() => {
         if (!activeProjectPath) {
@@ -494,24 +244,11 @@ export function useProjectsHomeController() {
         return () => {
             isCancelled = true
         }
-    }, [activeConversationId, activeProjectPath])
+    }, [activeConversationId, activeProjectPath, activateConversationThread, loadProjectConversationSummaries])
 
     useEffect(() => {
-        resetComposer()
-        setPanelError(null)
+        resetComposerRef.current()
     }, [activeProjectPath])
-
-    useEffect(() => {
-        setExpandedProposalChanges({})
-    }, [activeProjectPath, latestSpecEditProposalId])
-
-    useEffect(() => {
-        setExpandedToolCalls({})
-    }, [activeConversationId, activeProjectPath])
-
-    useEffect(() => {
-        setExpandedThinkingEntries({})
-    }, [activeConversationId, activeProjectPath])
 
     useEffect(() => {
         if (!projectDirectoryPickerInputRef.current) {
@@ -522,285 +259,19 @@ export function useProjectsHomeController() {
     }, [])
 
     useEffect(() => {
-        if (!isConversationPinnedToBottom) {
+        isConversationPinnedToBottomRef.current = isConversationPinnedToBottom
+    }, [isConversationPinnedToBottom])
+
+    useEffect(() => {
+        if (!isConversationPinnedToBottomRef.current) {
             return
         }
-        const frame = window.requestAnimationFrame(() => {
-            const node = conversationBodyRef.current
-            if (!node) {
-                return
-            }
-            node.scrollTop = node.scrollHeight
-        })
-        return () => {
-            window.cancelAnimationFrame(frame)
-        }
-    }, [activeConversationHistory, activeProjectPath, conversationBodyRef, isConversationPinnedToBottom])
-
-    const fetchProjectGitMetadata = async (
-        projectPath: string,
-    ): Promise<{ metadata: ProjectGitMetadata; error?: string }> => {
-        try {
-            const payload = await fetchProjectMetadataValidated(projectPath)
-            return {
-                metadata: {
-                    branch: asProjectGitMetadataField(payload.branch),
-                    commit: asProjectGitMetadataField(payload.commit),
-                },
-            }
-        } catch (err) {
-            let message = 'Unable to verify project Git state.'
-            if (err instanceof ApiHttpError && err.detail) {
-                message = err.detail
-            }
-            return { metadata: { ...EMPTY_PROJECT_GIT_METADATA }, error: message }
-        }
-    }
-
-    const ensureProjectGitRepository = async (projectPath: string): Promise<ProjectGitMetadata | null> => {
-        const { metadata, error } = await fetchProjectGitMetadata(projectPath)
-        setProjectGitMetadata((current) => ({ ...current, [projectPath]: metadata }))
-        if (error) {
-            setProjectRegistrationError(error)
-            return null
-        }
-        if (!metadata.branch && !metadata.commit) {
-            setProjectRegistrationError('Project directory must be a Git repository.')
-            return null
-        }
-        return metadata
-    }
-
-    const registerProjectFromPath = async (rawProjectPath: string) => {
-        const validation = resolveProjectPathValidation(rawProjectPath, projectRegistry)
-        if (!validation.ok || !validation.normalizedPath) {
-            setProjectRegistrationError(validation.error ?? 'Project directory path is required.')
+        const node = conversationBodyRef.current
+        if (!node) {
             return
         }
-        const normalizedProjectPath = validation.normalizedPath
-        const gitMetadata = await ensureProjectGitRepository(normalizedProjectPath)
-        if (!gitMetadata) {
-            return
-        }
-        const result = registerProject(normalizedProjectPath)
-        if (!result.ok) {
-            setProjectRegistrationError(result.error ?? 'Unable to register the project.')
-            return
-        }
-        try {
-            const projectRecord = await registerProjectValidated(normalizedProjectPath)
-            upsertProjectRegistryEntry(toHydratedProjectRecord(projectRecord))
-        } catch (error) {
-            useStore.setState((state) => {
-                const nextProjectRegistry = { ...state.projectRegistry }
-                const nextProjectSessionStates = { ...state.projectSessionsByPath }
-                delete nextProjectRegistry[normalizedProjectPath]
-                delete nextProjectSessionStates[normalizedProjectPath]
-                const nextActiveProjectPath = state.activeProjectPath === normalizedProjectPath ? null : state.activeProjectPath
-                return {
-                    projectRegistry: nextProjectRegistry,
-                    projectSessionsByPath: nextProjectSessionStates,
-                    activeProjectPath: nextActiveProjectPath,
-                    activeFlow: state.activeFlow,
-                    selectedRunId: nextActiveProjectPath ? state.selectedRunId : null,
-                    workingDir: nextActiveProjectPath ? state.workingDir : './test-app',
-                }
-            })
-            setProjectRegistrationError(extractApiErrorMessage(error, 'Unable to register the project.'))
-            return
-        }
-        if (result.ok) {
-            setProjectRegistrationError(null)
-        }
-    }
-
-    const onOpenProjectDirectoryChooser = async () => {
-        clearProjectRegistrationError()
-        try {
-            const selection = await pickProjectDirectoryValidated()
-            if (selection.status === 'canceled') {
-                return
-            }
-            await registerProjectFromPath(selection.directory_path)
-            return
-        } catch (error) {
-            const canUseBrowserFallback = error instanceof ApiHttpError
-                && [404, 405, 501, 503].includes(error.status)
-                && projectDirectoryPickerInputRef.current
-            if (!canUseBrowserFallback) {
-                setProjectRegistrationError(extractApiErrorMessage(error, 'Directory picker is unavailable.'))
-                return
-            }
-        }
-        if (!projectDirectoryPickerInputRef.current) {
-            setProjectRegistrationError('Directory picker is unavailable.')
-            return
-        }
-        projectDirectoryPickerInputRef.current.value = ''
-        projectDirectoryPickerInputRef.current.click()
-    }
-
-    const onProjectDirectorySelected = (event: ChangeEvent<HTMLInputElement>) => {
-        const files = event.target.files
-        const selectedProjectPath = deriveProjectPathFromDirectorySelection(files)
-        event.target.value = ''
-        if (!selectedProjectPath) {
-            setProjectRegistrationError(
-                'Unable to resolve an absolute project path from the selected directory.',
-            )
-            return
-        }
-        void registerProjectFromPath(selectedProjectPath)
-    }
-
-    const onActivateProject = async (projectPath: string) => {
-        if (!projectPath) {
-            return
-        }
-        if (projectPath === activeProjectPath) {
-            setActiveProjectPath(projectPath)
-            return
-        }
-        const gitMetadata = await ensureProjectGitRepository(projectPath)
-        if (!gitMetadata) {
-            return
-        }
-        setProjectRegistrationError(null)
-        setActiveProjectPath(projectPath)
-        void persistProjectState(projectPath, {
-            last_accessed_at: new Date().toISOString(),
-        })
-    }
-
-    const onCreateConversationThread = () => {
-        if (!activeProjectPath) {
-            return
-        }
-        const now = new Date().toISOString()
-        const conversationId = buildProjectConversationId(activeProjectPath)
-        setPanelError(null)
-        setConversationSummaryList(activeProjectPath, [
-            {
-                conversation_id: conversationId,
-                conversation_handle: '',
-                project_path: activeProjectPath,
-                title: 'New thread',
-                created_at: now,
-                updated_at: now,
-                last_message_preview: null,
-            },
-            ...(conversationCacheRef.current.summariesByProjectPath[activeProjectPath] || []),
-        ])
-        activateConversationThread(activeProjectPath, conversationId, 'create-thread')
-    }
-
-    const onSelectConversationThread = (conversationId: string) => {
-        if (!activeProjectPath) {
-            return
-        }
-        setPanelError(null)
-        activateConversationThread(activeProjectPath, conversationId, 'select-thread')
-        const cachedSnapshot = conversationCacheRef.current.snapshotsByConversationId[conversationId]
-        if (cachedSnapshot) {
-            applyConversationSnapshot(activeProjectPath, cachedSnapshot, 'thread-cache')
-        }
-    }
-
-    const onDeleteConversationThread = async (conversationId: string, title: string) => {
-        if (!activeProjectPath) {
-            return
-        }
-        if (typeof window !== 'undefined' && !window.confirm(`Delete thread "${title}"?`)) {
-            return
-        }
-        setPanelError(null)
-        setPendingDeleteConversationId(conversationId)
-        try {
-            await deleteConversationValidated(conversationId, activeProjectPath)
-            commitConversationCache((current) => removeConversationFromCache(current, conversationId))
-            const localRemainingSummaries = (
-                conversationCacheRef.current.summariesByProjectPath[activeProjectPath] || []
-            ).filter((entry) => entry.conversation_id !== conversationId)
-            setConversationSummaryList(activeProjectPath, localRemainingSummaries)
-
-            let remainingSummaries = localRemainingSummaries
-            try {
-                remainingSummaries = await fetchProjectConversationListValidated(activeProjectPath)
-                setConversationSummaryList(activeProjectPath, remainingSummaries)
-            } catch {
-                // Keep the local optimistic removal if the follow-up refresh fails.
-            }
-
-            if (activeConversationId === conversationId) {
-                const fallbackConversationId = remainingSummaries[0]?.conversation_id || null
-                resetComposer()
-                setConversationId(fallbackConversationId)
-                if (fallbackConversationId) {
-                    updateProjectSessionState(activeProjectPath, {
-                        conversationId: fallbackConversationId,
-                    })
-                }
-                void persistProjectState(activeProjectPath, {
-                    active_conversation_id: fallbackConversationId,
-                    last_accessed_at: new Date().toISOString(),
-                })
-            }
-        } catch (error) {
-            const message = extractApiErrorMessage(error, 'Unable to delete the thread.')
-            setPanelError(message)
-            appendLocalProjectEvent(`Thread deletion failed: ${message}`)
-        } finally {
-            setPendingDeleteConversationId(null)
-        }
-    }
-
-    const onDeleteProject = async (projectPath: string) => {
-        const projectLabel = formatProjectListLabel(projectPath)
-        if (
-            typeof window !== 'undefined'
-            && !window.confirm(
-                `Remove project "${projectLabel}" from Spark? This deletes its local threads, workflow history, and runs, but does not delete the project files.`,
-            )
-        ) {
-            return
-        }
-
-        setPanelError(null)
-        setPendingDeleteProjectPath(projectPath)
-        try {
-            await deleteProjectValidated(projectPath)
-
-            setProjectGitMetadata((current) => {
-                const next = { ...current }
-                delete next[projectPath]
-                return next
-            })
-            commitConversationCache((current) => removeProjectFromCache(current, projectPath))
-
-            const fallbackProjectPath = activeProjectPath === projectPath
-                ? orderedProjects.find((project) => project.directoryPath !== projectPath)?.directoryPath || null
-                : null
-            removeProject(projectPath, fallbackProjectPath)
-        } catch (error) {
-            const message = extractApiErrorMessage(error, 'Unable to remove the project.')
-            setPanelError(message)
-            appendLocalProjectEvent(`Project removal failed: ${message}`)
-        } finally {
-            setPendingDeleteProjectPath(null)
-        }
-    }
-
-    const ensureConversationId = () => {
-        if (!activeProjectPath) {
-            return null
-        }
-        if (activeConversationId) {
-            return activeConversationId
-        }
-        const conversationId = buildProjectConversationId(activeProjectPath)
-        activateConversationThread(activeProjectPath, conversationId, 'ensure-conversation')
-        return conversationId
-    }
+        node.scrollTop = node.scrollHeight
+    }, [activeProjectPath, conversationBodyRef, conversationHistoryRevisionKey])
 
     const {
         onChatComposerKeyDown,
@@ -821,6 +292,56 @@ export function useProjectsHomeController() {
         setChatDraft,
         setPanelError,
         setOptimisticSend,
+    })
+
+    useEffect(() => {
+        resetComposerRef.current = resetComposer
+    }, [resetComposer])
+
+    const {
+        onActivateProject,
+        onDeleteProject,
+        onOpenProjectDirectoryChooser,
+        onProjectDirectorySelected,
+    } = useProjectRegistryActions({
+        activeProjectPath,
+        projectRegistry,
+        orderedProjects,
+        projectDirectoryPickerInputRef,
+        setPanelError,
+        setPendingDeleteProjectPath,
+        setProjectRegistrationError,
+        clearProjectRegistrationError,
+        setProjectGitMetadata,
+        ensureProjectGitRepository,
+        registerProject,
+        upsertProjectRegistryEntry,
+        commitConversationCache,
+        removeProject,
+        setActiveProjectPath,
+        appendLocalProjectEvent,
+        persistProjectState,
+    })
+
+    const {
+        onCreateConversationThread,
+        onDeleteConversationThread,
+        onSelectConversationThread,
+    } = useProjectThreadActions({
+        activeProjectPath,
+        activeConversationId,
+        conversationCacheRef,
+        setConversationSummaryList,
+        applyConversationSnapshot,
+        activateConversationThread,
+        resetComposer,
+        setConversationId,
+        updateProjectSessionState,
+        setPanelError,
+        setPendingDeleteConversationId,
+        appendLocalProjectEvent,
+        commitConversationCache,
+        persistProjectState,
     })
 
     const {
@@ -848,27 +369,6 @@ export function useProjectsHomeController() {
         setSelectedRunId(request.run_id)
         setExecutionFlow(request.flow_name || null)
         setViewMode('execution')
-    }
-
-    const toggleProposalChangeExpanded = (changeKey: string) => {
-        setExpandedProposalChanges((current) => ({
-            ...current,
-            [changeKey]: !current[changeKey],
-        }))
-    }
-
-    const toggleToolCallExpanded = (toolCallId: string) => {
-        setExpandedToolCalls((current) => ({
-            ...current,
-            [toolCallId]: !current[toolCallId],
-        }))
-    }
-
-    const toggleThinkingEntryExpanded = (entryId: string) => {
-        setExpandedThinkingEntries((current) => ({
-            ...current,
-            [entryId]: !current[entryId],
-        }))
     }
 
     return {

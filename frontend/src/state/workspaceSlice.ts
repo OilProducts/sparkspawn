@@ -2,6 +2,7 @@ import { type StateCreator } from 'zustand'
 import { isAbsoluteProjectPath, normalizeProjectPath } from '@/lib/projectPaths'
 import {
     buildHydrateProjectRegistryTransition,
+    buildRegisterProjectTransition,
     buildRemoveProjectTransition,
     buildSetActiveProjectTransition,
     saveProjectScopeRouteState,
@@ -49,7 +50,7 @@ export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice
     viewMode: restoredRouteState.viewMode,
     setViewMode: (mode) =>
         set((state) => {
-            const nextViewMode = resolveViewModeForProjectScope(mode, state.activeProjectPath)
+            const nextViewMode = resolveViewModeForProjectScope(mode)
             saveRouteState({
                 viewMode: nextViewMode,
                 activeProjectPath: state.activeProjectPath,
@@ -150,47 +151,16 @@ export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice
                 return { projectRegistrationError: result.error }
             }
 
-            const nextActiveProjectPath = state.activeProjectPath ?? normalizedPath
-            const shouldActivateNewProject = !state.activeProjectPath
-            const nowIso = shouldActivateNewProject ? new Date().toISOString() : null
-            const nextProjectSessionStates = { ...state.projectSessionsByPath }
-            const nextProjectRegistry = {
-                ...state.projectRegistry,
-                [normalizedPath]: {
-                    directoryPath: normalizedPath,
-                    isFavorite: false,
-                    lastAccessedAt: nowIso,
-                },
-            }
-            nextProjectSessionStates[normalizedPath] = resolveProjectSessionState(
-                nextProjectSessionStates[normalizedPath],
-                normalizedPath,
-            )
-            const nextActiveProjectScope = resolveProjectSessionState(
-                nextProjectSessionStates[nextActiveProjectPath],
-                nextActiveProjectPath,
-            )
+            const nextState = buildRegisterProjectTransition(state, normalizedPath)
             saveRouteState({
                 viewMode: state.viewMode,
-                activeProjectPath: nextActiveProjectPath,
+                activeProjectPath: nextState.activeProjectPath,
             })
             result = {
                 ok: true,
                 normalizedPath,
             }
-            return {
-                projectRegistry: nextProjectRegistry,
-                recentProjectPaths: shouldActivateNewProject
-                    ? pushRecentProjectPath(state.recentProjectPaths, normalizedPath)
-                    : state.recentProjectPaths,
-                projectRegistrationError: null,
-                activeProjectPath: nextActiveProjectPath,
-                projectSessionsByPath: nextProjectSessionStates,
-                activeFlow: state.activeFlow,
-                executionFlow: state.activeProjectPath ? state.executionFlow : null,
-                selectedRunId: state.activeProjectPath ? state.selectedRunId : null,
-                workingDir: state.activeProjectPath ? state.workingDir : nextActiveProjectScope.workingDir,
-            }
+            return nextState
         })
         return result
     },

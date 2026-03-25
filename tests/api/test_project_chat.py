@@ -160,19 +160,19 @@ def test_project_chat_service_rejects_prompt_templates_missing_required_keys(tmp
 
 def test_extract_file_paths_deduplicates_nested_entries() -> None:
     payload = {
-        "path": "frontend/src/components/ProjectsPanel.tsx",
+        "path": "frontend/src/features/projects/ProjectsPanel.tsx",
         "files": [
-            "frontend/src/components/ProjectsPanel.tsx",
+            "frontend/src/features/projects/ProjectsPanel.tsx",
             {"path": "frontend/src/lib/apiClient.ts"},
         ],
         "changes": [
-            {"filePath": "frontend/src/components/ProjectsPanel.tsx"},
+            {"filePath": "frontend/src/features/projects/ProjectsPanel.tsx"},
             {"file_path": "frontend/src/store.ts"},
         ],
     }
 
     assert codex_app_server.extract_file_paths(payload) == [
-        "frontend/src/components/ProjectsPanel.tsx",
+        "frontend/src/features/projects/ProjectsPanel.tsx",
         "frontend/src/lib/apiClient.ts",
         "frontend/src/store.ts",
     ]
@@ -231,7 +231,7 @@ def test_tool_call_from_file_change_item_collects_paths() -> None:
             "type": "fileChange",
             "status": "inProgress",
             "changes": [
-                {"path": "frontend/src/components/ProjectsPanel.tsx"},
+                {"path": "frontend/src/features/projects/ProjectsPanel.tsx"},
                 {"filePath": "frontend/src/store.ts"},
             ],
         }
@@ -242,7 +242,7 @@ def test_tool_call_from_file_change_item_collects_paths() -> None:
     assert tool_call.kind == "file_change"
     assert tool_call.status == "running"
     assert tool_call.file_paths == [
-        "frontend/src/components/ProjectsPanel.tsx",
+        "frontend/src/features/projects/ProjectsPanel.tsx",
         "frontend/src/store.ts",
     ]
 

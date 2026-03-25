@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 
-FRONTEND_CONTRACT_TEST_FILE = "src/components/__tests__/ContractBehavior.test.tsx"
+FRONTEND_CONTRACT_TEST_FILE = "src/__tests__/ContractBehavior.test.tsx"
 CONTRACT_ID_PATTERN = re.compile(r"\[CID:([A-Za-z0-9_.-]+)\]")
 
 

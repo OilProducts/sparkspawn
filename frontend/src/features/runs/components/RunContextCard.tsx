@@ -1,4 +1,13 @@
-import type { ContextErrorState, RunContextRow } from '@/components/runs/shared'
+import type { ContextErrorState, RunContextRow } from '../model/shared'
+import {
+    Button,
+    InlineNotice,
+    Input,
+    Panel,
+    PanelContent,
+    PanelHeader,
+    SectionHeader,
+} from '@/ui'
 
 interface RunContextCardProps {
     isLoading: boolean
@@ -25,66 +34,88 @@ export function RunContextCard({
     onCopy,
     onSearchQueryChange,
 }: RunContextCardProps) {
+    const exportButton = contextExportHref ? (
+        <Button
+            asChild
+            variant="outline"
+            size="xs"
+            className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+        >
+            <a
+                data-testid="run-context-export-button"
+                href={contextExportHref}
+                download={`run-context-${runId}.json`}
+            >
+                Export JSON
+            </a>
+        </Button>
+    ) : (
+        <Button
+            type="button"
+            data-testid="run-context-export-button"
+            disabled={true}
+            variant="outline"
+            size="xs"
+            className="h-7 text-[11px] text-muted-foreground"
+        >
+            Export JSON
+        </Button>
+    )
+
     return (
-        <div data-testid="run-context-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Context</h3>
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={onRefresh}
-                        data-testid="run-context-refresh-button"
-                        className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                    >
-                        {isLoading ? 'Refreshing…' : 'Refresh'}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onCopy}
-                        data-testid="run-context-copy-button"
-                        className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                    >
-                        Copy JSON
-                    </button>
-                    <a
-                        data-testid="run-context-export-button"
-                        href={contextExportHref || undefined}
-                        download={`run-context-${runId}.json`}
-                        onClick={(event) => {
-                            if (!contextExportHref) {
-                                event.preventDefault()
-                            }
-                        }}
-                        className={`inline-flex h-7 items-center rounded-md border px-2 text-[11px] font-medium ${
-                            contextExportHref
-                                ? 'border-border text-muted-foreground hover:text-foreground'
-                                : 'cursor-not-allowed border-border/60 text-muted-foreground/50'
-                        }`}
-                    >
-                        Export JSON
-                    </a>
-                </div>
-            </div>
+        <Panel data-testid="run-context-panel">
+            <PanelHeader>
+                <SectionHeader
+                    title="Context"
+                    description="Search, copy, or export the structured runtime context."
+                    action={(
+                        <div className="flex items-center gap-2">
+                            <Button
+                                onClick={onRefresh}
+                                data-testid="run-context-refresh-button"
+                                variant="outline"
+                                size="xs"
+                                className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                                {isLoading ? 'Refreshing…' : 'Refresh'}
+                            </Button>
+                            <Button
+                                type="button"
+                                onClick={onCopy}
+                                data-testid="run-context-copy-button"
+                                variant="outline"
+                                size="xs"
+                                className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                                Copy JSON
+                            </Button>
+                            {exportButton}
+                        </div>
+                    )}
+                />
+            </PanelHeader>
+            <PanelContent className="space-y-3">
             {contextCopyStatus && (
-                <div data-testid="run-context-copy-status" className="mb-3 text-xs text-muted-foreground">
+                <div data-testid="run-context-copy-status" className="text-xs text-muted-foreground">
                     {contextCopyStatus}
                 </div>
             )}
-            <div className="mb-3">
-                <input
+            <div>
+                <Input
                     value={searchQuery}
                     onChange={(event) => onSearchQueryChange(event.target.value)}
                     placeholder="Search context key or value..."
                     data-testid="run-context-search-input"
-                    className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                    className="text-sm"
                 />
             </div>
             {contextError && (
-                <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <InlineNotice tone="error" className="space-y-1">
                     <div data-testid="run-context-error">{contextError.message}</div>
                     <div data-testid="run-context-error-help" className="text-xs text-destructive/90">
                         {contextError.help}
                     </div>
-                </div>
+                </InlineNotice>
             )}
             {!contextError && (
                 <div className="overflow-hidden rounded-md border border-border/80">
@@ -135,6 +166,7 @@ export function RunContextCard({
                     </table>
                 </div>
             )}
-        </div>
+            </PanelContent>
+        </Panel>
     )
 }

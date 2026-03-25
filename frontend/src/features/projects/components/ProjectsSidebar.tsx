@@ -1,9 +1,9 @@
 import type { ChangeEventHandler, KeyboardEventHandler, MutableRefObject, PointerEventHandler } from "react"
 import { FileText, Folder, FolderOpen, Plus, Trash2 } from "lucide-react"
 
-import { HomeProjectSidebar } from "@/components/HomeProjectSidebar"
-import type { ConversationSummaryResponse } from "@/lib/workspaceClient"
-import { Button, EmptyState, Panel, PanelContent, PanelHeader, SectionHeader } from "@/ui"
+import { HomeProjectSidebar } from "./HomeProjectSidebar"
+import type { ProjectConversationSummary } from "../model/types"
+import { Button, EmptyState, Input, Panel, PanelContent, PanelHeader, SectionHeader } from "@/ui"
 
 type ProjectRecord = {
     directoryPath: string
@@ -23,7 +23,7 @@ type ProjectsSidebarProps = {
     orderedProjects: ProjectRecord[]
     activeProjectPath: string | null
     activeConversationId: string | null
-    activeProjectConversationSummaries: ConversationSummaryResponse[]
+    activeProjectConversationSummaries: ProjectConversationSummary[]
     pendingDeleteProjectPath: string | null
     pendingDeleteConversationId: string | null
     activeProjectEventLog: ProjectEventLogEntry[]
@@ -100,7 +100,7 @@ export function ProjectsSidebar({
                                     New
                                 </Button>
                             </div>
-                            <input
+                            <Input
                                 ref={projectDirectoryPickerInputRef}
                                 data-testid="project-directory-picker-input"
                                 type="file"
@@ -132,14 +132,16 @@ export function ProjectsSidebar({
                                         const isDeletingProject = pendingDeleteProjectPath === projectPath
                                         return (
                                             <li key={projectPath} className="group/project relative space-y-1">
-                                                <button
+                                                <Button
                                                     type="button"
                                                     onClick={() => {
                                                         void onActivateProject(projectPath)
                                                     }}
                                                     aria-current={isActive ? "true" : undefined}
                                                     title={projectPath}
-                                                    className={`w-full rounded-md px-2 py-2 pr-9 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActive
+                                                    variant={isActive ? "secondary" : "ghost"}
+                                                    size="sm"
+                                                    className={`h-auto w-full justify-start px-2 py-2 pr-9 text-left ${isActive
                                                         ? "bg-primary/10 text-foreground"
                                                         : "text-foreground hover:bg-muted/70"
                                                         }`}
@@ -154,8 +156,8 @@ export function ProjectsSidebar({
                                                             {formatProjectListLabel(projectPath)}
                                                         </span>
                                                     </div>
-                                                </button>
-                                                <button
+                                                </Button>
+                                                <Button
                                                     type="button"
                                                     aria-label="Remove project"
                                                     title={`Remove project ${formatProjectListLabel(projectPath)}`}
@@ -164,25 +166,29 @@ export function ProjectsSidebar({
                                                         void onDeleteProject(projectPath)
                                                     }}
                                                     disabled={isDeletingProject}
-                                                    className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/project:opacity-100 group-focus-within/project:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    variant="ghost"
+                                                    size="icon-xs"
+                                                    className="absolute right-1 top-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover/project:opacity-100 group-focus-within/project:opacity-100"
                                                 >
                                                     <Trash2 className="h-3.5 w-3.5" />
-                                                </button>
+                                                </Button>
                                                 {isActive ? (
                                                     <div className="ml-5 border-l border-border/70 pl-2">
                                                         <div
                                                             data-testid="project-thread-controls"
                                                             className="mb-1 flex justify-end"
                                                         >
-                                                            <button
+                                                            <Button
                                                                 data-testid="project-thread-new-button"
                                                                 type="button"
                                                                 onClick={onCreateConversationThread}
-                                                                className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                                variant="ghost"
+                                                                size="xs"
+                                                                className="text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
                                                             >
                                                                 <Plus className="h-3.5 w-3.5" />
                                                                 <span>New thread</span>
-                                                            </button>
+                                                            </Button>
                                                         </div>
                                                         <ul data-testid="project-thread-list" className="space-y-1">
                                                             {projectConversationSummaries.length === 0 ? (
@@ -196,12 +202,14 @@ export function ProjectsSidebar({
                                                                     const isDeletingConversation = pendingDeleteConversationId === conversation.conversation_id
                                                                     return (
                                                                         <li key={conversation.conversation_id} className="group/thread relative">
-                                                                            <button
+                                                                            <Button
                                                                                 type="button"
                                                                                 onClick={() => onSelectConversationThread(conversation.conversation_id)}
                                                                                 aria-current={isActiveConversation ? "true" : undefined}
                                                                                 aria-label={`Open thread ${conversation.title}`}
-                                                                                className={`w-full rounded-xl px-2 py-2 pr-9 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${isActiveConversation
+                                                                                variant={isActiveConversation ? "secondary" : "ghost"}
+                                                                                size="sm"
+                                                                                className={`h-auto w-full justify-start rounded-xl px-2 py-2 pr-9 text-left ${isActiveConversation
                                                                                     ? "bg-muted text-foreground shadow-sm"
                                                                                     : "text-foreground/90 hover:bg-muted/60"
                                                                                     }`}
@@ -222,8 +230,8 @@ export function ProjectsSidebar({
                                                                                         {ageLabel}
                                                                                     </span>
                                                                                 </div>
-                                                                            </button>
-                                                                            <button
+                                                                            </Button>
+                                                                            <Button
                                                                                 type="button"
                                                                                 aria-label={`Delete thread ${conversation.title}`}
                                                                                 data-testid={`project-thread-delete-${conversation.conversation_id}`}
@@ -231,10 +239,12 @@ export function ProjectsSidebar({
                                                                                     void onDeleteConversationThread(conversation.conversation_id, conversation.title)
                                                                                 }}
                                                                                 disabled={isDeletingConversation}
-                                                                                className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                                variant="ghost"
+                                                                                size="icon-xs"
+                                                                                className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover/thread:opacity-100 group-focus-within/thread:opacity-100"
                                                                             >
                                                                                 <Trash2 className="h-3.5 w-3.5" />
-                                                                            </button>
+                                                                            </Button>
                                                                         </li>
                                                                     )
                                                                 })

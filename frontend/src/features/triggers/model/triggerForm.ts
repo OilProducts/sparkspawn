@@ -1,5 +1,7 @@
 import type { TriggerResponse, TriggerSourceType } from '@/lib/workspaceClient'
 
+export type { TriggerSourceType }
+
 export type TriggerFormState = {
     name: string
     enabled: boolean

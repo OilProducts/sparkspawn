@@ -66,7 +66,7 @@ const LEGACY_DEFAULT_MAX_RETRY_KEY: keyof GraphAttrs = 'default_max_retry'
 
 export const normalizeViewMode = (mode: ViewMode): ViewMode => (mode === 'projects' ? 'home' : mode)
 
-export const resolveViewModeForProjectScope = (mode: ViewMode, _activeProjectPath: string | null): ViewMode =>
+export const resolveViewModeForProjectScope = (mode: ViewMode): ViewMode =>
     normalizeViewMode(mode)
 
 export const pushRecentProjectPath = (recentProjectPaths: string[], projectPath: string | null) => {
@@ -259,7 +259,7 @@ export const loadRouteState = (): RouteState => {
         }
         return {
             ...parsedRouteState,
-            viewMode: resolveViewModeForProjectScope(parsedRouteState.viewMode, parsedRouteState.activeProjectPath),
+            viewMode: resolveViewModeForProjectScope(parsedRouteState.viewMode),
         }
     } catch {
         return { ...DEFAULT_ROUTE_STATE }

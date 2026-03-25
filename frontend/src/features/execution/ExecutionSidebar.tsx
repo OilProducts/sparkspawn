@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 
 import { useStore } from '@/store'
-import { fetchFlowListValidated } from '@/lib/attractorClient'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
-import { FlowTree } from '@/components/FlowTree'
+import { FlowTree } from '@/ui/flow-tree'
+import { loadExecutionFlowCatalog } from './services/flowCatalog'
 
 export function ExecutionSidebar() {
     const executionFlow = useStore((state) => state.executionFlow)
@@ -36,7 +36,7 @@ export function ExecutionSidebar() {
 
         const loadFlows = async () => {
             try {
-                const data = await fetchFlowListValidated()
+                const data = await loadExecutionFlowCatalog()
                 if (!cancelled) {
                     setFlows(data)
                 }

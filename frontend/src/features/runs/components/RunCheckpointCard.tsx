@@ -1,7 +1,8 @@
 import type {
     CheckpointErrorState,
     CheckpointResponse,
-} from '@/components/runs/shared'
+} from '../model/shared'
+import { Button, InlineNotice, Panel, PanelContent, PanelHeader, SectionHeader } from '@/ui'
 
 interface RunCheckpointCardProps {
     isLoading: boolean
@@ -23,24 +24,32 @@ export function RunCheckpointCard({
     onRefresh,
 }: RunCheckpointCardProps) {
     return (
-        <div data-testid="run-checkpoint-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Checkpoint</h3>
-                <button
-                    onClick={onRefresh}
-                    data-testid="run-checkpoint-refresh-button"
-                    className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                >
-                    {isLoading ? 'Refreshing…' : 'Refresh'}
-                </button>
-            </div>
+        <Panel data-testid="run-checkpoint-panel">
+            <PanelHeader>
+                <SectionHeader
+                    title="Checkpoint"
+                    description="Latest persisted runtime position and retry counters."
+                    action={(
+                        <Button
+                            onClick={onRefresh}
+                            data-testid="run-checkpoint-refresh-button"
+                            variant="outline"
+                            size="xs"
+                            className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+                        >
+                            {isLoading ? 'Refreshing…' : 'Refresh'}
+                        </Button>
+                    )}
+                />
+            </PanelHeader>
+            <PanelContent className="space-y-3">
             {checkpointError && (
-                <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <InlineNotice tone="error" className="space-y-1">
                     <div data-testid="run-checkpoint-error">{checkpointError.message}</div>
                     <div data-testid="run-checkpoint-error-help" className="text-xs text-destructive/90">
                         {checkpointError.help}
                     </div>
-                </div>
+                </InlineNotice>
             )}
             {!checkpointError && checkpointData && (
                 <div className="space-y-3">
@@ -63,6 +72,7 @@ export function RunCheckpointCard({
                     </pre>
                 </div>
             )}
-        </div>
+            </PanelContent>
+        </Panel>
     )
 }

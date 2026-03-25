@@ -1,10 +1,10 @@
 import type {
-    ExecutionCardResponse,
-    FlowLaunchResponse,
-    FlowRunRequestResponse,
-    SpecEditProposalResponse,
-} from '@/lib/workspaceClient'
-import type { ConversationTimelineToolCall } from '@/components/projects/types'
+    ConversationTimelineToolCall,
+    ProjectExecutionCard,
+    ProjectFlowLaunch,
+    ProjectFlowRunRequest,
+    ProjectSpecEditProposal,
+} from './types'
 
 export type ProjectGitMetadata = {
     branch: string | null
@@ -27,7 +27,7 @@ export const getSurfaceToneClassName = (tone: SurfaceTone) => (
     `rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${SURFACE_TONE_CLASS_MAP[tone]}`
 )
 
-export const getSpecEditStatusPresentation = (status: SpecEditProposalResponse['status']) => {
+export const getSpecEditStatusPresentation = (status: ProjectSpecEditProposal['status']) => {
     if (status === 'applied') {
         return { label: 'Applied', tone: 'success' as const }
     }
@@ -37,7 +37,7 @@ export const getSpecEditStatusPresentation = (status: SpecEditProposalResponse['
     return { label: 'Pending review', tone: 'warning' as const }
 }
 
-export const getExecutionCardStatusPresentation = (status: ExecutionCardResponse['status']) => {
+export const getExecutionCardStatusPresentation = (status: ProjectExecutionCard['status']) => {
     if (status === 'approved') {
         return { label: 'Approved', tone: 'success' as const }
     }
@@ -50,7 +50,7 @@ export const getExecutionCardStatusPresentation = (status: ExecutionCardResponse
     return { label: 'Draft', tone: 'info' as const }
 }
 
-export const getFlowRunRequestStatusPresentation = (status: FlowRunRequestResponse['status']) => {
+export const getFlowRunRequestStatusPresentation = (status: ProjectFlowRunRequest['status']) => {
     if (status === 'launched') {
         return { label: 'Launched', tone: 'success' as const }
     }
@@ -66,7 +66,7 @@ export const getFlowRunRequestStatusPresentation = (status: FlowRunRequestRespon
     return { label: 'Pending review', tone: 'warning' as const }
 }
 
-export const getFlowLaunchStatusPresentation = (status: FlowLaunchResponse['status']) => {
+export const getFlowLaunchStatusPresentation = (status: ProjectFlowLaunch['status']) => {
     if (status === 'launched') {
         return { label: 'Launched', tone: 'success' as const }
     }
@@ -113,7 +113,7 @@ export const parseThinkingSummaryContent = (content: string): { heading: string 
     return { heading, details }
 }
 
-export const buildProposalDiffLines = (change: SpecEditProposalResponse['changes'][number]) => ([
+export const buildProposalDiffLines = (change: ProjectSpecEditProposal['changes'][number]) => ([
     ...change.before.split('\n').map((line) => ({ type: 'removed' as const, text: line })),
     ...change.after.split('\n').map((line) => ({ type: 'added' as const, text: line })),
 ])

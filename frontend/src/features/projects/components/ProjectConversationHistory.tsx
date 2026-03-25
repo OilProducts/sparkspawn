@@ -1,17 +1,17 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import type {
-    ExecutionCardResponse,
-    FlowLaunchResponse,
-    FlowRunRequestResponse,
-    SpecEditProposalResponse,
-} from '@/lib/workspaceClient'
+    ConversationTimelineEntry,
+    ProjectExecutionCard,
+    ProjectFlowLaunch,
+    ProjectFlowRunRequest,
+    ProjectSpecEditProposal,
+} from '../model/types'
 import {
     ProjectExecutionCardEntry,
     ProjectFlowLaunchEntry,
     ProjectFlowRunRequestEntry,
     ProjectSpecEditProposalEntry,
-} from '@/components/projects/ProjectArtifactEntries'
-import type { ConversationTimelineEntry } from '@/components/projects/types'
+} from './ProjectArtifactEntries'
 import {
     PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT,
     buildProposalChangeKey,
@@ -25,16 +25,17 @@ import {
     parseThinkingSummaryContent,
     type ProjectGitMetadata,
     summarizeToolCallDetail,
-} from '@/components/projects/presentation'
+} from '../model/presentation'
+import { Button } from '@/ui'
 
 interface ProjectConversationHistoryProps {
     activeConversationId: string | null
     hasRenderableConversationHistory: boolean
     activeConversationHistory: ConversationTimelineEntry[]
-    activeSpecEditProposalsById: Map<string, SpecEditProposalResponse>
-    activeFlowRunRequestsById: Map<string, FlowRunRequestResponse>
-    activeFlowLaunchesById: Map<string, FlowLaunchResponse>
-    activeExecutionCardsById: Map<string, ExecutionCardResponse>
+    activeSpecEditProposalsById: Map<string, ProjectSpecEditProposal>
+    activeFlowRunRequestsById: Map<string, ProjectFlowRunRequest>
+    activeFlowLaunchesById: Map<string, ProjectFlowLaunch>
+    activeExecutionCardsById: Map<string, ProjectExecutionCard>
     latestSpecEditProposalId: string | null
     latestFlowRunRequestId: string | null
     latestFlowLaunchId: string | null
@@ -50,15 +51,15 @@ interface ProjectConversationHistoryProps {
     onToggleToolCallExpanded: (toolCallId: string) => void
     onToggleThinkingEntryExpanded: (entryId: string) => void
     onToggleProposalChangeExpanded: (changeKey: string) => void
-    onApproveSpecEditProposal: (proposal: SpecEditProposalResponse) => void | Promise<void>
-    onRejectSpecEditProposal: (proposal: SpecEditProposalResponse) => void | Promise<void>
+    onApproveSpecEditProposal: (proposal: ProjectSpecEditProposal) => void | Promise<void>
+    onRejectSpecEditProposal: (proposal: ProjectSpecEditProposal) => void | Promise<void>
     onReviewFlowRunRequest: (
-        flowRunRequest: FlowRunRequestResponse,
+        flowRunRequest: ProjectFlowRunRequest,
         disposition: 'approved' | 'rejected',
     ) => void | Promise<void>
     onOpenFlowRun: (request: { run_id?: string | null; flow_name: string }) => void
     onReviewExecutionCard: (
-        executionCard: ExecutionCardResponse,
+        executionCard: ProjectExecutionCard,
         disposition: 'approved' | 'rejected' | 'revision_requested',
     ) => void | Promise<void>
 }
@@ -111,12 +112,14 @@ export function ProjectConversationHistory({
                             return (
                                 <li key={key} className="flex justify-start">
                                     <div className="w-full rounded-md border border-border bg-muted/40 px-3 py-2">
-                                        <button
+                                        <Button
                                             type="button"
                                             data-testid={`project-tool-call-toggle-${entry.toolCall.id}`}
                                             aria-expanded={isExpanded}
                                             onClick={() => onToggleToolCallExpanded(entry.toolCall.id)}
-                                            className="flex w-full items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-auto w-full justify-start px-0 py-0 text-left hover:bg-transparent"
                                         >
                                             {isExpanded ? (
                                                 <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -139,7 +142,7 @@ export function ProjectConversationHistory({
                                                     {entry.toolCall.status === 'running' ? 'Running…' : 'No additional details'}
                                                 </p>
                                             )}
-                                        </button>
+                                        </Button>
                                         {isExpanded ? (
                                             <div className="mt-2 space-y-2">
                                                 {entry.toolCall.command ? (
@@ -190,12 +193,14 @@ export function ProjectConversationHistory({
                                 <li key={key} className="flex justify-start">
                                     <div className="max-w-[85%] rounded border border-border/80 bg-background px-3 py-2 text-muted-foreground">
                                         {isExpandable ? (
-                                            <button
+                                            <Button
                                                 type="button"
                                                 data-testid={`project-thinking-toggle-${entry.id}`}
                                                 aria-expanded={isExpanded}
                                                 onClick={() => onToggleThinkingEntryExpanded(entry.id)}
-                                                className="flex w-full items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-auto w-full justify-start px-0 py-0 text-left hover:bg-transparent"
                                             >
                                                 {isExpanded ? (
                                                     <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -205,7 +210,7 @@ export function ProjectConversationHistory({
                                                 <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
                                                     {heading}
                                                 </p>
-                                            </button>
+                                            </Button>
                                         ) : (
                                             <p className="text-xs font-semibold text-foreground">{heading}</p>
                                         )}

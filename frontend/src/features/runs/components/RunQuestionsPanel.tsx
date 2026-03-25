@@ -1,5 +1,6 @@
-import type { PendingInterviewGate, PendingInterviewGateGroup } from '@/components/runs/shared'
-import { pendingGateSemanticHint, formatTimestamp } from '@/components/runs/shared'
+import type { PendingInterviewGate, PendingInterviewGateGroup } from '../model/shared'
+import { pendingGateSemanticHint, formatTimestamp } from '../model/shared'
+import { Button, InlineNotice, Input } from '@/ui'
 
 interface RunQuestionsPanelProps {
     freeformAnswersByGateId: Record<string, string>
@@ -28,12 +29,13 @@ export function RunQuestionsPanel({
                 Pending Human Gates
             </div>
             {pendingGateActionError && (
-                <div
+                <InlineNotice
                     data-testid="run-pending-human-gate-answer-error"
-                    className="mt-2 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+                    tone="error"
+                    className="mt-2 px-2 py-1 text-xs"
                 >
                     {pendingGateActionError}
-                </div>
+                </InlineNotice>
             )}
             <div className="mt-2 space-y-2">
                 {groupedPendingInterviewGates.map((group) => (
@@ -66,43 +68,47 @@ export function RunQuestionsPanel({
                                         </div>
                                         {gate.questionId && gate.questionType === 'FREEFORM' && (
                                             <div className="mt-1 flex flex-wrap items-center gap-2">
-                                                <input
+                                                <Input
                                                     type="text"
                                                     data-testid={`run-pending-human-gate-freeform-input-${gate.questionId}`}
                                                     value={freeformAnswer}
                                                     onChange={(event) => onFreeformAnswerChange(gate.questionId!, event.target.value)}
                                                     disabled={submittingGateIds[gate.questionId] === true}
                                                     placeholder="Type answer..."
-                                                    className="h-7 min-w-[18rem] rounded border border-amber-500/40 bg-white px-2 text-[11px] text-amber-900 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:cursor-not-allowed disabled:opacity-70"
+                                                    className="h-7 min-w-[18rem] border-amber-500/40 bg-white px-2 text-[11px] text-amber-900 focus-visible:ring-amber-500/40"
                                                 />
-                                                <button
+                                                <Button
                                                     type="button"
                                                     data-testid={`run-pending-human-gate-freeform-submit-${gate.questionId}`}
                                                     onClick={() => {
                                                         onSubmitPendingGateAnswer(gate, freeformAnswer)
                                                     }}
                                                     disabled={submittingGateIds[gate.questionId] === true || freeformAnswer.trim().length === 0}
-                                                    className="inline-flex h-7 items-center rounded border border-amber-500/50 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    variant="outline"
+                                                    size="xs"
+                                                    className="h-7 border-amber-500/50 bg-white text-[11px] font-medium text-amber-900 hover:bg-amber-100"
                                                 >
                                                     Submit
-                                                </button>
+                                                </Button>
                                             </div>
                                         )}
                                         {gate.questionId && gate.questionType !== 'FREEFORM' && gate.options.length > 0 && (
                                             <div className="mt-1 flex flex-wrap gap-1.5">
                                                 {gate.options.map((option) => (
                                                     <div key={option.value} className="space-y-1">
-                                                        <button
+                                                        <Button
                                                             type="button"
                                                             data-testid={`run-pending-human-gate-answer-${option.value}`}
                                                             onClick={() => {
                                                                 onSubmitPendingGateAnswer(gate, option.value)
                                                             }}
                                                             disabled={submittingGateIds[gate.questionId!] === true}
-                                                            className="inline-flex h-6 items-center rounded border border-amber-500/50 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            variant="outline"
+                                                            size="xs"
+                                                            className="h-6 border-amber-500/50 bg-white text-[11px] font-medium text-amber-900 hover:bg-amber-100"
                                                         >
                                                             {option.label}
-                                                        </button>
+                                                        </Button>
                                                         {(() => {
                                                             const semanticHint = pendingGateSemanticHint(gate.questionType, option.value)
                                                             const showMultipleChoiceMetadata = gate.questionType === 'MULTIPLE_CHOICE'

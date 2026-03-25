@@ -1,6 +1,18 @@
 import type {
+    ConversationSummaryResponse,
     ConversationTurnResponse,
+    ExecutionCardResponse,
+    FlowLaunchResponse,
+    FlowRunRequestResponse,
+    SpecEditProposalResponse,
 } from '@/lib/workspaceClient'
+
+export type ProjectConversationSummary = ConversationSummaryResponse
+export type ProjectExecutionCard = ExecutionCardResponse
+export type ProjectFlowLaunch = FlowLaunchResponse
+export type ProjectFlowRunRequest = FlowRunRequestResponse
+export type ProjectSpecEditProposal = SpecEditProposalResponse
+export type ConversationTurnStatus = ConversationTurnResponse['status']
 
 export interface ConversationTimelineToolCall {
     id: string
@@ -19,7 +31,7 @@ export type ConversationTimelineEntry =
         role: 'user' | 'assistant'
         content: string
         timestamp: string
-        status: ConversationTurnResponse['status']
+        status: ConversationTurnStatus
         error?: string | null
         presentation?: 'default' | 'thinking'
     }

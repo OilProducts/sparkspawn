@@ -1,14 +1,15 @@
 import { useState } from "react"
 
-import { TriggerEditor } from "@/components/triggers/TriggerEditor"
+import { TriggerEditor } from "./components/TriggerEditor"
 import {
   formatTriggerTimestamp,
   SHARED_WEBHOOK_ENDPOINT,
   triggerSourceSummary,
-} from "@/components/triggers/triggerForm"
-import { useTriggersList } from "@/components/triggers/hooks/useTriggersList"
-import { useTriggerEditor } from "@/components/triggers/hooks/useTriggerEditor"
-import { useWebhookSecretRegeneration } from "@/components/triggers/hooks/useWebhookSecretRegeneration"
+} from "./model/triggerForm"
+import { useTriggersList } from "./hooks/useTriggersList"
+import { useTriggerEditor } from "./hooks/useTriggerEditor"
+import { useWebhookSecretRegeneration } from "./hooks/useWebhookSecretRegeneration"
+import { Button, EmptyState, InlineNotice, Panel, PanelContent, PanelHeader, PanelTitle, SectionHeader } from "@/ui"
 
 export function TriggersPanel() {
   const [revealedWebhookSecrets, setRevealedWebhookSecrets] = useState<Record<string, string>>({})
@@ -48,80 +49,86 @@ export function TriggersPanel() {
   return (
     <section data-testid="triggers-panel" className="flex-1 overflow-auto p-6">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Triggers</h2>
-          <p className="text-sm text-muted-foreground">
-            Manage system routing, schedules, polling, flow-event automation, and shared webhook ingress.
-          </p>
-        </div>
+        <SectionHeader
+          title="Triggers"
+          description="Manage system routing, schedules, polling, flow-event automation, and shared webhook ingress."
+        />
 
         {error ? (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <InlineNotice tone="error">
             {error}
-          </div>
+          </InlineNotice>
         ) : null}
 
         <div className="grid gap-6 lg:grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)]">
           <div className="space-y-4">
-            <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
+            <Panel>
+              <PanelHeader className="flex flex-row items-center justify-between gap-2">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">System triggers</div>
+                  <PanelTitle>System triggers</PanelTitle>
                   <div className="text-sm text-muted-foreground">Protected approval and review routing.</div>
                 </div>
-                <button
+                <Button
                   type="button"
                   onClick={() => void refreshTriggers()}
-                  className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                  variant="outline"
+                  size="xs"
                 >
                   {loading ? 'Refreshing…' : 'Refresh'}
-                </button>
-              </div>
-              <div className="mt-3 space-y-2">
+                </Button>
+              </PanelHeader>
+              <PanelContent className="space-y-2 pt-0">
                 {systemTriggers.map((trigger) => (
-                  <button
+                  <Button
                     key={trigger.id}
                     type="button"
                     data-testid={`trigger-row-${trigger.id}`}
                     onClick={() => setSelectedTriggerId(trigger.id)}
-                    className={`w-full rounded-md border px-3 py-2 text-left ${selectedTriggerId === trigger.id ? 'border-foreground bg-muted/60' : 'border-border bg-background/70'}`}
+                    variant="outline"
+                    className={`h-auto w-full justify-start rounded-md px-3 py-2 text-left ${selectedTriggerId === trigger.id ? 'border-foreground bg-muted/60' : 'border-border bg-background/70'}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium">{trigger.name}</span>
                       <span className="text-[11px] text-muted-foreground">{trigger.enabled ? 'Enabled' : 'Disabled'}</span>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">{triggerSourceSummary(trigger)}</div>
-                  </button>
+                  </Button>
                 ))}
-                {systemTriggers.length === 0 ? <p className="text-xs text-muted-foreground">No protected triggers configured.</p> : null}
-              </div>
-            </div>
+                {systemTriggers.length === 0 ? <EmptyState className="text-xs" description="No protected triggers configured." /> : null}
+              </PanelContent>
+            </Panel>
 
-            <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Custom triggers</div>
-              <div className="mt-3 space-y-2">
+            <Panel>
+              <PanelHeader>
+                <PanelTitle>Custom triggers</PanelTitle>
+              </PanelHeader>
+              <PanelContent className="space-y-2 pt-0">
                 {customTriggers.map((trigger) => (
-                  <button
+                  <Button
                     key={trigger.id}
                     type="button"
                     onClick={() => setSelectedTriggerId(trigger.id)}
-                    className={`w-full rounded-md border px-3 py-2 text-left ${selectedTriggerId === trigger.id ? 'border-foreground bg-muted/60' : 'border-border bg-background/70'}`}
+                    variant="outline"
+                    className={`h-auto w-full justify-start rounded-md px-3 py-2 text-left ${selectedTriggerId === trigger.id ? 'border-foreground bg-muted/60' : 'border-border bg-background/70'}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium">{trigger.name}</span>
                       <span className="text-[11px] text-muted-foreground">{trigger.enabled ? 'Enabled' : 'Disabled'}</span>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">{triggerSourceSummary(trigger)}</div>
-                  </button>
+                  </Button>
                 ))}
-                {customTriggers.length === 0 ? <p className="text-xs text-muted-foreground">No custom triggers yet.</p> : null}
-              </div>
-            </div>
+                {customTriggers.length === 0 ? <EmptyState className="text-xs" description="No custom triggers yet." /> : null}
+              </PanelContent>
+            </Panel>
           </div>
 
           <div className="space-y-6">
-            <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Create trigger</div>
+            <Panel>
+              <PanelHeader>
+                <PanelTitle>Create trigger</PanelTitle>
+              </PanelHeader>
+              <PanelContent className="pt-0">
               <TriggerEditor
                 form={newTriggerForm}
                 onChange={setNewTriggerForm}
@@ -129,39 +136,41 @@ export function TriggersPanel() {
                 protectedTrigger={false}
               />
               <div className="mt-4 flex justify-end">
-                <button
+                <Button
                   type="button"
                   data-testid="trigger-create-button"
                   onClick={() => void onCreateTrigger()}
-                  className="rounded border border-border px-3 py-2 text-sm hover:bg-muted"
                 >
                   Create trigger
-                </button>
+                </Button>
               </div>
-            </div>
+              </PanelContent>
+            </Panel>
 
-            <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
+            <Panel>
+              <PanelHeader className="flex flex-row items-center justify-between gap-2">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Selected trigger</div>
+                  <PanelTitle>Selected trigger</PanelTitle>
                   <div className="text-sm text-muted-foreground">
                     {selectedTrigger ? selectedTrigger.id : 'Select a trigger to inspect and edit it.'}
                   </div>
                 </div>
                 {selectedTrigger && !selectedTrigger.protected ? (
-                  <button
+                  <Button
                     type="button"
                     data-testid="trigger-delete-button"
                     onClick={() => void onDeleteSelectedTrigger()}
-                    className="rounded border border-destructive/40 px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                    variant="outline"
+                    size="xs"
+                    className="border-destructive/40 text-destructive hover:bg-destructive/10"
                   >
                     Delete
-                  </button>
+                  </Button>
                 ) : null}
-              </div>
+              </PanelHeader>
 
               {selectedTrigger && editTriggerForm ? (
-                <>
+                <PanelContent className="pt-0">
                   <TriggerEditor
                     form={editTriggerForm}
                     onChange={setEditTriggerForm}
@@ -179,14 +188,15 @@ export function TriggersPanel() {
                       <div className="font-mono text-xs text-foreground">
                         X-Spark-Webhook-Secret: {revealedWebhookSecrets[selectedTrigger.id] ?? 'Hidden after creation'}
                       </div>
-                      <button
+                      <Button
                         type="button"
                         data-testid="trigger-regenerate-secret-button"
                         onClick={() => void onRegenerateWebhookSecret()}
-                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                        variant="outline"
+                        size="xs"
                       >
                         {isRegenerating ? 'Regenerating…' : 'Regenerate secret'}
-                      </button>
+                      </Button>
                     </div>
                   ) : null}
 
@@ -218,18 +228,17 @@ export function TriggersPanel() {
                   </div>
 
                   <div className="mt-4 flex justify-end">
-                    <button
+                    <Button
                       type="button"
                       data-testid="trigger-save-button"
                       onClick={() => void onSaveSelectedTrigger()}
-                      className="rounded border border-border px-3 py-2 text-sm hover:bg-muted"
                     >
                       Save trigger
-                    </button>
+                    </Button>
                   </div>
-                </>
+                </PanelContent>
               ) : null}
-            </div>
+            </Panel>
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ReactFlow,
     MiniMap,
@@ -14,14 +14,9 @@ import type { Connection, Edge, EdgeChange, Node, NodeChange, OnSelectionChangeP
 import '@xyflow/react/dist/style.css';
 
 import { useStore } from '@/store';
-import { ValidationPanel } from '@/components/ValidationPanel';
+import { ValidationPanel } from './components/ValidationPanel';
 import { clearDotSerializationContext, generateDot, setDotSerializationContext } from '@/lib/dotUtils';
 import { recordFlowLoadDebug, summarizeDiagnosticsForFlowLoadDebug } from '@/lib/flowLoadDebug';
-import {
-    fetchFlowPayloadValidated,
-    fetchPreviewValidated,
-    type PreviewResponsePayload,
-} from '@/lib/attractorClient';
 import {
     EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS,
     primeFlowSaveBaseline,
@@ -44,12 +39,18 @@ import {
 } from '@/features/workflow-canvas';
 import { stripEdgeLayoutRoutes } from '@/lib/edgeRouting';
 import { getReactFlowNodeTypeForShape, getShapeNodeStyle } from '@/lib/workflowNodeShape';
+import { Button, Textarea } from '@/ui';
+import {
+    loadEditorFlowPayload,
+    loadEditorPreview,
+    type EditorPreviewResponse,
+} from './services/editorPreview';
 
 const DEFAULT_PREVIEW_DEBOUNCE_MS = 300;
 const MEDIUM_GRAPH_PREVIEW_DEBOUNCE_MS = 600;
 const MEDIUM_GRAPH_NODE_THRESHOLD = 25;
 
-type PreviewResponse = PreviewResponsePayload
+type PreviewResponse = EditorPreviewResponse
 
 type EditorMode = 'structured' | 'raw'
 type FlowGraphSnapshot = {
@@ -113,6 +114,14 @@ export function Editor() {
     const activeFlow = useStore((state) => state.activeFlow);
     const graphAttrs = useStore((state) => state.graphAttrs);
     const uiDefaults = useStore((state) => state.uiDefaults);
+    const uiDefaultModel = uiDefaults.llm_model;
+    const uiDefaultProvider = uiDefaults.llm_provider;
+    const uiDefaultReasoningEffort = uiDefaults.reasoning_effort;
+    const resolvedUiDefaults = useMemo(() => ({
+        llm_model: uiDefaultModel,
+        llm_provider: uiDefaultProvider,
+        reasoning_effort: uiDefaultReasoningEffort,
+    }), [uiDefaultModel, uiDefaultProvider, uiDefaultReasoningEffort]);
     const replaceGraphAttrs = useStore((state) => state.replaceGraphAttrs);
     const setDiagnostics = useStore((state) => state.setDiagnostics);
     const clearDiagnostics = useStore((state) => state.clearDiagnostics);
@@ -216,7 +225,7 @@ export function Editor() {
         const hydratedGraph = buildHydratedFlowGraph(
             flowName ?? 'flow',
             preview,
-            uiDefaults,
+            resolvedUiDefaults,
             sourceDot,
         )
         if (!hydratedGraph) {
@@ -272,9 +281,7 @@ export function Editor() {
         setEdges,
         replaceGraphAttrs,
         setNodes,
-        uiDefaults.llm_model,
-        uiDefaults.llm_provider,
-        uiDefaults.reasoning_effort,
+        resolvedUiDefaults,
     ]);
 
     const requestPreview = useCallback(async (
@@ -291,7 +298,7 @@ export function Editor() {
             debounceMs: debugContext?.debounceMs ?? null,
         });
         const previewStart = nowMs();
-        const preview = await fetchPreviewValidated(dot)
+        const preview = await loadEditorPreview(dot)
         const elapsed = Math.max(0, nowMs() - previewStart);
         setLastPreviewMs(elapsed);
         recordFlowLoadDebug('preview:response', flowName, {
@@ -361,7 +368,7 @@ export function Editor() {
         setEditorMode('structured');
         rawDotEntryDraftRef.current = '';
 
-        fetchFlowPayloadValidated(flowName)
+        loadEditorFlowPayload(flowName)
             .then((data) => {
                 const normalizedContent = normalizeLegacyDot(data.content);
                 recordFlowLoadDebug('flow-load:payload', flowName, {
@@ -579,15 +586,18 @@ export function Editor() {
         rawHandoffInFlightRef.current = true;
         setIsRawHandoffInFlight(true);
         try {
-            const expectSemanticEquivalence = rawDotEntryDraftRef.current === rawDotDraft;
-            const save = expectSemanticEquivalence ? saveFlowContentExpectingSemanticEquivalence : saveFlowContent;
-            const saved = await save(flowName, rawDotDraft);
-            if (!saved) {
-                const latestSaveErrorMessage = useStore.getState().saveErrorMessage;
-                setRawHandoffError(
-                    `Safe handoff requires valid DOT. ${latestSaveErrorMessage || 'Fix parse or validation errors before switching modes.'}`,
-                );
-                return;
+            const rawDotChanged = rawDotEntryDraftRef.current !== rawDotDraft;
+            if (rawDotChanged) {
+                const expectSemanticEquivalence = rawDotEntryDraftRef.current === rawDotDraft;
+                const save = expectSemanticEquivalence ? saveFlowContentExpectingSemanticEquivalence : saveFlowContent;
+                const saved = await save(flowName, rawDotDraft);
+                if (!saved) {
+                    const latestSaveErrorMessage = useStore.getState().saveErrorMessage;
+                    setRawHandoffError(
+                        `Safe handoff requires valid DOT. ${latestSaveErrorMessage || 'Fix parse or validation errors before switching modes.'}`,
+                    );
+                    return;
+                }
             }
 
             try {
@@ -657,14 +667,14 @@ export function Editor() {
             {editorMode === 'raw' ? (
                 <div className="h-full w-full p-4">
                     <div className="h-full rounded-lg border border-border bg-background/80 p-3">
-                        <textarea
+                        <Textarea
                             data-testid="raw-dot-editor"
                             value={rawDotDraft}
                             onChange={(event) => {
                                 setRawDotDraft(event.target.value);
                                 setRawHandoffError(null);
                             }}
-                            className="h-full w-full resize-none rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-5 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            className="h-full w-full resize-none font-mono text-xs leading-5"
                             spellCheck={false}
                         />
                     </div>
@@ -725,7 +735,7 @@ export function Editor() {
             {flowName && (
                 <div className="absolute left-4 top-4 z-10 flex gap-2">
                     <div data-testid="editor-mode-toggle" className="flex rounded-md border border-border bg-background/90 p-1 shadow-sm">
-                        <button
+                        <Button
                             onClick={() => {
                                 if (editorMode === 'raw') {
                                     void returnToStructuredMode();
@@ -734,33 +744,37 @@ export function Editor() {
                                 setEditorMode('structured');
                             }}
                             disabled={editorMode === 'raw' && isRawHandoffInFlight}
-                            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                            variant={editorMode === 'structured' ? 'default' : 'ghost'}
+                            size="sm"
+                            className={`px-3 ${
                                 editorMode === 'structured'
-                                    ? 'bg-primary text-primary-foreground'
+                                    ? ''
                                     : 'text-muted-foreground hover:text-foreground'
                             }`}
                         >
                             Structured
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                             onClick={enterRawDotMode}
                             disabled={editorMode === 'raw'}
-                            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                            variant={editorMode === 'raw' ? 'default' : 'ghost'}
+                            size="sm"
+                            className={`px-3 ${
                                 editorMode === 'raw'
-                                    ? 'bg-primary text-primary-foreground'
+                                    ? ''
                                     : 'text-muted-foreground hover:text-foreground'
                             }`}
                         >
                             Raw DOT
-                        </button>
+                        </Button>
                     </div>
                     {editorMode === 'structured' && (
-                        <button
+                        <Button
                             onClick={onAddNode}
-                            className="bg-primary text-primary-foreground shadow-sm px-3 py-1.5 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
+                            className="shadow-sm"
                         >
                             Add Node
-                        </button>
+                        </Button>
                     )}
                     <div
                         data-testid="canvas-interaction-performance-budget"

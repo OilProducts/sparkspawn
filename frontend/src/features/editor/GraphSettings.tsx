@@ -8,12 +8,8 @@ import { resolveGraphFieldDiagnostics } from '@/lib/inspectorFieldDiagnostics'
 import { resolveModelStylesheetPreview } from '@/lib/modelStylesheetPreview'
 import { toExtensionAttrEntries } from '@/lib/extensionAttrs'
 import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler'
-import {
-    fetchWorkspaceFlowValidated,
-    updateWorkspaceFlowLaunchPolicyValidated,
-    type FlowLaunchPolicy,
-} from '@/lib/workspaceClient'
-import { InspectorScaffold } from '@/components/InspectorScaffold'
+import { Button } from '@/ui'
+import { InspectorScaffold } from './components/InspectorScaffold'
 import {
     parseLaunchInputDefinitions,
     serializeLaunchInputDefinitions,
@@ -23,11 +19,19 @@ import {
 import {
     CORE_GRAPH_ATTR_KEYS,
     FLOW_LAUNCH_POLICY_LABELS,
-    GraphAttributesSection,
-    GraphBasicsSection,
+    GraphAdvancedAttrsSection,
+    GraphExecutionDefaultsSection,
     GraphLaunchPolicySection,
+    GraphLaunchInputsSection,
     GraphLlmDefaultsSection,
+    GraphMetadataSection,
+    GraphRunConfigurationSection,
 } from './components/graph-settings/GraphSettingsSections'
+import {
+    loadGraphLaunchPolicy,
+    saveGraphLaunchPolicy,
+    type FlowLaunchPolicy,
+} from './services/graphLaunchPolicy'
 
 interface GraphSettingsProps {
     inline?: boolean
@@ -224,7 +228,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
                 recordFlowLoadDebug('launch-policy:request', activeFlow, {
                     source: 'graph-settings',
                 })
-                const response = await fetchWorkspaceFlowValidated(activeFlow, 'human')
+                const response = await loadGraphLaunchPolicy(activeFlow)
                 if (cancelled || activeFlowRef.current !== activeFlow) {
                     return
                 }
@@ -272,7 +276,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
         setLaunchPolicySaveError(null)
 
         try {
-            const response = await updateWorkspaceFlowLaunchPolicyValidated(flowName, nextPolicy)
+            const response = await saveGraphLaunchPolicy(flowName, nextPolicy)
             if (activeFlowRef.current !== flowName) {
                 return
             }
@@ -370,50 +374,61 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
             entityLabel="Flow"
             entityValue={activeFlow || undefined}
         >
-            <GraphBasicsSection
-                model={model}
-                workingDir={workingDir}
-                graphAttrs={graphAttrs}
-                setModel={setModel}
-                setWorkingDir={setWorkingDir}
-                updateGraphAttr={updateGraphAttr}
-            />
-            <GraphLaunchPolicySection
-                activeFlow={activeFlow}
-                launchPolicy={launchPolicy}
-                launchPolicyLoadState={launchPolicyLoadState}
-                launchPolicySaveState={launchPolicySaveState}
-                launchPolicyStatusMessage={launchPolicyStatusMessage}
-                onLaunchPolicyChange={handleLaunchPolicyChange}
-            />
-            <GraphAttributesSection
-                graphAttrs={graphAttrs}
-                graphAttrErrors={graphAttrErrors}
-                showAdvancedGraphAttrs={showAdvancedGraphAttrs}
-                graphExtensionEntries={graphExtensionEntries}
-                launchInputDrafts={launchInputDrafts}
-                launchInputDraftError={launchInputDraftError}
-                showStylesheetFeedback={showStylesheetFeedback}
-                stylesheetDiagnostics={stylesheetDiagnostics}
-                stylesheetPreview={stylesheetPreview}
-                toolHookPreWarning={toolHookPreWarning}
-                toolHookPostWarning={toolHookPostWarning}
-                renderFieldDiagnostics={renderFieldDiagnostics}
-                updateGraphAttr={updateGraphAttr}
-                setShowAdvancedGraphAttrs={setShowAdvancedGraphAttrs}
-                onLaunchInputDefinitionsChange={handleLaunchInputDefinitionsChange}
-                onGraphExtensionValueChange={handleGraphExtensionValueChange}
-                onGraphExtensionRemove={handleGraphExtensionRemove}
-                onGraphExtensionAdd={handleGraphExtensionAdd}
-            />
-            <GraphLlmDefaultsSection
-                canApplyDefaults={canApplyDefaults}
-                flowProviderFallback={flowProviderFallback}
-                graphAttrs={graphAttrs}
-                uiDefaults={uiDefaults}
-                applyDefaultsToNodes={applyDefaultsToNodes}
-                updateGraphAttr={updateGraphAttr}
-            />
+            <div data-testid="graph-structured-form" className="space-y-4">
+                <GraphRunConfigurationSection
+                    model={model}
+                    workingDir={workingDir}
+                    setModel={setModel}
+                    setWorkingDir={setWorkingDir}
+                />
+                <GraphMetadataSection
+                    graphAttrs={graphAttrs}
+                    updateGraphAttr={updateGraphAttr}
+                />
+                <GraphLaunchPolicySection
+                    activeFlow={activeFlow}
+                    launchPolicy={launchPolicy}
+                    launchPolicyLoadState={launchPolicyLoadState}
+                    launchPolicySaveState={launchPolicySaveState}
+                    launchPolicyStatusMessage={launchPolicyStatusMessage}
+                    onLaunchPolicyChange={handleLaunchPolicyChange}
+                />
+                <GraphLaunchInputsSection
+                    launchInputDrafts={launchInputDrafts}
+                    launchInputDraftError={launchInputDraftError}
+                    onLaunchInputDefinitionsChange={handleLaunchInputDefinitionsChange}
+                />
+                <GraphExecutionDefaultsSection
+                    graphAttrs={graphAttrs}
+                    graphAttrErrors={graphAttrErrors}
+                    renderFieldDiagnostics={renderFieldDiagnostics}
+                    updateGraphAttr={updateGraphAttr}
+                />
+                <GraphAdvancedAttrsSection
+                    graphAttrs={graphAttrs}
+                    showAdvancedGraphAttrs={showAdvancedGraphAttrs}
+                    graphExtensionEntries={graphExtensionEntries}
+                    showStylesheetFeedback={showStylesheetFeedback}
+                    stylesheetDiagnostics={stylesheetDiagnostics}
+                    stylesheetPreview={stylesheetPreview}
+                    toolHookPreWarning={toolHookPreWarning}
+                    toolHookPostWarning={toolHookPostWarning}
+                    renderFieldDiagnostics={renderFieldDiagnostics}
+                    updateGraphAttr={updateGraphAttr}
+                    setShowAdvancedGraphAttrs={setShowAdvancedGraphAttrs}
+                    onGraphExtensionValueChange={handleGraphExtensionValueChange}
+                    onGraphExtensionRemove={handleGraphExtensionRemove}
+                    onGraphExtensionAdd={handleGraphExtensionAdd}
+                />
+                <GraphLlmDefaultsSection
+                    canApplyDefaults={canApplyDefaults}
+                    flowProviderFallback={flowProviderFallback}
+                    graphAttrs={graphAttrs}
+                    uiDefaults={uiDefaults}
+                    applyDefaultsToNodes={applyDefaultsToNodes}
+                    updateGraphAttr={updateGraphAttr}
+                />
+            </div>
         </InspectorScaffold>
     )
 
@@ -423,12 +438,14 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
 
     return (
         <div className="absolute right-4 top-4 z-20 flex flex-col items-end">
-            <button
+            <Button
                 onClick={() => setIsOpen((open) => !open)}
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background/90 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground shadow-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                variant="outline"
+                size="sm"
+                className="bg-background/90 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
             >
                 Graph Settings
-            </button>
+            </Button>
             {isOpen && (
                 <div className="mt-2 w-80 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-md border border-border bg-card p-4 shadow-lg">
                     {inspectorContent}

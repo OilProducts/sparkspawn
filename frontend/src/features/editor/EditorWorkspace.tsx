@@ -34,6 +34,7 @@ export function EditorWorkspace({ isActive }: { isActive: boolean }) {
     const [isEditorSidebarResizing, setIsEditorSidebarResizing] = useState(false)
     const workspaceRef = useRef<HTMLDivElement | null>(null)
     const editorSidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
+    const effectiveIsEditorSidebarResizing = isEditorSidebarResizing && !isNarrowViewport
 
     const adjustEditorSidebarWidth = (delta: number) => {
         const containerWidth = workspaceRef.current?.getBoundingClientRect().width || 0
@@ -85,7 +86,6 @@ export function EditorWorkspace({ isActive }: { isActive: boolean }) {
 
     useEffect(() => {
         if (isNarrowViewport) {
-            setIsEditorSidebarResizing(false)
             editorSidebarResizeRef.current = null
             document.body.style.cursor = ''
             document.body.style.userSelect = ''
@@ -113,7 +113,7 @@ export function EditorWorkspace({ isActive }: { isActive: boolean }) {
     }, [editorSidebarWidth, isNarrowViewport, setEditorSidebarWidth])
 
     useEffect(() => {
-        if (!isEditorSidebarResizing) {
+        if (!effectiveIsEditorSidebarResizing) {
             return
         }
 
@@ -144,7 +144,7 @@ export function EditorWorkspace({ isActive }: { isActive: boolean }) {
             document.body.style.cursor = ''
             document.body.style.userSelect = ''
         }
-    }, [isEditorSidebarResizing, setEditorSidebarWidth])
+    }, [effectiveIsEditorSidebarResizing, setEditorSidebarWidth])
 
     return (
         <section
@@ -172,7 +172,7 @@ export function EditorWorkspace({ isActive }: { isActive: boolean }) {
                                 onPointerDown={onEditorSidebarResizePointerDown}
                                 onKeyDown={onEditorSidebarResizeKeyDown}
                                 className={`group flex w-3 shrink-0 cursor-col-resize items-center justify-center focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-                                    isEditorSidebarResizing ? 'bg-muted' : 'hover:bg-muted/60'
+                                    effectiveIsEditorSidebarResizing ? 'bg-muted' : 'hover:bg-muted/60'
                                 }`}
                             >
                                 <span className="h-16 w-1 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/70" />

@@ -15,11 +15,6 @@ import '@xyflow/react/dist/style.css'
 import { useStore } from '@/store'
 import { recordFlowLoadDebug, summarizeDiagnosticsForFlowLoadDebug } from '@/lib/flowLoadDebug'
 import {
-    fetchFlowPayloadValidated,
-    fetchPreviewValidated,
-    type PreviewResponsePayload,
-} from '@/lib/attractorClient'
-import {
     buildHydratedFlowGraph,
     edgeTypes,
     EDGE_CLASS,
@@ -30,8 +25,13 @@ import {
     normalizeLegacyDot,
     nowMs,
 } from '@/features/workflow-canvas'
+import {
+    loadExecutionCanvasPreview,
+    loadExecutionFlowPayload,
+    type ExecutionCanvasPreviewResponse,
+} from './services/executionCanvasTransport'
 
-type PreviewResponse = PreviewResponsePayload
+type PreviewResponse = ExecutionCanvasPreviewResponse
 
 export function ExecutionCanvas() {
     const executionFlow = useStore((state) => state.executionFlow)
@@ -123,7 +123,7 @@ export function ExecutionCanvas() {
             session: 'execution',
         })
         const previewStart = nowMs()
-        const preview = await fetchPreviewValidated(dot)
+        const preview = await loadExecutionCanvasPreview(dot)
         const elapsed = Math.max(0, nowMs() - previewStart)
         setLastPreviewMs(elapsed)
         recordFlowLoadDebug('preview:response', executionFlow, {
@@ -163,7 +163,7 @@ export function ExecutionCanvas() {
         replaceExecutionGraphAttrs({})
         clearExecutionDiagnostics()
 
-        fetchFlowPayloadValidated(executionFlow)
+        loadExecutionFlowPayload(executionFlow)
             .then((data) => {
                 const normalizedContent = normalizeLegacyDot(data.content)
                 return requestPreview(normalizedContent, {

@@ -145,7 +145,7 @@ export const buildHydrateProjectRegistryTransition = (
     const nextActiveProjectScope = nextActiveProjectPath
         ? resolveProjectSessionState(nextProjectSessionStates[nextActiveProjectPath], nextActiveProjectPath)
         : null
-    const nextViewMode = resolveViewModeForProjectScope(state.viewMode, nextActiveProjectPath)
+    const nextViewMode = resolveViewModeForProjectScope(state.viewMode)
 
     return {
         ...preserveEditorSession(state),
@@ -202,7 +202,7 @@ export const buildRemoveProjectTransition = (
             nextResolvedActiveProjectPath,
         )
         : null
-    const nextViewMode = resolveViewModeForProjectScope(state.viewMode, nextResolvedActiveProjectPath)
+    const nextViewMode = resolveViewModeForProjectScope(state.viewMode)
     const removedActiveProject = state.activeProjectPath === normalizedPath
 
     return {
@@ -255,7 +255,7 @@ export const buildSetActiveProjectTransition = (
         }
     }
 
-    const nextViewMode = resolveViewModeForProjectScope(state.viewMode, nextProjectPath)
+    const nextViewMode = resolveViewModeForProjectScope(state.viewMode)
 
     return {
         ...preserveEditorSession(state),
@@ -267,6 +267,46 @@ export const buildSetActiveProjectTransition = (
         viewMode: nextViewMode,
         workingDir: nextProjectPath && nextProjectScope ? nextProjectScope.workingDir : DEFAULT_WORKING_DIRECTORY,
         ...(isProjectSwitch ? resetRunInspectionState() : preserveRunInspectionState(state)),
+    }
+}
+
+export const buildRegisterProjectTransition = (
+    state: AppState,
+    normalizedPath: string,
+) => {
+    const nextActiveProjectPath = state.activeProjectPath ?? normalizedPath
+    const shouldActivateNewProject = !state.activeProjectPath
+    const nowIso = shouldActivateNewProject ? new Date().toISOString() : null
+    const nextProjectSessionStates = { ...state.projectSessionsByPath }
+    const nextProjectRegistry = {
+        ...state.projectRegistry,
+        [normalizedPath]: {
+            directoryPath: normalizedPath,
+            isFavorite: false,
+            lastAccessedAt: nowIso,
+        },
+    }
+    nextProjectSessionStates[normalizedPath] = resolveProjectSessionState(
+        nextProjectSessionStates[normalizedPath],
+        normalizedPath,
+    )
+    const nextActiveProjectScope = resolveProjectSessionState(
+        nextProjectSessionStates[nextActiveProjectPath],
+        nextActiveProjectPath,
+    )
+
+    return {
+        projectRegistry: nextProjectRegistry,
+        recentProjectPaths: shouldActivateNewProject
+            ? pushRecentProjectPath(state.recentProjectPaths, normalizedPath)
+            : state.recentProjectPaths,
+        projectRegistrationError: null,
+        activeProjectPath: nextActiveProjectPath,
+        projectSessionsByPath: nextProjectSessionStates,
+        activeFlow: state.activeFlow,
+        executionFlow: state.activeProjectPath ? state.executionFlow : null,
+        selectedRunId: state.activeProjectPath ? state.selectedRunId : null,
+        workingDir: state.activeProjectPath ? state.workingDir : nextActiveProjectScope.workingDir,
     }
 }
 

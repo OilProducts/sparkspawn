@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Handle, NodeToolbar, Position, type Node, type NodeProps, useReactFlow } from '@xyflow/react'
 
-import { fetchPipelineAnswerValidated } from '@/lib/attractorClient'
 import { saveFlowContent } from '@/lib/flowPersistence'
 import { getToolHookCommandWarning } from '@/lib/graphAttrValidation'
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions'
@@ -26,6 +25,7 @@ import {
     getWorkflowNodeOverlayOffsetClassName,
 } from './workflowNodeFrames'
 import { useCanvasSessionMode } from './canvasSessionContext'
+import { submitPipelineAnswer } from './services/pipelineAnswers'
 
 const BUILTIN_HANDLER_OPTIONS = [
     'start',
@@ -798,7 +798,7 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
                                         if (!humanGate.runId) {
                                             return
                                         }
-                                        fetchPipelineAnswerValidated(humanGate.runId, humanGate.id, option.value).catch(console.error)
+                                        submitPipelineAnswer(humanGate.runId, humanGate.id, option.value).catch(console.error)
                                     }}
                                     disabled={!humanGate.runId || !selectedRunId}
                                     className="rounded-md border border-amber-200 bg-white px-2 py-1 text-left text-xs font-medium text-amber-900 hover:bg-amber-100"

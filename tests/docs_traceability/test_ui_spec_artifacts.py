@@ -76,7 +76,12 @@ def _markdown_table(section_text: str) -> tuple[list[str], list[list[str]]]:
 
 
 def _extract_component_paths(cell_text: str) -> set[str]:
-    return set(re.findall(r"frontend/src/components/[A-Za-z0-9_./-]+\.tsx", cell_text))
+    return set(
+        re.findall(
+            r"frontend/src/(?:components|features/[A-Za-z0-9_./-]+|app)/[A-Za-z0-9_./-]+\.tsx",
+            cell_text,
+        )
+    )
 
 
 def _extract_ui_spec_refs(cell_text: str) -> set[str]:

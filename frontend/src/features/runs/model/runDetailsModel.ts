@@ -1,13 +1,17 @@
 import { ApiHttpError } from '@/lib/attractorClient'
 import type {
     ArtifactErrorState,
+    ArtifactListResponse,
     CheckpointErrorState,
+    CheckpointResponse,
     ContextErrorState,
     ContextExportEntry,
+    ContextResponse,
     FormattedContextValue,
     GraphvizErrorState,
     PendingQuestionOption,
     PendingQuestionSnapshot,
+    RunContextRow,
 } from './shared'
 
 const EXPECTED_CORE_ARTIFACT_PATHS = ['manifest.json', 'checkpoint.json']
@@ -273,14 +277,141 @@ const buildContextExportPayload = (runId: string, contextEntries: ContextExportE
     2,
 )
 
+const buildCheckpointSummary = (checkpointData: CheckpointResponse | null) => {
+    const checkpointSnapshot = asRecord(checkpointData?.checkpoint)
+    const currentNode = checkpointSnapshot?.current_node
+    const checkpointCurrentNode = typeof currentNode === 'string' && currentNode.trim().length > 0 ? currentNode : '—'
+
+    const completedNodes = checkpointSnapshot?.completed_nodes
+    const checkpointCompletedNodes = Array.isArray(completedNodes)
+        ? (() => {
+            const normalized = completedNodes
+                .map((value) => (typeof value === 'string' ? value.trim() : ''))
+                .filter((value) => value.length > 0)
+            return normalized.length > 0 ? normalized.join(', ') : '—'
+        })()
+        : '—'
+
+    const retryCounts = asRecord(checkpointSnapshot?.retry_counts)
+    const checkpointRetryCounters = retryCounts
+        ? (() => {
+            const pairs = Object.entries(retryCounts)
+                .filter(([key]) => key.trim().length > 0)
+                .map(([key, value]) => {
+                    if (typeof value === 'number' && Number.isFinite(value)) {
+                        return `${key}: ${value}`
+                    }
+                    if (typeof value === 'string' || typeof value === 'boolean') {
+                        return `${key}: ${String(value)}`
+                    }
+                    return `${key}: ${JSON.stringify(value)}`
+                })
+            return pairs.length > 0 ? pairs.join(', ') : '—'
+        })()
+        : '—'
+
+    return {
+        checkpointCompletedNodes,
+        checkpointCurrentNode,
+        checkpointRetryCounters,
+    }
+}
+
+const buildContextRows = (contextData: ContextResponse | null): RunContextRow[] => {
+    const contextSnapshot = asRecord(contextData?.context)
+    if (!contextSnapshot) {
+        return []
+    }
+    return Object.entries(contextSnapshot)
+        .map(([key, value]) => {
+            const formatted = formatContextValue(value)
+            return { key, rawValue: value, ...formatted }
+        })
+        .sort((a, b) => a.key.localeCompare(b.key))
+}
+
+const filterContextRows = (contextRows: RunContextRow[], contextSearchQuery: string) => {
+    const normalizedQuery = contextSearchQuery.trim().toLowerCase()
+    if (!normalizedQuery) {
+        return contextRows
+    }
+    return contextRows.filter((row) => (
+        row.key.toLowerCase().includes(normalizedQuery)
+        || row.renderedValue.toLowerCase().includes(normalizedQuery)
+    ))
+}
+
+const buildArtifactDerivedState = (
+    artifactData: ArtifactListResponse | null,
+    selectedArtifactPath: string | null,
+) => {
+    const artifactEntries = artifactData?.artifacts || []
+    const missingCoreArtifacts = artifactEntries.length === 0
+        ? []
+        : (() => {
+            const available = new Set(artifactEntries.map((entry) => entry.path))
+            return EXPECTED_CORE_ARTIFACT_PATHS.filter((path) => !available.has(path))
+        })()
+    const selectedArtifactEntry = selectedArtifactPath
+        ? artifactEntries.find((entry) => entry.path === selectedArtifactPath) || null
+        : null
+
+    return {
+        artifactEntries,
+        missingCoreArtifacts,
+        selectedArtifactEntry,
+        showPartialRunArtifactNote: artifactEntries.length === 0 || missingCoreArtifacts.length > 0,
+    }
+}
+
+const buildGraphvizViewerSrc = (graphvizMarkup: string) => {
+    if (!graphvizMarkup) {
+        return ''
+    }
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(graphvizMarkup)}`
+}
+
+const buildDegradedDetailPanels = ({
+    checkpointError,
+    contextError,
+    artifactError,
+    graphvizError,
+}: {
+    checkpointError: CheckpointErrorState | null
+    contextError: ContextErrorState | null
+    artifactError: ArtifactErrorState | null
+    graphvizError: GraphvizErrorState | null
+}) => {
+    const panels: string[] = []
+    if (checkpointError) {
+        panels.push('checkpoint')
+    }
+    if (contextError) {
+        panels.push('context')
+    }
+    if (artifactError) {
+        panels.push('artifacts')
+    }
+    if (graphvizError) {
+        panels.push('graph visualization')
+    }
+    return panels
+}
+
 export {
     EXPECTED_CORE_ARTIFACT_PATHS,
     artifactErrorFromResponse,
     artifactPreviewErrorFromResponse,
     asPendingQuestionSnapshot,
+    buildArtifactDerivedState,
     buildContextExportPayload,
+    buildContextRows,
+    buildDegradedDetailPanels,
+    buildGraphvizViewerSrc,
+    buildCheckpointSummary,
     checkpointErrorFromResponse,
     contextErrorFromResponse,
+    filterContextRows,
     formatContextValue,
     graphvizErrorFromResponse,
     logUnexpectedRunError,

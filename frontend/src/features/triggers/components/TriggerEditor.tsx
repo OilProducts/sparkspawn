@@ -1,5 +1,10 @@
-import type { TriggerSourceType } from '@/lib/workspaceClient'
-import { SHARED_WEBHOOK_ENDPOINT, type TriggerFormState } from '../model/triggerForm'
+import { Checkbox, FieldRow, Input, Label, NativeSelect, Textarea } from '@/ui'
+
+import {
+    SHARED_WEBHOOK_ENDPOINT,
+    type TriggerFormState,
+    type TriggerSourceType,
+} from '../model/triggerForm'
 
 export function TriggerEditor({
     form,
@@ -17,123 +22,122 @@ export function TriggerEditor({
     return (
         <div className="mt-4 space-y-3">
             <div className="grid gap-3 lg:grid-cols-2">
-                <label className="space-y-1 text-sm">
-                    <span className="text-xs font-medium text-foreground">Name</span>
-                    <input
+                <FieldRow label="Name" htmlFor="trigger-name" className="text-sm">
+                    <Input
+                        id="trigger-name"
                         value={form.name}
                         onChange={(event) => onChange({ ...form, name: event.target.value })}
-                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                        className="text-sm"
                     />
-                </label>
-                <label className="space-y-1 text-sm">
-                    <span className="text-xs font-medium text-foreground">Target Flow</span>
-                    <input
+                </FieldRow>
+                <FieldRow label="Target Flow" htmlFor="trigger-target-flow" className="text-sm">
+                    <Input
+                        id="trigger-target-flow"
                         value={form.flowName}
                         onChange={(event) => onChange({ ...form, flowName: event.target.value })}
-                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm font-mono"
+                        className="text-sm font-mono"
                     />
-                </label>
+                </FieldRow>
             </div>
 
             <div className="grid gap-3 lg:grid-cols-3">
-                <label className="space-y-1 text-sm">
-                    <span className="text-xs font-medium text-foreground">Source Type</span>
-                    <select
+                <FieldRow label="Source Type" htmlFor="trigger-source-type" className="text-sm">
+                    <NativeSelect
+                        id="trigger-source-type"
                         value={form.sourceType}
                         onChange={(event) => onChange({ ...form, sourceType: event.target.value as TriggerSourceType })}
                         disabled={sourceTypeDisabled}
-                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                        className="text-sm"
                     >
                         <option value="schedule">Schedule</option>
                         <option value="poll">Poll</option>
                         <option value="webhook">Webhook</option>
                         <option value="flow_event">Flow Event</option>
                         {protectedTrigger ? <option value="workspace_event">Workspace Event</option> : null}
-                    </select>
-                </label>
-                <label className="space-y-1 text-sm">
-                    <span className="text-xs font-medium text-foreground">Project Target</span>
-                    <input
+                    </NativeSelect>
+                </FieldRow>
+                <FieldRow label="Project Target" htmlFor="trigger-project-target" className="text-sm">
+                    <Input
+                        id="trigger-project-target"
                         value={form.projectPath}
                         onChange={(event) => onChange({ ...form, projectPath: event.target.value })}
                         disabled={protectedTrigger}
-                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                        className="text-sm"
                     />
-                </label>
-                <label className="flex items-end gap-2 text-sm">
-                    <input
-                        type="checkbox"
+                </FieldRow>
+                <Label htmlFor="trigger-enabled" className="flex items-end gap-2 text-sm">
+                    <Checkbox
+                        id="trigger-enabled"
                         checked={form.enabled}
-                        onChange={(event) => onChange({ ...form, enabled: event.target.checked })}
-                        className="h-4 w-4"
+                        onCheckedChange={(checked) => onChange({ ...form, enabled: checked === true })}
                     />
                     <span className="text-xs font-medium text-foreground">Enabled</span>
-                </label>
+                </Label>
             </div>
 
             {form.sourceType === 'schedule' ? (
                 <div className="grid gap-3 lg:grid-cols-2">
-                    <label className="space-y-1 text-sm">
-                        <span className="text-xs font-medium text-foreground">Schedule Kind</span>
-                        <select
+                    <FieldRow label="Schedule Kind" htmlFor="trigger-schedule-kind" className="text-sm">
+                        <NativeSelect
+                            id="trigger-schedule-kind"
                             value={form.scheduleKind}
                             onChange={(event) => onChange({ ...form, scheduleKind: event.target.value as 'once' | 'interval' | 'weekly' })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            className="text-sm"
                         >
                             <option value="interval">Interval</option>
                             <option value="once">One Shot</option>
                             <option value="weekly">Weekly</option>
-                        </select>
-                    </label>
+                        </NativeSelect>
+                    </FieldRow>
                     {form.scheduleKind === 'interval' ? (
-                        <label className="space-y-1 text-sm">
-                            <span className="text-xs font-medium text-foreground">Interval Seconds</span>
-                            <input
+                        <FieldRow label="Interval Seconds" htmlFor="trigger-schedule-interval-seconds" className="text-sm">
+                            <Input
+                                id="trigger-schedule-interval-seconds"
                                 value={form.scheduleIntervalSeconds}
                                 onChange={(event) => onChange({ ...form, scheduleIntervalSeconds: event.target.value })}
-                                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                className="text-sm"
                             />
-                        </label>
+                        </FieldRow>
                     ) : null}
                     {form.scheduleKind === 'once' ? (
-                        <label className="space-y-1 text-sm lg:col-span-2">
-                            <span className="text-xs font-medium text-foreground">Run At (ISO UTC)</span>
-                            <input
+                        <FieldRow label="Run At (ISO UTC)" htmlFor="trigger-schedule-run-at" className="text-sm lg:col-span-2">
+                            <Input
+                                id="trigger-schedule-run-at"
                                 value={form.scheduleRunAt}
                                 onChange={(event) => onChange({ ...form, scheduleRunAt: event.target.value })}
-                                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm font-mono"
+                                className="text-sm font-mono"
                                 placeholder="2026-03-22T15:00:00Z"
                             />
-                        </label>
+                        </FieldRow>
                     ) : null}
                     {form.scheduleKind === 'weekly' ? (
                         <>
-                            <label className="space-y-1 text-sm">
-                                <span className="text-xs font-medium text-foreground">Weekdays</span>
-                                <input
+                            <FieldRow label="Weekdays" htmlFor="trigger-schedule-weekdays" className="text-sm">
+                                <Input
+                                    id="trigger-schedule-weekdays"
                                     value={form.scheduleWeekdays}
                                     onChange={(event) => onChange({ ...form, scheduleWeekdays: event.target.value })}
-                                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                    className="text-sm"
                                     placeholder="mon,wed,fri"
                                 />
-                            </label>
+                            </FieldRow>
                             <div className="grid grid-cols-2 gap-3">
-                                <label className="space-y-1 text-sm">
-                                    <span className="text-xs font-medium text-foreground">Hour</span>
-                                    <input
+                                <FieldRow label="Hour" htmlFor="trigger-schedule-hour" className="text-sm">
+                                    <Input
+                                        id="trigger-schedule-hour"
                                         value={form.scheduleHour}
                                         onChange={(event) => onChange({ ...form, scheduleHour: event.target.value })}
-                                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                        className="text-sm"
                                     />
-                                </label>
-                                <label className="space-y-1 text-sm">
-                                    <span className="text-xs font-medium text-foreground">Minute</span>
-                                    <input
+                                </FieldRow>
+                                <FieldRow label="Minute" htmlFor="trigger-schedule-minute" className="text-sm">
+                                    <Input
+                                        id="trigger-schedule-minute"
                                         value={form.scheduleMinute}
                                         onChange={(event) => onChange({ ...form, scheduleMinute: event.target.value })}
-                                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                        className="text-sm"
                                     />
-                                </label>
+                                </FieldRow>
                             </div>
                         </>
                     ) : null}
@@ -142,69 +146,69 @@ export function TriggerEditor({
 
             {form.sourceType === 'poll' ? (
                 <div className="grid gap-3 lg:grid-cols-2">
-                    <label className="space-y-1 text-sm lg:col-span-2">
-                        <span className="text-xs font-medium text-foreground">Poll URL</span>
-                        <input
+                    <FieldRow label="Poll URL" htmlFor="trigger-poll-url" className="text-sm lg:col-span-2">
+                        <Input
+                            id="trigger-poll-url"
                             value={form.pollUrl}
                             onChange={(event) => onChange({ ...form, pollUrl: event.target.value })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm font-mono"
+                            className="text-sm font-mono"
                         />
-                    </label>
-                    <label className="space-y-1 text-sm">
-                        <span className="text-xs font-medium text-foreground">Interval Seconds</span>
-                        <input
+                    </FieldRow>
+                    <FieldRow label="Interval Seconds" htmlFor="trigger-poll-interval-seconds" className="text-sm">
+                        <Input
+                            id="trigger-poll-interval-seconds"
                             value={form.pollIntervalSeconds}
                             onChange={(event) => onChange({ ...form, pollIntervalSeconds: event.target.value })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            className="text-sm"
                         />
-                    </label>
-                    <label className="space-y-1 text-sm">
-                        <span className="text-xs font-medium text-foreground">Items Path</span>
-                        <input
+                    </FieldRow>
+                    <FieldRow label="Items Path" htmlFor="trigger-poll-items-path" className="text-sm">
+                        <Input
+                            id="trigger-poll-items-path"
                             value={form.pollItemsPath}
                             onChange={(event) => onChange({ ...form, pollItemsPath: event.target.value })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            className="text-sm"
                         />
-                    </label>
-                    <label className="space-y-1 text-sm">
-                        <span className="text-xs font-medium text-foreground">Item ID Path</span>
-                        <input
+                    </FieldRow>
+                    <FieldRow label="Item ID Path" htmlFor="trigger-poll-item-id-path" className="text-sm">
+                        <Input
+                            id="trigger-poll-item-id-path"
                             value={form.pollItemIdPath}
                             onChange={(event) => onChange({ ...form, pollItemIdPath: event.target.value })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            className="text-sm"
                         />
-                    </label>
-                    <label className="space-y-1 text-sm lg:col-span-2">
-                        <span className="text-xs font-medium text-foreground">Headers JSON</span>
-                        <textarea
+                    </FieldRow>
+                    <FieldRow label="Headers JSON" htmlFor="trigger-poll-headers-json" className="text-sm lg:col-span-2">
+                        <Textarea
+                            id="trigger-poll-headers-json"
                             value={form.pollHeadersText}
                             onChange={(event) => onChange({ ...form, pollHeadersText: event.target.value })}
-                            className="min-h-24 w-full rounded-md border border-input bg-background px-2 py-2 font-mono text-xs"
+                            className="min-h-24 font-mono text-xs"
                         />
-                    </label>
+                    </FieldRow>
                 </div>
             ) : null}
 
             {form.sourceType === 'flow_event' ? (
                 <div className="grid gap-3 lg:grid-cols-2">
-                    <label className="space-y-1 text-sm">
-                        <span className="text-xs font-medium text-foreground">Observed Flow</span>
-                        <input
+                    <FieldRow label="Observed Flow" htmlFor="trigger-flow-event-flow-name" className="text-sm">
+                        <Input
+                            id="trigger-flow-event-flow-name"
                             value={form.flowEventFlowName}
                             onChange={(event) => onChange({ ...form, flowEventFlowName: event.target.value })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm font-mono"
+                            className="text-sm font-mono"
                             placeholder="Leave blank for any observed flow"
                         />
-                    </label>
-                    <label className="space-y-1 text-sm">
-                        <span className="text-xs font-medium text-foreground">Terminal Statuses</span>
-                        <input
+                    </FieldRow>
+                    <FieldRow label="Terminal Statuses" htmlFor="trigger-flow-event-statuses" className="text-sm">
+                        <Input
+                            id="trigger-flow-event-statuses"
                             value={form.flowEventStatuses}
                             onChange={(event) => onChange({ ...form, flowEventStatuses: event.target.value })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            className="text-sm"
                             placeholder="completed,failed"
                         />
-                    </label>
+                    </FieldRow>
                 </div>
             ) : null}
 
@@ -214,15 +218,15 @@ export function TriggerEditor({
                 </div>
             ) : null}
 
-            <label className="space-y-1 text-sm">
-                <span className="text-xs font-medium text-foreground">Static Context JSON</span>
-                <textarea
+            <FieldRow label="Static Context JSON" htmlFor="trigger-static-context-json" className="text-sm">
+                <Textarea
+                    id="trigger-static-context-json"
                     value={form.staticContextText}
                     onChange={(event) => onChange({ ...form, staticContextText: event.target.value })}
                     disabled={protectedTrigger}
-                    className="min-h-24 w-full rounded-md border border-input bg-background px-2 py-2 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                    className="min-h-24 font-mono text-xs"
                 />
-            </label>
+            </FieldRow>
         </div>
     )
 }

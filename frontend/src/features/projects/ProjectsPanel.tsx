@@ -1,10 +1,23 @@
-import { ProjectConversationHistory } from "@/components/projects/ProjectConversationHistory"
-import { ProjectConversationSurface } from "@/components/projects/ProjectConversationSurface"
-import { ProjectsSidebar } from "@/components/projects/ProjectsSidebar"
-import { useProjectsHomeController } from "@/components/projects/hooks/useProjectsHomeController"
+import { useState } from "react"
+
+import { ProjectConversationHistory } from "./components/ProjectConversationHistory"
+import { ProjectConversationSurface } from "./components/ProjectConversationSurface"
+import { ProjectsSidebar } from "./components/ProjectsSidebar"
+import { useProjectsHomeController } from "./hooks/useProjectsHomeController"
+import { useProjectRegistryBootstrap } from "./hooks/useProjectRegistryBootstrap"
+import { useStore } from "@/store"
 
 export function ProjectsPanel() {
+    const hydrateProjectRegistry = useStore((state) => state.hydrateProjectRegistry)
+    const shouldBootstrapRegistry = useStore((state) => Object.keys(state.projectRegistry).length === 0)
+    const [registryBootstrapError, setRegistryBootstrapError] = useState<string | null>(null)
     const { historyProps, isNarrowViewport, sidebarProps, surfaceProps } = useProjectsHomeController()
+
+    useProjectRegistryBootstrap({
+        hydrateProjectRegistry,
+        enabled: shouldBootstrapRegistry,
+        onError: setRegistryBootstrapError,
+    })
 
     return (
         <section
@@ -21,6 +34,7 @@ export function ProjectsPanel() {
                     <ProjectsSidebar {...sidebarProps} />
                     <ProjectConversationSurface
                         {...surfaceProps}
+                        panelError={registryBootstrapError || surfaceProps.panelError}
                         historyContent={<ProjectConversationHistory {...historyProps} />}
                     />
                 </div>

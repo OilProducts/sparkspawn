@@ -200,7 +200,7 @@ export function conversationEventsUrl(conversationId: string, projectPath: strin
     )
 }
 
-function parseConversationTurnResponse(value: unknown, _endpoint: string): ConversationTurnResponse | null {
+function parseConversationTurnResponse(value: unknown): ConversationTurnResponse | null {
     const record = asUnknownRecord(value)
     if (!record) {
         return null
@@ -495,7 +495,7 @@ function parseFlowLaunchResponse(value: unknown): FlowLaunchResponse | null {
     }
 }
 
-function parseConversationSummaryResponse(value: unknown, _endpoint: string): ConversationSummaryResponse | null {
+function parseConversationSummaryResponse(value: unknown): ConversationSummaryResponse | null {
     const record = asUnknownRecord(value)
     if (
         !record
@@ -526,7 +526,7 @@ export function parseConversationSummaryListResponse(
         throw new ApiSchemaError(endpoint, 'Expected an array of conversation summaries.')
     }
     return payload
-        .map((entry) => parseConversationSummaryResponse(entry, endpoint))
+        .map((entry) => parseConversationSummaryResponse(entry))
         .filter((entry): entry is ConversationSummaryResponse => entry !== null)
 }
 
@@ -554,7 +554,7 @@ export function parseConversationSnapshotResponse(
     }
     const turns = Array.isArray(record.turns)
         ? record.turns
-            .map((entry) => parseConversationTurnResponse(entry, endpoint))
+            .map((entry) => parseConversationTurnResponse(entry))
             .filter((entry): entry is ConversationTurnResponse => entry !== null)
         : []
     const event_log = Array.isArray(record.event_log)
@@ -621,7 +621,7 @@ export function parseConversationStreamEventResponse(
     const record = expectObjectRecord(payload, endpoint)
     const type = typeof record.type === 'string' ? record.type : ''
     if (type === 'turn_upsert') {
-        const turn = parseConversationTurnResponse(record.turn, endpoint)
+        const turn = parseConversationTurnResponse(record.turn)
         if (
             !turn
             || typeof record.conversation_id !== 'string'

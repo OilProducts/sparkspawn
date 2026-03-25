@@ -12,7 +12,7 @@ import {
     type ConversationTurnUpsertEventResponse,
     type ExecutionCardResponse,
 } from '@/lib/workspaceClient'
-import type { ProjectGitMetadata } from '@/components/projects/presentation'
+import type { ProjectGitMetadata } from './presentation'
 import {
     compareConversationSnapshotFreshness,
     ensureConversationSnapshotShell,
@@ -23,7 +23,7 @@ import {
     upsertConversationSegment,
     upsertConversationSummary,
     upsertConversationTurn,
-} from '@/components/projects/conversationState'
+} from './conversationState'
 
 type PickerFileWithPath = File & {
     path?: string

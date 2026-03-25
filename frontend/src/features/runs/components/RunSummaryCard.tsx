@@ -1,5 +1,6 @@
-import type { RunRecord } from '@/components/runs/shared'
-import { STATUS_LABELS, formatDuration, formatOutcomeLabel, formatTimestamp } from '@/components/runs/shared'
+import type { RunRecord } from '../model/shared'
+import { STATUS_LABELS, formatDuration, formatOutcomeLabel, formatTimestamp } from '../model/shared'
+import { Panel, PanelContent, PanelHeader, SectionHeader } from '@/ui'
 
 interface RunSummaryCardProps {
     run: RunRecord
@@ -9,12 +10,15 @@ interface RunSummaryCardProps {
 
 export function RunSummaryCard({ run, activeProjectPath, now }: RunSummaryCardProps) {
     return (
-        <div data-testid="run-summary-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Run Summary</h3>
-                <span className="text-xs text-muted-foreground">{run.run_id}</span>
-            </div>
-            <div className="grid gap-x-6 gap-y-2 text-sm md:grid-cols-2">
+        <Panel data-testid="run-summary-panel">
+            <PanelHeader>
+                <SectionHeader
+                    title="Run Summary"
+                    description="Execution metadata, scope, and final outcome."
+                    action={<span className="text-xs text-muted-foreground">{run.run_id}</span>}
+                />
+            </PanelHeader>
+            <PanelContent className="grid gap-x-6 gap-y-2 text-sm md:grid-cols-2">
                 <div data-testid="run-summary-status"><span className="font-medium">Status:</span> {STATUS_LABELS[run.status] || run.status}</div>
                 <div data-testid="run-summary-outcome"><span className="font-medium">Outcome:</span> {formatOutcomeLabel(run.outcome)}</div>
                 <div data-testid="run-summary-flow-name"><span className="font-medium">Flow:</span> {run.flow_name || 'Untitled'}</div>
@@ -28,7 +32,7 @@ export function RunSummaryCard({ run, activeProjectPath, now }: RunSummaryCardPr
                 <div data-testid="run-summary-git-commit"><span className="font-medium">Git Commit:</span> {run.git_commit || '—'}</div>
                 <div data-testid="run-summary-last-error" className="break-all"><span className="font-medium">Last Error:</span> {run.last_error || '—'}</div>
                 <div data-testid="run-summary-token-usage"><span className="font-medium">Tokens:</span> {typeof run.token_usage === 'number' ? run.token_usage.toLocaleString() : '—'}</div>
-            </div>
-        </div>
+            </PanelContent>
+        </Panel>
     )
 }

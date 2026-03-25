@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
 import type { LaunchInputDefinition, LaunchInputFormValues, ParsedLaunchInputDefinitions } from '@/lib/flowContracts'
+import { Button, InlineNotice, Input, Label, NativeSelect, Textarea } from '@/ui'
 
 const launchInputTypeLabel = (type: string) => {
     switch (type) {
@@ -74,29 +75,32 @@ export function ExecutionLaunchInputsSurface({
                     Launch Inputs
                 </p>
                 {canCollapseLaunchInputs ? (
-                    <button
+                    <Button
                         type="button"
                         data-testid="execution-launch-inputs-toggle"
                         aria-label={launchInputsCollapsed ? 'Expand launch inputs' : 'Collapse launch inputs'}
                         title={launchInputsCollapsed ? 'Expand launch inputs' : 'Collapse launch inputs'}
                         onClick={onToggleCollapsed}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                     >
                         {launchInputsCollapsed ? (
                             <ChevronUp className="h-3.5 w-3.5" />
                         ) : (
                             <ChevronDown className="h-3.5 w-3.5" />
                         )}
-                    </button>
+                    </Button>
                 ) : null}
             </div>
             {parsedLaunchInputs.error ? (
-                <p
+                <InlineNotice
                     data-testid="execution-launch-inputs-schema-error"
-                    className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive"
+                    tone="error"
+                    className="mb-3 text-[11px]"
                 >
                     {parsedLaunchInputs.error}
-                </p>
+                </InlineNotice>
             ) : null}
             {!launchInputsCollapsed ? (
                 <div
@@ -128,9 +132,9 @@ export function ExecutionLaunchInputsSurface({
                                     }`}
                                 >
                                     <div className="min-w-0">
-                                        <label className="text-xs font-medium text-foreground">
+                                        <Label className="text-xs">
                                             {entry.label}
-                                        </label>
+                                        </Label>
                                         {entry.description ? (
                                             <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
                                                 {entry.description}
@@ -143,48 +147,48 @@ export function ExecutionLaunchInputsSurface({
                                     </p>
                                 </div>
                                 {entry.type === 'string' ? (
-                                    <input
+                                    <Input
                                         data-testid={`execution-launch-input-${entry.key}`}
                                         value={launchInputValues[entry.key] ?? ''}
                                         onChange={(event) => onInputChange(entry, event.target.value)}
-                                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        className="h-8 text-xs"
                                     />
                                 ) : entry.type === 'string[]' ? (
-                                    <textarea
+                                    <Textarea
                                         data-testid={`execution-launch-input-${entry.key}`}
                                         value={launchInputValues[entry.key] ?? ''}
                                         onChange={(event) => onInputChange(entry, event.target.value)}
                                         rows={2}
-                                        className="min-h-16 w-full rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        className="min-h-16 px-2 py-1 text-xs"
                                         placeholder="One item per line"
                                     />
                                 ) : entry.type === 'boolean' ? (
-                                    <select
+                                    <NativeSelect
                                         data-testid={`execution-launch-input-${entry.key}`}
                                         value={launchInputValues[entry.key] ?? ''}
                                         onChange={(event) => onInputChange(entry, event.target.value)}
-                                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        className="h-8 text-xs"
                                     >
                                         <option value="">Unset</option>
                                         <option value="true">True</option>
                                         <option value="false">False</option>
-                                    </select>
+                                    </NativeSelect>
                                 ) : entry.type === 'number' ? (
-                                    <input
+                                    <Input
                                         data-testid={`execution-launch-input-${entry.key}`}
                                         type="number"
                                         value={launchInputValues[entry.key] ?? ''}
                                         onChange={(event) => onInputChange(entry, event.target.value)}
-                                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        className="h-8 text-xs"
                                         placeholder="42"
                                     />
                                 ) : (
-                                    <textarea
+                                    <Textarea
                                         data-testid={`execution-launch-input-${entry.key}`}
                                         value={launchInputValues[entry.key] ?? ''}
                                         onChange={(event) => onInputChange(entry, event.target.value)}
                                         rows={3}
-                                        className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        className="min-h-20 px-2 py-1 text-xs"
                                         placeholder='{"key":"value"}'
                                     />
                                 )}

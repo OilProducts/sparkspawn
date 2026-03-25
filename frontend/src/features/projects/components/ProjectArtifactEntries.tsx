@@ -1,8 +1,14 @@
 import { ChevronDown, ChevronUp } from "lucide-react"
 
-import type { ExecutionCardResponse, FlowLaunchResponse, FlowRunRequestResponse, SpecEditProposalResponse } from "@/lib/workspaceClient"
+import { Button } from "@/ui"
 
-import type { ProjectGitMetadata } from "@/components/projects/presentation"
+import type { ProjectGitMetadata } from "../model/presentation"
+import type {
+    ProjectExecutionCard,
+    ProjectFlowLaunch,
+    ProjectFlowRunRequest,
+    ProjectSpecEditProposal,
+} from "../model/types"
 
 type SurfaceTone = "neutral" | "info" | "success" | "warning" | "danger"
 
@@ -12,18 +18,18 @@ type ProposalDiffLine = {
 }
 
 type ProjectSpecEditProposalEntryProps = {
-    proposal: SpecEditProposalResponse | null
+    proposal: ProjectSpecEditProposal | null
     activeProjectGitMetadata: ProjectGitMetadata
     isLatestProposal: boolean
     pendingSpecProposalId: string | null
     expandedProposalChanges: Record<string, boolean>
-    onApproveSpecEditProposal: (proposal: SpecEditProposalResponse) => void | Promise<void>
-    onRejectSpecEditProposal: (proposal: SpecEditProposalResponse) => void | Promise<void>
+    onApproveSpecEditProposal: (proposal: ProjectSpecEditProposal) => void | Promise<void>
+    onRejectSpecEditProposal: (proposal: ProjectSpecEditProposal) => void | Promise<void>
     toggleProposalChangeExpanded: (changeKey: string) => void
     formatConversationTimestamp: (value: string) => string
-    getSpecEditStatusPresentation: (status: SpecEditProposalResponse["status"]) => { label: string; tone: SurfaceTone }
+    getSpecEditStatusPresentation: (status: ProjectSpecEditProposal["status"]) => { label: string; tone: SurfaceTone }
     getSurfaceToneClassName: (tone: SurfaceTone) => string
-    buildProposalDiffLines: (change: SpecEditProposalResponse["changes"][number]) => ProposalDiffLine[]
+    buildProposalDiffLines: (change: ProjectSpecEditProposal["changes"][number]) => ProposalDiffLine[]
     buildProposalChangeKey: (proposalId: string, path: string, changeIndex: number) => string
     proposalDiffCollapseLineLimit: number
 }
@@ -99,14 +105,16 @@ export function ProjectSpecEditProposalEntry({
                             <div className="flex items-center justify-between gap-2 border-b border-amber-500/20 px-3 py-2">
                                 <p className="truncate text-[11px] font-medium text-foreground">{change.path}</p>
                                 {shouldCollapse ? (
-                                    <button
+                                    <Button
                                         type="button"
                                         onClick={() => toggleProposalChangeExpanded(changeKey)}
-                                        className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        variant="outline"
+                                        size="xs"
+                                        className="h-auto px-1.5 py-0.5 text-[10px] text-muted-foreground"
                                     >
                                         {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                                         {isExpanded ? "Collapse" : `Show all (${diffLines.length})`}
-                                    </button>
+                                    </Button>
                                 ) : null}
                             </div>
                             <div className="space-y-1 px-3 py-3">
@@ -134,28 +142,32 @@ export function ProjectSpecEditProposalEntry({
             </ul>
             {proposal.status === "pending" ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
+                    <Button
                         data-testid={isLatestProposal ? "project-spec-edit-proposal-apply-button" : undefined}
                         type="button"
                         onClick={() => {
                             void onApproveSpecEditProposal(proposal)
                         }}
                         disabled={pendingSpecProposalId === proposal.id}
-                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                        variant="outline"
+                        size="xs"
+                        className="px-2 text-xs"
                     >
                         Apply proposal
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                         data-testid={isLatestProposal ? "project-spec-edit-proposal-reject-button" : undefined}
                         type="button"
                         onClick={() => {
                             void onRejectSpecEditProposal(proposal)
                         }}
                         disabled={pendingSpecProposalId === proposal.id}
-                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                        variant="outline"
+                        size="xs"
+                        className="px-2 text-xs"
                     >
                         Reject proposal
-                    </button>
+                    </Button>
                 </div>
             ) : proposal.status === "applied" ? (
                 <div className="mt-3 space-y-1 text-[11px] text-muted-foreground">
@@ -184,13 +196,13 @@ export function ProjectSpecEditProposalEntry({
 }
 
 type ProjectFlowRunRequestEntryProps = {
-    flowRunRequest: FlowRunRequestResponse | null
+    flowRunRequest: ProjectFlowRunRequest | null
     isLatestFlowRunRequest: boolean
     pendingFlowRunRequestId: string | null
-    onReviewFlowRunRequest: (request: FlowRunRequestResponse, disposition: "approved" | "rejected") => void | Promise<void>
+    onReviewFlowRunRequest: (request: ProjectFlowRunRequest, disposition: "approved" | "rejected") => void | Promise<void>
     onOpenFlowRun: (request: { run_id?: string | null; flow_name: string }) => void
     formatConversationTimestamp: (value: string) => string
-    getFlowRunRequestStatusPresentation: (status: FlowRunRequestResponse["status"]) => { label: string; tone: SurfaceTone }
+    getFlowRunRequestStatusPresentation: (status: ProjectFlowRunRequest["status"]) => { label: string; tone: SurfaceTone }
     getSurfaceToneClassName: (tone: SurfaceTone) => string
 }
 
@@ -279,41 +291,47 @@ export function ProjectFlowRunRequestEntry({
                         <span>
                             Run: <span className="font-mono text-foreground">{flowRunRequest.run_id}</span>
                         </span>
-                        <button
+                        <Button
                             type="button"
                             data-testid={isLatestFlowRunRequest ? "project-flow-run-request-open-run-button" : undefined}
                             onClick={() => onOpenFlowRun(flowRunRequest)}
-                            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            variant="outline"
+                            size="xs"
+                            className="px-2 text-xs"
                         >
                             Open run
-                        </button>
+                        </Button>
                     </div>
                 ) : null}
             </div>
             {canReview ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
+                    <Button
                         data-testid={isLatestFlowRunRequest ? "project-flow-run-request-approve-button" : undefined}
                         type="button"
                         onClick={() => {
                             void onReviewFlowRunRequest(flowRunRequest, "approved")
                         }}
                         disabled={pendingFlowRunRequestId === flowRunRequest.id}
-                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                        variant="outline"
+                        size="xs"
+                        className="px-2 text-xs"
                     >
                         Approve run
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                         data-testid={isLatestFlowRunRequest ? "project-flow-run-request-reject-button" : undefined}
                         type="button"
                         onClick={() => {
                             void onReviewFlowRunRequest(flowRunRequest, "rejected")
                         }}
                         disabled={pendingFlowRunRequestId === flowRunRequest.id}
-                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                        variant="outline"
+                        size="xs"
+                        className="px-2 text-xs"
                     >
                         Reject run
-                    </button>
+                    </Button>
                 </div>
             ) : null}
         </div>
@@ -321,11 +339,11 @@ export function ProjectFlowRunRequestEntry({
 }
 
 type ProjectFlowLaunchEntryProps = {
-    flowLaunch: FlowLaunchResponse | null
+    flowLaunch: ProjectFlowLaunch | null
     isLatestFlowLaunch: boolean
     onOpenFlowRun: (request: { run_id?: string | null; flow_name: string }) => void
     formatConversationTimestamp: (value: string) => string
-    getFlowLaunchStatusPresentation: (status: FlowLaunchResponse["status"]) => { label: string; tone: SurfaceTone }
+    getFlowLaunchStatusPresentation: (status: ProjectFlowLaunch["status"]) => { label: string; tone: SurfaceTone }
     getSurfaceToneClassName: (tone: SurfaceTone) => string
 }
 
@@ -404,14 +422,16 @@ export function ProjectFlowLaunchEntry({
                         <span>
                             Run: <span className="font-mono text-foreground">{flowLaunch.run_id}</span>
                         </span>
-                        <button
+                        <Button
                             type="button"
                             data-testid={isLatestFlowLaunch ? "project-flow-launch-open-run-button" : undefined}
                             onClick={() => onOpenFlowRun(flowLaunch)}
-                            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            variant="outline"
+                            size="xs"
+                            className="px-2 text-xs"
                         >
                             Open run
-                        </button>
+                        </Button>
                     </div>
                 ) : null}
             </div>
@@ -420,12 +440,12 @@ export function ProjectFlowLaunchEntry({
 }
 
 type ProjectExecutionCardEntryProps = {
-    executionCard: ExecutionCardResponse | null
+    executionCard: ProjectExecutionCard | null
     isLatestExecutionCard: boolean
     pendingExecutionCardId: string | null
-    onReviewExecutionCard: (card: ExecutionCardResponse, disposition: "approved" | "rejected" | "revision_requested") => void | Promise<void>
+    onReviewExecutionCard: (card: ProjectExecutionCard, disposition: "approved" | "rejected" | "revision_requested") => void | Promise<void>
     formatConversationTimestamp: (value: string) => string
-    getExecutionCardStatusPresentation: (status: ExecutionCardResponse["status"]) => { label: string; tone: SurfaceTone }
+    getExecutionCardStatusPresentation: (status: ProjectExecutionCard["status"]) => { label: string; tone: SurfaceTone }
     getSurfaceToneClassName: (tone: SurfaceTone) => string
 }
 
@@ -524,39 +544,45 @@ export function ProjectExecutionCardEntry({
                     </div>
                     {canReview ? (
                         <div className="flex flex-wrap items-center gap-2">
-                            <button
+                            <Button
                                 data-testid={isLatestExecutionCard ? "project-plan-approve-button" : undefined}
                                 type="button"
                                 onClick={() => {
                                     void onReviewExecutionCard(executionCard, "approved")
                                 }}
                                 disabled={pendingExecutionCardId === executionCard.id}
-                                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                variant="outline"
+                                size="xs"
+                                className="px-2 text-xs"
                             >
                                 Approve plan
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                                 data-testid={isLatestExecutionCard ? "project-plan-reject-button" : undefined}
                                 type="button"
                                 onClick={() => {
                                     void onReviewExecutionCard(executionCard, "rejected")
                                 }}
                                 disabled={pendingExecutionCardId === executionCard.id}
-                                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                variant="outline"
+                                size="xs"
+                                className="px-2 text-xs"
                             >
                                 Reject plan
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                                 data-testid={isLatestExecutionCard ? "project-plan-request-revision-button" : undefined}
                                 type="button"
                                 onClick={() => {
                                     void onReviewExecutionCard(executionCard, "revision_requested")
                                 }}
                                 disabled={pendingExecutionCardId === executionCard.id}
-                                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                                variant="outline"
+                                size="xs"
+                                className="px-2 text-xs"
                             >
                                 Request revision
-                            </button>
+                            </Button>
                         </div>
                     ) : null}
                 </section>

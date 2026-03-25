@@ -1,7 +1,16 @@
 import type {
     ArtifactErrorState,
     ArtifactListEntry,
-} from '@/components/runs/shared'
+} from '../model/shared'
+import {
+    Button,
+    EmptyState,
+    InlineNotice,
+    Panel,
+    PanelContent,
+    PanelHeader,
+    SectionHeader,
+} from '@/ui'
 
 interface RunArtifactsCardProps {
     isLoading: boolean
@@ -33,24 +42,32 @@ export function RunArtifactsCard({
     artifactDownloadHref,
 }: RunArtifactsCardProps) {
     return (
-        <div data-testid="run-artifact-panel" className="rounded-md border border-border bg-card p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Artifacts</h3>
-                <button
-                    onClick={onRefresh}
-                    data-testid="run-artifact-refresh-button"
-                    className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                >
-                    {isLoading ? 'Refreshing…' : 'Refresh'}
-                </button>
-            </div>
+        <Panel data-testid="run-artifact-panel">
+            <PanelHeader>
+                <SectionHeader
+                    title="Artifacts"
+                    description="Browse generated files, inspect previews, and download outputs."
+                    action={(
+                        <Button
+                            onClick={onRefresh}
+                            data-testid="run-artifact-refresh-button"
+                            variant="outline"
+                            size="xs"
+                            className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+                        >
+                            {isLoading ? 'Refreshing…' : 'Refresh'}
+                        </Button>
+                    )}
+                />
+            </PanelHeader>
+            <PanelContent className="space-y-3">
             {artifactError && (
-                <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <InlineNotice tone="error" className="space-y-1">
                     <div data-testid="run-artifact-error">{artifactError.message}</div>
                     <div data-testid="run-artifact-error-help" className="text-xs text-destructive/90">
                         {artifactError.help}
                     </div>
-                </div>
+                </InlineNotice>
             )}
             {!artifactError && (
                 <div className="space-y-3">
@@ -86,17 +103,19 @@ export function RunArtifactsCard({
                                             <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{artifact.size_bytes.toLocaleString()}</td>
                                             <td className="px-3 py-2">
                                                 <div className="flex items-center gap-2">
-                                                    <button
+                                                    <Button
                                                         type="button"
                                                         data-testid="run-artifact-view-button"
                                                         disabled={!artifact.viewable}
                                                         onClick={() => {
                                                             void onViewArtifact(artifact)
                                                         }}
-                                                        className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                                        variant="outline"
+                                                        size="xs"
+                                                        className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
                                                     >
                                                         View
-                                                    </button>
+                                                    </Button>
                                                     <a
                                                         data-testid="run-artifact-download-link"
                                                         href={artifactDownloadHref(artifact.path) || undefined}
@@ -111,8 +130,11 @@ export function RunArtifactsCard({
                                     ))
                                 ) : (
                                     <tr>
-                                        <td data-testid="run-artifact-empty" colSpan={4} className="px-3 py-4 text-sm text-muted-foreground">
-                                            No run artifacts are available yet.
+                                        <td colSpan={4} className="px-3 py-4">
+                                            <EmptyState
+                                                data-testid="run-artifact-empty"
+                                                description="No run artifacts are available yet."
+                                            />
                                         </td>
                                     </tr>
                                 )}
@@ -144,6 +166,7 @@ export function RunArtifactsCard({
                     </div>
                 </div>
             )}
-        </div>
+            </PanelContent>
+        </Panel>
     )
 }

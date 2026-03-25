@@ -9,6 +9,7 @@ import {
     type FlowRunRequestResponse,
     type SpecEditProposalResponse,
 } from '@/lib/workspaceClient'
+import { useDialogController } from '@/ui'
 
 type UseConversationReviewsArgs = {
     activeConversationId: string | null
@@ -29,6 +30,7 @@ export function useConversationReviews({
     model,
     setPanelError,
 }: UseConversationReviewsArgs) {
+    const { confirm, prompt } = useDialogController()
     const [pendingSpecProposalId, setPendingSpecProposalId] = useState<string | null>(null)
     const [pendingFlowRunRequestId, setPendingFlowRunRequestId] = useState<string | null>(null)
     const [pendingExecutionCardId, setPendingExecutionCardId] = useState<string | null>(null)
@@ -37,7 +39,13 @@ export function useConversationReviews({
         if (!activeProjectPath || !activeConversationId) {
             return
         }
-        if (!window.confirm('Approve these spec edits, commit them to git, and start execution planning?')) {
+        const confirmed = await confirm({
+            title: 'Apply spec edits?',
+            description: 'Approve these spec edits, commit them to git, and start execution planning?',
+            confirmLabel: 'Approve and plan',
+            cancelLabel: 'Cancel',
+        })
+        if (!confirmed) {
             return
         }
 
@@ -89,12 +97,19 @@ export function useConversationReviews({
 
         const reviewMessage = disposition === 'approved'
             ? 'Approved for dispatch.'
-            : window.prompt(
-                disposition === 'revision_requested'
+            : await prompt({
+                title: disposition === 'revision_requested'
+                    ? 'Request execution-card revision'
+                    : 'Reject execution card',
+                description: disposition === 'revision_requested'
                     ? 'Describe what should change before execution planning is regenerated.'
                     : 'Describe why this execution card should be rejected.',
-                '',
-            )?.trim() || ''
+                label: 'Review feedback',
+                confirmLabel: disposition === 'revision_requested' ? 'Request revision' : 'Reject card',
+                cancelLabel: 'Cancel',
+                multiline: true,
+                requireInput: true,
+            }) || ''
 
         if (!reviewMessage) {
             return
@@ -129,10 +144,15 @@ export function useConversationReviews({
 
         const reviewMessage = disposition === 'approved'
             ? 'Approved for launch.'
-            : window.prompt(
-                'Describe why this flow run request should be rejected.',
-                '',
-            )?.trim() || ''
+            : await prompt({
+                title: 'Reject flow run request',
+                description: 'Describe why this flow run request should be rejected.',
+                label: 'Review feedback',
+                confirmLabel: 'Reject request',
+                cancelLabel: 'Cancel',
+                multiline: true,
+                requireInput: true,
+            }) || ''
 
         if (!reviewMessage) {
             return
