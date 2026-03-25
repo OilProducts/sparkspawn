@@ -185,6 +185,30 @@ def _graph_attr_context_seed(graph) -> Dict[str, object]:
     return pipeline_runs.graph_attr_context_seed(graph)
 
 
+def _dot_attr_value(attrs: Dict[str, object], key: str, default: Optional[object] = None) -> Optional[object]:
+    attr = attrs.get(key)
+    if attr is None:
+        return default
+    value = getattr(attr, "value", default)
+    if hasattr(value, "raw"):
+        return value.raw
+    return value
+
+
+def _resolve_launch_model(graph, requested_model: Optional[str]) -> tuple[Optional[str], str]:
+    selected_model = (requested_model or "").strip() or None
+    if selected_model:
+        return selected_model, selected_model
+
+    flow_default = _dot_attr_value(graph.graph_attrs, "ui_default_llm_model")
+    if isinstance(flow_default, str):
+        normalized_flow_default = flow_default.strip()
+        if normalized_flow_default:
+            return normalized_flow_default, normalized_flow_default
+
+    return None, "codex default (config/profile)"
+
+
 def _run_meta_path(run_id: str) -> Path:
     return pipeline_runs.run_meta_path(get_settings, run_id)
 
@@ -487,17 +511,8 @@ def _graph_payload(graph) -> dict:
     _normalize_graph_attr_aliases(canonical_graph)
     canonical_graph_attrs = canonical_graph.graph_attrs
 
-    def _attr_value(attrs: Dict[str, object], key: str, default: Optional[object] = None):
-        attr = attrs.get(key)
-        if attr is None:
-            return default
-        value = getattr(attr, "value", default)
-        if hasattr(value, "raw"):
-            return value.raw
-        return value
-
     def _all_attrs_payload(attrs: Dict[str, object]) -> Dict[str, object]:
-        return {key: _attr_value(attrs, key) for key in attrs}
+        return {key: _dot_attr_value(attrs, key) for key in attrs}
 
     def _merge_extension_attrs(payload: Dict[str, object], attrs: Dict[str, object]) -> Dict[str, object]:
         merged = dict(payload)
@@ -525,55 +540,55 @@ def _graph_payload(graph) -> dict:
         "nodes": [
             _merge_extension_attrs({
                 "id": n.node_id,
-                "label": _attr_value(n.attrs, "label", n.node_id),
-                "shape": _attr_value(n.attrs, "shape"),
-                "prompt": _attr_value(n.attrs, "prompt"),
-                "tool.command": _attr_value(n.attrs, "tool.command"),
-                "tool.hooks.pre": _attr_value(n.attrs, "tool.hooks.pre"),
-                "tool.hooks.post": _attr_value(n.attrs, "tool.hooks.post"),
-                "tool.artifacts.paths": _attr_value(n.attrs, "tool.artifacts.paths"),
-                "tool.artifacts.stdout": _attr_value(n.attrs, "tool.artifacts.stdout"),
-                "tool.artifacts.stderr": _attr_value(n.attrs, "tool.artifacts.stderr"),
-                "join_policy": _attr_value(n.attrs, "join_policy"),
-                "error_policy": _attr_value(n.attrs, "error_policy"),
-                "max_parallel": _attr_value(n.attrs, "max_parallel"),
-                "type": _attr_value(n.attrs, "type"),
-                "max_retries": _attr_value(n.attrs, "max_retries"),
-                "goal_gate": _attr_value(n.attrs, "goal_gate"),
-                "retry_target": _attr_value(n.attrs, "retry_target"),
-                "fallback_retry_target": _attr_value(n.attrs, "fallback_retry_target"),
-                "fidelity": _attr_value(n.attrs, "fidelity"),
-                "thread_id": _attr_value(n.attrs, "thread_id"),
-                "class": _attr_value(n.attrs, "class"),
-                "timeout": _attr_value(n.attrs, "timeout"),
-                "llm_model": _attr_value(n.attrs, "llm_model"),
-                "llm_provider": _attr_value(n.attrs, "llm_provider"),
-                "reasoning_effort": _attr_value(n.attrs, "reasoning_effort"),
-                "auto_status": _attr_value(n.attrs, "auto_status"),
-                "allow_partial": _attr_value(n.attrs, "allow_partial"),
-                "manager.poll_interval": _attr_value(n.attrs, "manager.poll_interval"),
-                "manager.max_cycles": _attr_value(n.attrs, "manager.max_cycles"),
-                "manager.stop_condition": _attr_value(n.attrs, "manager.stop_condition"),
-                "manager.actions": _attr_value(n.attrs, "manager.actions"),
-                "human.default_choice": _attr_value(n.attrs, "human.default_choice"),
+                "label": _dot_attr_value(n.attrs, "label", n.node_id),
+                "shape": _dot_attr_value(n.attrs, "shape"),
+                "prompt": _dot_attr_value(n.attrs, "prompt"),
+                "tool.command": _dot_attr_value(n.attrs, "tool.command"),
+                "tool.hooks.pre": _dot_attr_value(n.attrs, "tool.hooks.pre"),
+                "tool.hooks.post": _dot_attr_value(n.attrs, "tool.hooks.post"),
+                "tool.artifacts.paths": _dot_attr_value(n.attrs, "tool.artifacts.paths"),
+                "tool.artifacts.stdout": _dot_attr_value(n.attrs, "tool.artifacts.stdout"),
+                "tool.artifacts.stderr": _dot_attr_value(n.attrs, "tool.artifacts.stderr"),
+                "join_policy": _dot_attr_value(n.attrs, "join_policy"),
+                "error_policy": _dot_attr_value(n.attrs, "error_policy"),
+                "max_parallel": _dot_attr_value(n.attrs, "max_parallel"),
+                "type": _dot_attr_value(n.attrs, "type"),
+                "max_retries": _dot_attr_value(n.attrs, "max_retries"),
+                "goal_gate": _dot_attr_value(n.attrs, "goal_gate"),
+                "retry_target": _dot_attr_value(n.attrs, "retry_target"),
+                "fallback_retry_target": _dot_attr_value(n.attrs, "fallback_retry_target"),
+                "fidelity": _dot_attr_value(n.attrs, "fidelity"),
+                "thread_id": _dot_attr_value(n.attrs, "thread_id"),
+                "class": _dot_attr_value(n.attrs, "class"),
+                "timeout": _dot_attr_value(n.attrs, "timeout"),
+                "llm_model": _dot_attr_value(n.attrs, "llm_model"),
+                "llm_provider": _dot_attr_value(n.attrs, "llm_provider"),
+                "reasoning_effort": _dot_attr_value(n.attrs, "reasoning_effort"),
+                "auto_status": _dot_attr_value(n.attrs, "auto_status"),
+                "allow_partial": _dot_attr_value(n.attrs, "allow_partial"),
+                "manager.poll_interval": _dot_attr_value(n.attrs, "manager.poll_interval"),
+                "manager.max_cycles": _dot_attr_value(n.attrs, "manager.max_cycles"),
+                "manager.stop_condition": _dot_attr_value(n.attrs, "manager.stop_condition"),
+                "manager.actions": _dot_attr_value(n.attrs, "manager.actions"),
+                "human.default_choice": _dot_attr_value(n.attrs, "human.default_choice"),
             }, n.attrs)
             for n in graph.nodes.values()
         ],
         "graph_attrs": _merge_extension_attrs({
-            "goal": _attr_value(canonical_graph_attrs, "goal"),
-            "label": _attr_value(canonical_graph_attrs, "label", ""),
-            "model_stylesheet": _attr_value(canonical_graph_attrs, "model_stylesheet"),
-            DEFAULT_MAX_RETRIES_KEY: _attr_value(canonical_graph_attrs, DEFAULT_MAX_RETRIES_KEY),
-            "retry_target": _attr_value(canonical_graph_attrs, "retry_target"),
-            "fallback_retry_target": _attr_value(canonical_graph_attrs, "fallback_retry_target"),
-            "default_fidelity": _attr_value(canonical_graph_attrs, "default_fidelity"),
-            "stack.child_dotfile": _attr_value(canonical_graph_attrs, "stack.child_dotfile"),
-            "stack.child_workdir": _attr_value(canonical_graph_attrs, "stack.child_workdir"),
-            "tool.hooks.pre": _attr_value(canonical_graph_attrs, "tool.hooks.pre"),
-            "tool.hooks.post": _attr_value(canonical_graph_attrs, "tool.hooks.post"),
-            "ui_default_llm_model": _attr_value(canonical_graph_attrs, "ui_default_llm_model"),
-            "ui_default_llm_provider": _attr_value(canonical_graph_attrs, "ui_default_llm_provider"),
-            "ui_default_reasoning_effort": _attr_value(canonical_graph_attrs, "ui_default_reasoning_effort"),
+            "goal": _dot_attr_value(canonical_graph_attrs, "goal"),
+            "label": _dot_attr_value(canonical_graph_attrs, "label", ""),
+            "model_stylesheet": _dot_attr_value(canonical_graph_attrs, "model_stylesheet"),
+            DEFAULT_MAX_RETRIES_KEY: _dot_attr_value(canonical_graph_attrs, DEFAULT_MAX_RETRIES_KEY),
+            "retry_target": _dot_attr_value(canonical_graph_attrs, "retry_target"),
+            "fallback_retry_target": _dot_attr_value(canonical_graph_attrs, "fallback_retry_target"),
+            "default_fidelity": _dot_attr_value(canonical_graph_attrs, "default_fidelity"),
+            "stack.child_dotfile": _dot_attr_value(canonical_graph_attrs, "stack.child_dotfile"),
+            "stack.child_workdir": _dot_attr_value(canonical_graph_attrs, "stack.child_workdir"),
+            "tool.hooks.pre": _dot_attr_value(canonical_graph_attrs, "tool.hooks.pre"),
+            "tool.hooks.post": _dot_attr_value(canonical_graph_attrs, "tool.hooks.post"),
+            "ui_default_llm_model": _dot_attr_value(canonical_graph_attrs, "ui_default_llm_model"),
+            "ui_default_llm_provider": _dot_attr_value(canonical_graph_attrs, "ui_default_llm_provider"),
+            "ui_default_reasoning_effort": _dot_attr_value(canonical_graph_attrs, "ui_default_reasoning_effort"),
         }, {
             key: value
             for key, value in canonical_graph_attrs.items()
@@ -583,12 +598,12 @@ def _graph_payload(graph) -> dict:
             _merge_extension_attrs({
                 "from": e.source,
                 "to": e.target,
-                "label": _attr_value(e.attrs, "label"),
-                "condition": _attr_value(e.attrs, "condition"),
-                "weight": _attr_value(e.attrs, "weight"),
-                "fidelity": _attr_value(e.attrs, "fidelity"),
-                "thread_id": _attr_value(e.attrs, "thread_id"),
-                "loop_restart": _attr_value(e.attrs, "loop_restart"),
+                "label": _dot_attr_value(e.attrs, "label"),
+                "condition": _dot_attr_value(e.attrs, "condition"),
+                "weight": _dot_attr_value(e.attrs, "weight"),
+                "fidelity": _dot_attr_value(e.attrs, "fidelity"),
+                "thread_id": _dot_attr_value(e.attrs, "thread_id"),
+                "loop_restart": _dot_attr_value(e.attrs, "loop_restart"),
             }, e.attrs)
             for e in graph.edges
         ],
@@ -759,8 +774,7 @@ async def _start_pipeline(
 
     os.makedirs(req.working_directory, exist_ok=True)
     working_dir = str(Path(req.working_directory).resolve())
-    selected_model = (req.model or "").strip()
-    display_model = selected_model or "codex default (config/profile)"
+    selected_model, display_model = _resolve_launch_model(graph, req.model)
 
     await _publish_run_event(
         run_id,
@@ -780,7 +794,7 @@ async def _start_pipeline(
             req.backend,
             working_dir,
             emit,
-            model=selected_model or None,
+            model=selected_model,
         )
     except ValueError as exc:
         return {

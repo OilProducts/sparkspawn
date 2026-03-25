@@ -226,6 +226,7 @@ class CodexAppServerClient:
         *,
         read_line: Optional[Callable[[float], Optional[str]]] = None,
         now: Callable[[], float] = time.monotonic,
+        on_activity: Optional[Callable[[], None]] = None,
     ) -> Optional[dict[str, Any]]:
         if self._pending_messages:
             return self._pending_messages.popleft()
@@ -238,6 +239,8 @@ class CodexAppServerClient:
             line = reader(remaining)
             if line is None:
                 return None
+            if on_activity is not None:
+                on_activity()
             self._log_incoming_line(line)
             message = codex_app_server.parse_jsonrpc_line(line)
             if message is None:
@@ -331,10 +334,19 @@ class CodexAppServerClient:
         now: Callable[[], float] = time.monotonic,
     ) -> CodexAppServerTurnResult:
         request = send_request or self.send_request
-        read_message = next_message or self.next_message
         stream_state = codex_app_server.CodexAppServerTurnState()
         started_at = now()
         last_activity_at = started_at
+
+        def mark_activity() -> None:
+            nonlocal last_activity_at
+            last_activity_at = now()
+
+        if next_message is None:
+            def read_message(wait: float) -> Optional[dict[str, Any]]:
+                return self.next_message(wait, now=now, on_activity=mark_activity)
+        else:
+            read_message = next_message
         params: dict[str, Any] = {
             "threadId": thread_id,
             "input": [{"type": "text", "text": prompt}],
@@ -364,7 +376,7 @@ class CodexAppServerClient:
                 if self._proc is not None and self._proc.poll() is not None:
                     raise RuntimeError("codex app-server exited before turn completion")
                 continue
-            last_activity_at = now()
+            mark_activity()
             extracted_turn_id = codex_app_server.extract_turn_id(message)
             if extracted_turn_id and extracted_turn_id != expected_turn_id:
                 continue

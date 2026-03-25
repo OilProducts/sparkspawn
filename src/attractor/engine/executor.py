@@ -1718,7 +1718,35 @@ class PipelineExecutor:
         if route:
             return _SyntheticEdge(route)
 
+        if not self._continue_after_failure(node_id):
+            if _edge_attr_text(next_edge, "condition"):
+                return next_edge
+            target_node_id = _edge_endpoint_text(next_edge, "target")
+            if target_node_id and self._is_conditional_node(target_node_id):
+                return next_edge
+            if self._is_goal_gate(node_id) and target_node_id and self._is_exit_node(target_node_id):
+                return next_edge
+            return None
+
         return next_edge
+
+    def _continue_after_failure(self, node_id: str) -> bool:
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            return False
+        attr = node.attrs.get("error_policy")
+        if not attr:
+            return False
+        return str(attr.value).strip().lower() == "continue"
+
+    def _is_goal_gate(self, node_id: str) -> bool:
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            return False
+        attr = node.attrs.get("goal_gate")
+        if not attr:
+            return False
+        return _to_bool(attr.value)
 
     def _resolve_resume_next_edge(self, node_id: str, context: Context) -> DotEdge | _SyntheticEdge | None:
         outgoing = [edge for edge in self.graph.edges if edge.source == node_id]

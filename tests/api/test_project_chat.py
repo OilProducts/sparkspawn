@@ -1246,6 +1246,54 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
     ]
 
 
+def test_direct_flow_launch_uses_flow_ui_default_model_when_request_model_missing(
+    product_api_client,
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    flow_name = "test-ui-default-model.dot"
+    flows_dir = server.get_settings().flows_dir
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    (flows_dir / flow_name).write_text(
+        """
+        digraph G {
+            graph [ui_default_llm_model="gpt-flow-default"]
+            start [shape=Mdiamond]
+            done [shape=Msquare]
+            start -> done
+        }
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    launch_response = product_api_client.post(
+        "/workspace/api/runs/launch",
+        json={
+            "flow_name": flow_name,
+            "summary": "Launch a flow without an explicit model override.",
+            "project_path": str(project_dir),
+        },
+    )
+
+    assert launch_response.status_code == 200
+    launch_payload = launch_response.json()
+    run_id = launch_payload["run_id"]
+
+    pipeline_payload: dict[str, object] = {}
+    for _ in range(200):
+        pipeline_response = product_api_client.get(f"/attractor/pipelines/{run_id}")
+        assert pipeline_response.status_code == 200
+        pipeline_payload = pipeline_response.json()
+        if pipeline_payload["status"] != "running":
+            break
+        time.sleep(0.01)
+
+    assert pipeline_payload["status"] == "completed"
+    assert pipeline_payload["model"] == "gpt-flow-default"
+
+
 def test_mark_execution_workflow_started_loads_conversation_without_project_argument(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     service._write_state(

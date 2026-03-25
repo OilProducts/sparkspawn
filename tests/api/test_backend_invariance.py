@@ -72,6 +72,99 @@ def test_pipeline_definition_is_backend_invariant_for_backend_selection(
     assert payload["working_directory"] == str((tmp_path / "work").resolve())
 
 
+def test_pipeline_start_uses_flow_ui_default_model_when_request_model_missing(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    selected_models: list[str | None] = []
+
+    class _Backend:
+        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
+            del node_id, prompt, context, timeout
+            return ""
+
+    def fake_build_backend(backend_name, working_dir, emit, *, model):  # type: ignore[no-untyped-def]
+        del backend_name, working_dir, emit
+        selected_models.append(model)
+        return _Backend()
+
+    monkeypatch.setattr(server, "_build_codergen_backend", fake_build_backend)
+
+    payload = _start_pipeline_via_http(
+        attractor_api_client,
+        {
+            "flow_content": """
+            digraph G {
+                graph [ui_default_llm_model="gpt-flow-default"]
+                start [shape=Mdiamond]
+                done [shape=Msquare]
+                start -> done
+            }
+            """,
+            "working_directory": str(tmp_path / "work"),
+            "backend": "codex-app-server",
+        },
+    )
+
+    assert payload["status"] == "started"
+    assert payload["model"] == "gpt-flow-default"
+    assert selected_models == ["gpt-flow-default"]
+    record = server._read_run_meta(server._run_meta_path(payload["run_id"]))
+    assert record is not None
+    assert record.model == "gpt-flow-default"
+
+
+def test_pipeline_start_explicit_model_overrides_flow_ui_default_model(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    selected_models: list[str | None] = []
+
+    class _Backend:
+        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
+            del node_id, prompt, context, timeout
+            return ""
+
+    def fake_build_backend(backend_name, working_dir, emit, *, model):  # type: ignore[no-untyped-def]
+        del backend_name, working_dir, emit
+        selected_models.append(model)
+        return _Backend()
+
+    monkeypatch.setattr(server, "_build_codergen_backend", fake_build_backend)
+
+    payload = _start_pipeline_via_http(
+        attractor_api_client,
+        {
+            "flow_content": """
+            digraph G {
+                graph [ui_default_llm_model="gpt-flow-default"]
+                start [shape=Mdiamond]
+                done [shape=Msquare]
+                start -> done
+            }
+            """,
+            "working_directory": str(tmp_path / "work"),
+            "backend": "codex-app-server",
+            "model": "gpt-explicit",
+        },
+    )
+
+    assert payload["status"] == "started"
+    assert payload["model"] == "gpt-explicit"
+    assert selected_models == ["gpt-explicit"]
+    record = server._read_run_meta(server._run_meta_path(payload["run_id"]))
+    assert record is not None
+    assert record.model == "gpt-explicit"
+
+
 def test_pipeline_emits_lifecycle_phases_in_spec_order(
     attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

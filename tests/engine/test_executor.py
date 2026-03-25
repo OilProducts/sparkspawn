@@ -13,6 +13,9 @@ from attractor.interviewer import Answer, QueueInterviewer
 
 BRANCHING_CONDITION_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "branching_condition_workflow.dot"
 REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "flows" / "parallel-review-reference.dot"
+STARTER_SPEC_IMPLEMENTATION_FIXTURE = (
+    Path(__file__).resolve().parents[2] / "src" / "spark" / "starter_flows" / "spec-implementation" / "implement-spec.dot"
+)
 
 
 class _WorkflowBackend:
@@ -833,6 +836,124 @@ class TestExecutor:
         assert all(event["name"] == "work" for event in stage_failed)
         assert all(event["index"] == 1 for event in stage_failed)
         assert any(event["will_retry"] is False for event in stage_failed)
+
+    def test_failed_stage_does_not_fall_through_unconditional_edge_by_default(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            del prompt, context
+            if node_id == "work":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="boom")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "failed"
+        assert result.current_node == "work"
+        assert result.route_trace == ["start", "work"]
+
+    def test_failed_stage_can_continue_when_node_opted_into_continue_policy(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box, error_policy="continue"]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            del prompt, context
+            if node_id == "work":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="boom")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "completed"
+        assert result.current_node == "done"
+        assert result.route_trace == ["start", "work", "done"]
+
+    def test_failed_stage_still_uses_matching_fail_condition_without_continue_policy(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box]
+                blocked [shape=box]
+                done [shape=Msquare]
+                start -> work
+                work -> blocked [condition="outcome=fail && preferred_label=Blocked", label="Blocked"]
+                work -> done
+                blocked -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            del prompt, context
+            if node_id == "work":
+                return Outcome(status=OutcomeStatus.FAIL, preferred_label="Blocked", failure_reason="blocked")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "completed"
+        assert result.current_node == "done"
+        assert result.route_trace == ["start", "work", "blocked", "done"]
+
+    def test_wait_human_block_routes_to_blocked_exit(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                review [shape=hexagon, prompt="Review"]
+                blocked_exit [shape=box]
+                done [shape=Msquare]
+                start -> review
+                review -> blocked_exit [label="Block"]
+                review -> done [label="Approve"]
+                blocked_exit -> done [condition="outcome=success"]
+            }
+            """
+        )
+        backend = _WorkflowBackend({"start": True, "blocked_exit": True})
+        interviewer = QueueInterviewer([Answer(selected_values=["blocked_exit"])])
+        runner = HandlerRunner(graph, build_default_registry(codergen_backend=backend, interviewer=interviewer))
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "completed"
+        assert result.current_node == "done"
+        assert result.route_trace == ["start", "review", "blocked_exit", "done"]
+
+    def test_starter_spec_implementation_flow_stops_after_failed_requirements_extraction(self):
+        graph = parse_dot(STARTER_SPEC_IMPLEMENTATION_FIXTURE.read_text(encoding="utf-8"))
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            del prompt, context
+            if node_id == "extract_requirements":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="timed out")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context(values={"context.request.spec_path": "spec.md"}))
+
+        assert result.status == "failed"
+        assert result.current_node == "extract_requirements"
+        assert "design_architecture" not in result.route_trace
 
     def test_executor_emits_parallel_and_interview_runtime_events(self):
         graph = parse_dot(REFERENCE_WORKFLOW_FIXTURE.read_text(encoding="utf-8"))

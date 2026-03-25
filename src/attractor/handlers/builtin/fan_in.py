@@ -19,7 +19,7 @@ class FanInHandler:
         if not results:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="No parallel results to evaluate")
 
-        candidates = [r for r in results if _status_rank(r.get("status", "")) < _status_rank("fail")]
+        candidates = [r for r in results if _status_rank(_result_status(r)) < _status_rank("fail")]
         if not candidates:
             return Outcome(status=OutcomeStatus.FAIL, failure_reason="All parallel branches failed")
 
@@ -37,7 +37,7 @@ class FanInHandler:
             best = sorted(
                 candidates,
                 key=lambda r: (
-                    _status_rank(r.get("status", "")),
+                    _status_rank(_result_status(r)),
                     -_score_value(r.get("score")),
                     str(r.get("id", "")),
                 ),
@@ -47,7 +47,7 @@ class FanInHandler:
             status=OutcomeStatus.SUCCESS,
             context_updates={
                 "parallel.fan_in.best_id": best.get("id", ""),
-                "parallel.fan_in.best_outcome": best.get("status", ""),
+                "parallel.fan_in.best_outcome": _result_status(best),
             },
             notes=f"Selected best candidate: {best.get('id', '')}",
         )
@@ -76,6 +76,16 @@ def _status_rank(status: str) -> int:
         "fail": 3,
     }
     return order.get(normalized, 4)
+
+
+def _result_status(result: Dict[str, Any]) -> str:
+    status = str(result.get("status", "") or "").strip().lower()
+    outcome = str(result.get("outcome", "") or "").strip().lower()
+    if status == "completed" and outcome:
+        return outcome
+    if status == "failed":
+        return "fail"
+    return status
 
 
 def _score_value(score: Any) -> float:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 
 import pytest
@@ -153,7 +154,7 @@ def test_shared_client_run_turn_requires_turn_completed_after_final_answer() -> 
             None,
         ]
     )
-    monotonic_values = iter([0.0, 0.1, 0.2, 0.3, 0.4, 1.6])
+    monotonic_values = itertools.count(0.0, 0.01)
 
     class DummyStdin:
         def write(self, text: str) -> None:
@@ -179,6 +180,48 @@ def test_shared_client_run_turn_requires_turn_completed_after_final_answer() -> 
             idle_timeout_seconds=1.0,
             now=lambda: next(monotonic_values),
         )
+
+
+def test_shared_client_run_turn_counts_unparsed_lines_as_activity() -> None:
+    client = CodexAppServerClient("/tmp/project")
+    lines = iter(
+        [
+            "Reading .specflow/spec-source.md",
+            None,
+            "Reading README.md",
+            '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Ack"}}',
+            '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"Ack"}],"phase":"final_answer"}}}',
+            '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-123","status":"completed"}}}',
+        ]
+    )
+    monotonic_values = itertools.count(0.0, 0.01)
+
+    class DummyStdin:
+        def write(self, text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class DummyProc:
+        stdin = DummyStdin()
+
+        def poll(self) -> int | None:
+            return None
+
+    client.proc = DummyProc()  # type: ignore[assignment]
+    client.read_line = lambda wait: next(lines, None)  # type: ignore[method-assign]
+
+    result = client.run_turn(
+        thread_id="thread-123",
+        prompt="hello",
+        model=None,
+        idle_timeout_seconds=0.08,
+        send_request=lambda method, params: {"result": {"turn": {"id": "turn-123", "status": "inProgress"}}},
+        now=lambda: next(monotonic_values),
+    )
+
+    assert result.assistant_message == "Ack"
 
 
 def test_shared_client_run_turn_ignores_non_matching_turn_completed() -> None:

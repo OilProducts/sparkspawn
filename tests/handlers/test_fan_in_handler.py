@@ -62,3 +62,29 @@ class TestFanInHandler:
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.context_updates["parallel.fan_in.best_id"] == "branch_b"
         assert outcome.context_updates["parallel.fan_in.best_outcome"] == "success"
+
+    def test_fan_in_normalizes_parallel_pipeline_status_payloads(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan_in [shape=tripleoctagon]
+            }
+            """
+        )
+        registry = build_default_registry(codergen_backend=_StubBackend())
+        runner = HandlerRunner(graph, registry)
+        context = Context(
+            values={
+                "parallel.results": [
+                    {"id": "branch_a", "status": "completed", "outcome": "success", "score": 0.2},
+                    {"id": "branch_b", "status": "completed", "outcome": "partial_success", "score": 1.0},
+                    {"id": "branch_c", "status": "failed", "outcome": "", "score": 9.0},
+                ]
+            }
+        )
+
+        outcome = runner("fan_in", "", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.context_updates["parallel.fan_in.best_id"] == "branch_a"
+        assert outcome.context_updates["parallel.fan_in.best_outcome"] == "success"
