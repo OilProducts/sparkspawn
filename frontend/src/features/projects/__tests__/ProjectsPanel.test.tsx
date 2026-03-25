@@ -178,15 +178,17 @@ describe('ProjectsPanel', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders project controls and event log', async () => {
+  it('renders a threads-first sidebar and event log', async () => {
     render(<ProjectsPanel />)
 
-    expect(screen.getByText('Projects')).toBeVisible()
-    expect(screen.getByTestId('quick-switch-new-button')).toBeVisible()
-    expect(screen.getByTestId('project-directory-picker-input')).toBeInTheDocument()
-    expect(screen.getByTestId('quick-switch-controls')).toBeVisible()
-    expect(screen.getByTestId('projects-list')).toBeVisible()
+    expect(screen.getByText('Threads')).toBeVisible()
+    expect(screen.getByTestId('project-thread-list')).toBeVisible()
     expect(screen.getByTestId('project-event-log-surface')).toBeVisible()
+    expect(
+      within(screen.getByTestId('project-thread-list')).getByText(
+        'Choose or add a project from the navbar to view threads.',
+      ),
+    ).toBeVisible()
 
     await waitFor(() => {
       expect(useStore.getState().projectRegistry['/tmp/quick-switch-project']).toBeDefined()
@@ -269,186 +271,52 @@ describe('ProjectsPanel', () => {
     expect(sidebarPrimarySurface.style.height).toBe('380px')
   })
 
-  it('shows an error when the browser fallback cannot resolve an absolute project path', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = resolveRequestUrl(input)
-        if (url.includes('/workspace/api/projects/pick-directory')) {
-          return new Response(JSON.stringify({ detail: 'picker unavailable' }), {
-            status: 503,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/metadata')) {
-          return new Response(JSON.stringify({ branch: 'main' }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/conversations')) {
-          return new Response(JSON.stringify([]), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        return new Response(JSON.stringify({}), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }),
-    )
+  it('points empty states at the navbar project switcher when no project is active', async () => {
     render(<ProjectsPanel />)
-    await userEvent.setup().click(screen.getByTestId('quick-switch-new-button'))
-    const pickerInput = screen.getByTestId('project-directory-picker-input') as HTMLInputElement
-    const selectedFile = new File(['console.log("hello")'], 'main.ts', { type: 'text/plain' })
-    Object.defineProperty(selectedFile, 'webkitRelativePath', {
-      configurable: true,
-      value: 'quick-switch-project/src/main.ts',
-    })
-    fireEvent.change(pickerInput, {
-      target: {
-        files: [selectedFile],
-      },
-    })
-    expect(screen.getByTestId('project-registration-error')).toHaveTextContent(
-      'Unable to resolve an absolute project path from the selected directory.',
-    )
+
+    expect(
+      within(screen.getByTestId('project-thread-list')).getByText(
+        'Choose or add a project from the navbar to view threads.',
+      ),
+    ).toBeVisible()
+    expect(
+      within(screen.getByTestId('project-event-log-surface')).getByText(
+        'Choose or add a project from the navbar to view workflow events.',
+      ),
+    ).toBeVisible()
+    expect(
+      within(screen.getByTestId('project-ai-conversation-surface')).getByText(
+        'Choose or add a project from the navbar to begin chatting.',
+      ),
+    ).toBeVisible()
   })
 
-  it('registers a project from the native directory picker', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = resolveRequestUrl(input)
-        if (url.includes('/workspace/api/projects/pick-directory')) {
-          return new Response(JSON.stringify({ status: 'selected', directory_path: '/tmp/quick-switch-project' }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects') && !url.includes('/workspace/api/projects/conversations') && !url.includes('/workspace/api/projects/metadata') && !url.includes('/workspace/api/projects/register') && !url.includes('/workspace/api/projects/pick-directory')) {
-          return new Response(JSON.stringify({ detail: 'skip registry sync for preloaded test state' }), {
-            status: 503,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/register')) {
-          return new Response(JSON.stringify({
-            project_id: 'quick-switch-project-1234',
-            project_path: '/tmp/quick-switch-project',
-            display_name: 'quick-switch-project',
-            is_favorite: false,
-            active_conversation_id: null,
-          }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/metadata')) {
-          return new Response(JSON.stringify({ branch: 'main' }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/conversations')) {
-          return new Response(JSON.stringify([]), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        return new Response(JSON.stringify({}), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }),
-    )
-    const user = userEvent.setup()
-    render(<ProjectsPanel />)
-    await user.click(screen.getByTestId('quick-switch-new-button'))
-
-    await waitFor(() => {
-      expect(useStore.getState().projectRegistry['/tmp/quick-switch-project']).toBeDefined()
+  it('shows thread controls for the active project', async () => {
+    act(() => {
+      useStore.getState().registerProject('/tmp/quick-switch-project')
+      useStore.getState().setActiveProjectPath('/tmp/quick-switch-project')
     })
-    expect(useStore.getState().activeProjectPath).toBe('/tmp/quick-switch-project')
+
+    render(<ProjectsPanel />)
+
+    expect(screen.getByTestId('project-thread-new-button')).toBeVisible()
+    expect(screen.getByText('Threads for quick-switch-project.')).toBeVisible()
+    expect(screen.getByText('No threads for this project yet.')).toBeVisible()
   })
 
-  it('falls back to the browser directory picker when the native picker is unavailable', async () => {
-    const user = userEvent.setup()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = resolveRequestUrl(input)
-        if (url.includes('/workspace/api/projects/pick-directory')) {
-          return new Response(JSON.stringify({ detail: 'picker unavailable' }), {
-            status: 503,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.endsWith('/workspace/api/projects')) {
-          return new Response(JSON.stringify([]), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/register')) {
-          return new Response(JSON.stringify({
-            project_id: 'quick-switch-project-1234',
-            project_path: '/tmp/quick-switch-project',
-            display_name: 'quick-switch-project',
-            is_favorite: false,
-            active_conversation_id: null,
-          }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/metadata')) {
-          return new Response(JSON.stringify({ branch: 'main' }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/conversations')) {
-          return new Response(JSON.stringify([]), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        return new Response(JSON.stringify({}), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }),
-    )
+  it('keeps the workflow event log project-scoped', async () => {
+    act(() => {
+      useStore.getState().registerProject('/tmp/quick-switch-project')
+      useStore.getState().setActiveProjectPath('/tmp/quick-switch-project')
+      useStore.getState().appendProjectEventEntry({
+        message: 'Approved plan',
+        timestamp: '2026-03-24T12:00:00Z',
+      })
+    })
+
     render(<ProjectsPanel />)
 
-    const pickerInput = screen.getByTestId('project-directory-picker-input') as HTMLInputElement
-    const pickerClickSpy = vi.spyOn(pickerInput, 'click')
-    await user.click(screen.getByTestId('quick-switch-new-button'))
-    expect(pickerClickSpy).toHaveBeenCalled()
-
-    const selectedFile = new File(['console.log("hello")'], 'main.ts', { type: 'text/plain' })
-    Object.defineProperty(selectedFile, 'path', {
-      configurable: true,
-      value: '/tmp/quick-switch-project/src/main.ts',
-    })
-    Object.defineProperty(selectedFile, 'webkitRelativePath', {
-      configurable: true,
-      value: 'quick-switch-project/src/main.ts',
-    })
-
-    fireEvent.change(pickerInput, {
-      target: {
-        files: [selectedFile],
-      },
-    })
-
-    await waitFor(() => {
-      expect(useStore.getState().projectRegistry['/tmp/quick-switch-project']).toBeDefined()
-    })
-    expect(screen.getByTestId('projects-list')).toHaveTextContent('quick-switch-project')
-    expect(useStore.getState().activeProjectPath).toBe('/tmp/quick-switch-project')
+    expect(screen.getByTestId('project-event-log-list')).toHaveTextContent('Approved plan')
   })
 
   it('renders the user turn before the assistant response completes', async () => {

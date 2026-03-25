@@ -9,7 +9,6 @@ import { useProjectConversationCache } from './useProjectConversationCache'
 import { useProjectGitMetadata } from './useProjectGitMetadata'
 import { useProjectsHomeInteractionState } from './useProjectsHomeInteractionState'
 import { usePersistProjectState } from './usePersistProjectState'
-import { useProjectRegistryActions } from './projectRegistryActions'
 import { useProjectThreadActions } from './projectThreadActions'
 import { debugProjectChat } from '../model/projectChatDebug'
 import { buildProjectsHomeViewModel } from '../model/projectsHomeViewModel'
@@ -20,7 +19,7 @@ import {
     extractApiErrorMessage,
     formatConversationAgeShort,
     formatConversationTimestamp,
-    formatProjectListLabel,
+    removeProjectFromCache,
 } from '../model/projectsHomeState'
 
 function buildConversationHistoryRevisionKey(history: ConversationTimelineEntry[]) {
@@ -47,12 +46,6 @@ export function useProjectsHomeController() {
     const recentProjectPaths = useStore((state) => state.recentProjectPaths)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const projectSessionsByPath = useStore((state) => state.projectSessionsByPath)
-    const projectRegistrationError = useStore((state) => state.projectRegistrationError)
-    const registerProject = useStore((state) => state.registerProject)
-    const removeProject = useStore((state) => state.removeProject)
-    const setProjectRegistrationError = useStore((state) => state.setProjectRegistrationError)
-    const clearProjectRegistrationError = useStore((state) => state.clearProjectRegistrationError)
-    const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
     const setConversationId = useStore((state) => state.setConversationId)
     const appendProjectEventEntry = useStore((state) => state.appendProjectEventEntry)
     const updateProjectSessionState = useStore((state) => state.updateProjectSessionState)
@@ -61,14 +54,13 @@ export function useProjectsHomeController() {
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const setViewMode = useStore((state) => state.setViewMode)
 
-    const projectDirectoryPickerInputRef = useRef<HTMLInputElement | null>(null)
     const resetComposerRef = useRef<() => void>(() => {})
     const persistProjectState = usePersistProjectState(upsertProjectRegistryEntry)
 
     const isNarrowViewport = useNarrowViewport()
     const { projectGitMetadata, setProjectGitMetadata, ensureProjectGitRepository } = useProjectGitMetadata({
         projectPaths: projects.map((project) => project.directoryPath),
-        setProjectRegistrationError,
+        setProjectRegistrationError: () => {},
     })
     const activeProjectScope = activeProjectPath ? projectSessionsByPath[activeProjectPath] : null
     const activeConversationId = activeProjectScope?.conversationId ?? null
@@ -103,7 +95,6 @@ export function useProjectsHomeController() {
         setOptimisticSend,
         setPanelError,
         setPendingDeleteConversationId,
-        setPendingDeleteProjectPath,
         toggleProposalChangeExpanded,
         toggleThinkingEntryExpanded,
         toggleToolCallExpanded,
@@ -167,6 +158,28 @@ export function useProjectsHomeController() {
         () => buildConversationHistoryRevisionKey(activeConversationHistory),
         [activeConversationHistory],
     )
+
+    useEffect(() => {
+        const registeredPaths = new Set(Object.keys(projectRegistry))
+        commitConversationCache((current) => {
+            const removableProjectPaths = Object.keys(current.summariesByProjectPath).filter(
+                (projectPath) => !registeredPaths.has(projectPath),
+            )
+            if (removableProjectPaths.length === 0) {
+                return current
+            }
+            return removableProjectPaths.reduce(
+                (next, projectPath) => removeProjectFromCache(next, projectPath),
+                current,
+            )
+        })
+        setProjectGitMetadata((current) => {
+            const next = Object.fromEntries(
+                Object.entries(current).filter(([projectPath]) => registeredPaths.has(projectPath)),
+            )
+            return Object.keys(next).length === Object.keys(current).length ? current : next
+        })
+    }, [commitConversationCache, projectRegistry, setProjectGitMetadata])
 
     const appendLocalProjectEvent = useCallback((message: string) => {
         appendProjectEventEntry({
@@ -251,14 +264,6 @@ export function useProjectsHomeController() {
     }, [activeProjectPath])
 
     useEffect(() => {
-        if (!projectDirectoryPickerInputRef.current) {
-            return
-        }
-        projectDirectoryPickerInputRef.current.setAttribute('webkitdirectory', '')
-        projectDirectoryPickerInputRef.current.setAttribute('directory', '')
-    }, [])
-
-    useEffect(() => {
         isConversationPinnedToBottomRef.current = isConversationPinnedToBottom
     }, [isConversationPinnedToBottom])
 
@@ -297,31 +302,6 @@ export function useProjectsHomeController() {
     useEffect(() => {
         resetComposerRef.current = resetComposer
     }, [resetComposer])
-
-    const {
-        onActivateProject,
-        onDeleteProject,
-        onOpenProjectDirectoryChooser,
-        onProjectDirectorySelected,
-    } = useProjectRegistryActions({
-        activeProjectPath,
-        projectRegistry,
-        orderedProjects,
-        projectDirectoryPickerInputRef,
-        setPanelError,
-        setPendingDeleteProjectPath,
-        setProjectRegistrationError,
-        clearProjectRegistrationError,
-        setProjectGitMetadata,
-        ensureProjectGitRepository,
-        registerProject,
-        upsertProjectRegistryEntry,
-        commitConversationCache,
-        removeProject,
-        setActiveProjectPath,
-        appendLocalProjectEvent,
-        persistProjectState,
-    })
 
     const {
         onCreateConversationThread,
@@ -406,26 +386,18 @@ export function useProjectsHomeController() {
             isNarrowViewport,
             homeSidebarRef,
             homeSidebarPrimaryHeight,
-            projectDirectoryPickerInputRef,
-            projectRegistrationError,
-            orderedProjects,
             activeProjectPath,
             activeConversationId,
+            activeProjectLabel,
             activeProjectConversationSummaries,
-            pendingDeleteProjectPath,
             pendingDeleteConversationId,
             activeProjectEventLog,
             isHomeSidebarResizing,
-            onOpenProjectDirectoryChooser,
-            onProjectDirectorySelected,
-            onActivateProject,
-            onDeleteProject,
             onCreateConversationThread,
             onSelectConversationThread,
             onDeleteConversationThread,
             onHomeSidebarResizePointerDown,
             onHomeSidebarResizeKeyDown,
-            formatProjectListLabel,
             formatConversationAgeShort,
             formatConversationTimestamp,
         },

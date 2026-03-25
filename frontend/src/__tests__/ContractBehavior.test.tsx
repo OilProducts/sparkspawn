@@ -1,3 +1,4 @@
+import App from '@/App'
 import { ExecutionControls } from '@/features/execution/ExecutionControls'
 import { Editor } from '@/features/editor/Editor'
 import { GraphSettings } from '@/features/editor/GraphSettings'
@@ -887,7 +888,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -1782,14 +1783,22 @@ describe('Frontend contract behavior', () => {
     act(() => {
       resetContractState()
     })
+    render(<Navbar />)
+
+    expect(screen.getByTestId('top-nav-project-add-button').className).toContain('focus-visible')
+    expect(screen.getByTestId('top-nav-project-clear-button').className).toContain('focus-visible')
+
+    cleanup()
+    act(() => {
+      resetContractState()
+      useStore.setState((state) => ({
+        ...state,
+        viewMode: 'home',
+      }))
+    })
     render(<ProjectsPanel />)
 
-    expect(screen.getByTestId('quick-switch-new-button').className).toContain('focus-visible')
-    expect(screen.getByTestId('quick-switch-new-button')).toHaveTextContent('New')
-    const recentActiveProjectButton = within(screen.getByTestId('projects-list')).getByRole('button', {
-      name: /project-contract-behavior/i,
-    })
-    expect(recentActiveProjectButton.className).toContain('focus-visible')
+    expect(screen.getByTestId('project-thread-new-button').className).toContain('focus-visible')
 
     cleanup()
     act(() => {
@@ -1876,7 +1885,7 @@ describe('Frontend contract behavior', () => {
         'fetch',
         vi.fn(async (input: RequestInfo | URL) => {
           const url = requestUrl(input)
-          if (url.endsWith('/attractor/runs')) {
+          if (url.includes('/attractor/runs')) {
             return jsonResponse({ runs: [runRecord] })
           }
           if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -1953,8 +1962,8 @@ describe('Frontend contract behavior', () => {
       render(<ProjectsPanel />)
 
       expect(screen.getByTestId('projects-panel')).toHaveAttribute('data-responsive-layout', 'stacked')
-      expect(screen.getByTestId('quick-switch-controls')).toHaveAttribute('data-responsive-layout', 'stacked')
-      expect(screen.getByTestId('quick-switch-new-button')).toBeVisible()
+      expect(screen.getByTestId('project-thread-list')).toBeVisible()
+      expect(screen.getByTestId('project-thread-new-button')).toBeVisible()
       expect(screen.queryByTestId('home-sidebar-resize-handle')).not.toBeInTheDocument()
 
       cleanup()
@@ -2018,7 +2027,8 @@ describe('Frontend contract behavior', () => {
       })
       render(<ProjectsPanel />)
       expect(screen.getByTestId('projects-panel')).toHaveAttribute('data-responsive-layout', 'split')
-      expect(screen.getByTestId('quick-switch-controls')).toHaveAttribute('data-responsive-layout', 'inline')
+      expect(screen.getByTestId('project-thread-list')).toBeVisible()
+      expect(screen.getByTestId('project-thread-new-button')).toBeVisible()
       expect(screen.getByTestId('home-sidebar-resize-handle')).toBeVisible()
 
       cleanup()
@@ -2044,7 +2054,8 @@ describe('Frontend contract behavior', () => {
       })
       render(<ProjectsPanel />)
       expect(screen.getByTestId('projects-panel')).toHaveAttribute('data-responsive-layout', 'stacked')
-      expect(screen.getByTestId('quick-switch-controls')).toHaveAttribute('data-responsive-layout', 'stacked')
+      expect(screen.getByTestId('project-thread-list')).toBeVisible()
+      expect(screen.getByTestId('project-thread-new-button')).toBeVisible()
       expect(screen.queryByTestId('home-sidebar-resize-handle')).not.toBeInTheDocument()
 
       cleanup()
@@ -2122,7 +2133,7 @@ describe('Frontend contract behavior', () => {
             diagnostics: [],
           })
         }
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -2295,7 +2306,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -2399,38 +2410,175 @@ describe('Frontend contract behavior', () => {
     expect(throughputNotice).toHaveTextContent(`Showing latest ${maxItems} events`)
   })
 
-  it('[CID:14.0.01] marks the active project in the Projects list', () => {
+  it('[CID:14.0.01] propagates navbar project context through Home, Execution, Triggers, and Runs', async () => {
+    const buildProjectRecord = (projectPath: string) => ({
+      project_id: projectPath.split('/').filter(Boolean).join('-'),
+      project_path: projectPath,
+      display_name: projectPath.split('/').filter(Boolean).at(-1) ?? projectPath,
+      created_at: '2026-03-25T12:00:00Z',
+      last_opened_at: '2026-03-25T12:00:00Z',
+      last_accessed_at: null,
+      is_favorite: false,
+      active_conversation_id: null,
+    })
+    const buildConversationSummary = ({
+      conversationId,
+      projectPath,
+      title,
+    }: {
+      conversationId: string
+      projectPath: string
+      title: string
+    }) => ({
+      conversation_id: conversationId,
+      conversation_handle: null,
+      project_path: projectPath,
+      title,
+      created_at: '2026-03-25T12:00:00Z',
+      updated_at: '2026-03-25T12:05:00Z',
+      last_message_preview: null,
+    })
+    const buildRunRecord = ({
+      flowName,
+      projectPath,
+      runId,
+    }: {
+      flowName: string
+      projectPath: string
+      runId: string
+    }) => ({
+      run_id: runId,
+      flow_name: flowName,
+      status: 'completed',
+      outcome: 'success',
+      outcome_reason_code: null,
+      outcome_reason_message: null,
+      working_directory: projectPath,
+      project_path: projectPath,
+      git_branch: 'main',
+      git_commit: 'abcdef0',
+      spec_id: null,
+      plan_id: null,
+      model: 'gpt-5.3-codex-spark',
+      started_at: '2026-03-25T12:00:00Z',
+      ended_at: '2026-03-25T12:05:00Z',
+      last_error: null,
+      token_usage: 1234,
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (url.includes('/workspace/api/projects/metadata')) {
+        return jsonResponse({ branch: 'main', commit: 'abcdef0' })
+      }
+      if (url.includes('/workspace/api/projects/state')) {
+        const payload = init?.body ? JSON.parse(String(init.body)) as { project_path?: string } : {}
+        return jsonResponse(buildProjectRecord(payload.project_path ?? '/tmp/project-alpha'))
+      }
+      if (url.includes('/workspace/api/projects/conversations')) {
+        const projectPath = new URL(url, 'http://localhost').searchParams.get('project_path')
+        if (projectPath === '/tmp/project-alpha') {
+          return jsonResponse([
+            buildConversationSummary({
+              conversationId: 'conversation-alpha',
+              projectPath: '/tmp/project-alpha',
+              title: 'Alpha thread',
+            }),
+          ])
+        }
+        if (projectPath === '/tmp/project-beta') {
+          return jsonResponse([
+            buildConversationSummary({
+              conversationId: 'conversation-beta',
+              projectPath: '/tmp/project-beta',
+              title: 'Beta thread',
+            }),
+          ])
+        }
+        return jsonResponse([])
+      }
+      if (url.includes('/workspace/api/conversations/') && method === 'GET') {
+        return jsonResponse({ detail: 'Unknown conversation' }, { status: 404 })
+      }
+      if (url.endsWith('/workspace/api/triggers') && method === 'GET') {
+        return jsonResponse([])
+      }
+      if (url.includes('/workspace/api/projects')) {
+        return jsonResponse([])
+      }
+      if (url.includes('/attractor/status')) {
+        return jsonResponse({ status: 'idle', last_run_id: null })
+      }
+      if (url.includes('/attractor/api/flows')) {
+        return jsonResponse([])
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-alpha')) {
+        return jsonResponse({
+          runs: [buildRunRecord({ flowName: 'alpha.dot', projectPath: '/tmp/project-alpha', runId: 'run-alpha' })],
+        })
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-beta')) {
+        return jsonResponse({
+          runs: [buildRunRecord({ flowName: 'beta.dot', projectPath: '/tmp/project-beta', runId: 'run-beta' })],
+        })
+      }
+      if (url.includes('/attractor/runs')) {
+        return jsonResponse({ runs: [] })
+      }
+      return jsonResponse({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
     act(() => {
       resetContractState()
       useStore.setState((state) => ({
         ...state,
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/project-alpha',
-        projectRegistry: {
-          '/tmp/project-alpha': {
-            directoryPath: '/tmp/project-alpha',
-            isFavorite: true,
-            lastAccessedAt: '2026-03-05T00:00:00Z',
-          },
-          '/tmp/project-beta': {
-            directoryPath: '/tmp/project-beta',
-            isFavorite: false,
-            lastAccessedAt: '2026-03-05T00:00:00Z',
-          },
-        },
-        recentProjectPaths: ['/tmp/project-alpha', '/tmp/project-beta'],
+        viewMode: 'home',
+        activeProjectPath: null,
+        projectRegistry: {},
+        projectSessionsByPath: {},
+        recentProjectPaths: [],
       }))
+      useStore.getState().registerProject('/tmp/project-alpha')
+      useStore.getState().registerProject('/tmp/project-beta')
+      useStore.getState().setActiveProjectPath('/tmp/project-alpha')
+      useStore.getState().setViewMode('home')
     })
 
-    render(<ProjectsPanel />)
+    render(<App />)
 
-    const projectsList = screen.getByTestId('projects-list')
-    const activeProjectButton = within(projectsList).getByRole('button', { name: /project-alpha/i })
-    const inactiveProjectButton = within(projectsList).getByRole('button', { name: /project-beta/i })
+    await waitFor(() => {
+      expect(screen.getByText('Alpha thread')).toBeVisible()
+    })
+    await user.click(screen.getByTestId('top-nav-project-switcher'))
+    await user.click(await screen.findByText('project-beta'))
 
-    expect(activeProjectButton).toHaveAttribute('aria-current', 'true')
-    expect(inactiveProjectButton).not.toHaveAttribute('aria-current')
-    expect(screen.getByTestId('project-thread-controls')).toBeVisible()
+    await waitFor(() => {
+      expect(screen.getByText('Beta thread')).toBeVisible()
+    })
+    expect(screen.queryByText('Alpha thread')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('nav-mode-execution'))
+    expect(await screen.findByTestId('execution-project-context-chip')).toHaveTextContent('project-beta')
+    expect(screen.getByTestId('execute-button')).toHaveTextContent('Run in project-beta')
+
+    await user.click(screen.getByTestId('nav-mode-triggers'))
+    expect(await screen.findByTestId('triggers-project-context-chip')).toHaveTextContent('project-beta')
+    expect(screen.getByLabelText('Execution Target')).toHaveValue('active')
+    expect(screen.getByText('Uses the current active project: /tmp/project-beta')).toBeVisible()
+
+    await user.click(screen.getByTestId('nav-mode-runs'))
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([request]) =>
+          requestUrl(request as RequestInfo | URL).includes('/attractor/runs?project_path=%2Ftmp%2Fproject-beta'),
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByTestId('runs-project-context-chip')).toHaveTextContent('project-beta')
+    expect(screen.getByText('Run history for the active project.')).toBeVisible()
+    expect(screen.getByText('beta.dot')).toBeVisible()
   })
 
   it('[CID:14.0.02] enforces unique project directories and Git-repo registration invariants', async () => {
@@ -2495,18 +2643,18 @@ describe('Frontend contract behavior', () => {
       }))
     })
 
-    render(<ProjectsPanel />)
-    const newButton = screen.getByTestId('quick-switch-new-button')
+    render(<Navbar />)
+    const newButton = screen.getByTestId('top-nav-project-add-button')
     await user.click(newButton)
 
-    expect(screen.getByTestId('project-registration-error')).toHaveTextContent(
+    expect(screen.getByTestId('top-nav-project-error')).toHaveTextContent(
       'Project already registered: /tmp/project-contract-behavior',
     )
 
     await user.click(newButton)
 
     await waitFor(() => {
-      expect(screen.getByTestId('project-registration-error')).toHaveTextContent(
+      expect(screen.getByTestId('top-nav-project-error')).toHaveTextContent(
         'Project directory must be a Git repository.',
       )
     })
@@ -2517,7 +2665,7 @@ describe('Frontend contract behavior', () => {
     await waitFor(() => {
       expect(useStore.getState().projectRegistry['/tmp/detached-git-project']).toBeDefined()
     })
-    expect(screen.queryByTestId('project-registration-error')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('top-nav-project-error')).not.toBeInTheDocument()
 
     await user.click(newButton)
 
@@ -2540,12 +2688,11 @@ describe('Frontend contract behavior', () => {
       }))
     })
 
-    await user.click(
-      within(screen.getByTestId('projects-list')).getByRole('button', { name: /non-git-existing/i }),
-    )
+    await user.click(screen.getByTestId('top-nav-project-switcher'))
+    await user.click(await screen.findByText('non-git-existing'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('project-registration-error')).toHaveTextContent(
+      expect(screen.getByTestId('top-nav-project-error')).toHaveTextContent(
         'Project directory must be a Git repository.',
       )
     })
@@ -2872,7 +3019,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3012,7 +3159,7 @@ describe('Frontend contract behavior', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = requestUrl(input)
-      if (url.endsWith('/attractor/runs')) {
+      if (url.includes('/attractor/runs')) {
         return jsonResponse({ runs: [runRecord] })
       }
       if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3154,7 +3301,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3294,7 +3441,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3440,7 +3587,7 @@ describe('Frontend contract behavior', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = requestUrl(input)
-      if (url.endsWith('/attractor/runs')) {
+      if (url.includes('/attractor/runs')) {
         return jsonResponse({ runs: [runRecord] })
       }
       if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3588,7 +3735,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3786,7 +3933,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -3947,7 +4094,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -4088,7 +4235,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -4269,7 +4416,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
@@ -4417,7 +4564,7 @@ describe('Frontend contract behavior', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
-        if (url.endsWith('/attractor/runs')) {
+        if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {

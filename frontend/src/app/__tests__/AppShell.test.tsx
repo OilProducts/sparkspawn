@@ -58,6 +58,70 @@ const resolveRequestUrl = (input: RequestInfo | URL): string => {
   return input.url
 }
 
+const jsonResponse = (payload: unknown, init?: ResponseInit) =>
+  new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  })
+
+const buildProjectRecord = (projectPath: string) => ({
+  project_id: projectPath.split('/').filter(Boolean).join('-'),
+  project_path: projectPath,
+  display_name: projectPath.split('/').filter(Boolean).at(-1) ?? projectPath,
+  created_at: '2026-03-25T12:00:00Z',
+  last_opened_at: '2026-03-25T12:00:00Z',
+  last_accessed_at: null,
+  is_favorite: false,
+  active_conversation_id: null,
+})
+
+const buildConversationSummary = ({
+  conversationId,
+  projectPath,
+  title,
+}: {
+  conversationId: string
+  projectPath: string
+  title: string
+}) => ({
+  conversation_id: conversationId,
+  conversation_handle: null,
+  project_path: projectPath,
+  title,
+  created_at: '2026-03-25T12:00:00Z',
+  updated_at: '2026-03-25T12:05:00Z',
+  last_message_preview: null,
+})
+
+const buildRunRecord = ({
+  flowName,
+  projectPath,
+  runId,
+}: {
+  flowName: string
+  projectPath: string
+  runId: string
+}) => ({
+  run_id: runId,
+  flow_name: flowName,
+  status: 'completed',
+  outcome: 'success',
+  outcome_reason_code: null,
+  outcome_reason_message: null,
+  working_directory: projectPath,
+  project_path: projectPath,
+  git_branch: 'main',
+  git_commit: 'abcdef0',
+  spec_id: null,
+  plan_id: null,
+  model: 'gpt-5.3-codex-spark',
+  started_at: '2026-03-25T12:00:00Z',
+  ended_at: '2026-03-25T12:05:00Z',
+  last_error: null,
+  token_usage: 1234,
+})
+
 const installCanvasWorkspaceFetchMock = () => {
   vi.stubGlobal(
     'fetch',
@@ -203,7 +267,6 @@ const installCanvasWorkspaceFetchMock = () => {
 describe('App shell behavior', () => {
   beforeEach(() => {
     resetAppShellState()
-    window.HTMLElement.prototype.scrollIntoView = vi.fn()
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -253,7 +316,9 @@ describe('App shell behavior', () => {
     expect(screen.getByTestId('app-main')).toBeVisible()
     expect(screen.getByTestId('top-nav')).toBeVisible()
     expect(screen.getByTestId('projects-panel')).toBeVisible()
-    expect(screen.getByTestId('top-nav-active-project')).toHaveTextContent('No active project')
+    expect(screen.getByTestId('top-nav-project-switcher')).toBeVisible()
+    expect(screen.getByTestId('top-nav-project-add-button')).toBeVisible()
+    expect(screen.getByTestId('top-nav-project-clear-button')).toBeDisabled()
     expect(screen.queryByTestId('top-nav-active-flow')).not.toBeInTheDocument()
     expect(screen.queryByTestId('top-nav-run-context')).not.toBeInTheDocument()
 
@@ -288,7 +353,326 @@ describe('App shell behavior', () => {
       useStore.getState().registerProject('/tmp/project-shell')
     })
 
-    expect(screen.getByTestId('top-nav-active-project')).toHaveTextContent('/tmp/project-shell')
+    expect(screen.getByTestId('top-nav-project-switcher')).toHaveTextContent('project-shell')
+  })
+
+  it('adds a project from the navbar picker and clears the active project', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects/pick-directory')) {
+          return new Response(JSON.stringify({ status: 'selected', directory_path: '/tmp/project-shell' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/register')) {
+          return new Response(JSON.stringify({
+            project_id: 'project-shell-1',
+            project_path: '/tmp/project-shell',
+            display_name: 'project-shell',
+            is_favorite: false,
+            active_conversation_id: null,
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/attractor/status')) {
+          return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/attractor/api/flows')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/attractor/runs')) {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    render(<App />)
+
+    await user.click(screen.getByTestId('top-nav-project-add-button'))
+
+    await waitFor(() => {
+      expect(useStore.getState().activeProjectPath).toBe('/tmp/project-shell')
+    })
+    expect(screen.getByTestId('top-nav-project-switcher')).toHaveTextContent('project-shell')
+
+    await user.click(screen.getByTestId('top-nav-project-clear-button'))
+    expect(useStore.getState().activeProjectPath).toBeNull()
+  })
+
+  it('propagates navbar project switches across Home, Execution, Triggers, and Runs', async () => {
+    const user = userEvent.setup()
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().registerProject('/tmp/project-two')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+      useStore.getState().setViewMode('home')
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+
+      if (url.includes('/workspace/api/projects/metadata')) {
+        return jsonResponse({ branch: 'main', commit: 'abcdef0' })
+      }
+      if (url.includes('/workspace/api/projects/state')) {
+        const payload = init?.body ? JSON.parse(String(init.body)) as { project_path?: string } : {}
+        return jsonResponse(buildProjectRecord(payload.project_path ?? '/tmp/project-one'))
+      }
+      if (url.includes('/workspace/api/projects/conversations')) {
+        const projectPath = new URL(url, 'http://localhost').searchParams.get('project_path')
+        if (projectPath === '/tmp/project-one') {
+          return jsonResponse([
+            buildConversationSummary({
+              conversationId: 'conversation-project-one',
+              projectPath: '/tmp/project-one',
+              title: 'Thread one',
+            }),
+          ])
+        }
+        if (projectPath === '/tmp/project-two') {
+          return jsonResponse([
+            buildConversationSummary({
+              conversationId: 'conversation-project-two',
+              projectPath: '/tmp/project-two',
+              title: 'Thread two',
+            }),
+          ])
+        }
+        return jsonResponse([])
+      }
+      if (url.includes('/workspace/api/conversations/') && method === 'GET') {
+        return jsonResponse({ detail: 'Unknown conversation' }, { status: 404 })
+      }
+      if (url.endsWith('/workspace/api/triggers') && method === 'GET') {
+        return jsonResponse([])
+      }
+      if (url.includes('/workspace/api/projects')) {
+        return jsonResponse([])
+      }
+      if (url.includes('/attractor/status')) {
+        return jsonResponse({ status: 'idle', last_run_id: null })
+      }
+      if (url.includes('/attractor/api/flows')) {
+        return jsonResponse([])
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({
+          runs: [buildRunRecord({ flowName: 'review-one.dot', projectPath: '/tmp/project-one', runId: 'run-one' })],
+        })
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-two')) {
+        return jsonResponse({
+          runs: [buildRunRecord({ flowName: 'review-two.dot', projectPath: '/tmp/project-two', runId: 'run-two' })],
+        })
+      }
+      if (url.includes('/attractor/runs')) {
+        return jsonResponse({ runs: [] })
+      }
+      return jsonResponse({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Thread one')).toBeVisible()
+    })
+    await user.click(screen.getByTestId('top-nav-project-switcher'))
+    await user.click(await screen.findByText('project-two'))
+
+    await waitFor(() => {
+      expect(useStore.getState().activeProjectPath).toBe('/tmp/project-two')
+    })
+    await waitFor(() => {
+      expect(screen.getByText('Thread two')).toBeVisible()
+    })
+    expect(screen.queryByText('Thread one')).not.toBeInTheDocument()
+    expect(screen.getByTestId('top-nav-project-switcher')).toHaveTextContent('project-two')
+    expect(screen.getByTestId('top-nav-project-switcher')).not.toHaveTextContent('/tmp/project-two')
+
+    await user.click(screen.getByTestId('nav-mode-execution'))
+    expect(await screen.findByTestId('execution-project-context-chip')).toHaveTextContent('project-two')
+    expect(screen.getByTestId('execute-button')).toHaveTextContent('Run in project-two')
+
+    await user.click(screen.getByTestId('nav-mode-triggers'))
+    expect(await screen.findByTestId('triggers-project-context-chip')).toHaveTextContent('project-two')
+    expect(screen.getByLabelText('Execution Target')).toHaveValue('active')
+    expect(screen.getByText('Uses the current active project: /tmp/project-two')).toBeVisible()
+
+    await user.click(screen.getByTestId('nav-mode-runs'))
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([request]) =>
+          resolveRequestUrl(request as RequestInfo | URL).includes('/attractor/runs?project_path=%2Ftmp%2Fproject-two'),
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByTestId('runs-project-context-chip')).toHaveTextContent('project-two')
+    expect(screen.getByText('Run history for the active project.')).toBeVisible()
+    expect(screen.getByText('review-two.dot')).toBeVisible()
+  })
+
+  it('removes the active project from the navbar after confirmation', async () => {
+    const user = userEvent.setup()
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-remove')
+      useStore.getState().setActiveProjectPath('/tmp/project-remove')
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects?project_path=') && init?.method === 'DELETE') {
+          return new Response(JSON.stringify({
+            status: 'deleted',
+            project_id: 'project-remove',
+            project_path: '/tmp/project-remove',
+            display_name: 'project-remove',
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/attractor/status')) {
+          return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/attractor/api/flows')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    render(<App />)
+
+    await user.click(screen.getByTestId('top-nav-project-remove-button'))
+    await user.click(screen.getByTestId('shared-dialog-confirm'))
+
+    await waitFor(() => {
+      expect(useStore.getState().projectRegistry['/tmp/project-remove']).toBeUndefined()
+    })
+    expect(useStore.getState().activeProjectPath).toBeNull()
+  })
+
+  it('returns to the active-project run scope after opening a run from all-project history', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = resolveRequestUrl(input)
+      if (url.includes('/attractor/status')) {
+        return jsonResponse({ status: 'idle', last_run_id: null })
+      }
+      if (url.includes('/attractor/api/flows')) {
+        return jsonResponse([])
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({
+          runs: [buildRunRecord({ flowName: 'review-one.dot', projectPath: '/tmp/project-one', runId: 'run-one' })],
+        })
+      }
+      if (url.endsWith('/attractor/runs')) {
+        return jsonResponse({
+          runs: [buildRunRecord({ flowName: 'review-two.dot', projectPath: '/tmp/project-two', runId: 'run-two' })],
+        })
+      }
+      return jsonResponse({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+      useStore.getState().setViewMode('runs')
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('review-one.dot')).toBeVisible()
+    })
+    const initialActiveScopeFetchCount = fetchMock.mock.calls.filter(([request]) =>
+      resolveRequestUrl(request as RequestInfo | URL).includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one'),
+    ).length
+
+    await user.click(screen.getByTestId('runs-scope-all-projects'))
+    await waitFor(() => {
+      expect(screen.getByText('review-two.dot')).toBeVisible()
+    })
+    await user.click(screen.getByRole('button', { name: 'Open' }))
+
+    await waitFor(() => {
+      expect(useStore.getState().viewMode).toBe('execution')
+    })
+    expect(useStore.getState().selectedRunId).toBe('run-two')
+    expect(useStore.getState().executionFlow).toBe('review-two.dot')
+
+    await user.click(screen.getByTestId('nav-mode-runs'))
+    await waitFor(() => {
+      const activeScopeFetchCount = fetchMock.mock.calls.filter(([request]) =>
+        resolveRequestUrl(request as RequestInfo | URL).includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one'),
+      ).length
+      expect(activeScopeFetchCount).toBeGreaterThan(initialActiveScopeFetchCount)
+    })
+    expect(screen.getByText('Run history for the active project.')).toBeVisible()
+    expect(screen.getByText('review-one.dot')).toBeVisible()
+    expect(screen.queryByText('review-two.dot')).not.toBeInTheDocument()
   })
 
   it('lets the operator resize the editor sidebar without affecting execution width', async () => {

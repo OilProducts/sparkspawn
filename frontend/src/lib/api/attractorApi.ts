@@ -467,8 +467,11 @@ export async function fetchPipelineGraphValidated(pipelineId: string): Promise<P
     return fetchTextWithValidation(url, undefined, '/attractor/pipelines/{id}/graph', parsePipelineGraphResponse)
 }
 
-export async function fetchRunsListValidated(): Promise<RunsListResponse> {
-    return fetchJsonWithValidation(attractorUrl('/runs'), undefined, '/attractor/runs', parseRunsListResponse)
+export async function fetchRunsListValidated(projectPath?: string | null): Promise<RunsListResponse> {
+    const url = projectPath
+        ? `${attractorUrl('/runs')}?project_path=${encodeURIComponent(projectPath)}`
+        : attractorUrl('/runs')
+    return fetchJsonWithValidation(url, undefined, '/attractor/runs', parseRunsListResponse)
 }
 
 export async function fetchRuntimeStatusValidated(): Promise<RuntimeStatusResponse> {

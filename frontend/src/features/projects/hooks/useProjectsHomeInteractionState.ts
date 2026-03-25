@@ -17,7 +17,6 @@ export function useProjectsHomeInteractionState({
     const [panelError, setPanelError] = useState<string | null>(null)
     const [optimisticSend, setOptimisticSend] = useState<OptimisticSendState | null>(null)
     const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
-    const [pendingDeleteProjectPath, setPendingDeleteProjectPath] = useState<string | null>(null)
     const [expandedProposalChanges, setExpandedProposalChanges] = useState<Record<string, boolean>>({})
     const [expandedToolCalls, setExpandedToolCalls] = useState<Record<string, boolean>>({})
     const [expandedThinkingEntries, setExpandedThinkingEntries] = useState<Record<string, boolean>>({})
@@ -67,12 +66,10 @@ export function useProjectsHomeInteractionState({
         optimisticSend,
         panelError,
         pendingDeleteConversationId,
-        pendingDeleteProjectPath,
         setChatDraft,
         setOptimisticSend,
         setPanelError,
         setPendingDeleteConversationId,
-        setPendingDeleteProjectPath,
         toggleProposalChangeExpanded,
         toggleThinkingEntryExpanded,
         toggleToolCallExpanded,

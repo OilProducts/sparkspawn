@@ -16,6 +16,7 @@ import {
     type LaunchInputFormValues,
 } from '@/lib/flowContracts'
 import { Separator, useDialogController } from '@/ui'
+import { formatProjectListLabel } from '@/features/projects/model/projectsHomeState'
 import { ExecutionActionOverlay } from './components/ExecutionActionOverlay'
 import { ExecutionLaunchInputsSurface } from './components/ExecutionLaunchInputsSurface'
 import { ExecutionNoticeStack } from './components/ExecutionNoticeStack'
@@ -170,6 +171,9 @@ export function ExecutionControls() {
     const footerDesktopWidthClass = showLaunchInputs && !hasFooterAuxiliaryContent
         ? 'w-[calc(100%-2rem)] max-w-3xl'
         : 'w-[calc(100%-2rem)] max-w-[960px]'
+    const executeLabel = activeProjectPath
+        ? `Run in ${formatProjectListLabel(activeProjectPath)}`
+        : 'Run'
     const executeDisabledReason = !activeProjectPath
         ? 'Select an active project before running.'
         : !executionFlowName
@@ -322,6 +326,7 @@ export function ExecutionControls() {
                 isNarrowViewport={isNarrowViewport}
                 disabled={!activeProjectPath || !executionFlowName || hasValidationErrors}
                 disabledReason={executeDisabledReason}
+                executeLabel={executeLabel}
                 onExecute={() => {
                     void requestStart()
                 }}

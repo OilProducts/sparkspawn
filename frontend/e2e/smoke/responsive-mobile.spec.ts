@@ -60,13 +60,31 @@ const stubResponsiveSmokeApis = async (page: Page) => {
       return
     }
 
-    if (pathname === '/attractor/runs') {
+    if (pathname === '/workspace/api/projects' && requestMethod === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          runs: [],
-        }),
+        body: JSON.stringify([
+          {
+            project_id: 'ui-smoke-mobile-project',
+            project_path: MOBILE_PROJECT_PATH,
+            display_name: 'ui-smoke-mobile-project',
+            created_at: '2026-03-11T09:00:00Z',
+            last_opened_at: '2026-03-11T09:30:00Z',
+            last_accessed_at: '2026-03-11T09:45:00Z',
+            is_favorite: true,
+            active_conversation_id: null,
+          },
+        ]),
+      })
+      return
+    }
+
+    if (pathname === '/workspace/api/projects/conversations' && requestMethod === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
       })
       return
     }
@@ -184,9 +202,11 @@ test('mobile and narrow viewport usability is preserved for core project and ope
   await expect(page.getByTestId('top-nav')).toHaveAttribute('data-responsive-layout', 'stacked')
   await expect(page.getByTestId('view-mode-tabs')).toHaveAttribute('data-responsive-layout', 'stacked')
   await expect(page.getByTestId('projects-panel')).toHaveAttribute('data-responsive-layout', 'stacked')
-  await expect(page.getByTestId('project-register-controls')).toHaveAttribute('data-responsive-layout', 'stacked')
-  await expect(page.getByTestId('project-register-button')).toBeVisible()
-  await expect(page.getByTestId('favorite-toggle-button')).toBeVisible()
+  await expect(page.getByTestId('top-nav-active-project')).toHaveAttribute('data-responsive-layout', 'stacked')
+  await expect(page.getByTestId('top-nav-project-switcher')).toBeVisible()
+  await expect(page.getByTestId('top-nav-project-add-button')).toBeVisible()
+  await expect(page.getByTestId('top-nav-project-clear-button')).toBeVisible()
+  await expect(page.getByTestId('top-nav-project-remove-button')).toBeVisible()
   await page.screenshot({ path: screenshotPath('13a-mobile-projects-operations.png'), fullPage: true })
 
   await page.getByTestId('nav-mode-runs').click()
@@ -207,9 +227,11 @@ test('viewport regression baselines capture desktop shell layouts for projects a
   await expect(page.getByTestId('top-nav')).toHaveAttribute('data-responsive-layout', 'inline')
   await expect(page.getByTestId('view-mode-tabs')).toHaveAttribute('data-responsive-layout', 'inline')
   await expect(page.getByTestId('projects-panel')).toHaveAttribute('data-responsive-layout', 'split')
-  await expect(page.getByTestId('project-register-controls')).toHaveAttribute('data-responsive-layout', 'inline')
-  await expect(page.getByTestId('project-register-button')).toBeVisible()
-  await expect(page.getByTestId('favorite-toggle-button')).toBeVisible()
+  await expect(page.getByTestId('top-nav-active-project')).toHaveAttribute('data-responsive-layout', 'inline')
+  await expect(page.getByTestId('top-nav-project-switcher')).toBeVisible()
+  await expect(page.getByTestId('top-nav-project-add-button')).toBeVisible()
+  await expect(page.getByTestId('top-nav-project-clear-button')).toBeVisible()
+  await expect(page.getByTestId('top-nav-project-remove-button')).toBeVisible()
   await page.screenshot({ path: screenshotPath('13c-desktop-projects-operations.png'), fullPage: true })
 
   await page.getByTestId('nav-mode-runs').click()

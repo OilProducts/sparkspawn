@@ -12,6 +12,7 @@ import {
 
 interface RunListProps {
     activeProjectPath: string | null
+    scopeMode: 'active' | 'all'
     now: number
     onOpenRun: (run: RunRecord) => void
     onOpenRunArtifact: (run: RunRecord, artifactType: 'spec' | 'plan') => void
@@ -22,6 +23,7 @@ interface RunListProps {
 
 export function RunList({
     activeProjectPath,
+    scopeMode,
     now,
     onOpenRun,
     onOpenRunArtifact,
@@ -34,14 +36,22 @@ export function RunList({
             <PanelHeader>
                 <SectionHeader
                     title="Runs"
-                    description={activeProjectPath ? 'Run history for the active project.' : 'Select a project to inspect its runs.'}
+                    description={scopeMode === 'all'
+                        ? 'Run history across all projects.'
+                        : activeProjectPath
+                            ? 'Run history for the active project.'
+                            : 'Choose an active project or switch to all projects.'}
                 />
             </PanelHeader>
             <PanelContent className="px-0">
                 {runs.length === 0 ? (
                     <EmptyState
                         className="mx-4 mb-4"
-                        description={activeProjectPath ? 'No runs for the active project yet.' : 'No runs yet.'}
+                        description={scopeMode === 'all'
+                            ? 'No runs yet.'
+                            : activeProjectPath
+                                ? 'No runs for the active project yet.'
+                                : 'Choose an active project or switch to all projects.'}
                     />
                 ) : (
                     <div className="overflow-x-auto">

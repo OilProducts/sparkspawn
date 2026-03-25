@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
 import type {
     ConversationSegmentUpsertEventResponse,
@@ -60,7 +60,7 @@ export function useProjectConversationCache({
         projectSessionsRef.current = projectSessionsByPath
     }, [projectSessionsByPath])
 
-    const commitConversationCache = (
+    const commitConversationCache = useCallback((
         next:
             | ProjectConversationCacheState
             | ((current: ProjectConversationCacheState) => ProjectConversationCacheState),
@@ -70,14 +70,14 @@ export function useProjectConversationCache({
             : next
         conversationCacheRef.current = resolved
         setConversationCache(resolved)
-    }
+    }, [])
 
-    const setConversationSummaryList = (
+    const setConversationSummaryList = useCallback((
         projectPath: string,
         summaries: ConversationSummaryResponse[],
     ) => {
         commitConversationCache((current) => setProjectConversationSummaryList(current, projectPath, summaries))
-    }
+    }, [commitConversationCache])
 
     const loadProjectConversationSummaries = async (projectPath: string) => {
         try {

@@ -1,4 +1,5 @@
 import { RefreshCcw } from 'lucide-react'
+import { useState } from 'react'
 import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { useRunsList } from './hooks/useRunsList'
@@ -13,10 +14,11 @@ import { RunGraphvizCard } from './components/RunGraphvizCard'
 import { RunList } from './components/RunList'
 import { RunSummaryCard } from './components/RunSummaryCard'
 import type { RunRecord } from './model/shared'
-import { Button, InlineNotice, SectionHeader } from '@/ui'
+import { Button, InlineNotice, ProjectContextChip, SectionHeader } from '@/ui'
 
 export function RunsPanel() {
     const isNarrowViewport = useNarrowViewport()
+    const [scopeMode, setScopeMode] = useState<'active' | 'all'>('active')
     const viewMode = useStore((state) => state.viewMode)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const selectedRunId = useStore((state) => state.selectedRunId)
@@ -41,6 +43,7 @@ export function RunsPanel() {
         updatedAtLabel,
     } = useRunsList({
         activeProjectPath,
+        scopeMode,
         selectedRunId,
         viewMode,
     })
@@ -150,7 +153,37 @@ export function RunsPanel() {
                     <SectionHeader
                         title="Run History"
                         description={`${summary.total} total runs · ${summary.running} running`}
+                        action={
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                <ProjectContextChip
+                                    testId="runs-project-context-chip"
+                                    projectPath={activeProjectPath}
+                                    emptyLabel="No active project"
+                                />
+                                <Button
+                                    type="button"
+                                    data-testid="runs-scope-active-project"
+                                    onClick={() => setScopeMode('active')}
+                                    variant={scopeMode === 'active' ? 'secondary' : 'outline'}
+                                    size="xs"
+                                    disabled={!activeProjectPath}
+                                >
+                                    Active project
+                                </Button>
+                                <Button
+                                    type="button"
+                                    data-testid="runs-scope-all-projects"
+                                    onClick={() => setScopeMode('all')}
+                                    variant={scopeMode === 'all' ? 'secondary' : 'outline'}
+                                    size="xs"
+                                >
+                                    All projects
+                                </Button>
+                            </div>
+                        }
                     />
+                </div>
+                <div className="flex justify-end">
                     <Button
                         onClick={() => void fetchRuns()}
                         data-testid="runs-refresh-button"
@@ -183,12 +216,12 @@ export function RunsPanel() {
                         {error}
                     </InlineNotice>
                 )}
-                {!activeProjectPath && (
+                {scopeMode === 'active' && !activeProjectPath && (
                     <InlineNotice>
-                        Select an active project to view run history for that project.
+                        Choose an active project or switch to all projects to view run history.
                     </InlineNotice>
                 )}
-                {activeProjectPath && scopedRuns.length > 0 && !selectedRunSummary && (
+                {((scopeMode === 'active' && activeProjectPath) || scopeMode === 'all') && scopedRuns.length > 0 && !selectedRunSummary && (
                     <div data-testid="run-selection-empty-state" className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
                         Select a run from the history table to inspect its details.
                     </div>
@@ -310,6 +343,7 @@ export function RunsPanel() {
                 )}
                 <RunList
                     activeProjectPath={activeProjectPath}
+                    scopeMode={scopeMode}
                     now={now}
                     onOpenRun={openRun}
                     onOpenRunArtifact={openRunArtifact}

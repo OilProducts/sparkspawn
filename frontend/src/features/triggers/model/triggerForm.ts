@@ -1,12 +1,16 @@
 import type { TriggerResponse, TriggerSourceType } from '@/lib/workspaceClient'
+import { normalizeProjectPath } from '@/lib/projectPaths'
 
 export type { TriggerSourceType }
+
+export type TriggerTargetMode = 'active' | 'none' | 'custom'
 
 export type TriggerFormState = {
     name: string
     enabled: boolean
     sourceType: TriggerSourceType
     flowName: string
+    targetMode: TriggerTargetMode
     projectPath: string
     staticContextText: string
     scheduleKind: 'once' | 'interval' | 'weekly'
@@ -24,12 +28,11 @@ export type TriggerFormState = {
     flowEventStatuses: string
 }
 
-export const EMPTY_TRIGGER_FORM: TriggerFormState = {
+const BASE_TRIGGER_FORM: Omit<TriggerFormState, 'targetMode' | 'projectPath'> = {
     name: '',
     enabled: true,
     sourceType: 'schedule',
     flowName: '',
-    projectPath: '',
     staticContextText: '{}',
     scheduleKind: 'interval',
     scheduleRunAt: '',
@@ -45,6 +48,12 @@ export const EMPTY_TRIGGER_FORM: TriggerFormState = {
     flowEventFlowName: '',
     flowEventStatuses: 'completed,failed',
 }
+
+export const createEmptyTriggerForm = (activeProjectPath: string | null): TriggerFormState => ({
+    ...BASE_TRIGGER_FORM,
+    targetMode: activeProjectPath ? 'active' : 'none',
+    projectPath: activeProjectPath || '',
+})
 
 export const SHARED_WEBHOOK_ENDPOINT = '/workspace/api/webhooks'
 
@@ -70,6 +79,37 @@ export function triggerSourceSummary(trigger: TriggerResponse): string {
         return `System event · ${String(trigger.source.event_name ?? '')}`
     }
     return `Flow event · ${String(trigger.source.flow_name ?? 'any flow')}`
+}
+
+const formatProjectLabel = (projectPath: string) => {
+    const normalizedPath = normalizeProjectPath(projectPath)
+    const segments = normalizedPath.split('/').filter(Boolean)
+    return segments[segments.length - 1] || normalizedPath
+}
+
+export function triggerTargetsActiveProject(trigger: TriggerResponse, activeProjectPath: string | null): boolean {
+    return Boolean(activeProjectPath) && trigger.action.project_path === activeProjectPath
+}
+
+export function triggerTargetSummary(trigger: TriggerResponse, activeProjectPath: string | null): string {
+    if (!trigger.action.project_path) {
+        return 'No project'
+    }
+    if (triggerTargetsActiveProject(trigger, activeProjectPath)) {
+        return 'Targets active project'
+    }
+    return `Project · ${formatProjectLabel(trigger.action.project_path)}`
+}
+
+export function resolveTriggerTargetMode(
+    projectPath: string | null | undefined,
+    activeProjectPath: string | null,
+): TriggerTargetMode {
+    const normalizedProjectPath = typeof projectPath === 'string' ? projectPath.trim() : ''
+    if (!normalizedProjectPath) {
+        return 'none'
+    }
+    return activeProjectPath && normalizedProjectPath === activeProjectPath ? 'active' : 'custom'
 }
 
 export function buildTriggerSourcePayload(form: TriggerFormState): Record<string, unknown> {
@@ -114,19 +154,21 @@ export function buildTriggerSourcePayload(form: TriggerFormState): Record<string
 export function buildTriggerActionPayload(form: TriggerFormState): Record<string, unknown> {
     return {
         flow_name: form.flowName.trim(),
-        project_path: form.projectPath.trim() || null,
+        project_path: form.targetMode === 'none' ? null : form.projectPath.trim() || null,
         static_context: JSON.parse(form.staticContextText || '{}') as Record<string, unknown>,
     }
 }
 
-export function triggerToFormState(trigger: TriggerResponse): TriggerFormState {
+export function triggerToFormState(trigger: TriggerResponse, activeProjectPath: string | null): TriggerFormState {
     const source = trigger.source
+    const projectPath = trigger.action.project_path ?? ''
     return {
         name: trigger.name,
         enabled: trigger.enabled,
         sourceType: trigger.source_type,
         flowName: trigger.action.flow_name,
-        projectPath: trigger.action.project_path ?? '',
+        targetMode: resolveTriggerTargetMode(projectPath, activeProjectPath),
+        projectPath,
         staticContextText: JSON.stringify(trigger.action.static_context ?? {}, null, 2),
         scheduleKind: (typeof source.kind === 'string' ? source.kind : 'interval') as 'once' | 'interval' | 'weekly',
         scheduleRunAt: typeof source.run_at === 'string' ? source.run_at : '',

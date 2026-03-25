@@ -1,18 +1,23 @@
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { TriggerEditor } from "./components/TriggerEditor"
 import {
   formatTriggerTimestamp,
   SHARED_WEBHOOK_ENDPOINT,
+  triggerTargetSummary,
+  triggerTargetsActiveProject,
   triggerSourceSummary,
 } from "./model/triggerForm"
 import { useTriggersList } from "./hooks/useTriggersList"
 import { useTriggerEditor } from "./hooks/useTriggerEditor"
 import { useWebhookSecretRegeneration } from "./hooks/useWebhookSecretRegeneration"
-import { Button, EmptyState, InlineNotice, Panel, PanelContent, PanelHeader, PanelTitle, SectionHeader } from "@/ui"
+import { useStore } from "@/store"
+import { Badge, Button, EmptyState, InlineNotice, Panel, PanelContent, PanelHeader, PanelTitle, ProjectContextChip, SectionHeader } from "@/ui"
 
 export function TriggersPanel() {
+  const activeProjectPath = useStore((state) => state.activeProjectPath)
   const [revealedWebhookSecrets, setRevealedWebhookSecrets] = useState<Record<string, string>>({})
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'active'>('all')
   const {
     customTriggers,
     error,
@@ -33,6 +38,7 @@ export function TriggersPanel() {
     setEditTriggerForm,
     setNewTriggerForm,
   } = useTriggerEditor({
+    activeProjectPath,
     refreshTriggers,
     selectedTrigger,
     setError,
@@ -45,6 +51,43 @@ export function TriggersPanel() {
     setError,
     setRevealedWebhookSecrets,
   })
+  const filteredSystemTriggers = useMemo(
+    () => scopeFilter === 'active' && activeProjectPath
+      ? systemTriggers.filter((trigger) => triggerTargetsActiveProject(trigger, activeProjectPath))
+      : systemTriggers,
+    [activeProjectPath, scopeFilter, systemTriggers],
+  )
+  const filteredCustomTriggers = useMemo(
+    () => scopeFilter === 'active' && activeProjectPath
+      ? customTriggers.filter((trigger) => triggerTargetsActiveProject(trigger, activeProjectPath))
+      : customTriggers,
+    [activeProjectPath, customTriggers, scopeFilter],
+  )
+  const visibleTriggerIds = useMemo(
+    () => new Set([...filteredSystemTriggers, ...filteredCustomTriggers].map((trigger) => trigger.id)),
+    [filteredCustomTriggers, filteredSystemTriggers],
+  )
+
+  useEffect(() => {
+    if (scopeFilter === 'active' && !activeProjectPath) {
+      setScopeFilter('all')
+    }
+  }, [activeProjectPath, scopeFilter])
+
+  useEffect(() => {
+    if (!selectedTriggerId) {
+      const firstVisibleTrigger = [...filteredSystemTriggers, ...filteredCustomTriggers][0]
+      if (firstVisibleTrigger) {
+        setSelectedTriggerId(firstVisibleTrigger.id)
+      }
+      return
+    }
+    if (visibleTriggerIds.has(selectedTriggerId)) {
+      return
+    }
+    const firstVisibleTrigger = [...filteredSystemTriggers, ...filteredCustomTriggers][0]
+    setSelectedTriggerId(firstVisibleTrigger?.id ?? null)
+  }, [filteredCustomTriggers, filteredSystemTriggers, selectedTriggerId, setSelectedTriggerId, visibleTriggerIds])
 
   return (
     <section data-testid="triggers-panel" className="flex-1 overflow-auto p-6">
@@ -52,7 +95,31 @@ export function TriggersPanel() {
         <SectionHeader
           title="Triggers"
           description="Manage system routing, schedules, polling, flow-event automation, and shared webhook ingress."
+          action={<ProjectContextChip testId="triggers-project-context-chip" projectPath={activeProjectPath} />}
         />
+
+        {activeProjectPath ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              data-testid="triggers-filter-all"
+              onClick={() => setScopeFilter('all')}
+              variant={scopeFilter === 'all' ? 'secondary' : 'outline'}
+              size="xs"
+            >
+              All triggers
+            </Button>
+            <Button
+              type="button"
+              data-testid="triggers-filter-active-project"
+              onClick={() => setScopeFilter('active')}
+              variant={scopeFilter === 'active' ? 'secondary' : 'outline'}
+              size="xs"
+            >
+              Targets active project
+            </Button>
+          </div>
+        ) : null}
 
         {error ? (
           <InlineNotice tone="error">
@@ -78,7 +145,7 @@ export function TriggersPanel() {
                 </Button>
               </PanelHeader>
               <PanelContent className="space-y-2 pt-0">
-                {systemTriggers.map((trigger) => (
+                {filteredSystemTriggers.map((trigger) => (
                   <Button
                     key={trigger.id}
                     type="button"
@@ -86,15 +153,22 @@ export function TriggersPanel() {
                     onClick={() => setSelectedTriggerId(trigger.id)}
                     variant="outline"
                     className={`h-auto w-full justify-start rounded-md px-3 py-2 text-left ${selectedTriggerId === trigger.id ? 'border-foreground bg-muted/60' : 'border-border bg-background/70'}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{trigger.name}</span>
-                      <span className="text-[11px] text-muted-foreground">{trigger.enabled ? 'Enabled' : 'Disabled'}</span>
+                    >
+                    <div className="w-full">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{trigger.name}</span>
+                        <span className="text-[11px] text-muted-foreground">{trigger.enabled ? 'Enabled' : 'Disabled'}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="text-[11px]">
+                          {triggerTargetSummary(trigger, activeProjectPath)}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{triggerSourceSummary(trigger)}</span>
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">{triggerSourceSummary(trigger)}</div>
                   </Button>
                 ))}
-                {systemTriggers.length === 0 ? <EmptyState className="text-xs" description="No protected triggers configured." /> : null}
+                {filteredSystemTriggers.length === 0 ? <EmptyState className="text-xs" description="No protected triggers in this scope." /> : null}
               </PanelContent>
             </Panel>
 
@@ -103,22 +177,29 @@ export function TriggersPanel() {
                 <PanelTitle>Custom triggers</PanelTitle>
               </PanelHeader>
               <PanelContent className="space-y-2 pt-0">
-                {customTriggers.map((trigger) => (
+                {filteredCustomTriggers.map((trigger) => (
                   <Button
                     key={trigger.id}
                     type="button"
                     onClick={() => setSelectedTriggerId(trigger.id)}
                     variant="outline"
                     className={`h-auto w-full justify-start rounded-md px-3 py-2 text-left ${selectedTriggerId === trigger.id ? 'border-foreground bg-muted/60' : 'border-border bg-background/70'}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{trigger.name}</span>
-                      <span className="text-[11px] text-muted-foreground">{trigger.enabled ? 'Enabled' : 'Disabled'}</span>
+                    >
+                    <div className="w-full">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{trigger.name}</span>
+                        <span className="text-[11px] text-muted-foreground">{trigger.enabled ? 'Enabled' : 'Disabled'}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="text-[11px]">
+                          {triggerTargetSummary(trigger, activeProjectPath)}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{triggerSourceSummary(trigger)}</span>
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">{triggerSourceSummary(trigger)}</div>
                   </Button>
                 ))}
-                {customTriggers.length === 0 ? <EmptyState className="text-xs" description="No custom triggers yet." /> : null}
+                {filteredCustomTriggers.length === 0 ? <EmptyState className="text-xs" description="No custom triggers in this scope yet." /> : null}
               </PanelContent>
             </Panel>
           </div>
@@ -134,6 +215,7 @@ export function TriggersPanel() {
                 onChange={setNewTriggerForm}
                 mode="create"
                 protectedTrigger={false}
+                activeProjectPath={activeProjectPath}
               />
               <div className="mt-4 flex justify-end">
                 <Button
@@ -176,6 +258,7 @@ export function TriggersPanel() {
                     onChange={setEditTriggerForm}
                     mode="edit"
                     protectedTrigger={selectedTrigger.protected}
+                    activeProjectPath={activeProjectPath}
                   />
 
                   {selectedTrigger.source_type === 'webhook' ? (
@@ -203,6 +286,7 @@ export function TriggersPanel() {
                   <div className="mt-4 grid gap-3 lg:grid-cols-2">
                     <div className="rounded-md border border-border bg-background/70 p-3 text-sm">
                       <div className="font-medium text-foreground">Runtime</div>
+                      <div className="mt-2 text-muted-foreground">Target: {triggerTargetSummary(selectedTrigger, activeProjectPath)}</div>
                       <div className="mt-2 text-muted-foreground">Last fired: {formatTriggerTimestamp(selectedTrigger.state.last_fired_at)}</div>
                       <div className="text-muted-foreground">Next run: {formatTriggerTimestamp(selectedTrigger.state.next_run_at)}</div>
                       <div className="text-muted-foreground">Last result: {selectedTrigger.state.last_result ?? 'Never'}</div>

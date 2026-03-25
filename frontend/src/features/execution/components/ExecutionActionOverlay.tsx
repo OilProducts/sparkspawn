@@ -6,6 +6,7 @@ interface ExecutionActionOverlayProps {
     isNarrowViewport: boolean
     disabled: boolean
     disabledReason?: string
+    executeLabel?: string
     onExecute: () => void
 }
 
@@ -13,6 +14,7 @@ export function ExecutionActionOverlay({
     isNarrowViewport,
     disabled,
     disabledReason,
+    executeLabel = 'Execute',
     onExecute,
 }: ExecutionActionOverlayProps) {
     return (
@@ -28,7 +30,7 @@ export function ExecutionActionOverlay({
                 className="shadow-lg"
             >
                 <Play className="h-4 w-4" />
-                Execute
+                {executeLabel}
             </Button>
         </div>
     )

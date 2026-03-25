@@ -7,15 +7,6 @@ import {
 } from '@/lib/runMetadataFreshness'
 import type { RunRecord } from '../model/shared'
 
-const normalizeScopePath = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-
-const runBelongsToProjectScope = (run: RunRecord, projectPath: string) => {
-    const normalizedProjectPath = normalizeScopePath(projectPath)
-    const runProjectPath = normalizeScopePath(run.project_path || '')
-    const runWorkingDirectory = normalizeScopePath(run.working_directory || '')
-    return runProjectPath === normalizedProjectPath || runWorkingDirectory === normalizedProjectPath
-}
-
 const logUnexpectedRunError = (error: unknown) => {
     if (error instanceof Error && error.name === 'ApiHttpError') {
         return
@@ -25,10 +16,12 @@ const logUnexpectedRunError = (error: unknown) => {
 
 export function useRunsList({
     activeProjectPath,
+    scopeMode,
     selectedRunId,
     viewMode,
 }: {
     activeProjectPath: string | null
+    scopeMode: 'active' | 'all'
     selectedRunId: string | null
     viewMode: string
 }) {
@@ -45,14 +38,21 @@ export function useRunsList({
             : RUN_METADATA_STALE_AFTER_MS
     })
     const isFetchingRef = useRef(false)
+    const usesActiveProjectScope = scopeMode === 'active'
 
     const fetchRuns = useCallback(async () => {
+        if (usesActiveProjectScope && !activeProjectPath) {
+            setRuns([])
+            setError(null)
+            setIsLoading(false)
+            return
+        }
         if (isFetchingRef.current) return
         isFetchingRef.current = true
         setIsLoading(true)
         setError(null)
         try {
-            const data = await fetchRunsListValidated()
+            const data = await fetchRunsListValidated(usesActiveProjectScope ? activeProjectPath : null)
             setRuns(data.runs)
             setLastFetchedAtMs(Date.now())
         } catch (err) {
@@ -62,7 +62,7 @@ export function useRunsList({
             isFetchingRef.current = false
             setIsLoading(false)
         }
-    }, [])
+    }, [activeProjectPath, usesActiveProjectScope])
 
     useEffect(() => {
         if (viewMode !== 'runs') return
@@ -83,10 +83,7 @@ export function useRunsList({
         return () => window.clearInterval(interval)
     }, [viewMode])
 
-    const scopedRuns = useMemo(() => {
-        if (!activeProjectPath) return []
-        return runs.filter((run) => runBelongsToProjectScope(run, activeProjectPath))
-    }, [runs, activeProjectPath])
+    const scopedRuns = useMemo(() => runs, [runs])
 
     const summary = useMemo(() => {
         const total = scopedRuns.length
@@ -136,5 +133,6 @@ export function useRunsList({
         setRuns,
         summary,
         updatedAtLabel: formatRunMetadataLastUpdated({ lastFetchedAtMs, nowMs: now }),
+        usesActiveProjectScope,
     }
 }

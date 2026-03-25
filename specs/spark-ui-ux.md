@@ -14,15 +14,16 @@ The frontend composes workspace data from Spark and execution data from Attracto
 
 ## 2. Scope and Design Intent
 
-Spark is organized around a home-first operator workflow with two frames:
-- select a project
+Spark is organized around a home-first operator workflow with an active-project workspace context:
+- choose or add the active project
 - collaborate in project chat
 - review artifacts
 - author or inspect flows
 - monitor and inspect runs
 
-Project selection frames conversations, approvals, and execution context.
+The active project frames conversations, approvals, execution launch defaults, trigger execution defaults, and default run-history scope.
 Flow authoring itself operates on shared workspace flows rather than per-project copies.
+Trigger identity remains workspace-global even when trigger execution targets a project.
 
 Story material exists to support implementation, testing, and auditing. It does not override the normative client contract sections below.
 
@@ -114,13 +115,22 @@ These workflow summaries are normative at the experience level. Detailed story r
 ## 7. Navigation Model
 
 Home is the default top-level workspace for:
-- project selection
 - project framing
+- thread selection
 - AI collaboration
 
-Navigation should preserve project framing as the operator moves from conversation to execution and run inspection whenever that framing still applies.
-The Editor may open with no active project. The Execution view may also open without a project, but run-start actions must remain locally gated on selecting a project.
-Triggers are a first-class top-level workspace view because they are global automations rather than project settings.
+The navbar owns project switching and project management.
+It must present a persistent active-project switcher cluster with:
+- active project identity
+- project add
+- clear active project
+- remove active project
+
+Navigation should preserve project framing as the operator moves from conversation to Execution and Runs whenever that framing still applies.
+Execution and Runs are project-framed views by default and should expose a compact project-context indicator near the view header.
+The Editor may open with no active project. Execution may also open without a project, but run-start actions must remain locally gated on selecting a project.
+Triggers are a first-class top-level workspace view because they are global automations rather than project settings; however, new and edited trigger execution targets should default to the active project when that default is meaningful.
+Settings remain global and should not imply project ownership.
 
 Editor and Execution are separate in-memory UI sessions.
 Switching between them must restore each mode exactly as the operator left it rather than deriving one mode's local state from the other.
@@ -130,8 +140,8 @@ Switching between them must restore each mode exactly as the operator left it ra
 ### 8.1 Workspace Surfaces
 
 Workspace-oriented surfaces include:
-- project selection
-- conversation list
+- navbar project switcher
+- conversation thread list
 - project chat
 - inline spec proposal cards
 - inline flow-run request cards
@@ -160,12 +170,24 @@ These are provenance views, not ownership transfers.
 
 The UI should support:
 - one active project at a time
-- visible active project identity
+- visible active project identity in the navbar and in project-framed views
 - duplicate-path prevention
-- project metadata visible enough for safe selection
+- short project labels with full paths visible enough for safe selection
 - recent or favorite project switching when supported
+- active-project add, clear, and remove actions without requiring a trip back to Home
 
 Project identity itself remains workspace truth even though the UI presents it.
+
+### 9.1 Project Context Propagation
+
+The active project is a shared workspace context, not a Home-only decoration.
+
+That context should propagate as follows:
+- Home shows threads for the active project rather than a standalone project list
+- Execution defaults direct runs to the active project and makes that target explicit in run-start copy
+- Runs defaults to active-project scope and provides a one-click `All projects` escape hatch
+- Triggers remain a global registry, but trigger execution-target controls should default to the active project and make project targeting visible in list rows and detail panels
+- Editor and Settings remain visually and conceptually global
 
 ## 10. Conversation UX
 
@@ -317,6 +339,8 @@ The frontend may keep local ephemeral state for:
 - execution session state
 - draft message text
 - local filter or sort controls
+- trigger execution-target mode for the editor form
+- runs scope mode (`active project` vs `all projects`)
 
 At minimum, the frontend should model two independent mode-local sessions:
 - `editorSession`

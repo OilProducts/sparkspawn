@@ -61,6 +61,33 @@ if (typeof window !== 'undefined') {
   })
 }
 
+if (typeof Element !== 'undefined') {
+  if (typeof Element.prototype.scrollIntoView !== 'function') {
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: () => {},
+    })
+  }
+  if (typeof Element.prototype.hasPointerCapture !== 'function') {
+    Object.defineProperty(Element.prototype, 'hasPointerCapture', {
+      configurable: true,
+      value: () => false,
+    })
+  }
+  if (typeof Element.prototype.setPointerCapture !== 'function') {
+    Object.defineProperty(Element.prototype, 'setPointerCapture', {
+      configurable: true,
+      value: () => {},
+    })
+  }
+  if (typeof Element.prototype.releasePointerCapture !== 'function') {
+    Object.defineProperty(Element.prototype, 'releasePointerCapture', {
+      configurable: true,
+      value: () => {},
+    })
+  }
+}
+
 beforeEach(() => {
   vi.stubGlobal('confirm', vi.fn(() => true))
 })

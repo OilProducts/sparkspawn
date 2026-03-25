@@ -4,8 +4,10 @@ import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { FlowTree } from '@/ui/flow-tree'
 import { loadExecutionFlowCatalog } from './services/flowCatalog'
+import { ProjectContextChip } from '@/ui'
 
 export function ExecutionSidebar() {
+    const activeProjectPath = useStore((state) => state.activeProjectPath)
     const executionFlow = useStore((state) => state.executionFlow)
     const setExecutionFlow = useStore((state) => state.setExecutionFlow)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
@@ -63,6 +65,11 @@ export function ExecutionSidebar() {
                     <span>Execution</span>
                     <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
                 </div>
+                <ProjectContextChip
+                    testId="execution-project-context-chip"
+                    projectPath={activeProjectPath}
+                    className="mt-3"
+                />
             </div>
             <div className="px-5 py-2">
                 <h2 className="font-semibold text-sm tracking-tight">Flow Library</h2>

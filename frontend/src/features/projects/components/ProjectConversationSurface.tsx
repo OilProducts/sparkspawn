@@ -57,7 +57,7 @@ export function ProjectConversationSurface({
                 {!activeProjectPath ? (
                     <EmptyState
                         className={isNarrowViewport ? '' : 'flex flex-1 items-center'}
-                        description="Select an active project to begin chatting."
+                        description="Choose or add a project from the navbar to begin chatting."
                     />
                 ) : (
                     <div className="flex min-h-0 flex-1 flex-col gap-3">
