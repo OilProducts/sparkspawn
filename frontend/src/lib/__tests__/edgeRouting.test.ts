@@ -1,7 +1,9 @@
 import type { Edge } from '@xyflow/react'
 import {
+    buildAnchoredOrthogonalRoute,
     buildFallbackOrthogonalRoute,
     buildPolylinePath,
+    extractRouteEndpointSides,
     flattenElkSectionToRoute,
     getRouteMidpoint,
     stripEdgeLayoutRoutes,
@@ -33,6 +35,18 @@ describe('edgeRouting', () => {
             { x: 80, y: 60 },
             { x: 80, y: 100 },
         ])
+    })
+
+    it('derives source and target sides from an ELK route', () => {
+        expect(extractRouteEndpointSides([
+            { x: 110, y: 110 },
+            { x: 110, y: 160 },
+            { x: 410, y: 160 },
+            { x: 410, y: 200 },
+        ])).toEqual({
+            sourceSide: 'bottom',
+            targetSide: 'top',
+        })
     })
 
     it('builds downstream fallback routes from bottom to top', () => {
@@ -69,6 +83,19 @@ describe('edgeRouting', () => {
         expect(route[1].x).toBeLessThan(route[0].x)
     })
 
+    it('builds a live route from fixed ELK side hints', () => {
+        const route = buildAnchoredOrthogonalRoute(
+            { x: 0, y: 0, width: 220, height: 110 },
+            { x: 40, y: 220, width: 220, height: 110 },
+            'right',
+            'left',
+        )
+
+        expect(route[0]).toEqual({ x: 220, y: 55 })
+        expect(route[route.length - 1]).toEqual({ x: 40, y: 275 })
+        expect(route[1].x).toBeGreaterThan(route[0].x)
+    })
+
     it('computes the midpoint along a multi-segment route by length', () => {
         const midpoint = getRouteMidpoint([
             { x: 0, y: 0 },
@@ -98,6 +125,8 @@ describe('edgeRouting', () => {
                 target: 'b',
                 data: {
                     condition: 'outcome=success',
+                    layoutSourceSide: 'bottom',
+                    layoutTargetSide: 'top',
                     layoutRoute: [
                         { x: 0, y: 0 },
                         { x: 0, y: 40 },
@@ -113,6 +142,8 @@ describe('edgeRouting', () => {
                 target: 'b',
                 data: {
                     condition: 'outcome=success',
+                    layoutSourceSide: 'bottom',
+                    layoutTargetSide: 'top',
                 },
             },
         ])

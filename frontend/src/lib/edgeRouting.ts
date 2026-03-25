@@ -12,6 +12,13 @@ export type NodeRect = {
     height: number
 }
 
+export type RouteSide = 'top' | 'right' | 'bottom' | 'left'
+
+export type EdgeRouteEndpointSides = {
+    sourceSide: RouteSide
+    targetSide: RouteSide
+}
+
 export type ElkEdgeSectionLike = {
     id?: string
     startPoint: EdgeRoutePoint
@@ -21,10 +28,9 @@ export type ElkEdgeSectionLike = {
     outgoingSections?: string[]
 }
 
-type RouteSide = 'top' | 'right' | 'bottom' | 'left'
-
 const SAME_ROW_THRESHOLD = 72
 const LOOPBACK_CLEARANCE = 40
+const ANCHOR_STUB_DISTANCE = 28
 const EDGE_CORNER_RADIUS = 12
 
 function isFinitePoint(point: EdgeRoutePoint | null | undefined): point is EdgeRoutePoint {
@@ -139,6 +145,115 @@ function getAnchorPoint(rect: NodeRect, side: RouteSide): EdgeRoutePoint {
         return { x: rect.x + rect.width / 2, y: rect.y + rect.height }
     }
     return { x: rect.x, y: rect.y + rect.height / 2 }
+}
+
+function offsetPoint(point: EdgeRoutePoint, side: RouteSide, distance: number): EdgeRoutePoint {
+    if (side === 'top') {
+        return { x: point.x, y: point.y - distance }
+    }
+    if (side === 'right') {
+        return { x: point.x + distance, y: point.y }
+    }
+    if (side === 'bottom') {
+        return { x: point.x, y: point.y + distance }
+    }
+    return { x: point.x - distance, y: point.y }
+}
+
+function deriveSourceSide(start: EdgeRoutePoint, next: EdgeRoutePoint): RouteSide {
+    if (start.x !== next.x) {
+        return next.x > start.x ? 'right' : 'left'
+    }
+    return next.y > start.y ? 'bottom' : 'top'
+}
+
+function deriveTargetSide(previous: EdgeRoutePoint, end: EdgeRoutePoint): RouteSide {
+    if (previous.x !== end.x) {
+        return end.x > previous.x ? 'left' : 'right'
+    }
+    return end.y > previous.y ? 'top' : 'bottom'
+}
+
+export function extractRouteEndpointSides(route: EdgeRoute | null | undefined): EdgeRouteEndpointSides | null {
+    const normalizedRoute = normalizeRoute(route ?? [])
+    if (normalizedRoute.length < 2) {
+        return null
+    }
+
+    const sourcePoint = normalizedRoute[0]
+    const nextPoint = normalizedRoute[1]
+    const previousPoint = normalizedRoute[normalizedRoute.length - 2]
+    const targetPoint = normalizedRoute[normalizedRoute.length - 1]
+
+    return {
+        sourceSide: deriveSourceSide(sourcePoint, nextPoint),
+        targetSide: deriveTargetSide(previousPoint, targetPoint),
+    }
+}
+
+export function buildAnchoredOrthogonalRoute(
+    sourceRect: NodeRect,
+    targetRect: NodeRect,
+    sourceSide: RouteSide,
+    targetSide: RouteSide,
+): EdgeRoute {
+    const sourceAnchor = getAnchorPoint(sourceRect, sourceSide)
+    const targetAnchor = getAnchorPoint(targetRect, targetSide)
+
+    if (sourceSide === targetSide) {
+        if (sourceSide === 'left' || sourceSide === 'right') {
+            const corridorX = sourceSide === 'left'
+                ? Math.min(sourceRect.x, targetRect.x) - ANCHOR_STUB_DISTANCE
+                : Math.max(sourceRect.x + sourceRect.width, targetRect.x + targetRect.width) + ANCHOR_STUB_DISTANCE
+            return normalizeRoute([
+                sourceAnchor,
+                { x: corridorX, y: sourceAnchor.y },
+                { x: corridorX, y: targetAnchor.y },
+                targetAnchor,
+            ])
+        }
+
+        const corridorY = sourceSide === 'top'
+            ? Math.min(sourceRect.y, targetRect.y) - ANCHOR_STUB_DISTANCE
+            : Math.max(sourceRect.y + sourceRect.height, targetRect.y + targetRect.height) + ANCHOR_STUB_DISTANCE
+        return normalizeRoute([
+            sourceAnchor,
+            { x: sourceAnchor.x, y: corridorY },
+            { x: targetAnchor.x, y: corridorY },
+            targetAnchor,
+        ])
+    }
+
+    const sourceStub = offsetPoint(sourceAnchor, sourceSide, ANCHOR_STUB_DISTANCE)
+    const targetStub = offsetPoint(targetAnchor, targetSide, ANCHOR_STUB_DISTANCE)
+
+    if (targetSide === 'left' || targetSide === 'right') {
+        let corridorY = (sourceStub.y + targetStub.y) / 2
+        if (corridorY === sourceStub.y && corridorY === targetStub.y) {
+            corridorY += ANCHOR_STUB_DISTANCE
+        }
+        return normalizeRoute([
+            sourceAnchor,
+            sourceStub,
+            { x: sourceStub.x, y: corridorY },
+            { x: targetStub.x, y: corridorY },
+            targetStub,
+            targetAnchor,
+        ])
+    }
+
+    let corridorX = (sourceStub.x + targetStub.x) / 2
+    if (corridorX === sourceStub.x && corridorX === targetStub.x) {
+        corridorX += ANCHOR_STUB_DISTANCE
+    }
+    return normalizeRoute([
+        sourceAnchor,
+        sourceStub,
+        { x: corridorX, y: sourceStub.y },
+        { x: corridorX, y: targetStub.y },
+        targetStub,
+        targetAnchor,
+    ])
 }
 
 function buildMidpointRoute(start: EdgeRoutePoint, end: EdgeRoutePoint, verticalFirst: boolean): EdgeRoute {
@@ -341,7 +456,8 @@ export function stripEdgeLayoutRoutes<EdgeType extends { data?: Record<string, u
         }
 
         mutated = true
-        const { layoutRoute: _layoutRoute, ...rest } = edgeData
+        const rest = { ...edgeData }
+        delete rest.layoutRoute
         if (Object.keys(rest).length === 0) {
             return { ...edge, data: undefined }
         }

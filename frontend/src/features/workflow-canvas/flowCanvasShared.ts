@@ -9,7 +9,11 @@ import {
     getReactFlowNodeTypeForShape,
     getShapeNodeStyle,
 } from '@/lib/workflowNodeShape'
-import { flattenElkSectionToRoute, type ElkEdgeSectionLike } from '@/lib/edgeRouting'
+import {
+    extractRouteEndpointSides,
+    flattenElkSectionToRoute,
+    type ElkEdgeSectionLike,
+} from '@/lib/edgeRouting'
 
 import {
     ConditionalNode,
@@ -73,12 +77,17 @@ export type LaidOutFlowGraph = {
     edges: Edge[]
 }
 
+type ElkEdgeLayoutMeta = {
+    route: ReturnType<typeof flattenElkSectionToRoute>
+    endpointSides: ReturnType<typeof extractRouteEndpointSides>
+}
+
 export function normalizeLegacyDot(content: string): string {
     return content.replace(/\blabel=label=/g, 'label=')
 }
 
-export async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<LaidOutFlowGraph> {
-    const graph = {
+function buildElkLayoutGraph(nodes: Node[], edges: Edge[]) {
+    return {
         id: 'root',
         layoutOptions: ELK_OPTIONS,
         children: nodes.map((node) => ({
@@ -92,8 +101,10 @@ export async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<LaidO
             targets: [edge.target],
         })),
     }
+}
 
-    const layout = await elk.layout(graph)
+async function computeElkLayout(nodes: Node[], edges: Edge[]) {
+    const layout = await elk.layout(buildElkLayoutGraph(nodes, edges))
     const layoutMap = new Map((layout.children ?? []).map((child) => [child.id, child]))
     const layoutEdgeMap = new Map(
         (
@@ -101,8 +112,54 @@ export async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<LaidO
             ?? []
         )
             .filter((edge): edge is { id: string; sections?: readonly ElkEdgeSectionLike[] } => typeof edge.id === 'string')
-            .map((edge) => [edge.id, flattenElkSectionToRoute(edge.sections)]),
+            .map((edge) => {
+                const route = flattenElkSectionToRoute(edge.sections)
+                return [
+                    edge.id,
+                    {
+                        route,
+                        endpointSides: extractRouteEndpointSides(route),
+                    } satisfies ElkEdgeLayoutMeta,
+                ] as const
+            }),
     )
+
+    return {
+        layoutMap,
+        layoutEdgeMap,
+    }
+}
+
+function mergeElkEdgeLayoutMeta(
+    edge: Edge,
+    meta: ElkEdgeLayoutMeta | undefined,
+    options?: { includeRoute?: boolean },
+): Edge {
+    if (!meta) {
+        return edge
+    }
+
+    const includeRoute = options?.includeRoute ?? true
+    const nextData: Record<string, unknown> = {
+        ...(edge.data ?? {}),
+    }
+
+    let mutated = false
+    if (includeRoute && meta.route) {
+        nextData.layoutRoute = meta.route
+        mutated = true
+    }
+    if (meta.endpointSides) {
+        nextData.layoutSourceSide = meta.endpointSides.sourceSide
+        nextData.layoutTargetSide = meta.endpointSides.targetSide
+        mutated = true
+    }
+
+    return mutated ? { ...edge, data: nextData } : edge
+}
+
+export async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<LaidOutFlowGraph> {
+    const { layoutMap, layoutEdgeMap } = await computeElkLayout(nodes, edges)
 
     const laidOutNodes = nodes.map((node) => {
         const layoutNode = layoutMap.get(node.id)
@@ -116,24 +173,17 @@ export async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<LaidO
         }
     })
 
-    const laidOutEdges = edges.map((edge) => {
-        const layoutRoute = layoutEdgeMap.get(edge.id)
-        if (!layoutRoute) {
-            return edge
-        }
-        return {
-            ...edge,
-            data: {
-                ...(edge.data ?? {}),
-                layoutRoute,
-            },
-        }
-    })
+    const laidOutEdges = edges.map((edge) => mergeElkEdgeLayoutMeta(edge, layoutEdgeMap.get(edge.id)))
 
     return {
         nodes: laidOutNodes,
         edges: laidOutEdges,
     }
+}
+
+export async function deriveElkEdgeRoutingHints(nodes: Node[], edges: Edge[]): Promise<Edge[]> {
+    const { layoutEdgeMap } = await computeElkLayout(nodes, edges)
+    return edges.map((edge) => mergeElkEdgeLayoutMeta(edge, layoutEdgeMap.get(edge.id), { includeRoute: false }))
 }
 
 export function nowMs(): number {

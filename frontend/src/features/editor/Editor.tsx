@@ -32,6 +32,7 @@ import { CANVAS_INTERACTION_BUDGET_MS } from '@/lib/performanceBudgets';
 import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler';
 import {
     buildHydratedFlowGraph,
+    deriveElkEdgeRoutingHints,
     edgeTypes,
     EDGE_CLASS,
     EDGE_INTERACTION_WIDTH,
@@ -65,6 +66,45 @@ type PreviewDebugContext = {
     debounceMs?: number
 }
 
+function mergeEdgeRoutingHints(currentEdges: Edge[], hintedEdges: Edge[]): Edge[] {
+    const hintedById = new Map(
+        hintedEdges.map((edge) => [
+            edge.id,
+            {
+                layoutSourceSide: edge.data?.layoutSourceSide,
+                layoutTargetSide: edge.data?.layoutTargetSide,
+            },
+        ]),
+    )
+
+    let mutated = false
+    const nextEdges = currentEdges.map((edge) => {
+        const hinted = hintedById.get(edge.id)
+        if (!hinted || typeof hinted.layoutSourceSide !== 'string' || typeof hinted.layoutTargetSide !== 'string') {
+            return edge
+        }
+
+        if (
+            edge.data?.layoutSourceSide === hinted.layoutSourceSide
+            && edge.data?.layoutTargetSide === hinted.layoutTargetSide
+        ) {
+            return edge
+        }
+
+        mutated = true
+        return {
+            ...edge,
+            data: {
+                ...(edge.data ?? {}),
+                layoutSourceSide: hinted.layoutSourceSide,
+                layoutTargetSide: hinted.layoutTargetSide,
+            },
+        }
+    })
+
+    return mutated ? nextEdges : currentEdges
+}
+
 export function Editor() {
     const selectedNodeId = useStore((state) => state.selectedNodeId);
     const selectedEdgeId = useStore((state) => state.selectedEdgeId);
@@ -82,6 +122,7 @@ export function Editor() {
     const hydratedRef = useRef(false);
     const previewTimer = useRef<number | null>(null);
     const activeFlowLoadIdRef = useRef(0);
+    const routingHintRefreshIdRef = useRef(0);
     const rawDotEntryDraftRef = useRef<string>('');
     const rawHandoffInFlightRef = useRef(false);
     const [isDragging, setIsDragging] = useState(false);
@@ -138,6 +179,26 @@ export function Editor() {
             graphAttrs,
         ),
     })
+
+    const refreshEdgeRoutingHints = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
+        const refreshId = routingHintRefreshIdRef.current + 1
+        routingHintRefreshIdRef.current = refreshId
+
+        if (nextEdges.length === 0) {
+            return
+        }
+
+        void deriveElkEdgeRoutingHints(nextNodes, nextEdges)
+            .then((hintedEdges) => {
+                if (routingHintRefreshIdRef.current !== refreshId) {
+                    return
+                }
+                setEdges((currentEdges) => mergeEdgeRoutingHints(currentEdges, hintedEdges))
+            })
+            .catch((error) => {
+                console.error('ELK routing hint refresh failed, keeping existing edge hints.', error)
+            })
+    }, [setEdges]);
 
     const hydrateFromPreview = useCallback(async (
         preview: PreviewResponse,
@@ -260,6 +321,7 @@ export function Editor() {
         hydratedRef.current = false;
         if (!flowName) {
             activeFlowLoadIdRef.current += 1;
+            routingHintRefreshIdRef.current += 1;
             recordFlowLoadDebug('flow-load:cleared', null, {
                 loadId: activeFlowLoadIdRef.current,
                 reason: 'no active flow',
@@ -281,6 +343,7 @@ export function Editor() {
         }
         const loadId = activeFlowLoadIdRef.current + 1;
         activeFlowLoadIdRef.current = loadId;
+        routingHintRefreshIdRef.current += 1;
         recordFlowLoadDebug('flow-load:start', flowName, {
             loadId,
             session: 'editor',
@@ -447,10 +510,11 @@ export function Editor() {
             const shouldSave = changes.some((change) => change.type !== 'select');
             if (shouldSave) {
                 scheduleSave({ nodes, edges: nextEdges });
+                refreshEdgeRoutingHints(nodes, nextEdges);
             }
             return nextEdges;
         });
-    }, [setEdges, scheduleSave, nodes, enforceSingleSelectedEdge]);
+    }, [setEdges, scheduleSave, nodes, enforceSingleSelectedEdge, refreshEdgeRoutingHints]);
 
     const onConnect = useCallback(
         (params: Connection | Edge) => {
@@ -460,10 +524,11 @@ export function Editor() {
                     currentEdges
                 );
                 scheduleSave({ nodes, edges: newEdges });
+                refreshEdgeRoutingHints(nodes, newEdges);
                 return newEdges;
             });
         },
-        [setEdges, scheduleSave, nodes],
+        [setEdges, scheduleSave, nodes, refreshEdgeRoutingHints],
     );
 
     const onAddNode = useCallback(() => {

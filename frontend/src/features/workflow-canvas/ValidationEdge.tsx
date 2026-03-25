@@ -2,11 +2,13 @@ import type { CSSProperties } from 'react'
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps, type InternalNode, useStore as useFlowStore } from '@xyflow/react'
 
 import {
+    buildAnchoredOrthogonalRoute,
     buildFallbackOrthogonalRoute,
     buildPolylinePath,
     getRouteMidpoint,
     type EdgeRoute,
     type NodeRect,
+    type RouteSide,
 } from '@/lib/edgeRouting'
 import { useStore as useAppStore } from '@/store'
 
@@ -50,6 +52,12 @@ function readLayoutRoute(value: unknown): EdgeRoute | null {
     return route.length >= 2 ? route : null
 }
 
+function readRouteSide(value: unknown): RouteSide | null {
+    return value === 'top' || value === 'right' || value === 'bottom' || value === 'left'
+        ? value
+        : null
+}
+
 export function ValidationEdge({
     source,
     target,
@@ -75,6 +83,11 @@ export function ValidationEdge({
     const sourceRect = readNodeRect(sourceNode)
     const targetRect = readNodeRect(targetNode)
     const layoutRoute = readLayoutRoute((data as { layoutRoute?: unknown } | undefined)?.layoutRoute)
+    const layoutSourceSide = readRouteSide((data as { layoutSourceSide?: unknown } | undefined)?.layoutSourceSide)
+    const layoutTargetSide = readRouteSide((data as { layoutTargetSide?: unknown } | undefined)?.layoutTargetSide)
+    const liveHintedRoute = sourceRect && targetRect && layoutSourceSide && layoutTargetSide
+        ? buildAnchoredOrthogonalRoute(sourceRect, targetRect, layoutSourceSide, layoutTargetSide)
+        : null
     const fallbackRoute = sourceRect && targetRect
         ? buildFallbackOrthogonalRoute(sourceRect, targetRect)
         : [
@@ -83,7 +96,7 @@ export function ValidationEdge({
             { x: targetX, y: (sourceY + targetY) / 2 },
             { x: targetX, y: targetY },
         ]
-    const route = layoutRoute ?? fallbackRoute
+    const route = layoutRoute ?? liveHintedRoute ?? fallbackRoute
     const edgePath = buildPolylinePath(route)
     const labelPoint = getRouteMidpoint(route)
 
