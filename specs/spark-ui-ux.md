@@ -321,6 +321,8 @@ Timeline and lifecycle summaries for `PipelineCompleted` should include:
 - optional outcome reason code
 - optional outcome reason message
 
+Terminal and run-log summaries should prefer a backend-provided failure reason over a generic lifecycle label when one is available.
+
 ## 14. Frontend State Model
 
 The frontend treats backend-provided state as authoritative for:

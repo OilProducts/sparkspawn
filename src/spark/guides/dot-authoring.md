@@ -155,12 +155,25 @@ Documented Attractor node attributes:
 | `llm_model` | string | Explicit model override. |
 | `llm_provider` | string | Explicit provider override. |
 | `reasoning_effort` | string | `low`, `medium`, or `high`. |
+| `codergen.response_contract` | string | Codergen-only shared response-format contract. |
 | `auto_status` | boolean | Auto-generate success when the handler writes no status. |
 | `allow_partial` | boolean | Accept `PARTIAL_SUCCESS` when retries exhaust. |
 
 ## Handler-Specific Node Attributes
 
 These attrs are only meaningful for specific node types:
+
+### `codergen`
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `codergen.response_contract` | string | Shared response-format appendix injected by the runtime. Use `status_envelope` when the node must return only Attractor's structured Outcome JSON. |
+
+Authoring guidance:
+
+- Use `codergen.response_contract="status_envelope"` on codergen nodes that are expected to emit structured routing/context outcomes.
+- Keep the node prompt focused on the task and any node-specific fields it must set; the runtime supplies the canonical envelope schema.
+- Do not set this attr on `tool`, `wait.human`, `stack.manager_loop`, `start`, or `exit` nodes.
 
 ### `tool`
 
@@ -207,6 +220,10 @@ Artifact capture rules:
 | `stack.child_autostart` | boolean | Whether the child pipeline should be started automatically. |
 
 `manager.steer_cooldown` exists in the runtime implementation but is not currently documented in the spec, so it is intentionally omitted from this guide.
+
+`context.stack.child.*` is runtime-owned manager-loop telemetry. Read it from authored flows if you need child status or outcome, but do not clear or set it from prompts or context updates as business logic.
+
+With `stack.child_autostart=true`, each manager invocation starts a fresh child unless `context.stack.child.status` is already `running`. Terminal child state from an earlier invocation is treated as stale runtime snapshot data, not reusable authored state.
 
 ## Edge Attributes
 

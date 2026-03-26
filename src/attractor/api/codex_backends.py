@@ -24,6 +24,8 @@ _STRUCTURED_OUTCOME_KEYS = {
     "failure_reason",
     "retryable",
 }
+
+
 class CodexAppServerBackend(CodergenBackend):
     RUNTIME_THREAD_ID_KEY = "_attractor.runtime.thread_id"
 
@@ -142,7 +144,9 @@ def build_codergen_backend(
 
 
 def _coerce_structured_text_outcome(text: str) -> str | Outcome:
-    candidate = _extract_structured_outcome_payload(text)
+    candidate, envelope_error = _extract_structured_outcome_payload(text)
+    if envelope_error is not None:
+        return _invalid_structured_outcome(text, envelope_error)
     if candidate is None:
         return text
 
@@ -156,26 +160,41 @@ def _coerce_structured_text_outcome(text: str) -> str | Outcome:
     retryable = candidate.get("retryable", None)
 
     if not isinstance(preferred_label, str):
-        return text
+        return _invalid_structured_outcome(text, "invalid structured status envelope: preferred_label must be a string")
     if not isinstance(suggested_next_ids, list) or any(not isinstance(item, str) for item in suggested_next_ids):
-        return text
+        return _invalid_structured_outcome(
+            text,
+            "invalid structured status envelope: suggested_next_ids must be a list of strings",
+        )
     if not isinstance(context_updates, dict):
-        return text
+        return _invalid_structured_outcome(
+            text,
+            "invalid structured status envelope: context_updates must be an object",
+        )
     if notes is not None and not isinstance(notes, str):
-        return text
+        return _invalid_structured_outcome(text, "invalid structured status envelope: notes must be a string")
     if failure_reason is not None and not isinstance(failure_reason, str):
-        return text
+        return _invalid_structured_outcome(
+            text,
+            "invalid structured status envelope: failure_reason must be a string",
+        )
     if retryable is not None and not isinstance(retryable, bool):
-        return text
+        return _invalid_structured_outcome(text, "invalid structured status envelope: retryable must be a boolean")
 
     outcome_name = str(candidate.get("outcome", "")).strip().lower()
     try:
         status = OutcomeStatus(outcome_name)
     except ValueError:
-        return text
+        return _invalid_structured_outcome(
+            text,
+            f"invalid structured status envelope: unsupported outcome status '{outcome_name or '<empty>'}'",
+        )
 
     if status == OutcomeStatus.SKIPPED:
-        return text
+        return _invalid_structured_outcome(
+            text,
+            "invalid structured status envelope: unsupported outcome status 'skipped'",
+        )
 
     return Outcome(
         status=status,
@@ -188,10 +207,18 @@ def _coerce_structured_text_outcome(text: str) -> str | Outcome:
     )
 
 
-def _extract_structured_outcome_payload(text: str) -> dict[str, object] | None:
+def _invalid_structured_outcome(text: str, reason: str) -> Outcome:
+    return Outcome(
+        status=OutcomeStatus.FAIL,
+        notes=text.strip(),
+        failure_reason=reason,
+    )
+
+
+def _extract_structured_outcome_payload(text: str) -> tuple[dict[str, object] | None, str | None]:
     stripped = text.strip()
     if not stripped:
-        return None
+        return None, None
 
     candidates = [stripped]
     if stripped.startswith("```") and stripped.endswith("```"):
@@ -209,6 +236,8 @@ def _extract_structured_outcome_payload(text: str) -> dict[str, object] | None:
         if "outcome" not in payload:
             continue
         if not set(payload.keys()).issubset(_STRUCTURED_OUTCOME_KEYS):
-            continue
-        return payload
-    return None
+            unexpected = sorted(set(payload.keys()) - _STRUCTURED_OUTCOME_KEYS)
+            unexpected_text = ", ".join(unexpected)
+            return None, f"invalid structured status envelope: unexpected top-level keys {unexpected_text}"
+        return payload, None
+    return None, None

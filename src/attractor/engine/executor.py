@@ -19,6 +19,12 @@ from attractor.graph_prep import (
     resolve_default_max_retries_value,
 )
 from attractor.transforms.runtime_preamble import RuntimePreambleTransform
+from attractor.transforms.runtime_preamble import (
+    RUNTIME_RETRY_ATTEMPT_KEY,
+    RUNTIME_RETRY_FAILURE_REASON_KEY,
+    RUNTIME_RETRY_MAX_ATTEMPTS_KEY,
+    RUNTIME_RETRY_NODE_ID_KEY,
+)
 
 from .checkpoint import Checkpoint, load_checkpoint, save_checkpoint
 from .context import Context
@@ -202,6 +208,7 @@ class PipelineExecutor:
         ctx = context or Context()
         if not resume:
             self._reset_workflow_outcome_context(ctx)
+            self._clear_runtime_retry_context(ctx)
         completed: List[str] = []
         outcomes: Dict[str, Outcome] = {}
         retry_counts: Dict[str, int] = {}
@@ -432,6 +439,13 @@ class PipelineExecutor:
                 retries_so_far = retry_counts.get(node.node_id, 0)
                 if self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
+                    self._set_runtime_retry_context(
+                        ctx,
+                        node_id=node.node_id,
+                        attempt=retry_counts[node.node_id],
+                        max_attempts=retry_policy.max_attempts,
+                        failure_reason=outcome.failure_reason or "stage_failed",
+                    )
                     if outcome.status.value == "fail":
                         self._emit_event(
                             "StageFailed",
@@ -472,6 +486,7 @@ class PipelineExecutor:
                     ctx.set("preferred_label", outcome.preferred_label or "")
                     self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
                     self._write_stage_artifacts(node.node_id, prompt, outcome)
+                self._clear_runtime_retry_context(ctx)
                 self._reset_retry_counter(node.node_id, outcome, retry_counts)
                 stage_duration = max(0.0, time.perf_counter() - stage_started_at)
 
@@ -621,6 +636,7 @@ class PipelineExecutor:
 
         ctx = context or Context()
         self._reset_workflow_outcome_context(ctx)
+        self._clear_runtime_retry_context(ctx)
         self._mirror_graph_attrs(ctx)
         completed: List[str] = []
         outcomes: Dict[str, Outcome] = {}
@@ -840,6 +856,13 @@ class PipelineExecutor:
                 retries_so_far = retry_counts.get(node.node_id, 0)
                 if self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
+                    self._set_runtime_retry_context(
+                        ctx,
+                        node_id=node.node_id,
+                        attempt=retry_counts[node.node_id],
+                        max_attempts=retry_policy.max_attempts,
+                        failure_reason=outcome.failure_reason or "stage_failed",
+                    )
                     if outcome.status.value == "fail":
                         self._emit_event(
                             "StageFailed",
@@ -880,6 +903,7 @@ class PipelineExecutor:
                     ctx.set("preferred_label", outcome.preferred_label or "")
                     self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
                     self._write_stage_artifacts(node.node_id, prompt, outcome)
+                self._clear_runtime_retry_context(ctx)
                 self._reset_retry_counter(node.node_id, outcome, retry_counts)
                 stage_duration = max(0.0, time.perf_counter() - stage_started_at)
 
@@ -1204,7 +1228,7 @@ class PipelineExecutor:
 
         status_payload = {
             "outcome": outcome.status.value,
-            "preferred_next_label": str(outcome.preferred_label or ""),
+            "preferred_label": str(outcome.preferred_label or ""),
             "suggested_next_ids": normalized_suggested_next_ids,
             "context_updates": normalized_context_updates,
             "notes": str(outcome.notes or ""),
@@ -1234,6 +1258,7 @@ class PipelineExecutor:
         context.set("outcome", "")
         context.set("preferred_label", "")
         self._reset_workflow_outcome_context(context)
+        self._clear_runtime_retry_context(context)
         context.set("current_node", restart_node)
 
         self._rotate_logs_root_for_restart()
@@ -1330,7 +1355,10 @@ class PipelineExecutor:
         if context_updates is None:
             return {}
         if isinstance(context_updates, dict):
-            return dict(context_updates)
+            normalized: Dict[str, object] = {}
+            for raw_key, value in dict(context_updates).items():
+                normalized[_normalize_context_update_key(str(raw_key))] = value
+            return normalized
         return {}
 
     def _execute_node_handler(self, node_id: str, prompt: str, context: Context) -> Outcome:
@@ -1461,6 +1489,34 @@ class PipelineExecutor:
         context.set(WORKFLOW_OUTCOME_KEY, "")
         context.set(WORKFLOW_OUTCOME_REASON_CODE_KEY, "")
         context.set(WORKFLOW_OUTCOME_REASON_MESSAGE_KEY, "")
+
+    def _set_runtime_retry_context(
+        self,
+        context: Context,
+        *,
+        node_id: str,
+        attempt: int,
+        max_attempts: int,
+        failure_reason: str,
+    ) -> None:
+        context.apply_updates(
+            {
+                RUNTIME_RETRY_NODE_ID_KEY: str(node_id),
+                RUNTIME_RETRY_ATTEMPT_KEY: int(attempt),
+                RUNTIME_RETRY_MAX_ATTEMPTS_KEY: int(max_attempts),
+                RUNTIME_RETRY_FAILURE_REASON_KEY: str(failure_reason),
+            }
+        )
+
+    def _clear_runtime_retry_context(self, context: Context) -> None:
+        context.apply_updates(
+            {
+                RUNTIME_RETRY_NODE_ID_KEY: "",
+                RUNTIME_RETRY_ATTEMPT_KEY: 0,
+                RUNTIME_RETRY_MAX_ATTEMPTS_KEY: 0,
+                RUNTIME_RETRY_FAILURE_REASON_KEY: "",
+            }
+        )
 
     def _resolve_terminal_workflow_outcome(
         self,
@@ -1947,6 +2003,27 @@ def _edge_endpoint_text(edge: object | None, key: str) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+_ALLOWED_CONTEXT_UPDATE_PREFIXES: tuple[str, ...] = (
+    "context.",
+    "graph.",
+    "internal.",
+    "parallel.",
+    "stack.",
+    "human.gate.",
+    "work.",
+    "_attractor.",
+)
+
+
+def _normalize_context_update_key(key: str) -> str:
+    normalized = str(key).strip()
+    if not normalized or "." not in normalized:
+        return normalized
+    if any(normalized.startswith(prefix) for prefix in _ALLOWED_CONTEXT_UPDATE_PREFIXES):
+        return normalized
+    return f"context.{normalized}"
 
 
 def _is_outcome_fail_condition(condition: str) -> bool:

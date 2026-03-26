@@ -160,6 +160,7 @@ Graph attributes are declared in a `graph [ ... ]` block or as top-level `key = 
 | `llm_model`         | String   | inherited       | LLM model identifier. Overridable by stylesheet. |
 | `llm_provider`      | String   | auto-detected   | LLM provider key. Auto-detected from model if unset. |
 | `reasoning_effort`  | String   | `"high"`        | LLM reasoning effort: `low`, `medium`, `high`. |
+| `codergen.response_contract` | String | `""`     | Codergen-only shared response-format contract. `status_envelope` appends the canonical structured Outcome schema to the prompt. |
 | `auto_status`       | Boolean  | `false`         | If `true` and the handler writes no status, the engine auto-generates a SUCCESS outcome. |
 | `allow_partial`     | Boolean  | `false`         | Accept PARTIAL_SUCCESS when retries are exhausted instead of failing. |
 
@@ -610,10 +611,16 @@ FUNCTION delay_for_attempt(attempt, config):
 
 When a stage returns FAIL (or retries are exhausted), the engine attempts failure routing in this order:
 
-1. **Fail edge:** An outgoing edge with `condition="outcome=fail"`. If found, follow it.
-2. **Retry target:** Node attribute `retry_target`. Jump to that node.
-3. **Fallback retry target:** Node attribute `fallback_retry_target`. Jump to that node.
-4. **Pipeline termination:** No failure route found. The pipeline fails with the stage's failure reason.
+1. **Exact fail edge preference:** If an outgoing edge has the exact condition
+   `condition="outcome=fail"`, prefer it over any other true condition.
+2. **Other conditioned failure edges:** If no exact fail edge exists, reuse the normal
+   edge-selection algorithm for other conditioned edges that evaluate true against the failing
+   outcome and current context, including compound expressions such as
+   `outcome=fail && preferred_label=Fix`.
+3. **Retry target:** If no conditioned failure edge matches, use the node attribute `retry_target`.
+4. **Fallback retry target:** If no `retry_target` is configured, use `fallback_retry_target`.
+5. **Pipeline termination:** If no explicit failure route exists, the pipeline fails with the
+   stage's failure reason.
 
 ### 3.8 Concurrency Model
 
@@ -715,6 +722,7 @@ CodergenHandler:
         IF prompt is empty:
             prompt = node.label
         prompt = expand_variables(prompt, graph, context)
+        prompt = apply_response_contract(prompt, node.attrs["codergen.response_contract"])
 
         -- 2. Write prompt to logs
         stage_dir = logs_root + "/" + node.id + "/"
@@ -751,6 +759,8 @@ CodergenHandler:
 ```
 
 **Variable expansion:** The only built-in template variable is `$goal`, which resolves to the graph-level `goal` attribute. Variable expansion is simple string replacement, not a templating engine. Host-supplied `launch_context` does not create additional built-in prompt variables.
+
+When `codergen.response_contract="status_envelope"`, the runtime appends a shared structured-output appendix to the prompt that enumerates the allowed top-level Outcome keys and forbids extra ones. Use this on codergen nodes that must return a structured status envelope; do not set it on non-codergen nodes.
 
 **Status file:** The handler writes `status.json` in the stage directory with the Outcome fields serialized as JSON. This file serves as an audit trail and enables the status-file contract: external tools or agents can write `status.json` to communicate outcomes back to the engine.
 
@@ -1010,14 +1020,17 @@ ManagerLoopHandler:
 
         -- 1. Auto-start child if configured
         IF node.attrs.get("stack.child_autostart", "true") == "true":
-            resolved_child_workdir = resolve_child_workdir(child_workdir, run.cwd)
-            resolved_child_dotfile = resolve_child_dotfile(
-                child_dotfile,
-                child_workdir,
-                parent_flow_dir,
-                resolved_child_workdir,
-            )
-            start_child_pipeline(resolved_child_dotfile, cwd=resolved_child_workdir)
+            child_status = context.get_string("context.stack.child.status")
+            IF child_status != "running":
+                clear_runtime_owned_child_snapshot(context)
+                resolved_child_workdir = resolve_child_workdir(child_workdir, run.cwd)
+                resolved_child_dotfile = resolve_child_dotfile(
+                    child_dotfile,
+                    child_workdir,
+                    parent_flow_dir,
+                    resolved_child_workdir,
+                )
+                start_child_pipeline(resolved_child_dotfile, cwd=resolved_child_workdir)
 
         -- 2. Observation loop
         FOR cycle FROM 1 TO max_cycles:
@@ -1050,6 +1063,12 @@ The manager pattern implements a **supervisor architecture** where:
 - **Observe** ingests worker telemetry (active stage, outcomes, retry counts, artifacts)
 - **Guard** scores worker progress and routes to continue, intervene, or escalate
 - **Steer** writes intervention instructions to the child's active stage directory
+
+`context.stack.child.*` is runtime-owned latest-child telemetry. Authored flows may read it, but should not clear or set it as business logic.
+
+With `stack.child_autostart=true`, terminal child state from an earlier manager invocation is stale. Only `context.stack.child.status=running` suppresses a new child launch; `completed` and `failed` do not.
+
+When the runtime launches a fresh autostarted child, it clears the runtime-owned `context.stack.child.*` snapshot fields it manages before writing the new child result. When autostart is disabled, the manager may still resolve directly from pre-populated terminal child state in context.
 
 **Child path resolution rules:**
 - `stack.child_workdir` default `cwd` means the current pipeline run working directory, not the host process launch directory.
@@ -1186,6 +1205,10 @@ Outcome:
     notes              : String          -- human-readable execution summary
     failure_reason     : String          -- reason for failure (when status is FAIL or RETRY)
 ```
+
+`context_updates` should use canonical namespaced keys such as `context.review.summary`.
+For AI-authored structured outcomes, implementations may normalize dotted semantic keys that do
+not start with a reserved namespace (for example `review.summary`) into `context.*` before merge.
 
 **StageStatus values:**
 
@@ -2133,6 +2156,7 @@ ASSERT "review" IN checkpoint.completed_nodes
 | `llm_model`             | String   | inherited     | LLM model override |
 | `llm_provider`          | String   | auto-detected | LLM provider override |
 | `reasoning_effort`      | String   | `"high"`      | Reasoning depth: low/medium/high |
+| `codergen.response_contract` | String | `""`       | Codergen-only shared response-format contract. `status_envelope` appends the canonical structured Outcome schema to the prompt. |
 | `auto_status`           | Boolean  | `false`       | Auto-generate SUCCESS if no status written |
 | `allow_partial`         | Boolean  | `false`       | Accept PARTIAL_SUCCESS on retry exhaustion |
 | `tool.command`          | String   | `""`          | Shell command executed by tool nodes. Required when a node resolves to `tool`. |
@@ -2195,6 +2219,9 @@ Each non-terminal node writes a `status.json` file in its stage directory. This 
 | `suggested_next_ids`   | List of Strings | No       | Fallback target node IDs if no label match. |
 | `context_updates`      | Map             | No       | Key-value pairs merged into the run context. |
 | `notes`                | String          | No       | Human-readable log entries. |
+
+`preferred_label` is the canonical status-file field name. `preferred_next_label` is a legacy
+implementation alias and is not part of the current contract.
 
 When `auto_status=true` on a node and no `status.json` was written by the handler, the engine synthesizes: `{"outcome": "success", "notes": "auto-status: handler completed without writing status"}`.
 

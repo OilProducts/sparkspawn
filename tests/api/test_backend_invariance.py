@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import itertools
 from pathlib import Path
+from types import SimpleNamespace
 from typing import List
 
 import pytest
@@ -219,6 +221,83 @@ def test_pipeline_stream_includes_executor_typed_runtime_events(
     assert "StageCompleted" in event_types
     assert "CheckpointSaved" in event_types
     assert "PipelineCompleted" in event_types
+
+
+@pytest.mark.anyio
+async def test_pipeline_failure_preserves_last_error_and_emits_descriptive_terminal_summary(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+
+    scheduled: list[object] = []
+
+    class _Executor:
+        def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            del args, kwargs
+
+        def run(self, context, resume=True):  # type: ignore[no-untyped-def]
+            del context, resume
+            return SimpleNamespace(
+                status="failed",
+                current_node="fail_work",
+                completed_nodes=["start"],
+                context={},
+                node_outcomes={},
+                route_trace=["start", "fail_work"],
+                failure_reason="boom",
+                outcome=None,
+                outcome_reason_code=None,
+                outcome_reason_message=None,
+            )
+
+    def _capture_task(coro):  # type: ignore[no-untyped-def]
+        scheduled.append(coro)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(server, "PipelineExecutor", _Executor)
+    monkeypatch.setattr(server.asyncio, "create_task", _capture_task)
+
+    run_id = "run-failure-summary"
+    payload = await server._start_pipeline(
+        server.PipelineStartRequest(
+            flow_content="""
+            digraph G {
+                start [shape=Mdiamond]
+                done [shape=Msquare]
+                start -> done
+            }
+            """,
+            working_directory=str(tmp_path / "work"),
+            backend="codex-app-server",
+        ),
+        run_id=run_id,
+    )
+    assert payload["status"] == "started"
+    assert len(scheduled) == 1
+
+    await scheduled.pop()
+
+    status_payload = await server.get_pipeline(run_id)
+    assert status_payload["status"] == "failed"
+    assert status_payload["last_error"] == "boom"
+
+    history = server.EVENT_HUB.history(run_id)
+    assert {
+        "type": "runtime",
+        "status": "failed",
+        "outcome": None,
+        "outcome_reason_code": None,
+        "outcome_reason_message": None,
+        "last_error": "boom",
+        "run_id": run_id,
+    } in history
+    assert {
+        "type": "log",
+        "msg": "Pipeline failed: boom",
+        "run_id": run_id,
+    } in history
 
 
 def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
@@ -613,6 +692,73 @@ def test_codex_app_server_backend_parses_structured_outcome_agent_text(
     assert result.notes == "needs fixes"
     assert result.failure_reason == "review requested changes"
     assert result.context_updates == {"context.review.summary": "missing validation"}
+
+
+def test_codex_app_server_backend_fails_closed_on_malformed_structured_outcome_agent_text(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+
+    class FakeStdout:
+        def __init__(self, lines: list[str]) -> None:
+            self._lines = list(lines)
+
+        def readline(self) -> str:
+            if not self._lines:
+                return ""
+            return f"{self._lines.pop(0)}\n"
+
+    class FakeStdin:
+        def write(self, text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self, lines: list[str]) -> None:
+            self.stdout = FakeStdout(lines)
+            self.stdin = FakeStdin()
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> None:
+            return None
+
+        def kill(self) -> None:
+            return None
+
+    malformed_payload = (
+        '{"outcome":"success","context":{"workflow_outcome":"failure"},'
+        '"notes":"attempted blocked exit"}'
+    )
+    lines = [
+        '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"experimentalApi":true}}}',
+        '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-123"}}}',
+        '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-123","status":"inProgress","items":[]}}}',
+        f'{{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{{"delta":{json.dumps(malformed_payload)}}}}}',
+        (
+            '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"AgentMessage","id":"msg-1",'
+            f'"content":[{{"type":"Text","text":{json.dumps(malformed_payload)}}}],"phase":"final_answer"}}}}'
+        ),
+        '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-123","status":"completed"}}}',
+    ]
+
+    monkeypatch.setattr(codex_backends_module.subprocess, "Popen", lambda *args, **kwargs: FakeProcess(lines))
+
+    result = backend.run("blocked_exit", "hello", Context())
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.notes == malformed_payload
+    assert result.failure_reason == "invalid structured status envelope: unexpected top-level keys context"
+    assert result.context_updates == {}
 
 
 def test_codex_app_server_backend_requires_turn_completed_after_final_answer(

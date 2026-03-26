@@ -81,8 +81,9 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
         return None
 
     current_status = str(runtime.context.get("context.stack.child.status", "")).strip().lower()
-    if current_status in {"running", "completed", "failed"}:
+    if current_status == "running":
         return None
+    _clear_child_snapshot(runtime.context)
 
     authored_child_workdir = _authored_dot_attr_string(runtime.graph.graph_attrs.get("stack.child_workdir"))
     child_workdir_path = _resolve_child_workdir_path(
@@ -155,10 +156,26 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
     runtime.context.set("context.stack.child.active_stage", child_result.current_node)
     runtime.context.set("context.stack.child.completed_nodes", list(child_result.completed_nodes))
     runtime.context.set("context.stack.child.route_trace", list(child_result.route_trace))
-    if child_result.failure_reason:
-        runtime.context.set("context.stack.child.failure_reason", child_result.failure_reason)
+    runtime.context.set("context.stack.child.failure_reason", child_result.failure_reason or "")
 
     return None
+
+
+def _clear_child_snapshot(context: Context) -> None:
+    context.apply_updates(
+        {
+            "context.stack.child.status": "",
+            "context.stack.child.outcome": "",
+            "context.stack.child.outcome_reason_code": "",
+            "context.stack.child.outcome_reason_message": "",
+            "context.stack.child.active_stage": "",
+            "context.stack.child.completed_nodes": [],
+            "context.stack.child.route_trace": [],
+            "context.stack.child.failure_reason": "",
+            "context.stack.child.retry_count": "",
+            "context.stack.child.intervention": "",
+        }
+    )
 
 
 def _poll_interval_seconds(attr: DotAttribute | None) -> float:

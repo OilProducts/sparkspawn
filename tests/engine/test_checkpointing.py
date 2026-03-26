@@ -213,7 +213,7 @@ class TestCheckpointAndArtifacts:
             assert result.status == "completed"
             status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
             assert status_payload["outcome"] == "success"
-            assert status_payload["preferred_next_label"] == ""
+            assert status_payload["preferred_label"] == ""
             assert status_payload["suggested_next_ids"] == []
             assert status_payload["context_updates"] == {}
             assert status_payload["notes"] == ""
@@ -258,7 +258,7 @@ class TestCheckpointAndArtifacts:
 
             status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
             assert status_payload["outcome"] == "fail"
-            assert status_payload["preferred_next_label"] == ""
+            assert status_payload["preferred_label"] == ""
             assert status_payload["suggested_next_ids"] == []
             assert status_payload["context_updates"] == {}
             assert status_payload["notes"] == "123"

@@ -6,6 +6,7 @@ from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.outcome import Outcome, OutcomeStatus
 from attractor.handlers import HandlerRunner, build_default_registry
+from attractor.handlers.builtin.codergen import STATUS_ENVELOPE_PROMPT_APPENDIX
 
 from tests.handlers._support.fakes import (
     _StubBackend,
@@ -13,6 +14,7 @@ from tests.handlers._support.fakes import (
     _TextBackend,
     _OutcomeBackend,
 )
+
 
 class TestCodergenHandler:
     def test_codergen_handler_calls_backend(self):
@@ -84,6 +86,24 @@ class TestCodergenHandler:
         outcome = runner("task", "Plan for $goal", Context())
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0][1] == "Plan for Ship docs"
+
+    def test_codergen_handler_appends_status_envelope_contract_when_configured(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [shape=box, prompt="Plan for $goal", codergen.response_contract="status_envelope"]
+            }
+            """
+        )
+
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("task", "Plan for $goal", Context(values={"graph.goal": "ship"}))
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0][1] == f"Plan for ship\n\n{STATUS_ENVELOPE_PROMPT_APPENDIX}"
 
     def test_codergen_handler_falls_back_to_label_when_prompt_is_empty(self):
         graph = parse_dot(
@@ -244,6 +264,6 @@ class TestCodergenHandler:
                 },
                 "notes": "backend returned partial",
                 "outcome": "partial_success",
-                "preferred_next_label": "continue",
+                "preferred_label": "continue",
                 "suggested_next_ids": ["followup"],
             }

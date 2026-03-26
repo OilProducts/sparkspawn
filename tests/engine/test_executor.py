@@ -60,6 +60,57 @@ class _StructuredLoopBackend:
         return f"{node_id} completed"
 
 
+class _SpecImplementationLoopBackend:
+    def __init__(self):
+        self.next_milestone_calls = 0
+        self.child_milestone_ids: list[str] = []
+
+    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> Outcome:
+        del prompt, timeout
+        if node_id == "next_milestone":
+            self.next_milestone_calls += 1
+            if self.next_milestone_calls == 1:
+                return Outcome(
+                    status=OutcomeStatus.SUCCESS,
+                    preferred_label="Work",
+                    context_updates=self._milestone_updates(
+                        milestone_id="M-ONE",
+                        title="First milestone",
+                    ),
+                )
+            if self.next_milestone_calls == 2:
+                return Outcome(
+                    status=OutcomeStatus.SUCCESS,
+                    preferred_label="Work",
+                    context_updates=self._milestone_updates(
+                        milestone_id="M-TWO",
+                        title="Second milestone",
+                    ),
+                )
+            return Outcome(status=OutcomeStatus.SUCCESS, preferred_label="Audit")
+
+        if node_id == "prepare_milestone_state":
+            self.child_milestone_ids.append(str(context.get("context.milestone.id", "")))
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        if node_id == "next_item":
+            return Outcome(status=OutcomeStatus.SUCCESS, preferred_label="Audit")
+
+        return Outcome(status=OutcomeStatus.SUCCESS)
+
+    @staticmethod
+    def _milestone_updates(*, milestone_id: str, title: str) -> dict[str, object]:
+        return {
+            "context.milestone.id": milestone_id,
+            "context.milestone.title": title,
+            "context.milestone.objective": f"Ship {title.lower()}",
+            "context.milestone.requirement_ids": [f"REQ-{milestone_id}"],
+            "context.milestone.acceptance_criteria": [f"{title} acceptance"],
+            "context.milestone.target_paths": [f"src/{milestone_id.lower()}"],
+            "context.milestone.attempts": 1,
+        }
+
+
 class TestExecutor:
     @pytest.mark.parametrize(
         ("validate_outcomes", "expected_route"),
@@ -509,6 +560,49 @@ class TestExecutor:
         assert "context.review.required_changes=add regression coverage and tighten edge handling" in backend.prompts["implement"][1]
         assert result.route_trace == ["start", "implement", "review", "implement", "review", "done"]
 
+    def test_executor_carries_retry_failure_reason_into_next_attempt(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [goal="Ship docs", default_fidelity="summary:high"]
+                start [shape=Mdiamond]
+                work [shape=box, max_retries=1]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+
+        work_calls = 0
+        second_attempt_carryover = ""
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            nonlocal work_calls, second_attempt_carryover
+            del prompt
+            if node_id == "work":
+                work_calls += 1
+                if work_calls == 1:
+                    return Outcome(
+                        status=OutcomeStatus.FAIL,
+                        notes='{"outcome":"success","context":{"workflow_outcome":"failure"}}',
+                        failure_reason="invalid structured status envelope: unexpected top-level keys context",
+                    )
+                second_attempt_carryover = str(context.get("_attractor.runtime.context_carryover", ""))
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context(values={"internal.run_id": "run-123"}))
+
+        assert result.status == "completed"
+        assert work_calls == 2
+        assert "retry.node_id=work" in second_attempt_carryover
+        assert "retry.attempt=1" in second_attempt_carryover
+        assert "retry.max_attempts=2" in second_attempt_carryover
+        assert (
+            "retry.failure_reason=invalid structured status envelope: unexpected top-level keys context"
+            in second_attempt_carryover
+        )
+
     def test_executor_mirrors_graph_goal_into_context(self):
         graph = parse_dot(
             """
@@ -915,6 +1009,48 @@ class TestExecutor:
         assert result.current_node == "done"
         assert result.route_trace == ["start", "work", "blocked", "done"]
 
+    def test_failure_loop_normalizes_shorthand_context_updates_before_routing(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                review [shape=box]
+                implement [shape=box]
+                done [shape=Msquare]
+
+                start -> review
+                review -> implement [condition="outcome=fail && preferred_label=Fix", label="Fix"]
+                implement -> done
+            }
+            """
+        )
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            del prompt
+            if node_id == "review":
+                return Outcome(
+                    status=OutcomeStatus.FAIL,
+                    preferred_label="Fix",
+                    failure_reason="needs fixes",
+                    context_updates={
+                        "review.summary": "implementation is incomplete",
+                        "review.required_changes": "add regression coverage",
+                        "review.blockers": "",
+                    },
+                )
+            if node_id == "implement":
+                assert context.get("context.review.summary") == "implementation is incomplete"
+                assert context.get("context.review.required_changes") == "add regression coverage"
+                assert context.get("review.summary") is None
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "completed"
+        assert result.route_trace == ["start", "review", "implement", "done"]
+        assert result.context["context.review.summary"] == "implementation is incomplete"
+        assert result.context["context.review.required_changes"] == "add regression coverage"
+
     def test_wait_human_block_routes_to_blocked_exit(self):
         graph = parse_dot(
             """
@@ -954,6 +1090,38 @@ class TestExecutor:
         assert result.status == "failed"
         assert result.current_node == "extract_requirements"
         assert "design_architecture" not in result.route_trace
+
+    def test_starter_spec_implementation_prepare_workspace_retries_once(self):
+        graph = parse_dot(STARTER_SPEC_IMPLEMENTATION_FIXTURE.read_text(encoding="utf-8"))
+
+        assert graph.nodes["prepare_workspace"].attrs["max_retries"].value == 1
+
+    def test_starter_spec_implementation_flow_restarts_child_worker_for_each_selected_milestone(
+        self, tmp_path
+    ):
+        graph = parse_dot(STARTER_SPEC_IMPLEMENTATION_FIXTURE.read_text(encoding="utf-8"))
+        backend = _SpecImplementationLoopBackend()
+        interviewer = QueueInterviewer([Answer(selected_values=["Approve"])])
+        logs_root = tmp_path / "logs"
+        runner = HandlerRunner(
+            graph,
+            build_default_registry(codergen_backend=backend, interviewer=interviewer),
+            logs_root=logs_root,
+        )
+
+        result = PipelineExecutor(graph, runner, logs_root=str(logs_root)).run(
+            Context(
+                values={
+                    "context.request.spec_path": "spec.md",
+                    "internal.flow_source_dir": str(STARTER_SPEC_IMPLEMENTATION_FIXTURE.parent),
+                    "internal.run_workdir": str(tmp_path),
+                }
+            )
+        )
+
+        assert result.status == "completed"
+        assert result.route_trace.count("run_milestone") == 2
+        assert backend.child_milestone_ids == ["M-ONE", "M-TWO"]
 
     def test_executor_emits_parallel_and_interview_runtime_events(self):
         graph = parse_dot(REFERENCE_WORKFLOW_FIXTURE.read_text(encoding="utf-8"))

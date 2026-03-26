@@ -11,6 +11,21 @@ from attractor.engine.outcome import Outcome, OutcomeStatus
 from ..base import CodergenBackend, HandlerRuntime
 
 RUNTIME_CONTEXT_CARRYOVER_KEY = "_attractor.runtime.context_carryover"
+STATUS_ENVELOPE_RESPONSE_CONTRACT = "status_envelope"
+STATUS_ENVELOPE_PROMPT_APPENDIX = "\n".join(
+    [
+        "Structured response contract:",
+        '- Return ONLY a JSON object.',
+        '- Required top-level key: "outcome" with one of "success", "fail", "partial_success", or "retry".',
+        '- Optional top-level keys: "preferred_label", "suggested_next_ids", "context_updates", "notes", "failure_reason", and "retryable".',
+        '- Use "preferred_label" for routing; do not use legacy aliases.',
+        '- "suggested_next_ids" must be a list of strings.',
+        '- "context_updates" must be a JSON object.',
+        '- Do not emit any other top-level keys.',
+        '- Put machine-readable details in "context_updates", not ad hoc top-level fields.',
+        '- If no routing or context updates are needed, prefer: {"outcome":"success"}',
+    ]
+)
 
 
 class CodergenHandler:
@@ -26,6 +41,7 @@ class CodergenHandler:
             if not prompt:
                 prompt = runtime.node_id
         prompt = _expand_goal(prompt, runtime.context, runtime.graph)
+        prompt = _apply_response_contract(prompt, runtime.node_attrs)
         prompt = _apply_runtime_carryover(prompt, runtime.context)
         stage_dir = _ensure_stage_dir(runtime.logs_root, runtime.node_id)
         _write_stage_file(stage_dir, "prompt.md", prompt)
@@ -106,6 +122,16 @@ def _apply_runtime_carryover(prompt: str, context) -> str:
     )
 
 
+def _apply_response_contract(prompt: str, node_attrs) -> str:
+    attr = node_attrs.get("codergen.response_contract")
+    if attr is None:
+        return prompt
+    contract_name = str(attr.value).strip().lower().replace("-", "_")
+    if contract_name != STATUS_ENVELOPE_RESPONSE_CONTRACT:
+        return prompt
+    return "\n\n".join([prompt, STATUS_ENVELOPE_PROMPT_APPENDIX])
+
+
 def _with_builtin_response_context(outcome: Outcome, *, node_id: str, response_text: str) -> Outcome:
     merged_updates = {
         "last_stage": node_id,
@@ -159,7 +185,7 @@ def _write_status_file(stage_dir: Path | None, outcome: Outcome) -> None:
         return
     payload = {
         "outcome": outcome.status.value,
-        "preferred_next_label": outcome.preferred_label,
+        "preferred_label": outcome.preferred_label,
         "suggested_next_ids": list(outcome.suggested_next_ids),
         "context_updates": dict(outcome.context_updates),
         "notes": outcome.notes,

@@ -10,6 +10,18 @@ from attractor.handlers import HandlerRunner, build_default_registry
 
 from tests.handlers._support.fakes import _StubBackend
 
+
+class _MilestoneRecordingBackend:
+    def __init__(self):
+        self.milestone_ids: list[str] = []
+
+    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
+        del prompt, timeout
+        if node_id == "task":
+            self.milestone_ids.append(str(context.get("context.milestone.id", "")))
+        return True
+
+
 class TestManagerLoopHandler:
     def test_manager_loop_autostarts_child_pipeline_from_graph_attr(self, tmp_path):
         child_dot_path = tmp_path / "child.dot"
@@ -47,6 +59,95 @@ class TestManagerLoopHandler:
         assert context.get("context.stack.child.status") == "completed"
         assert context.get("context.stack.child.outcome") == "success"
         assert context.get("context.stack.child.active_stage") == "done"
+
+    def test_manager_loop_autostarts_fresh_child_when_stale_completed_child_state_exists(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Child task"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+        context = Context(
+            values={
+                "context.stack.child.status": "completed",
+                "context.stack.child.outcome": "success",
+                "context.stack.child.outcome_reason_message": "stale success",
+                "context.stack.child.active_stage": "old-stage",
+                "context.stack.child.failure_reason": "old failure",
+                "context.stack.child.route_trace": ["old"],
+            }
+        )
+
+        outcome = runner("manager", "", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.notes == "Child completed"
+        assert [call[0] for call in backend.calls] == ["task"]
+        assert context.get("context.stack.child.active_stage") == "done"
+        assert context.get("context.stack.child.outcome_reason_message") == ""
+        assert context.get("context.stack.child.failure_reason") == ""
+        assert context.get("context.stack.child.route_trace") == ["start", "task", "done"]
+
+    def test_manager_loop_autostarts_fresh_child_when_stale_failed_child_state_exists(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Child task"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+        context = Context(
+            values={
+                "context.stack.child.status": "failed",
+                "context.stack.child.outcome": "failure",
+                "context.stack.child.failure_reason": "stale failure",
+            }
+        )
+
+        outcome = runner("manager", "", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert [call[0] for call in backend.calls] == ["task"]
+        assert context.get("context.stack.child.status") == "completed"
+        assert context.get("context.stack.child.outcome") == "success"
+        assert context.get("context.stack.child.failure_reason") == ""
 
     def test_manager_loop_applies_child_graph_transforms_before_execution(self, tmp_path):
         child_dot_path = tmp_path / "child.dot"
@@ -211,6 +312,40 @@ class TestManagerLoopHandler:
         assert outcome.status == OutcomeStatus.FAIL
         assert outcome.failure_reason == "Child failed"
 
+    def test_manager_loop_does_not_autostart_duplicate_child_when_existing_child_is_running(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Child task"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+        context = Context(values={"context.stack.child.status": "running"})
+
+        outcome = runner("manager", "", context)
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason == "Max cycles exceeded"
+        assert backend.calls == []
+
     def test_manager_loop_returns_success_when_child_is_completed_with_success(self, monkeypatch):
         def _fake_sleep(seconds: float) -> None:
             raise AssertionError(f"unexpected wait call: {seconds}")
@@ -241,6 +376,51 @@ class TestManagerLoopHandler:
 
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.notes == "Child completed"
+
+    def test_manager_loop_non_autostart_resolves_prepopulated_terminal_child_state(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Child task"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [
+                    shape=house,
+                    stack.child_autostart=false,
+                    manager.poll_interval=0ms,
+                    manager.max_cycles=5,
+                    manager.actions="wait"
+                ]
+            }}
+            """
+        )
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+        context = Context(
+            values={
+                "context.stack.child.status": "completed",
+                "context.stack.child.outcome": "success",
+            }
+        )
+
+        outcome = runner("manager", "", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert outcome.notes == "Child completed"
+        assert backend.calls == []
 
     def test_manager_loop_returns_fail_when_child_completes_with_failure_outcome(self, monkeypatch):
         def _fake_sleep(seconds: float) -> None:
@@ -474,3 +654,39 @@ class TestManagerLoopHandler:
         assert outcome.status == OutcomeStatus.FAIL
         assert outcome.failure_reason == "Max cycles exceeded"
         assert sleep_calls == pytest.approx([0.025, 0.025, 0.025])
+
+    def test_manager_loop_revisiting_same_node_autostarts_new_child_with_updated_milestone_context(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Child task"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        backend = _MilestoneRecordingBackend()
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+        context = Context(values={"context.milestone.id": "M-ONE"})
+
+        first = runner("manager", "", context)
+        context.set("context.milestone.id", "M-TWO")
+        second = runner("manager", "", context)
+
+        assert first.status == OutcomeStatus.SUCCESS
+        assert second.status == OutcomeStatus.SUCCESS
+        assert backend.milestone_ids == ["M-ONE", "M-TWO"]

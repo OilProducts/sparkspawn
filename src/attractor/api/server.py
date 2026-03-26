@@ -337,6 +337,29 @@ def _set_active_run_status(run_id: str, status: str, *, last_error: Optional[str
             run.outcome_reason_message = None
 
 
+def _terminal_status_summary(
+    *,
+    status: str,
+    outcome: str | None,
+    outcome_reason_code: str | None,
+    outcome_reason_message: str | None,
+    last_error: str = "",
+) -> str:
+    reason = (
+        str(outcome_reason_message or "").strip()
+        or str(last_error or "").strip()
+        or str(outcome_reason_code or "").strip()
+    )
+    if status == "completed" and outcome:
+        summary = f"Pipeline completed ({outcome})"
+        return f"{summary}: {reason}" if reason else summary
+    if status == "validation_error":
+        summary = "Pipeline validation error"
+        return f"{summary}: {reason}" if reason else summary
+    summary = f"Pipeline {status}"
+    return f"{summary}: {reason}" if reason else summary
+
+
 def _set_active_run_outcome(
     run_id: str,
     *,
@@ -926,7 +949,18 @@ async def _start_pipeline(
             final_outcome = result.outcome
             final_outcome_reason_code = result.outcome_reason_code
             final_outcome_reason_message = result.outcome_reason_message
-            _set_active_run_status(run_id, final_status)
+            final_last_error = ""
+            if final_status in {"failed", "validation_error"}:
+                final_last_error = (
+                    str(result.failure_reason or "").strip()
+                    or str(final_outcome_reason_message or "").strip()
+                    or str(final_outcome_reason_code or "").strip()
+                )
+            _set_active_run_status(
+                run_id,
+                final_status,
+                last_error=final_last_error if final_last_error else None,
+            )
             _set_active_run_outcome(
                 run_id,
                 outcome=final_outcome,
@@ -938,6 +972,7 @@ async def _start_pipeline(
             RUNTIME.outcome = final_outcome
             RUNTIME.outcome_reason_code = final_outcome_reason_code
             RUNTIME.outcome_reason_message = final_outcome_reason_message
+            RUNTIME.last_error = final_last_error
             RUNTIME.last_completed_nodes = result.completed_nodes
             await _publish_run_event(
                 run_id,
@@ -947,23 +982,31 @@ async def _start_pipeline(
                     "outcome": final_outcome,
                     "outcome_reason_code": final_outcome_reason_code,
                     "outcome_reason_message": final_outcome_reason_message,
+                    "last_error": final_last_error or None,
                 },
             )
             _record_run_end(
                 run_id,
                 working_dir,
                 final_status,
+                final_last_error,
                 outcome=final_outcome,
                 outcome_reason_code=final_outcome_reason_code,
                 outcome_reason_message=final_outcome_reason_message,
             )
-            if final_status == "completed" and final_outcome:
-                outcome_summary = f"Pipeline completed ({final_outcome})"
-                if final_outcome_reason_message:
-                    outcome_summary = f"{outcome_summary}: {final_outcome_reason_message}"
-                await _publish_run_event(run_id, {"type": "log", "msg": outcome_summary})
-            else:
-                await _publish_run_event(run_id, {"type": "log", "msg": f"Pipeline {final_status}"})
+            await _publish_run_event(
+                run_id,
+                {
+                    "type": "log",
+                    "msg": _terminal_status_summary(
+                        status=final_status,
+                        outcome=final_outcome,
+                        outcome_reason_code=final_outcome_reason_code,
+                        outcome_reason_message=final_outcome_reason_message,
+                        last_error=final_last_error,
+                    ),
+                },
+            )
         except Exception as exc:  # noqa: BLE001
             import traceback
             traceback.print_exc()

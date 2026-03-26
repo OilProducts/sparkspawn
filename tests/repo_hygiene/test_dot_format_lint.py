@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from attractor.dsl import parse_dot
+from attractor.handlers.registry import SHAPE_TO_TYPE
 from attractor.dsl.dot_lint import (
     find_dot_paths,
     find_non_canonical_dot_diffs,
@@ -76,6 +77,48 @@ def test_starter_child_dotfile_references_are_relative_and_resolve_within_starte
             ) from exc
 
 
+def test_starter_status_envelope_contracts_only_appear_on_codergen_nodes() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    starter_flows_dir = repo_root / "starter-flows"
+
+    for dot_path in find_dot_paths(starter_flows_dir):
+        graph = parse_dot(dot_path.read_text(encoding="utf-8"))
+        for node in graph.nodes.values():
+            contract = node.attrs.get("codergen.response_contract")
+            if contract is None:
+                continue
+
+            assert str(contract.value).strip() == "status_envelope", (
+                f"unsupported starter response contract in {dot_path}: {node.id}"
+            )
+            assert _resolved_handler_type(node) == "codergen", (
+                f"starter response contract must only be used on codergen nodes: {dot_path}:{node.id}"
+            )
+
+
+def test_starter_json_status_envelope_prompts_opt_into_runtime_contract() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    starter_flows_dir = repo_root / "starter-flows"
+    envelope_markers = ("JSON status envelope", "Attractor's status envelope")
+
+    for dot_path in find_dot_paths(starter_flows_dir):
+        graph = parse_dot(dot_path.read_text(encoding="utf-8"))
+        for node in graph.nodes.values():
+            prompt_attr = node.attrs.get("prompt")
+            if prompt_attr is None:
+                continue
+
+            prompt = str(prompt_attr.value)
+            if not any(marker in prompt for marker in envelope_markers):
+                continue
+
+            contract = node.attrs.get("codergen.response_contract")
+            assert contract is not None, f"starter structured prompt missing response contract: {dot_path}:{node.id}"
+            assert str(contract.value).strip() == "status_envelope", (
+                f"starter structured prompt has wrong response contract: {dot_path}:{node.id}"
+            )
+
+
 def test_justfile_exposes_dot_lint_recipe() -> None:
     justfile = Path(__file__).resolve().parents[2] / "justfile"
     content = justfile.read_text(encoding="utf-8")
@@ -120,3 +163,17 @@ def test_ci_runs_parser_unsupported_grammar_regression_suite() -> None:
             break
 
     assert has_parser_guard_step, "expected CI workflow to run parser unsupported-grammar regression suite"
+
+
+def _resolved_handler_type(node) -> str:
+    explicit = node.attrs.get("type")
+    if explicit is not None:
+        explicit_value = str(explicit.value).strip()
+        if explicit_value:
+            return explicit_value
+
+    shape = node.attrs.get("shape")
+    if shape is not None:
+        return SHAPE_TO_TYPE.get(str(shape.value).strip(), "codergen")
+
+    return "codergen"

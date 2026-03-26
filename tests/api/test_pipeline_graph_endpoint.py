@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+from attractor.graphviz_export import GraphvizArtifactExport
 from tests.api._support import (
     close_task_immediately as _close_task_immediately,
     start_pipeline as _start_pipeline,
@@ -55,6 +56,15 @@ def test_get_pipeline_graph_returns_404_when_svg_is_unavailable(
 ) -> None:
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+    monkeypatch.setattr(
+        server,
+        "export_graphviz_artifact",
+        lambda dot_source, run_root: GraphvizArtifactExport(
+            dot_path=Path(run_root) / "artifacts" / "graphviz" / "pipeline.dot",
+            rendered_path=None,
+            error="Graphviz render forced unavailable for test",
+        ),
+    )
     start_payload = _start_pipeline(attractor_api_client, tmp_path / "work")
     run_id = str(start_payload["pipeline_id"])
 

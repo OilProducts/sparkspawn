@@ -37,9 +37,9 @@ def validate_artifact_and_status_contract(*, logs_root: Path, status_node_ids: I
                 f"{sorted(_ALLOWED_STATUS_OUTCOMES)}, got {outcome!r}"
             )
 
-        preferred_next_label = payload.get("preferred_next_label")
-        if "preferred_next_label" in payload and not isinstance(preferred_next_label, str):
-            errors.append(f"preferred_next_label for node '{node_id}' must be a string")
+        preferred_label = payload.get("preferred_label")
+        if "preferred_label" in payload and not isinstance(preferred_label, str):
+            errors.append(f"preferred_label for node '{node_id}' must be a string")
 
         suggested_next_ids = payload.get("suggested_next_ids")
         if "suggested_next_ids" in payload and (
