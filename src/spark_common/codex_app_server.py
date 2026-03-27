@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
-APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS = 60.0
+APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS = 300.0
 
 
 def as_non_empty_string(value: Any) -> Optional[str]:

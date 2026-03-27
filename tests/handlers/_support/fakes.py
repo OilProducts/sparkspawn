@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import threading
 import time
 from pathlib import Path
@@ -65,6 +66,28 @@ class _FanInRankingBackend:
                 "timeout": timeout,
             }
         )
+        return self.response
+
+
+class _StageLoggingBackend:
+    def __init__(self, response: str):
+        self.response = response
+        self.bind_calls = []
+        self.run_bound = False
+        self._active_bindings = 0
+
+    @contextmanager
+    def bind_stage_raw_rpc_log(self, node_id: str, logs_root: Path | None):
+        self.bind_calls.append((node_id, logs_root))
+        self._active_bindings += 1
+        try:
+            yield
+        finally:
+            self._active_bindings -= 1
+
+    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> str:
+        del node_id, prompt, context, timeout
+        self.run_bound = self._active_bindings > 0
         return self.response
 
 class _PluginHandler:
@@ -219,6 +242,7 @@ __all__ = [
     "_TextBackend",
     "_OutcomeBackend",
     "_FanInRankingBackend",
+    "_StageLoggingBackend",
     "_PluginHandler",
     "_ExecuteOnlyHandler",
     "_RuntimeCaptureHandler",

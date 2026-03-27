@@ -196,7 +196,7 @@ export function nowMs(): number {
 export function buildHydratedFlowGraph(
     flowName: string,
     preview: PreviewResponse,
-    uiDefaults: UiDefaults,
+    _uiDefaults: UiDefaults,
     sourceDot?: string,
 ): HydratedFlowGraph | null {
     if (!preview.graph) {
@@ -209,20 +209,6 @@ export function buildHydratedFlowGraph(
         sourceDot !== undefined ? { rawDot: sourceDot } : undefined,
     )
     const nextGraphAttrs: GraphAttrs = preview.graph.graph_attrs ? { ...canonicalModel.graphAttrs } : {}
-    const shouldSeed = (value?: string | null) =>
-        value === undefined || value === null || value === ''
-
-    if (preview.graph.graph_attrs) {
-        if (shouldSeed(nextGraphAttrs.ui_default_llm_model) && uiDefaults.llm_model) {
-            nextGraphAttrs.ui_default_llm_model = uiDefaults.llm_model
-        }
-        if (shouldSeed(nextGraphAttrs.ui_default_llm_provider) && uiDefaults.llm_provider) {
-            nextGraphAttrs.ui_default_llm_provider = uiDefaults.llm_provider
-        }
-        if (shouldSeed(nextGraphAttrs.ui_default_reasoning_effort) && uiDefaults.reasoning_effort) {
-            nextGraphAttrs.ui_default_reasoning_effort = uiDefaults.reasoning_effort
-        }
-    }
 
     const nodes: Node[] = canonicalModel.nodes.map((n, i: number) => {
         const shape = typeof n.attrs.shape === 'string' ? n.attrs.shape : 'box'
@@ -248,16 +234,10 @@ export function buildHydratedFlowGraph(
                 'tool.artifacts.stderr': typeof n.attrs['tool.artifacts.stderr'] === 'string'
                     ? n.attrs['tool.artifacts.stderr']
                     : '',
-                join_policy: typeof n.attrs.join_policy === 'string' ? n.attrs.join_policy : 'wait_all',
-                error_policy: typeof n.attrs.error_policy === 'string' ? n.attrs.error_policy : 'continue',
-                max_parallel: typeof n.attrs.max_parallel === 'number' || typeof n.attrs.max_parallel === 'string'
-                    ? n.attrs.max_parallel
-                    : 4,
                 type: typeof n.attrs.type === 'string' ? n.attrs.type : '',
                 max_retries: typeof n.attrs.max_retries === 'number' || typeof n.attrs.max_retries === 'string'
                     ? n.attrs.max_retries
                     : '',
-                goal_gate: n.attrs.goal_gate === true || n.attrs.goal_gate === 'true',
                 retry_target: typeof n.attrs.retry_target === 'string' ? n.attrs.retry_target : '',
                 fallback_retry_target: typeof n.attrs.fallback_retry_target === 'string' ? n.attrs.fallback_retry_target : '',
                 fidelity: typeof n.attrs.fidelity === 'string' ? n.attrs.fidelity : '',
@@ -267,8 +247,6 @@ export function buildHydratedFlowGraph(
                 llm_model: typeof n.attrs.llm_model === 'string' ? n.attrs.llm_model : '',
                 llm_provider: typeof n.attrs.llm_provider === 'string' ? n.attrs.llm_provider : '',
                 reasoning_effort: typeof n.attrs.reasoning_effort === 'string' ? n.attrs.reasoning_effort : '',
-                auto_status: n.attrs.auto_status === true || n.attrs.auto_status === 'true',
-                allow_partial: n.attrs.allow_partial === true || n.attrs.allow_partial === 'true',
                 'manager.poll_interval': typeof n.attrs['manager.poll_interval'] === 'string'
                     ? n.attrs['manager.poll_interval']
                     : '',

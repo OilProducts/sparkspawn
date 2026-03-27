@@ -1,5 +1,6 @@
 import { buildHydratedFlowGraph, layoutWithElk } from '@/features/workflow-canvas/flowCanvasShared'
 import type { PreviewResponsePayload } from '@/lib/attractorClient'
+import { generateDot } from '@/lib/dotUtils'
 import { describe, expect, it } from 'vitest'
 
 describe('flowCanvasShared', () => {
@@ -96,5 +97,66 @@ describe('flowCanvasShared', () => {
                 return typeof data?.layoutSourceSide === 'string' && typeof data?.layoutTargetSide === 'string'
             }),
         ).toBe(true)
+    })
+
+    it('does not materialize implicit node or graph defaults when saving after apply-to-nodes style edits', () => {
+        const sourceDot = `
+            digraph implement_spec_program {
+                graph [label="Implement Spec Program"]
+                start [shape=Mdiamond, label="Start"]
+                extract_requirements [shape=box, label="Extract Requirements", prompt="Read spec"]
+                start -> extract_requirements
+            }
+        `
+        const preview: PreviewResponsePayload = {
+            status: 'ok',
+            graph: {
+                graph_attrs: {
+                    label: 'Implement Spec Program',
+                },
+                nodes: [
+                    { id: 'start', label: 'Start', shape: 'Mdiamond' },
+                    { id: 'extract_requirements', label: 'Extract Requirements', shape: 'box', prompt: 'Read spec' },
+                ],
+                edges: [
+                    { from: 'start', to: 'extract_requirements' },
+                ],
+            },
+        }
+
+        const hydrated = buildHydratedFlowGraph('implement-spec.dot', preview, {
+            llm_model: 'gpt-5.4',
+            llm_provider: 'openai',
+            reasoning_effort: 'high',
+        }, sourceDot)
+
+        expect(hydrated).not.toBeNull()
+        expect(hydrated?.graphAttrs.ui_default_llm_model).toBeUndefined()
+        expect(hydrated?.nodes[1]?.data).not.toHaveProperty('error_policy')
+        expect(hydrated?.nodes[1]?.data).not.toHaveProperty('goal_gate')
+        expect(hydrated?.nodes[1]?.data).not.toHaveProperty('auto_status')
+        expect(hydrated?.nodes[1]?.data).not.toHaveProperty('allow_partial')
+
+        const updatedNodes = (hydrated?.nodes ?? []).map((node) => ({
+            ...node,
+            data: {
+                ...node.data,
+                llm_model: 'gpt-5.4',
+                llm_provider: 'openai',
+                reasoning_effort: 'high',
+            },
+        }))
+        const dot = generateDot('implement-spec.dot', updatedNodes, hydrated?.edges ?? [], hydrated?.graphAttrs ?? {})
+
+        expect(dot).toContain('llm_model="gpt-5.4"')
+        expect(dot).toContain('llm_provider=openai')
+        expect(dot).toContain('reasoning_effort=high')
+        expect(dot).not.toContain('error_policy=continue')
+        expect(dot).not.toContain('goal_gate=false')
+        expect(dot).not.toContain('auto_status=false')
+        expect(dot).not.toContain('allow_partial=false')
+        expect(dot).not.toContain('ui_default_llm_model=')
+        expect(dot).not.toContain('ui_default_llm_provider=')
+        expect(dot).not.toContain('ui_default_reasoning_effort=')
     })
 })

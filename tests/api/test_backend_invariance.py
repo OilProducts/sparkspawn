@@ -819,3 +819,72 @@ def test_codex_app_server_backend_requires_turn_completed_after_final_answer(
     assert isinstance(result, Outcome)
     assert result.status == OutcomeStatus.FAIL
     assert result.failure_reason == "codex app-server turn timed out waiting for activity"
+
+
+def test_codex_app_server_backend_writes_stage_raw_rpc_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+
+    class FakeStdout:
+        def __init__(self, lines: list[str]) -> None:
+            self._lines = list(lines)
+
+        def readline(self) -> str:
+            if not self._lines:
+                return ""
+            return f"{self._lines.pop(0)}\n"
+
+    class FakeStdin:
+        def write(self, text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self, lines: list[str]) -> None:
+            self.stdout = FakeStdout(lines)
+            self.stdin = FakeStdin()
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> None:
+            return None
+
+        def kill(self) -> None:
+            return None
+
+    lines = [
+        '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"experimentalApi":true}}}',
+        '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-123"}}}',
+        '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-123","status":"inProgress","items":[]}}}',
+        '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Ack"}}',
+        '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"Ack"}],"phase":"final_answer"}}}',
+        '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-123","status":"completed"}}}',
+    ]
+
+    monkeypatch.setattr(codex_backends_module.subprocess, "Popen", lambda *args, **kwargs: FakeProcess(lines))
+
+    logs_root = tmp_path / "logs"
+    with backend.bind_stage_raw_rpc_log("plan", logs_root):
+        result = backend.run("plan", "hello", Context())
+
+    assert result == "Ack"
+    raw_log_path = logs_root / "plan" / "raw-rpc.jsonl"
+    assert raw_log_path.exists()
+    entries = [json.loads(line) for line in raw_log_path.read_text(encoding="utf-8").splitlines()]
+    assert any(
+        entry["direction"] == "outgoing" and json.loads(entry["line"]).get("method") == "turn/start"
+        for entry in entries
+    )
+    assert any(
+        entry["direction"] == "incoming" and json.loads(entry["line"]).get("method") == "turn/completed"
+        for entry in entries
+    )

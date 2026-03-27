@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from attractor.dsl.models import Duration
@@ -31,6 +33,7 @@ class FanInHandler:
                 runtime.prompt,
                 runtime.context,
                 runtime.node_attrs.get("timeout"),
+                runtime.logs_root,
                 candidates,
             )
         if best is None:
@@ -105,11 +108,13 @@ def _backend_select(
     prompt: str,
     context,
     timeout_attr: Any,
+    logs_root: Path | None,
     candidates: List[Dict[str, Any]],
 ) -> Dict[str, Any] | None:
     ranking_prompt = _build_ranking_prompt(prompt, candidates)
     timeout = _to_seconds(timeout_attr)
-    response = backend.run(node_id, ranking_prompt, context, timeout=timeout)
+    with _backend_stage_logging_context(backend, node_id, logs_root):
+        response = backend.run(node_id, ranking_prompt, context, timeout=timeout)
     best_id = _extract_best_id(response)
     if not best_id:
         return None
@@ -158,6 +163,13 @@ def _extract_best_id_from_text(text: str) -> str:
     if isinstance(parsed, str):
         return parsed.strip()
     return ""
+
+
+def _backend_stage_logging_context(backend: object, node_id: str, logs_root: Path | None):
+    binder = getattr(backend, "bind_stage_raw_rpc_log", None)
+    if callable(binder):
+        return binder(node_id, logs_root)
+    return nullcontext()
 
 
 def _to_seconds(attr: Any) -> float | None:

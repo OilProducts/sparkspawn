@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 import subprocess
@@ -36,6 +38,42 @@ class CodexAppServerBackend(CodergenBackend):
         self.model = model
         self._session_threads_by_key: dict[str, str] = {}
         self._session_threads_lock = threading.Lock()
+        self._raw_rpc_log_lock = threading.Lock()
+        self._raw_rpc_log_state = threading.local()
+
+    @contextmanager
+    def bind_stage_raw_rpc_log(self, node_id: str, logs_root: str | Path | None):
+        previous = getattr(self._raw_rpc_log_state, "path", None)
+        self._raw_rpc_log_state.path = self._stage_raw_rpc_log_path(node_id, logs_root)
+        try:
+            yield
+        finally:
+            if previous is None:
+                if hasattr(self._raw_rpc_log_state, "path"):
+                    delattr(self._raw_rpc_log_state, "path")
+            else:
+                self._raw_rpc_log_state.path = previous
+
+    def _stage_raw_rpc_log_path(self, node_id: str, logs_root: str | Path | None) -> Path | None:
+        if logs_root is None:
+            return None
+        stage_dir = Path(logs_root) / node_id
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        return stage_dir / "raw-rpc.jsonl"
+
+    def _append_raw_rpc_log(self, direction: str, line: str) -> None:
+        path = getattr(self._raw_rpc_log_state, "path", None)
+        if path is None:
+            return
+        payload = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "direction": direction,
+            "line": line,
+        }
+        with self._raw_rpc_log_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, sort_keys=True) + "\n")
 
     def _runtime_thread_key(self, context: Context) -> str:
         value = context.get(self.RUNTIME_THREAD_ID_KEY, "")
@@ -83,7 +121,11 @@ class CodexAppServerBackend(CodergenBackend):
             requested_working_dir=self.requested_working_dir,
             on_unparsed_line=log_line,
         )
+        set_raw_rpc_logger = getattr(client, "set_raw_rpc_logger", None)
+        clear_raw_rpc_logger = getattr(client, "clear_raw_rpc_logger", None)
         try:
+            if callable(set_raw_rpc_logger):
+                set_raw_rpc_logger(self._append_raw_rpc_log)
             client.ensure_process(popen_factory=subprocess.Popen)
 
             def start_thread() -> str | None:
@@ -125,6 +167,8 @@ class CodexAppServerBackend(CodergenBackend):
         except RuntimeError as exc:
             return fail(str(exc))
         finally:
+            if callable(clear_raw_rpc_logger):
+                clear_raw_rpc_logger()
             client.close()
 
 

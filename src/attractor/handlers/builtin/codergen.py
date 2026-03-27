@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 from pathlib import Path
 from typing import Optional
@@ -61,7 +62,8 @@ class CodergenHandler:
             return outcome
 
         timeout = _to_seconds(runtime.node_attrs.get("timeout"))
-        result = self.backend.run(runtime.node_id, prompt, runtime.context, timeout=timeout)
+        with _backend_stage_logging_context(self.backend, runtime.node_id, runtime.logs_root):
+            result = self.backend.run(runtime.node_id, prompt, runtime.context, timeout=timeout)
         outcome: Outcome
         response_text: str
         if isinstance(result, Outcome):
@@ -120,6 +122,13 @@ def _apply_runtime_carryover(prompt: str, context) -> str:
             prompt,
         ]
     )
+
+
+def _backend_stage_logging_context(backend: object, node_id: str, logs_root: Path | None):
+    binder = getattr(backend, "bind_stage_raw_rpc_log", None)
+    if callable(binder):
+        return binder(node_id, logs_root)
+    return nullcontext()
 
 
 def _apply_response_contract(prompt: str, node_attrs) -> str:

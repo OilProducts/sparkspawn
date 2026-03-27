@@ -1,3 +1,6 @@
+from pathlib import Path
+import tempfile
+
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.outcome import OutcomeStatus
@@ -6,6 +9,7 @@ from attractor.handlers import HandlerRunner, build_default_registry
 from tests.handlers._support.fakes import (
     _StubBackend,
     _FanInRankingBackend,
+    _StageLoggingBackend,
 )
 
 class TestFanInHandler:
@@ -88,3 +92,31 @@ class TestFanInHandler:
         assert outcome.status == OutcomeStatus.SUCCESS
         assert outcome.context_updates["parallel.fan_in.best_id"] == "branch_a"
         assert outcome.context_updates["parallel.fan_in.best_outcome"] == "success"
+
+    def test_fan_in_binds_stage_raw_rpc_logging_for_supporting_backends(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan_in [shape=tripleoctagon, prompt="Rank the branch results"]
+            }
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+            backend = _StageLoggingBackend('{"best_id":"branch_b"}')
+            registry = build_default_registry(codergen_backend=backend)
+            runner = HandlerRunner(graph, registry, logs_root=logs_root)
+            context = Context(
+                values={
+                    "parallel.results": [
+                        {"id": "branch_a", "status": "success"},
+                        {"id": "branch_b", "status": "success"},
+                    ]
+                }
+            )
+
+            outcome = runner("fan_in", "Rank the branch results", context)
+
+            assert outcome.status == OutcomeStatus.SUCCESS
+            assert backend.run_bound is True
+            assert backend.bind_calls == [("fan_in", logs_root)]
