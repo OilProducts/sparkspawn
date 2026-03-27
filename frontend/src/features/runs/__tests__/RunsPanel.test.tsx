@@ -182,6 +182,9 @@ describe('RunsPanel', () => {
   })
 
   it('keeps the run selector ahead of the detail stack and constrains it to a scroll region', async () => {
+    window.innerWidth = 1400
+    window.dispatchEvent(new Event('resize'))
+
     const selectedRun = makeRun({
       run_id: 'run-selected',
       flow_name: 'selected.dot',
@@ -260,14 +263,17 @@ describe('RunsPanel', () => {
       expect(screen.getByTestId('run-summary-panel')).toBeVisible()
     })
 
+    expect(screen.getByTestId('runs-panel')).toHaveAttribute('data-responsive-layout', 'split')
+
     const runListPanel = screen.getByTestId('run-list-panel')
     const runSummaryPanel = screen.getByTestId('run-summary-panel')
+    expect(runListPanel).toHaveClass('border-r')
     expect(
       runListPanel.compareDocumentPosition(runSummaryPanel) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
 
     const scrollRegion = screen.getByTestId('run-list-scroll-region')
-    expect(scrollRegion).toHaveClass('max-h-[28rem]')
+    expect(scrollRegion).toHaveClass('flex-1')
     expect(scrollRegion).toHaveClass('overflow-y-auto')
 
     expect(screen.getAllByTestId('run-history-row')).toHaveLength(2)

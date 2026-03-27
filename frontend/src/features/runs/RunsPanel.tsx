@@ -1,4 +1,3 @@
-import { RefreshCcw } from 'lucide-react'
 import { useState } from 'react'
 import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
@@ -14,7 +13,7 @@ import { RunGraphvizCard } from './components/RunGraphvizCard'
 import { RunList } from './components/RunList'
 import { RunSummaryCard } from './components/RunSummaryCard'
 import type { RunRecord } from './model/shared'
-import { Button, InlineNotice, ProjectContextChip, SectionHeader } from '@/ui'
+import { InlineNotice } from '@/ui'
 
 export function RunsPanel() {
     const isNarrowViewport = useNarrowViewport()
@@ -151,99 +150,40 @@ export function RunsPanel() {
     }
 
     return (
-        <div data-testid="runs-panel" className={`flex-1 overflow-auto ${isNarrowViewport ? 'p-3' : 'p-6'}`}>
-            <div className="mx-auto w-full max-w-6xl space-y-6">
-                <div className="flex items-center justify-between">
-                    <SectionHeader
-                        title="Run History"
-                        description={`${summary.total} total runs · ${summary.running} running`}
-                        action={
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                                <ProjectContextChip
-                                    testId="runs-project-context-chip"
-                                    projectPath={activeProjectPath}
-                                    emptyLabel="No active project"
-                                />
-                                <Button
-                                    type="button"
-                                    data-testid="runs-scope-active-project"
-                                    onClick={() => setScopeMode('active')}
-                                    variant={scopeMode === 'active' ? 'secondary' : 'outline'}
-                                    size="xs"
-                                    disabled={!activeProjectPath}
-                                >
-                                    Active project
-                                </Button>
-                                <Button
-                                    type="button"
-                                    data-testid="runs-scope-all-projects"
-                                    onClick={() => setScopeMode('all')}
-                                    variant={scopeMode === 'all' ? 'secondary' : 'outline'}
-                                    size="xs"
-                                >
-                                    All projects
-                                </Button>
-                            </div>
-                        }
-                    />
-                </div>
-                <div className="flex justify-end">
-                    <Button
-                        onClick={() => void fetchRuns()}
-                        data-testid="runs-refresh-button"
-                        variant="outline"
-                        size="sm"
-                    >
-                        <RefreshCcw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </Button>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span
-                        data-testid="run-metadata-freshness-indicator"
-                        className={`inline-flex items-center rounded-md border px-2 py-1 font-semibold uppercase tracking-wide ${metadataFreshnessStyle}`}
-                    >
-                        {metadataFreshnessLabel}
-                    </span>
-                    <span data-testid="run-metadata-last-updated" className="text-muted-foreground">
-                        {updatedAtLabel}
-                    </span>
-                </div>
-                {metadataFreshness === 'stale' && (
-                    <InlineNotice data-testid="run-metadata-stale-indicator" tone="warning">
-                        Run metadata may be stale. Refresh to load the latest run status.
-                    </InlineNotice>
-                )}
-
-                {error && (
-                    <InlineNotice tone="error">
-                        {error}
-                    </InlineNotice>
-                )}
-                {scopeMode === 'active' && !activeProjectPath && (
-                    <InlineNotice>
-                        Choose an active project or switch to all projects to view run history.
-                    </InlineNotice>
-                )}
-                <div className={`grid gap-6 ${isNarrowViewport ? 'grid-cols-1' : 'xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]'}`}>
-                    <div className="self-start xl:sticky xl:top-6">
-                        <RunList
-                            activeProjectPath={activeProjectPath}
-                            scopeMode={scopeMode}
-                            now={now}
-                            onOpenRun={openRun}
-                            onOpenRunArtifact={openRunArtifact}
-                            onRequestCancel={(runId, currentStatus) => {
-                                void requestCancel(runId, currentStatus)
-                            }}
-                            runs={scopedRuns}
-                            selectedRunId={selectedRunId}
-                        />
-                    </div>
-                    <div className="min-w-0 space-y-6">
+        <section
+            data-testid="runs-panel"
+            data-responsive-layout={isNarrowViewport ? 'stacked' : 'split'}
+            className={`flex-1 ${isNarrowViewport ? 'overflow-auto p-3' : 'flex min-h-0 flex-col overflow-hidden p-6'}`}
+        >
+            <div className={`w-full ${isNarrowViewport ? 'space-y-6' : 'flex min-h-0 flex-1 overflow-hidden'}`}>
+                <RunList
+                    activeProjectPath={activeProjectPath}
+                    error={error}
+                    isLoading={isLoading}
+                    metadataFreshness={metadataFreshness}
+                    metadataFreshnessLabel={metadataFreshnessLabel}
+                    metadataFreshnessStyle={metadataFreshnessStyle}
+                    onRefresh={() => {
+                        void fetchRuns()
+                    }}
+                    scopeMode={scopeMode}
+                    onScopeModeChange={setScopeMode}
+                    now={now}
+                    onOpenRun={openRun}
+                    onOpenRunArtifact={openRunArtifact}
+                    onRequestCancel={(runId, currentStatus) => {
+                        void requestCancel(runId, currentStatus)
+                    }}
+                    runs={scopedRuns}
+                    selectedRunId={selectedRunId}
+                    summaryLabel={`${summary.total} total runs · ${summary.running} running`}
+                    updatedAtLabel={updatedAtLabel}
+                />
+                <div className={`min-w-0 ${isNarrowViewport ? 'space-y-6' : 'flex min-h-0 flex-1 flex-col overflow-hidden pl-6'}`}>
+                    <div className={isNarrowViewport ? 'space-y-6' : 'min-h-0 flex-1 space-y-6 overflow-auto pr-2'}>
                         {showRunSelectionEmptyState && (
                             <div data-testid="run-selection-empty-state" className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-                                Select a run from the history list to inspect its details.
+                                Select a run from the sidebar to inspect its details.
                             </div>
                         )}
                         {selectedRunSummary && (
@@ -263,6 +203,11 @@ export function RunsPanel() {
                                     Affected surfaces: {degradedRunPanels.join(', ')}.
                                 </span>
                             </div>
+                        )}
+                        {!selectedRunSummary && scopeMode === 'all' && scopedRuns.length === 0 && (
+                            <InlineNotice>
+                                No runs have been recorded yet.
+                            </InlineNotice>
                         )}
                         {selectedRunSummary && (
                             <RunCheckpointCard
@@ -364,6 +309,6 @@ export function RunsPanel() {
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
     )
 }
