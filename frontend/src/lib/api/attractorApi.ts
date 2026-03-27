@@ -348,9 +348,9 @@ export async function fetchFlowListValidated(): Promise<string[]> {
     return fetchJsonWithValidation(attractorUrl('/api/flows'), undefined, '/attractor/api/flows', parseFlowListResponse)
 }
 
-export async function fetchFlowPayloadValidated(flowName: string): Promise<FlowPayloadResponse> {
+export async function fetchFlowPayloadValidated(flowName: string, init?: RequestInit): Promise<FlowPayloadResponse> {
     const url = attractorUrl(`/api/flows/${encodeFlowPath(flowName)}`)
-    return fetchJsonWithValidation(url, undefined, '/attractor/api/flows/{name}', parseFlowPayloadResponse)
+    return fetchJsonWithValidation(url, init, '/attractor/api/flows/{name}', parseFlowPayloadResponse)
 }
 
 export async function saveFlowValidated(
@@ -385,12 +385,19 @@ export async function deleteFlowValidated(flowName: string): Promise<void> {
     await fetchJsonWithValidation(url, { method: 'DELETE' }, '/attractor/api/flows/{name}', () => undefined)
 }
 
-export async function fetchPreviewValidated(flowContent: string): Promise<PreviewResponsePayload> {
+export async function fetchPreviewValidated(flowContent: string, init?: RequestInit): Promise<PreviewResponsePayload> {
+    const headers = init?.headers
+        ? {
+            ...Object.fromEntries(new Headers(init.headers).entries()),
+            'Content-Type': 'application/json',
+        }
+        : { 'Content-Type': 'application/json' }
     return fetchJsonWithValidation(
         attractorUrl('/preview'),
         {
+            ...init,
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ flow_content: flowContent }),
         },
         '/attractor/preview',

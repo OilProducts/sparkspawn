@@ -160,8 +160,6 @@ export const TIMELINE_SEVERITY_STYLES: Record<TimelineSeverity, string> = {
 
 export const TIMELINE_MAX_ITEMS = 200
 
-export const RUN_HISTORY_GRID_TEMPLATE = 'grid-cols-[minmax(112px,0.9fr)_minmax(112px,0.9fr)_minmax(320px,2.8fr)_minmax(144px,1fr)_minmax(144px,1fr)_minmax(96px,0.8fr)_minmax(96px,0.8fr)_minmax(164px,1.2fr)]'
-
 export const STATUS_STYLES: Record<string, string> = {
     running: 'bg-sky-500/15 text-sky-700',
     completed: 'bg-green-500/15 text-green-800',

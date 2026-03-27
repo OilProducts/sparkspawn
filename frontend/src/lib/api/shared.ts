@@ -208,3 +208,10 @@ export async function fetchTextWithValidation<T>(
     const payload = await response.text()
     return parser(payload, endpoint)
 }
+
+export function isAbortError(error: unknown): boolean {
+    if (error instanceof DOMException) {
+        return error.name === 'AbortError'
+    }
+    return error instanceof Error && error.name === 'AbortError'
+}

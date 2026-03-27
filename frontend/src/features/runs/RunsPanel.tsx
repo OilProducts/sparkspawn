@@ -123,6 +123,10 @@ export function RunsPanel() {
     const degradedRunPanels = timelineError
         ? [...degradedDetailPanels, 'event timeline']
         : degradedDetailPanels
+    const showRunSelectionEmptyState =
+        ((scopeMode === 'active' && activeProjectPath) || scopeMode === 'all')
+        && scopedRuns.length > 0
+        && !selectedRunSummary
 
     const openRun = (run: RunRecord) => {
         setSelectedRunId(run.run_id)
@@ -221,138 +225,144 @@ export function RunsPanel() {
                         Choose an active project or switch to all projects to view run history.
                     </InlineNotice>
                 )}
-                {((scopeMode === 'active' && activeProjectPath) || scopeMode === 'all') && scopedRuns.length > 0 && !selectedRunSummary && (
-                    <div data-testid="run-selection-empty-state" className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-                        Select a run from the history table to inspect its details.
+                <div className={`grid gap-6 ${isNarrowViewport ? 'grid-cols-1' : 'xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]'}`}>
+                    <div className="self-start xl:sticky xl:top-6">
+                        <RunList
+                            activeProjectPath={activeProjectPath}
+                            scopeMode={scopeMode}
+                            now={now}
+                            onOpenRun={openRun}
+                            onOpenRunArtifact={openRunArtifact}
+                            onRequestCancel={(runId, currentStatus) => {
+                                void requestCancel(runId, currentStatus)
+                            }}
+                            runs={scopedRuns}
+                            selectedRunId={selectedRunId}
+                        />
                     </div>
-                )}
-                {selectedRunSummary && (
-                    <RunSummaryCard
-                        activeProjectPath={activeProjectPath}
-                        now={now}
-                        run={selectedRunSummary}
-                    />
-                )}
-                {selectedRunSummary && degradedRunPanels.length > 0 && (
-                    <div
-                        data-testid="run-partial-api-failure-banner"
-                        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800"
-                    >
-                        Some run detail endpoints are unavailable. Non-dependent panels remain functional.
-                        <span className="ml-1 text-xs">
-                            Affected surfaces: {degradedRunPanels.join(', ')}.
-                        </span>
+                    <div className="min-w-0 space-y-6">
+                        {showRunSelectionEmptyState && (
+                            <div data-testid="run-selection-empty-state" className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+                                Select a run from the history list to inspect its details.
+                            </div>
+                        )}
+                        {selectedRunSummary && (
+                            <RunSummaryCard
+                                activeProjectPath={activeProjectPath}
+                                now={now}
+                                run={selectedRunSummary}
+                            />
+                        )}
+                        {selectedRunSummary && degradedRunPanels.length > 0 && (
+                            <div
+                                data-testid="run-partial-api-failure-banner"
+                                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800"
+                            >
+                                Some run detail endpoints are unavailable. Non-dependent panels remain functional.
+                                <span className="ml-1 text-xs">
+                                    Affected surfaces: {degradedRunPanels.join(', ')}.
+                                </span>
+                            </div>
+                        )}
+                        {selectedRunSummary && (
+                            <RunCheckpointCard
+                                checkpointCompletedNodes={checkpointCompletedNodes}
+                                checkpointCurrentNode={checkpointCurrentNode}
+                                checkpointData={checkpointData?.checkpoint ?? null}
+                                checkpointError={checkpointError}
+                                checkpointRetryCounters={checkpointRetryCounters}
+                                isLoading={isCheckpointLoading}
+                                onRefresh={() => {
+                                    void fetchCheckpoint()
+                                }}
+                            />
+                        )}
+                        {selectedRunSummary && (
+                            <RunContextCard
+                                contextCopyStatus={contextCopyStatus}
+                                contextError={contextError}
+                                contextExportHref={contextExportHref || null}
+                                filteredContextRows={filteredContextRows}
+                                isLoading={isContextLoading}
+                                onCopy={() => {
+                                    void copyContextToClipboard()
+                                }}
+                                onRefresh={() => {
+                                    setContextCopyStatus('')
+                                    void fetchContext()
+                                }}
+                                onSearchQueryChange={setContextSearchQuery}
+                                runId={selectedRunSummary.run_id}
+                                searchQuery={contextSearchQuery}
+                            />
+                        )}
+                        {selectedRunSummary && (
+                            <RunArtifactsCard
+                                artifactDownloadHref={(artifactPath) => artifactDownloadHref(artifactPath) || null}
+                                artifactEntries={artifactEntries}
+                                artifactError={artifactError}
+                                artifactViewerError={artifactViewerError}
+                                artifactViewerPayload={artifactViewerPayload || null}
+                                isArtifactViewerLoading={isArtifactViewerLoading}
+                                isLoading={isArtifactLoading}
+                                missingCoreArtifacts={missingCoreArtifacts}
+                                onRefresh={() => {
+                                    void fetchArtifacts()
+                                }}
+                                onViewArtifact={(artifact) => {
+                                    void viewArtifact(artifact)
+                                }}
+                                selectedArtifactEntry={selectedArtifactEntry}
+                                showPartialRunArtifactNote={showPartialRunArtifactNote}
+                            />
+                        )}
+                        {selectedRunSummary && (
+                            <RunGraphvizCard
+                                graphvizError={graphvizError}
+                                graphvizViewerSrc={graphvizViewerSrc || null}
+                                isGraphvizLoading={isGraphvizLoading}
+                                onRefresh={() => {
+                                    void fetchGraphviz()
+                                }}
+                                runId={selectedRunSummary.run_id}
+                            />
+                        )}
+                        {selectedRunSummary && (
+                            <RunEventTimelineCard
+                                isNarrowViewport={isNarrowViewport}
+                                isTimelineLive={isTimelineLive}
+                                timelineDroppedCount={timelineDroppedCount}
+                                timelineError={timelineError}
+                                timelineEvents={timelineEvents}
+                                visiblePendingInterviewGates={visiblePendingInterviewGates}
+                                groupedPendingInterviewGates={groupedPendingInterviewGates}
+                                pendingGateActionError={pendingGateActionError}
+                                submittingGateIds={submittingGateIds}
+                                freeformAnswersByGateId={freeformAnswersByGateId}
+                                timelineTypeFilter={timelineTypeFilter}
+                                timelineTypeOptions={timelineTypeOptions}
+                                timelineNodeStageFilter={timelineNodeStageFilter}
+                                timelineCategoryFilter={timelineCategoryFilter}
+                                timelineSeverityFilter={timelineSeverityFilter}
+                                filteredTimelineEvents={filteredTimelineEvents}
+                                groupedTimelineEntries={groupedTimelineEntries}
+                                onTimelineCategoryFilterChange={setTimelineCategoryFilter}
+                                onTimelineNodeStageFilterChange={setTimelineNodeStageFilter}
+                                onTimelineSeverityFilterChange={setTimelineSeverityFilter}
+                                onTimelineTypeFilterChange={setTimelineTypeFilter}
+                                onFreeformAnswerChange={(questionId, value) => {
+                                    setFreeformAnswersByGateId((previous) => ({
+                                        ...previous,
+                                        [questionId]: value,
+                                    }))
+                                }}
+                                onSubmitPendingGateAnswer={(gate, selectedValue) => {
+                                    void submitPendingGateAnswer(gate, selectedValue)
+                                }}
+                            />
+                        )}
                     </div>
-                )}
-                {selectedRunSummary && (
-                    <RunCheckpointCard
-                        checkpointCompletedNodes={checkpointCompletedNodes}
-                        checkpointCurrentNode={checkpointCurrentNode}
-                        checkpointData={checkpointData?.checkpoint ?? null}
-                        checkpointError={checkpointError}
-                        checkpointRetryCounters={checkpointRetryCounters}
-                        isLoading={isCheckpointLoading}
-                        onRefresh={() => {
-                            void fetchCheckpoint()
-                        }}
-                    />
-                )}
-                {selectedRunSummary && (
-                    <RunContextCard
-                        contextCopyStatus={contextCopyStatus}
-                        contextError={contextError}
-                        contextExportHref={contextExportHref || null}
-                        filteredContextRows={filteredContextRows}
-                        isLoading={isContextLoading}
-                        onCopy={() => {
-                            void copyContextToClipboard()
-                        }}
-                        onRefresh={() => {
-                            setContextCopyStatus('')
-                            void fetchContext()
-                        }}
-                        onSearchQueryChange={setContextSearchQuery}
-                        runId={selectedRunSummary.run_id}
-                        searchQuery={contextSearchQuery}
-                    />
-                )}
-                {selectedRunSummary && (
-                    <RunArtifactsCard
-                        artifactDownloadHref={(artifactPath) => artifactDownloadHref(artifactPath) || null}
-                        artifactEntries={artifactEntries}
-                        artifactError={artifactError}
-                        artifactViewerError={artifactViewerError}
-                        artifactViewerPayload={artifactViewerPayload || null}
-                        isArtifactViewerLoading={isArtifactViewerLoading}
-                        isLoading={isArtifactLoading}
-                        missingCoreArtifacts={missingCoreArtifacts}
-                        onRefresh={() => {
-                            void fetchArtifacts()
-                        }}
-                        onViewArtifact={(artifact) => {
-                            void viewArtifact(artifact)
-                        }}
-                        selectedArtifactEntry={selectedArtifactEntry}
-                        showPartialRunArtifactNote={showPartialRunArtifactNote}
-                    />
-                )}
-                {selectedRunSummary && (
-                    <RunGraphvizCard
-                        graphvizError={graphvizError}
-                        graphvizViewerSrc={graphvizViewerSrc || null}
-                        isGraphvizLoading={isGraphvizLoading}
-                        onRefresh={() => {
-                            void fetchGraphviz()
-                        }}
-                        runId={selectedRunSummary.run_id}
-                    />
-                )}
-                {selectedRunSummary && (
-                    <RunEventTimelineCard
-                        isNarrowViewport={isNarrowViewport}
-                        isTimelineLive={isTimelineLive}
-                        timelineDroppedCount={timelineDroppedCount}
-                        timelineError={timelineError}
-                        timelineEvents={timelineEvents}
-                        visiblePendingInterviewGates={visiblePendingInterviewGates}
-                        groupedPendingInterviewGates={groupedPendingInterviewGates}
-                        pendingGateActionError={pendingGateActionError}
-                        submittingGateIds={submittingGateIds}
-                        freeformAnswersByGateId={freeformAnswersByGateId}
-                        timelineTypeFilter={timelineTypeFilter}
-                        timelineTypeOptions={timelineTypeOptions}
-                        timelineNodeStageFilter={timelineNodeStageFilter}
-                        timelineCategoryFilter={timelineCategoryFilter}
-                        timelineSeverityFilter={timelineSeverityFilter}
-                        filteredTimelineEvents={filteredTimelineEvents}
-                        groupedTimelineEntries={groupedTimelineEntries}
-                        onTimelineCategoryFilterChange={setTimelineCategoryFilter}
-                        onTimelineNodeStageFilterChange={setTimelineNodeStageFilter}
-                        onTimelineSeverityFilterChange={setTimelineSeverityFilter}
-                        onTimelineTypeFilterChange={setTimelineTypeFilter}
-                        onFreeformAnswerChange={(questionId, value) => {
-                            setFreeformAnswersByGateId((previous) => ({
-                                ...previous,
-                                [questionId]: value,
-                            }))
-                        }}
-                        onSubmitPendingGateAnswer={(gate, selectedValue) => {
-                            void submitPendingGateAnswer(gate, selectedValue)
-                        }}
-                    />
-                )}
-                <RunList
-                    activeProjectPath={activeProjectPath}
-                    scopeMode={scopeMode}
-                    now={now}
-                    onOpenRun={openRun}
-                    onOpenRunArtifact={openRunArtifact}
-                    onRequestCancel={(runId, currentStatus) => {
-                        void requestCancel(runId, currentStatus)
-                    }}
-                    runs={scopedRuns}
-                    selectedRunId={selectedRunId}
-                />
+                </div>
             </div>
         </div>
     )

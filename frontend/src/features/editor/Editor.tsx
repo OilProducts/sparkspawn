@@ -40,6 +40,7 @@ import {
 import { stripEdgeLayoutRoutes } from '@/lib/edgeRouting';
 import { getReactFlowNodeTypeForShape, getShapeNodeStyle } from '@/lib/workflowNodeShape';
 import { Button, Textarea } from '@/ui';
+import { isAbortError } from '@/lib/api/shared';
 import {
     loadEditorFlowPayload,
     loadEditorPreview,
@@ -65,6 +66,16 @@ type PreviewDebugContext = {
     edgeCount?: number
     graphAttrCount?: number
     debounceMs?: number
+}
+
+type PreparedHydratedPreview = {
+    defaults: NonNullable<ReturnType<typeof buildHydratedFlowGraph>>['defaults']
+    subgraphs: NonNullable<ReturnType<typeof buildHydratedFlowGraph>>['subgraphs']
+    graphAttrs: NonNullable<ReturnType<typeof buildHydratedFlowGraph>>['graphAttrs']
+    nodes: Node[]
+    edges: Edge[]
+    serializedNodes: Node[]
+    layoutDurationMs: number
 }
 
 function mergeEdgeRoutingHints(currentEdges: Edge[], hintedEdges: Edge[]): Edge[] {
@@ -213,7 +224,7 @@ export function Editor() {
         preview: PreviewResponse,
         sourceDot?: string,
         debugContext?: { loadId: number | null; source: PreviewDebugContext['source'] },
-    ) => {
+    ): Promise<PreparedHydratedPreview | null> => {
         if (!preview.graph) {
             recordFlowLoadDebug('hydrate:skipped', flowName, {
                 loadId: debugContext?.loadId ?? null,
@@ -229,7 +240,7 @@ export function Editor() {
             sourceDot,
         )
         if (!hydratedGraph) {
-            return false
+            return null
         }
         recordFlowLoadDebug('hydrate:start', flowName, {
             loadId: debugContext?.loadId ?? null,
@@ -239,55 +250,42 @@ export function Editor() {
             edgeCount: hydratedGraph.edges.length,
             graphAttrCount: Object.keys(hydratedGraph.graphAttrs).length,
         })
-        setDotSerializationContext({
-            defaults: hydratedGraph.defaults,
-            subgraphs: hydratedGraph.subgraphs,
-        })
-        replaceGraphAttrs(hydratedGraph.graphAttrs)
 
         const layoutStart = nowMs();
         let layoutDurationMs = 0;
         let serializedNodes = hydratedGraph.nodes;
         let laidOutEdges = hydratedGraph.edges;
+        let laidOutNodes = hydratedGraph.nodes;
         try {
             const layoutGraph = await layoutWithElk(hydratedGraph.nodes, hydratedGraph.edges);
-            setNodes(layoutGraph.nodes);
+            laidOutNodes = layoutGraph.nodes;
             laidOutEdges = layoutGraph.edges;
             serializedNodes = layoutGraph.nodes;
         } catch (error) {
             console.error('ELK layout failed, using fallback positions.', error);
-            setNodes(hydratedGraph.nodes);
             serializedNodes = hydratedGraph.nodes;
         } finally {
             layoutDurationMs = Math.max(0, nowMs() - layoutStart);
-            setLastLayoutMs(layoutDurationMs);
         }
-        setEdges(laidOutEdges);
-        primeFlowSaveBaseline(
-            flowName ?? 'flow',
-            generateDot(flowName ?? 'flow', serializedNodes, laidOutEdges, hydratedGraph.graphAttrs),
-        )
-        hydratedRef.current = true;
-        recordFlowLoadDebug('hydrate:complete', flowName, {
-            loadId: debugContext?.loadId ?? null,
-            source: debugContext?.source ?? 'flow-load-source-dot',
-            nodeCount: hydratedGraph.nodes.length,
-            edgeCount: laidOutEdges.length,
-            layoutMs: layoutDurationMs,
-        })
-        return true;
+        return {
+            defaults: hydratedGraph.defaults,
+            subgraphs: hydratedGraph.subgraphs,
+            graphAttrs: hydratedGraph.graphAttrs,
+            nodes: laidOutNodes,
+            edges: laidOutEdges,
+            serializedNodes,
+            layoutDurationMs,
+        };
     }, [
         flowName,
-        setEdges,
-        replaceGraphAttrs,
-        setNodes,
         resolvedUiDefaults,
     ]);
 
     const requestPreview = useCallback(async (
         dot: string,
         debugContext?: PreviewDebugContext,
-    ): Promise<PreviewResponse> => {
+        signal?: AbortSignal,
+    ): Promise<{ preview: PreviewResponse; elapsedMs: number }> => {
         recordFlowLoadDebug('preview:request', flowName, {
             loadId: debugContext?.loadId ?? null,
             source: debugContext?.source ?? 'structured-sync-preview',
@@ -298,30 +296,19 @@ export function Editor() {
             debounceMs: debugContext?.debounceMs ?? null,
         });
         const previewStart = nowMs();
-        const preview = await loadEditorPreview(dot)
-        const elapsed = Math.max(0, nowMs() - previewStart);
-        setLastPreviewMs(elapsed);
+        const preview = await loadEditorPreview(dot, signal ? { signal } : undefined)
+        const elapsedMs = Math.max(0, nowMs() - previewStart);
         recordFlowLoadDebug('preview:response', flowName, {
             loadId: debugContext?.loadId ?? null,
             source: debugContext?.source ?? 'structured-sync-preview',
-            elapsedMs: elapsed,
+            elapsedMs,
             status: preview.status,
             hasGraph: Boolean(preview.graph),
             backendErrorCount: preview.errors?.length ?? 0,
             ...summarizeDiagnosticsForFlowLoadDebug(preview.diagnostics),
         });
-        if (preview.diagnostics) {
-            setDiagnostics(preview.diagnostics);
-        } else {
-            clearDiagnostics();
-        }
-        recordFlowLoadDebug('diagnostics:apply', flowName, {
-            loadId: debugContext?.loadId ?? null,
-            source: debugContext?.source ?? 'structured-sync-preview',
-            ...summarizeDiagnosticsForFlowLoadDebug(preview.diagnostics),
-        });
-        return preview;
-    }, [clearDiagnostics, flowName, setDiagnostics]);
+        return { preview, elapsedMs };
+    }, [flowName]);
 
     // Auto-load and sync with Backend Preview
     useEffect(() => {
@@ -336,6 +323,8 @@ export function Editor() {
             clearDotSerializationContext();
             setNodes([]);
             setEdges([]);
+            setSelectedNodeId(null);
+            setSelectedEdgeId(null);
             replaceGraphAttrs({});
             clearDiagnostics();
             setRawDotDraft('');
@@ -348,14 +337,23 @@ export function Editor() {
             setLastPreviewMs(0);
             return;
         }
+
         const loadId = activeFlowLoadIdRef.current + 1;
         activeFlowLoadIdRef.current = loadId;
         routingHintRefreshIdRef.current += 1;
+        const loadAbort = new AbortController();
+        let cancelled = false;
+        const isCurrentLoad = () => !cancelled && activeFlowLoadIdRef.current === loadId;
+
         recordFlowLoadDebug('flow-load:start', flowName, {
             loadId,
             session: 'editor',
         });
         clearDotSerializationContext();
+        setNodes([]);
+        setEdges([]);
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
         replaceGraphAttrs({});
         clearDiagnostics();
         recordFlowLoadDebug('diagnostics:clear', flowName, {
@@ -367,9 +365,17 @@ export function Editor() {
         setIsRawHandoffInFlight(false);
         setEditorMode('structured');
         rawDotEntryDraftRef.current = '';
+        setRawDotDraft('');
+        setLastLayoutMs(0);
+        setLastPreviewMs(0);
 
-        loadEditorFlowPayload(flowName)
-            .then((data) => {
+        const startScopedLoad = async () => {
+            try {
+                const data = await loadEditorFlowPayload(flowName, { signal: loadAbort.signal });
+                if (!isCurrentLoad()) {
+                    return;
+                }
+
                 const normalizedContent = normalizeLegacyDot(data.content);
                 recordFlowLoadDebug('flow-load:payload', flowName, {
                     loadId,
@@ -377,20 +383,74 @@ export function Editor() {
                     normalizedLength: normalizedContent.length,
                     normalizedLegacySyntax: normalizedContent !== data.content,
                 });
-                setRawDotDraft(normalizedContent);
-                return requestPreview(normalizedContent, {
+
+                const { preview, elapsedMs } = await requestPreview(
+                    normalizedContent,
+                    {
+                        loadId,
+                        source: 'flow-load-source-dot',
+                    },
+                    loadAbort.signal,
+                );
+                if (!isCurrentLoad()) {
+                    return;
+                }
+
+                setLastPreviewMs(elapsedMs);
+                if (preview.diagnostics) {
+                    setDiagnostics(preview.diagnostics);
+                } else {
+                    clearDiagnostics();
+                }
+                recordFlowLoadDebug('diagnostics:apply', flowName, {
                     loadId,
                     source: 'flow-load-source-dot',
-                }).then((preview) => ({
-                    normalizedContent,
-                    preview,
-                }));
-            })
-            .then(({ normalizedContent, preview }) => hydrateFromPreview(preview, normalizedContent, {
-                loadId,
-                source: 'flow-load-source-dot',
-            }))
-            .catch(console.error);
+                    ...summarizeDiagnosticsForFlowLoadDebug(preview.diagnostics),
+                });
+                setRawDotDraft(normalizedContent);
+
+                const hydrated = await hydrateFromPreview(preview, normalizedContent, {
+                    loadId,
+                    source: 'flow-load-source-dot',
+                });
+                if (!isCurrentLoad() || !hydrated) {
+                    return;
+                }
+
+                setDotSerializationContext({
+                    defaults: hydrated.defaults,
+                    subgraphs: hydrated.subgraphs,
+                });
+                replaceGraphAttrs(hydrated.graphAttrs);
+                setLastLayoutMs(hydrated.layoutDurationMs);
+                setNodes(hydrated.nodes);
+                setEdges(hydrated.edges);
+                primeFlowSaveBaseline(
+                    flowName,
+                    generateDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
+                );
+                hydratedRef.current = true;
+                recordFlowLoadDebug('hydrate:complete', flowName, {
+                    loadId,
+                    source: 'flow-load-source-dot',
+                    nodeCount: hydrated.nodes.length,
+                    edgeCount: hydrated.edges.length,
+                    layoutMs: hydrated.layoutDurationMs,
+                });
+            } catch (error) {
+                if (loadAbort.signal.aborted || isAbortError(error)) {
+                    return;
+                }
+                console.error(error);
+            }
+        };
+
+        void startScopedLoad();
+
+        return () => {
+            cancelled = true;
+            loadAbort.abort();
+        };
     }, [
         flowName,
         clearDiagnostics,
@@ -399,6 +459,9 @@ export function Editor() {
         replaceGraphAttrs,
         setEdges,
         setNodes,
+        setSelectedEdgeId,
+        setSelectedNodeId,
+        setDiagnostics,
     ]);
 
     useEffect(() => {
@@ -430,7 +493,21 @@ export function Editor() {
                 edgeCount: edges.length,
                 graphAttrCount: Object.keys(graphAttrs).length,
                 debounceMs: previewDebounceMs,
-            }).catch(console.error);
+            })
+                .then(({ preview, elapsedMs }) => {
+                    setLastPreviewMs(elapsedMs);
+                    if (preview.diagnostics) {
+                        setDiagnostics(preview.diagnostics);
+                    } else {
+                        clearDiagnostics();
+                    }
+                    recordFlowLoadDebug('diagnostics:apply', flowName, {
+                        loadId: activeFlowLoadIdRef.current,
+                        source: 'structured-sync-preview',
+                        ...summarizeDiagnosticsForFlowLoadDebug(preview.diagnostics),
+                    });
+                })
+                .catch(console.error);
         }, previewDebounceMs);
 
         return () => {
@@ -439,11 +516,13 @@ export function Editor() {
             }
         };
     }, [
+        clearDiagnostics,
         flowName,
         nodes,
         edges,
         graphAttrs,
         requestPreview,
+        setDiagnostics,
         suppressPreview,
         isDragging,
         editorMode,
@@ -601,9 +680,20 @@ export function Editor() {
             }
 
             try {
-                const preview = await requestPreview(rawDotDraft, {
+                const { preview, elapsedMs } = await requestPreview(rawDotDraft, {
                     loadId: activeFlowLoadIdRef.current,
                     source: 'raw-dot-handoff',
+                });
+                setLastPreviewMs(elapsedMs);
+                if (preview.diagnostics) {
+                    setDiagnostics(preview.diagnostics);
+                } else {
+                    clearDiagnostics();
+                }
+                recordFlowLoadDebug('diagnostics:apply', flowName, {
+                    loadId: activeFlowLoadIdRef.current,
+                    source: 'raw-dot-handoff',
+                    ...summarizeDiagnosticsForFlowLoadDebug(preview.diagnostics),
                 });
                 if (preview.status === 'validation_error' || (preview.errors?.length ?? 0) > 0) {
                     setRawHandoffError(
@@ -619,6 +709,26 @@ export function Editor() {
                     setRawHandoffError('Safe handoff requires valid DOT. Preview response did not include a graph.');
                     return;
                 }
+                setDotSerializationContext({
+                    defaults: hydrated.defaults,
+                    subgraphs: hydrated.subgraphs,
+                });
+                replaceGraphAttrs(hydrated.graphAttrs);
+                setLastLayoutMs(hydrated.layoutDurationMs);
+                setNodes(hydrated.nodes);
+                setEdges(hydrated.edges);
+                primeFlowSaveBaseline(
+                    flowName,
+                    generateDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
+                );
+                hydratedRef.current = true;
+                recordFlowLoadDebug('hydrate:complete', flowName, {
+                    loadId: activeFlowLoadIdRef.current,
+                    source: 'raw-dot-handoff',
+                    nodeCount: hydrated.nodes.length,
+                    edgeCount: hydrated.edges.length,
+                    layoutMs: hydrated.layoutDurationMs,
+                });
                 setRawHandoffError(null);
                 rawDotEntryDraftRef.current = '';
                 setEditorMode('structured');
@@ -629,7 +739,17 @@ export function Editor() {
             rawHandoffInFlightRef.current = false;
             setIsRawHandoffInFlight(false);
         }
-    }, [flowName, hydrateFromPreview, rawDotDraft, requestPreview]);
+    }, [
+        clearDiagnostics,
+        flowName,
+        hydrateFromPreview,
+        rawDotDraft,
+        replaceGraphAttrs,
+        requestPreview,
+        setDiagnostics,
+        setEdges,
+        setNodes,
+    ]);
 
     const onSelectionChange = useCallback(({ nodes, edges }: OnSelectionChangeParams) => {
         const selectedNode = nodes.find(n => n.selected);

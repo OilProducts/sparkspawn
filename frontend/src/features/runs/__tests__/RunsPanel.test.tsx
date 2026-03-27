@@ -52,6 +52,25 @@ describe('RunsPanel', () => {
   beforeEach(() => {
     resetRunsState()
     vi.stubGlobal('fetch', vi.fn())
+    class MockEventSource {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 2
+      readonly url: string
+      readyState = MockEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent<string>) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string | URL) {
+        this.url = String(url)
+      }
+
+      close() {
+        this.readyState = MockEventSource.CLOSED
+      }
+    }
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
   })
 
   afterEach(() => {
@@ -160,5 +179,100 @@ describe('RunsPanel', () => {
       expect(screen.getByText('global.dot')).toBeVisible()
     })
     expect(fetchMock).toHaveBeenCalled()
+  })
+
+  it('keeps the run selector ahead of the detail stack and constrains it to a scroll region', async () => {
+    const selectedRun = makeRun({
+      run_id: 'run-selected',
+      flow_name: 'selected.dot',
+      status: 'running',
+      ended_at: null,
+      project_path: '/tmp/project-one',
+      spec_id: 'spec-123',
+      plan_id: 'plan-123',
+    })
+    const secondaryRun = makeRun({
+      run_id: 'run-secondary',
+      flow_name: 'secondary.dot',
+      project_path: '/tmp/project-one',
+    })
+
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({
+          runs: [selectedRun, secondaryRun],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-selected/checkpoint')) {
+        return jsonResponse({
+          pipeline_id: 'run-selected',
+          checkpoint: {
+            completed_nodes: ['prepare'],
+            current_node: 'validate',
+          },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-selected/context')) {
+        return jsonResponse({
+          pipeline_id: 'run-selected',
+          context: {
+            active_item: 'REQ-001',
+          },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-selected/artifacts')) {
+        return jsonResponse({
+          pipeline_id: 'run-selected',
+          artifacts: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-selected/graph')) {
+        return new Response('<svg xmlns="http://www.w3.org/2000/svg"></svg>', {
+          status: 200,
+          headers: { 'Content-Type': 'image/svg+xml' },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-selected/questions')) {
+        return jsonResponse({
+          pipeline_id: 'run-selected',
+          questions: [],
+        })
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+      useStore.getState().setSelectedRunId('run-selected')
+    })
+
+    render(<RunsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-list-panel')).toBeVisible()
+      expect(screen.getByTestId('run-summary-panel')).toBeVisible()
+    })
+
+    const runListPanel = screen.getByTestId('run-list-panel')
+    const runSummaryPanel = screen.getByTestId('run-summary-panel')
+    expect(
+      runListPanel.compareDocumentPosition(runSummaryPanel) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    const scrollRegion = screen.getByTestId('run-list-scroll-region')
+    expect(scrollRegion).toHaveClass('max-h-[28rem]')
+    expect(scrollRegion).toHaveClass('overflow-y-auto')
+
+    expect(screen.getAllByTestId('run-history-row')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Open' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Cancel' }).some((button) => !button.hasAttribute('disabled'))).toBe(true)
+    expect(screen.queryByText('history table')).not.toBeInTheDocument()
   })
 })

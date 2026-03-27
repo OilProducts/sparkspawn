@@ -13,6 +13,7 @@ import type { Edge, EdgeChange, Node, NodeChange, OnSelectionChangeParams } from
 import '@xyflow/react/dist/style.css'
 
 import { useStore } from '@/store'
+import { isAbortError } from '@/lib/api/shared'
 import { recordFlowLoadDebug, summarizeDiagnosticsForFlowLoadDebug } from '@/lib/flowLoadDebug'
 import {
     buildHydratedFlowGraph,
@@ -33,6 +34,13 @@ import {
 
 type PreviewResponse = ExecutionCanvasPreviewResponse
 
+type PreparedHydratedPreview = {
+    graphAttrs: NonNullable<ReturnType<typeof buildHydratedFlowGraph>>['graphAttrs']
+    nodes: Node[]
+    edges: Edge[]
+    layoutDurationMs: number
+}
+
 export function ExecutionCanvas() {
     const executionFlow = useStore((state) => state.executionFlow)
     const nodeStatuses = useStore((state) => state.nodeStatuses)
@@ -52,9 +60,9 @@ export function ExecutionCanvas() {
         preview: PreviewResponse,
         sourceDot?: string,
         debugContext?: { loadId: number | null; source: 'flow-load-source-dot' },
-    ) => {
+    ): Promise<PreparedHydratedPreview | null> => {
         if (!executionFlow) {
-            return false
+            return null
         }
         const hydratedGraph = buildHydratedFlowGraph(
             executionFlow,
@@ -63,7 +71,7 @@ export function ExecutionCanvas() {
             sourceDot,
         )
         if (!hydratedGraph) {
-            return false
+            return null
         }
 
         recordFlowLoadDebug('hydrate:start', executionFlow, {
@@ -75,8 +83,6 @@ export function ExecutionCanvas() {
             graphAttrCount: Object.keys(hydratedGraph.graphAttrs).length,
             session: 'execution',
         })
-
-        replaceExecutionGraphAttrs(hydratedGraph.graphAttrs)
 
         const layoutStart = nowMs()
         let layoutDurationMs = 0
@@ -90,31 +96,23 @@ export function ExecutionCanvas() {
             console.error('ELK layout failed, using fallback positions.', error)
         } finally {
             layoutDurationMs = Math.max(0, nowMs() - layoutStart)
-            setLastLayoutMs(layoutDurationMs)
         }
 
-        setNodes(laidOutNodes)
-        setEdges(laidOutEdges)
-        recordFlowLoadDebug('hydrate:complete', executionFlow, {
-            loadId: debugContext?.loadId ?? null,
-            source: debugContext?.source ?? 'flow-load-source-dot',
-            nodeCount: laidOutNodes.length,
-            edgeCount: laidOutEdges.length,
-            layoutMs: layoutDurationMs,
-            session: 'execution',
-        })
-        return true
+        return {
+            graphAttrs: hydratedGraph.graphAttrs,
+            nodes: laidOutNodes,
+            edges: laidOutEdges,
+            layoutDurationMs,
+        }
     }, [
         executionFlow,
-        replaceExecutionGraphAttrs,
-        setEdges,
-        setNodes,
         uiDefaults,
     ])
 
     const requestPreview = useCallback(async (
         dot: string,
         debugContext?: { loadId: number | null; source: 'flow-load-source-dot' },
+        signal?: AbortSignal,
     ) => {
         recordFlowLoadDebug('preview:request', executionFlow, {
             loadId: debugContext?.loadId ?? null,
@@ -123,26 +121,20 @@ export function ExecutionCanvas() {
             session: 'execution',
         })
         const previewStart = nowMs()
-        const preview = await loadExecutionCanvasPreview(dot)
-        const elapsed = Math.max(0, nowMs() - previewStart)
-        setLastPreviewMs(elapsed)
+        const preview = await loadExecutionCanvasPreview(dot, signal ? { signal } : undefined)
+        const elapsedMs = Math.max(0, nowMs() - previewStart)
         recordFlowLoadDebug('preview:response', executionFlow, {
             loadId: debugContext?.loadId ?? null,
             source: debugContext?.source ?? 'flow-load-source-dot',
-            elapsedMs: elapsed,
+            elapsedMs,
             status: preview.status,
             hasGraph: Boolean(preview.graph),
             backendErrorCount: preview.errors?.length ?? 0,
             session: 'execution',
             ...summarizeDiagnosticsForFlowLoadDebug(preview.diagnostics),
         })
-        if (preview.diagnostics) {
-            setExecutionDiagnostics(preview.diagnostics)
-        } else {
-            clearExecutionDiagnostics()
-        }
-        return preview
-    }, [clearExecutionDiagnostics, executionFlow, setExecutionDiagnostics])
+        return { preview, elapsedMs }
+    }, [executionFlow])
 
     useEffect(() => {
         if (!executionFlow) {
@@ -160,33 +152,80 @@ export function ExecutionCanvas() {
 
         const loadId = activeFlowLoadIdRef.current + 1
         activeFlowLoadIdRef.current = loadId
+        const loadAbort = new AbortController()
+        let cancelled = false
+        const isCurrentLoad = () => !cancelled && activeFlowLoadIdRef.current === loadId
+
         replaceExecutionGraphAttrs({})
         clearExecutionDiagnostics()
+        setNodes([])
+        setEdges([])
+        setSelectedNodeId(null)
+        setSelectedEdgeId(null)
+        setLastLayoutMs(0)
+        setLastPreviewMs(0)
 
-        loadExecutionFlowPayload(executionFlow)
-            .then((data) => {
+        const startScopedLoad = async () => {
+            try {
+                const data = await loadExecutionFlowPayload(executionFlow, { signal: loadAbort.signal })
+                if (!isCurrentLoad()) {
+                    return
+                }
+
                 const normalizedContent = normalizeLegacyDot(data.content)
-                return requestPreview(normalizedContent, {
+                const { preview, elapsedMs } = await requestPreview(
+                    normalizedContent,
+                    {
+                        loadId,
+                        source: 'flow-load-source-dot',
+                    },
+                    loadAbort.signal,
+                )
+                if (!isCurrentLoad()) {
+                    return
+                }
+
+                setLastPreviewMs(elapsedMs)
+                if (preview.diagnostics) {
+                    setExecutionDiagnostics(preview.diagnostics)
+                } else {
+                    clearExecutionDiagnostics()
+                }
+
+                const hydrated = await hydrateFromPreview(preview, normalizedContent, {
                     loadId,
                     source: 'flow-load-source-dot',
-                }).then((preview) => ({
-                    normalizedContent,
-                    preview,
-                }))
-            })
-            .then(({ normalizedContent, preview }) => hydrateFromPreview(preview, normalizedContent, {
-                loadId,
-                source: 'flow-load-source-dot',
-            }))
-            .catch((error) => {
+                })
+                if (!isCurrentLoad() || !hydrated) {
+                    return
+                }
+
+                replaceExecutionGraphAttrs(hydrated.graphAttrs)
+                setLastLayoutMs(hydrated.layoutDurationMs)
+                setNodes(hydrated.nodes)
+                setEdges(hydrated.edges)
+                recordFlowLoadDebug('hydrate:complete', executionFlow, {
+                    loadId,
+                    source: 'flow-load-source-dot',
+                    nodeCount: hydrated.nodes.length,
+                    edgeCount: hydrated.edges.length,
+                    layoutMs: hydrated.layoutDurationMs,
+                    session: 'execution',
+                })
+            } catch (error) {
+                if (loadAbort.signal.aborted || isAbortError(error)) {
+                    return
+                }
                 console.error(error)
-                replaceExecutionGraphAttrs({})
-                clearExecutionDiagnostics()
-                setNodes([])
-                setEdges([])
-                setSelectedNodeId(null)
-                setSelectedEdgeId(null)
-            })
+            }
+        }
+
+        void startScopedLoad()
+
+        return () => {
+            cancelled = true
+            loadAbort.abort()
+        }
     }, [
         clearExecutionDiagnostics,
         executionFlow,
@@ -195,6 +234,7 @@ export function ExecutionCanvas() {
         requestPreview,
         setEdges,
         setNodes,
+        setExecutionDiagnostics,
     ])
 
     const onNodesChange = useCallback((changes: NodeChange<Node>[]) => {
