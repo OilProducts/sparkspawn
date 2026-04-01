@@ -101,6 +101,17 @@ export interface UiDefaults {
     reasoning_effort: string
 }
 
+export type ExecutionContinuationFlowSourceMode = 'snapshot' | 'flow_name'
+
+export interface ExecutionContinuationDraft {
+    sourceRunId: string
+    sourceFlowName: string | null
+    sourceWorkingDirectory: string
+    sourceModel: string | null
+    flowSourceMode: ExecutionContinuationFlowSourceMode
+    startNodeId: string | null
+}
+
 export interface RouteState {
     viewMode: ViewMode
     activeProjectPath: string | null
@@ -235,6 +246,11 @@ export interface RunInspectorSlice {
 export interface ExecutionLaunchSlice {
     executionFlow: string | null
     setExecutionFlow: (flow: string | null) => void
+    executionContinuation: ExecutionContinuationDraft | null
+    setExecutionContinuation: (draft: ExecutionContinuationDraft | null) => void
+    clearExecutionContinuation: () => void
+    setExecutionContinuationFlowSourceMode: (mode: ExecutionContinuationFlowSourceMode) => void
+    setExecutionContinuationStartNode: (nodeId: string | null) => void
     executionGraphAttrs: GraphAttrs
     replaceExecutionGraphAttrs: (attrs: GraphAttrs) => void
     executionDiagnostics: DiagnosticEntry[]

@@ -1,6 +1,6 @@
 import type { CanonicalPreviewGraphPayload } from '@/lib/canonicalFlowModel'
 import { encodeFlowPath } from '@/lib/flowPaths'
-import type { PipelineStartPayload } from '@/lib/pipelineStartPayload'
+import type { PipelineContinuePayload, PipelineStartPayload } from '@/lib/pipelineStartPayload'
 import {
     ApiSchemaError,
     asOptionalNullableString,
@@ -68,6 +68,10 @@ export interface PipelineStatusResponse {
     completed_nodes?: string[]
     started_at?: string
     ended_at?: string | null
+    continued_from_run_id?: string | null
+    continued_from_node?: string | null
+    continued_from_flow_mode?: string | null
+    continued_from_flow_name?: string | null
 }
 
 export interface PipelineCancelResponse {
@@ -116,6 +120,10 @@ export interface RunRecordResponse {
     ended_at?: string | null
     last_error?: string
     token_usage?: number | null
+    continued_from_run_id?: string | null
+    continued_from_node?: string | null
+    continued_from_flow_mode?: string | null
+    continued_from_flow_name?: string | null
 }
 
 export interface RunsListResponse {
@@ -216,6 +224,10 @@ export function parsePipelineStatusResponse(payload: unknown, endpoint = '/attra
         completed_nodes: asOptionalStringArray(record.completed_nodes),
         started_at: asOptionalString(record.started_at),
         ended_at: asOptionalNullableString(record.ended_at),
+        continued_from_run_id: asOptionalNullableString(record.continued_from_run_id),
+        continued_from_node: asOptionalNullableString(record.continued_from_node),
+        continued_from_flow_mode: asOptionalNullableString(record.continued_from_flow_mode),
+        continued_from_flow_name: asOptionalNullableString(record.continued_from_flow_name),
     }
 }
 
@@ -321,6 +333,10 @@ function parseRunRecord(payload: unknown): RunRecordResponse | null {
             : record.token_usage === null
                 ? null
                 : undefined,
+        continued_from_run_id: asOptionalNullableString(record.continued_from_run_id),
+        continued_from_node: asOptionalNullableString(record.continued_from_node),
+        continued_from_flow_mode: asOptionalNullableString(record.continued_from_flow_mode),
+        continued_from_flow_name: asOptionalNullableString(record.continued_from_flow_name),
     }
 }
 
@@ -422,6 +438,23 @@ export async function fetchPipelineStartValidated(payload: PipelineStartPayload)
             body: JSON.stringify(payload),
         },
         '/attractor/pipelines',
+        parsePipelineStartResponse,
+    )
+}
+
+export async function fetchPipelineContinueValidated(
+    pipelineId: string,
+    payload: PipelineContinuePayload,
+): Promise<PipelineStartResponse> {
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/continue`)
+    return fetchJsonWithValidation(
+        url,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        },
+        '/attractor/pipelines/{id}/continue',
         parsePipelineStartResponse,
     )
 }

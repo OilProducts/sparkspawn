@@ -1730,6 +1730,7 @@ Implementations may expose the pipeline engine as an HTTP service for web-based 
 | Method | Path                                    | Description |
 |--------|-----------------------------------------|-------------|
 | `POST` | `/pipelines`                            | Submit a DOT source and start execution. Returns pipeline ID. |
+| `POST` | `/pipelines/{id}/continue`              | Create a derived run from an existing run, starting at a chosen node. |
 | `GET`  | `/pipelines/{id}`                       | Get pipeline status and progress. |
 | `GET`  | `/pipelines/{id}/events`                | SSE stream of pipeline events in real-time. |
 | `POST` | `/pipelines/{id}/cancel`                | Cancel a running pipeline. |
@@ -1742,6 +1743,22 @@ Implementations may expose the pipeline engine as an HTTP service for web-based 
 
 Human gates must be operable via web controls in addition to CLI. The server maintains SSE connections for real-time event streaming.
 Implementations that expose both `/graph` and `/graph-preview` should preserve the original run DOT source as a stable artifact so run inspection can render a snapshot-accurate graph even if the named flow changes later.
+
+`POST /pipelines/{id}/continue` is a derived-continuation endpoint, not a same-run resume endpoint.
+It must:
+- create a new run id
+- preserve the source run unchanged
+- inherit the source checkpoint context
+- accept `start_node`
+- require `flow_source_mode`
+- treat `flow_source_mode = "snapshot"` as the explicit way to use the stored run snapshot
+- allow `flow_source_mode = "flow_name"` plus `flow_name` as an advanced override
+
+Derived runs should persist lineage metadata on the run record and expose it through run-detail and run-list responses:
+- `continued_from_run_id`
+- `continued_from_node`
+- `continued_from_flow_mode`
+- `continued_from_flow_name`
 
 ### 9.6 Observability and Events
 
@@ -1993,6 +2010,7 @@ This section defines how to validate that an implementation of this spec is comp
 - [ ] Context updates are merged after each node execution
 - [ ] Checkpoint is saved after each node completion (current_node, completed_nodes, context, retry counts)
 - [ ] Resume from checkpoint: load checkpoint -> restore state -> continue from current_node
+- [ ] Derived continuation: create a new run from a stored checkpoint context and explicit start node without mutating the source run
 - [ ] Stage trace is written to `{run_root}/logs/{node_id}/` (prompt.md, response.md, status.json)
 - [ ] Extra run artifacts are written under `{run_root}/artifacts/`
 

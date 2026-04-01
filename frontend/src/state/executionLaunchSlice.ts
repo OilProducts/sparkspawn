@@ -14,6 +14,30 @@ export const createExecutionLaunchSlice: StateCreator<AppState, [], [], Executio
             executionEdgeDiagnostics: {},
             executionHasValidationErrors: false,
         }),
+    executionContinuation: null,
+    setExecutionContinuation: (draft) => set({ executionContinuation: draft }),
+    clearExecutionContinuation: () => set({ executionContinuation: null }),
+    setExecutionContinuationFlowSourceMode: (mode) =>
+        set((state) => ({
+            executionContinuation: state.executionContinuation
+                ? {
+                    ...state.executionContinuation,
+                    flowSourceMode: mode,
+                    startNodeId: mode === state.executionContinuation.flowSourceMode
+                        ? state.executionContinuation.startNodeId
+                        : null,
+                }
+                : null,
+        })),
+    setExecutionContinuationStartNode: (nodeId) =>
+        set((state) => ({
+            executionContinuation: state.executionContinuation
+                ? {
+                    ...state.executionContinuation,
+                    startNodeId: nodeId,
+                }
+                : null,
+        })),
     executionGraphAttrs: {},
     replaceExecutionGraphAttrs: (attrs) =>
         set({

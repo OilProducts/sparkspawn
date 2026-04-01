@@ -6,16 +6,38 @@ import {
     parseLaunchInputDefinitions,
     type LaunchInputFormValues,
 } from '@/lib/flowContracts'
-import { buildPipelineStartPayload, type PipelineStartPayload } from '@/lib/pipelineStartPayload'
+import {
+    buildPipelineContinuePayload,
+    buildPipelineStartPayload,
+    type PipelineStartPayload,
+} from '@/lib/pipelineStartPayload'
 import { formatProjectListLabel } from '@/features/projects/model/projectsHomeState'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { useStore } from '@/store'
-import { Button, Checkbox, InlineNotice, Label, Panel, PanelContent, PanelHeader, SectionHeader, useDialogController } from '@/ui'
+import {
+    Button,
+    Checkbox,
+    InlineNotice,
+    Input,
+    Label,
+    Panel,
+    PanelContent,
+    PanelHeader,
+    SectionHeader,
+    useDialogController,
+} from '@/ui'
 
-import { useExecutionLaunchPreview } from './hooks/useExecutionLaunchPreview'
-import { ApiHttpError, loadExecutionFlowPayload, loadExecutionProjectMetadata, startExecutionRun } from './services/executionRunService'
+import { ExecutionGraphCard } from './components/ExecutionGraphCard'
 import { ExecutionLaunchInputsSurface } from './components/ExecutionLaunchInputsSurface'
 import { ExecutionNoticeStack } from './components/ExecutionNoticeStack'
+import { useExecutionLaunchPreview } from './hooks/useExecutionLaunchPreview'
+import {
+    ApiHttpError,
+    continueExecutionRun,
+    loadExecutionFlowPayload,
+    loadExecutionProjectMetadata,
+    startExecutionRun,
+} from './services/executionRunService'
 
 type LaunchFailureDiagnostics = {
     message: string
@@ -37,8 +59,14 @@ export function ExecutionControls() {
         state.activeProjectPath ? state.projectSessionsByPath[state.activeProjectPath] : null,
     )
     const executionFlow = useStore((state) => state.executionFlow)
+    const executionContinuation = useStore((state) => state.executionContinuation)
+    const clearExecutionContinuation = useStore((state) => state.clearExecutionContinuation)
+    const setExecutionContinuationFlowSourceMode = useStore((state) => state.setExecutionContinuationFlowSourceMode)
+    const setExecutionContinuationStartNode = useStore((state) => state.setExecutionContinuationStartNode)
     const workingDir = useStore((state) => state.workingDir)
+    const setWorkingDir = useStore((state) => state.setWorkingDir)
     const model = useStore((state) => state.model)
+    const setModel = useStore((state) => state.setModel)
     const graphAttrs = useStore((state) => state.executionGraphAttrs)
     const diagnostics = useStore((state) => state.executionDiagnostics)
     const hasValidationErrors = useStore((state) => state.executionHasValidationErrors)
@@ -59,7 +87,11 @@ export function ExecutionControls() {
     const [launchSuccessRunId, setLaunchSuccessRunId] = useState<string | null>(null)
 
     const executionFlowName = executionFlow
-    const { isLoadingPreview, previewLoadError } = useExecutionLaunchPreview(executionFlowName)
+    const isContinuationMode = Boolean(executionContinuation)
+    const { isLoadingPreview, previewLoadError, hydratedGraph } = useExecutionLaunchPreview(
+        executionFlowName,
+        executionContinuation,
+    )
     const parsedLaunchInputs = useMemo(
         () => parseLaunchInputDefinitions(graphAttrs['spark.launch_inputs']),
         [graphAttrs],
@@ -68,22 +100,38 @@ export function ExecutionControls() {
     const launchInputsCollapsed = executionFlowName ? (collapsedLaunchInputsByFlow[executionFlowName] ?? false) : false
     const canCollapseLaunchInputs = parsedLaunchInputs.entries.length > 0
     const showValidationWarningBanner = diagnostics.some((diag) => diag.severity === 'warning') && !hasValidationErrors
-    const executeLabel = activeProjectPath
-        ? `Run in ${formatProjectListLabel(activeProjectPath)}`
-        : 'Run'
-    const executeDisabledReason = !activeProjectPath
-        ? 'Select an active project before running.'
-        : !executionFlowName
-            ? 'Select an active flow before running.'
-            : isLoadingPreview
-                ? 'Loading flow preview for launch inputs.'
-                : hasValidationErrors
-                    ? 'Fix validation errors before running.'
-                    : parsedLaunchInputs.error
-                        ? 'Fix launch-input schema errors before running.'
+    const executeLabel = isContinuationMode
+        ? activeProjectPath
+            ? `Continue in ${formatProjectListLabel(activeProjectPath)}`
+            : 'Continue from node'
+        : activeProjectPath
+            ? `Run in ${formatProjectListLabel(activeProjectPath)}`
+            : 'Run'
+    const executeDisabledReason = isContinuationMode
+        ? isLoadingPreview
+            ? 'Loading graph preview for continuation.'
+            : hasValidationErrors
+                ? 'Fix validation errors before continuing.'
+                : executionContinuation?.flowSourceMode === 'flow_name' && !executionFlowName
+                    ? 'Select an installed flow override or switch back to the source snapshot.'
+                    : !executionContinuation?.startNodeId
+                        ? 'Select a restart node in the graph.'
                         : undefined
+        : !activeProjectPath
+            ? 'Select an active project before running.'
+            : !executionFlowName
+                ? 'Select an active flow before running.'
+                : isLoadingPreview
+                    ? 'Loading flow preview for launch inputs.'
+                    : hasValidationErrors
+                        ? 'Fix validation errors before running.'
+                        : parsedLaunchInputs.error
+                            ? 'Fix launch-input schema errors before running.'
+                            : undefined
     const canRun = !executeDisabledReason
-    const canRetryLaunch = Boolean(activeProjectPath) && Boolean(executionFlowName) && !hasValidationErrors
+    const canRetryLaunch = isContinuationMode
+        ? Boolean(executionContinuation?.startNodeId) && !hasValidationErrors
+        : Boolean(activeProjectPath) && Boolean(executionFlowName) && !hasValidationErrors
     const visibleDiagnostics = diagnostics.slice(0, 8)
     const pendingHumanGatePrompt = humanGate && humanGate.runId === selectedRunId ? humanGate.prompt : null
     const runInitiationForm = {
@@ -106,11 +154,16 @@ export function ExecutionControls() {
         setLastLaunchFailure(null)
         setRunStartGitPolicyWarning(null)
         setLaunchSuccessRunId(null)
-    }, [executionFlowName])
+    }, [executionFlowName, executionContinuation])
 
     const confirmGitPolicyGate = async () => {
+        const projectPathForGitCheck = activeProjectPath || executionContinuation?.sourceWorkingDirectory || ''
+        if (!projectPathForGitCheck) {
+            return true
+        }
+
         try {
-            const metadata = await loadExecutionProjectMetadata(runInitiationForm.projectPath)
+            const metadata = await loadExecutionProjectMetadata(projectPathForGitCheck)
             const branch = typeof metadata.branch === 'string' ? metadata.branch.trim() : ''
             if (branch) {
                 setRunStartGitPolicyWarning(null)
@@ -141,25 +194,12 @@ export function ExecutionControls() {
     }
 
     const requestStart = async () => {
-        if (!canRun || !activeProjectPath || !executionFlowName) {
+        if (!canRun) {
             return
         }
 
         setRunStartError(null)
         setLaunchSuccessRunId(null)
-        if (parsedLaunchInputs.error) {
-            setRunStartError(`Flow launch input schema is invalid: ${parsedLaunchInputs.error}`)
-            return
-        }
-
-        const { launchContext, errors: launchContextErrors } = buildLaunchContextFromValues(
-            parsedLaunchInputs.entries,
-            launchInputValues,
-        )
-        if (launchContextErrors.length > 0) {
-            setRunStartError(launchContextErrors.join(' '))
-            return
-        }
 
         try {
             const gitPolicyGateAllowed = await confirmGitPolicyGate()
@@ -167,17 +207,52 @@ export function ExecutionControls() {
                 return
             }
 
-            const flow = await loadExecutionFlowPayload(runInitiationForm.flowSource)
-            const resolvedWorkingDirectory = runInitiationForm.workingDirectory.trim() || runInitiationForm.projectPath
-            const startPayload = buildPipelineStartPayload(
-                {
-                    ...runInitiationForm,
-                    launchContext,
-                    workingDirectory: resolvedWorkingDirectory,
-                },
-                flow.content,
-            )
-            const runData = await startExecutionRun(startPayload as PipelineStartPayload)
+            let runData
+            if (isContinuationMode && executionContinuation) {
+                const continuePayload = buildPipelineContinuePayload(
+                    {
+                        projectPath: activeProjectPath || executionContinuation.sourceWorkingDirectory,
+                        workingDirectory: workingDir,
+                        model: model.trim() || null,
+                    },
+                    {
+                        startNodeId: executionContinuation.startNodeId || '',
+                        flowSourceMode: executionContinuation.flowSourceMode,
+                        flowName: executionContinuation.flowSourceMode === 'flow_name' ? executionFlowName : null,
+                    },
+                )
+                runData = await continueExecutionRun(executionContinuation.sourceRunId, continuePayload)
+            } else {
+                if (!activeProjectPath || !executionFlowName) {
+                    return
+                }
+                if (parsedLaunchInputs.error) {
+                    setRunStartError(`Flow launch input schema is invalid: ${parsedLaunchInputs.error}`)
+                    return
+                }
+
+                const { launchContext, errors: launchContextErrors } = buildLaunchContextFromValues(
+                    parsedLaunchInputs.entries,
+                    launchInputValues,
+                )
+                if (launchContextErrors.length > 0) {
+                    setRunStartError(launchContextErrors.join(' '))
+                    return
+                }
+
+                const flow = await loadExecutionFlowPayload(runInitiationForm.flowSource)
+                const resolvedWorkingDirectory = runInitiationForm.workingDirectory.trim() || runInitiationForm.projectPath
+                const startPayload = buildPipelineStartPayload(
+                    {
+                        ...runInitiationForm,
+                        launchContext,
+                        workingDirectory: resolvedWorkingDirectory,
+                    },
+                    flow.content,
+                )
+                runData = await startExecutionRun(startPayload as PipelineStartPayload)
+            }
+
             if (runData?.status !== 'started') {
                 const reason = runData?.error || runData?.status || 'Unknown run error'
                 throw new Error(`Run not started: ${reason}`)
@@ -192,7 +267,11 @@ export function ExecutionControls() {
             setRuntimeOutcome(null)
             setLastLaunchFailure(null)
 
-            if (openRunsAfterLaunch && nextRunId) {
+            if (isContinuationMode && nextRunId) {
+                clearExecutionContinuation()
+                setLaunchSuccessRunId(null)
+                setViewMode('runs')
+            } else if (openRunsAfterLaunch && nextRunId) {
                 setViewMode('runs')
             }
         } catch (error) {
@@ -206,7 +285,9 @@ export function ExecutionControls() {
             setLastLaunchFailure({
                 message: errorMessage,
                 failedAt: new Date().toISOString(),
-                flowSource: runInitiationForm.flowSource || null,
+                flowSource: isContinuationMode
+                    ? executionContinuation?.sourceRunId || null
+                    : runInitiationForm.flowSource || null,
             })
         }
     }
@@ -216,10 +297,12 @@ export function ExecutionControls() {
             <Panel className="m-4 flex min-h-0 flex-1 flex-col overflow-hidden">
                 <PanelHeader>
                     <SectionHeader
-                        title="Launch Flow"
-                        description={executionFlowName
-                            ? `Direct-run launch inputs for ${executionFlowName}.`
-                            : 'Select a flow to configure direct-run launch inputs.'}
+                        title={isContinuationMode ? 'Continue Run' : 'Launch Flow'}
+                        description={isContinuationMode
+                            ? 'Configure a derived run and pick the restart node below.'
+                            : executionFlowName
+                                ? `Direct-run launch inputs for ${executionFlowName}.`
+                                : 'Select a flow to configure direct-run launch inputs.'}
                         action={executionFlowName ? (
                             <span
                                 data-testid="execution-launch-flow-name"
@@ -257,7 +340,7 @@ export function ExecutionControls() {
                             </InlineNotice>
                         </div>
                     ) : null}
-                    {!executionFlowName ? (
+                    {!executionFlowName && !isContinuationMode ? (
                         <div
                             data-testid="execution-no-flow-state"
                             className="flex min-h-0 flex-1 items-center justify-center p-6"
@@ -274,33 +357,37 @@ export function ExecutionControls() {
                             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
                                 <div className="space-y-1">
                                     <p className="text-sm font-medium text-foreground">
-                                        Launch target
+                                        {isContinuationMode ? 'Continuation target' : 'Launch target'}
                                     </p>
                                     <p
                                         data-testid="execution-launch-target-copy"
                                         className="text-sm text-muted-foreground"
                                     >
-                                        {activeProjectPath
-                                            ? `${executeLabel} using the active project context.`
-                                            : 'Select an active project to enable launching.'}
+                                        {isContinuationMode && executionContinuation
+                                            ? `Create a derived run from ${executionContinuation.sourceRunId} using inherited checkpoint context.`
+                                            : activeProjectPath
+                                                ? `${executeLabel} using the active project context.`
+                                                : 'Select an active project to enable launching.'}
                                     </p>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-3">
-                                    <div className="flex items-center gap-2">
-                                        <Checkbox
-                                            id="execution-open-runs-after-launch-checkbox"
-                                            checked={openRunsAfterLaunch}
-                                            onCheckedChange={(checked) => {
-                                                setOpenRunsAfterLaunch(checked === true)
-                                            }}
-                                        />
-                                        <Label
-                                            htmlFor="execution-open-runs-after-launch-checkbox"
-                                            className="text-xs text-muted-foreground"
-                                        >
-                                            Open in Runs after launch
-                                        </Label>
-                                    </div>
+                                    {!isContinuationMode ? (
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="execution-open-runs-after-launch-checkbox"
+                                                checked={openRunsAfterLaunch}
+                                                onCheckedChange={(checked) => {
+                                                    setOpenRunsAfterLaunch(checked === true)
+                                                }}
+                                            />
+                                            <Label
+                                                htmlFor="execution-open-runs-after-launch-checkbox"
+                                                className="text-xs text-muted-foreground"
+                                            >
+                                                Open in Runs after launch
+                                            </Label>
+                                        </div>
+                                    ) : null}
                                     <div data-testid="execution-launch-primary-action">
                                         <Button
                                             type="button"
@@ -319,7 +406,7 @@ export function ExecutionControls() {
 
                             {isLoadingPreview ? (
                                 <InlineNotice data-testid="execution-launch-preview-loading">
-                                    Loading flow preview and launch contract…
+                                    {isContinuationMode ? 'Loading continuation graph preview…' : 'Loading flow preview and launch contract…'}
                                 </InlineNotice>
                             ) : null}
                             {previewLoadError ? (
@@ -327,7 +414,7 @@ export function ExecutionControls() {
                                     {previewLoadError}
                                 </InlineNotice>
                             ) : null}
-                            {launchSuccessRunId && !openRunsAfterLaunch ? (
+                            {launchSuccessRunId && !openRunsAfterLaunch && !isContinuationMode ? (
                                 <InlineNotice data-testid="execution-launch-success-notice" tone="success">
                                     <div className={`flex ${isNarrowViewport ? 'flex-col items-start gap-2' : 'items-center justify-between gap-3'}`}>
                                         <div>
@@ -360,6 +447,80 @@ export function ExecutionControls() {
                                 }}
                             />
 
+                            {isContinuationMode && executionContinuation ? (
+                                <div
+                                    data-testid="execution-continuation-settings"
+                                    className="space-y-4 rounded-lg border border-border/80 bg-muted/10 p-4"
+                                >
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-1">
+                                            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                                Source run
+                                            </p>
+                                            <p data-testid="execution-continuation-source-run" className="font-mono text-sm text-foreground">
+                                                {executionContinuation.sourceRunId}
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                                Graph source
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                                <Button
+                                                    type="button"
+                                                    size="xs"
+                                                    variant={executionContinuation.flowSourceMode === 'snapshot' ? 'secondary' : 'outline'}
+                                                    data-testid="execution-continuation-use-snapshot-button"
+                                                    onClick={() => {
+                                                        setExecutionContinuationFlowSourceMode('snapshot')
+                                                        setExecutionContinuationStartNode(null)
+                                                    }}
+                                                >
+                                                    Use source snapshot
+                                                </Button>
+                                                <span className="text-xs text-muted-foreground">
+                                                    Pick a flow in the sidebar to use an installed-flow override.
+                                                </span>
+                                            </div>
+                                            <p data-testid="execution-continuation-flow-source-copy" className="text-xs text-muted-foreground">
+                                                {executionContinuation.flowSourceMode === 'snapshot'
+                                                    ? 'Currently previewing the stored source-run graph snapshot.'
+                                                    : executionFlowName
+                                                        ? `Currently previewing installed flow override ${executionFlowName}.`
+                                                        : 'Select an installed flow in the sidebar to preview an override.'}
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="execution-continuation-working-directory">Working directory</Label>
+                                            <Input
+                                                id="execution-continuation-working-directory"
+                                                data-testid="execution-continuation-working-directory-input"
+                                                value={workingDir}
+                                                onChange={(event) => setWorkingDir(event.target.value)}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="execution-continuation-model">Model override</Label>
+                                            <Input
+                                                id="execution-continuation-model"
+                                                data-testid="execution-continuation-model-input"
+                                                value={model}
+                                                onChange={(event) => setModel(event.target.value)}
+                                                placeholder="Use server default"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div
+                                        data-testid="execution-continuation-selected-node-copy"
+                                        className="rounded-md border border-border/80 bg-background/80 px-3 py-2 text-sm text-muted-foreground"
+                                    >
+                                        {executionContinuation.startNodeId
+                                            ? <>Restart node: <span className="font-mono text-foreground">{executionContinuation.startNodeId}</span></>
+                                            : 'Select a restart node in the graph below.'}
+                                    </div>
+                                </div>
+                            ) : null}
+
                             {visibleDiagnostics.length > 0 ? (
                                 <div
                                     data-testid="execution-launch-diagnostics"
@@ -386,32 +547,48 @@ export function ExecutionControls() {
                                 </div>
                             ) : null}
 
-                            <div className="rounded-lg border border-border/80 bg-muted/10 p-4">
-                                <ExecutionLaunchInputsSurface
-                                    isNarrowViewport={isNarrowViewport}
-                                    executionFlowName={executionFlowName}
-                                    parsedLaunchInputs={parsedLaunchInputs}
-                                    launchInputValues={launchInputValues}
-                                    launchInputCount={launchInputCount}
-                                    launchInputsCollapsed={launchInputsCollapsed}
-                                    canCollapseLaunchInputs={canCollapseLaunchInputs}
-                                    onToggleCollapsed={() => {
-                                        if (!executionFlowName) {
-                                            return
-                                        }
-                                        setCollapsedLaunchInputsByFlow((current) => ({
-                                            ...current,
-                                            [executionFlowName]: !launchInputsCollapsed,
-                                        }))
-                                    }}
-                                    onInputChange={(entry, value) => {
-                                        setLaunchInputValues((current) => ({
-                                            ...current,
-                                            [entry.key]: value,
-                                        }))
+                            {!isContinuationMode ? (
+                                <div className="rounded-lg border border-border/80 bg-muted/10 p-4">
+                                    <ExecutionLaunchInputsSurface
+                                        isNarrowViewport={isNarrowViewport}
+                                        executionFlowName={executionFlowName}
+                                        parsedLaunchInputs={parsedLaunchInputs}
+                                        launchInputValues={launchInputValues}
+                                        launchInputCount={launchInputCount}
+                                        launchInputsCollapsed={launchInputsCollapsed}
+                                        canCollapseLaunchInputs={canCollapseLaunchInputs}
+                                        onToggleCollapsed={() => {
+                                            if (!executionFlowName) {
+                                                return
+                                            }
+                                            setCollapsedLaunchInputsByFlow((current) => ({
+                                                ...current,
+                                                [executionFlowName]: !launchInputsCollapsed,
+                                            }))
+                                        }}
+                                        onInputChange={(entry, value) => {
+                                            setLaunchInputValues((current) => ({
+                                                ...current,
+                                                [entry.key]: value,
+                                            }))
+                                        }}
+                                    />
+                                </div>
+                            ) : null}
+
+                            {(executionFlowName || isContinuationMode) ? (
+                                <ExecutionGraphCard
+                                    hydratedGraph={hydratedGraph}
+                                    isLoading={isLoadingPreview}
+                                    loadError={previewLoadError}
+                                    isContinuationMode={isContinuationMode}
+                                    sourceMode={executionContinuation?.flowSourceMode ?? null}
+                                    selectedStartNodeId={executionContinuation?.startNodeId ?? null}
+                                    onSelectStartNode={(nodeId) => {
+                                        setExecutionContinuationStartNode(nodeId)
                                     }}
                                 />
-                            </div>
+                            ) : null}
                         </div>
                     )}
                 </PanelContent>

@@ -77,6 +77,10 @@ REQUIRED_UI_ENDPOINT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("/attractor/preview", re.compile(r"fetch\(\s*['\"]/attractor/preview['\"]|fetchPreviewValidated\(")),
     ("/attractor/pipelines", re.compile(r"fetch\(\s*['\"]/attractor/pipelines['\"]|fetchPipelineStartValidated\(")),
     (
+        "/attractor/pipelines/{id}/continue",
+        re.compile(r"fetch\(\s*`/attractor/pipelines/\$\{encodeURIComponent\([^)]+\)\}/continue`|fetchPipelineContinueValidated\("),
+    ),
+    (
         "/attractor/pipelines/{id}",
         re.compile(r"fetch\(\s*`/attractor/pipelines/\$\{encodeURIComponent\([^)]+\)\}`\s*(?:,|\))|fetchPipelineStatusValidated\("),
     ),

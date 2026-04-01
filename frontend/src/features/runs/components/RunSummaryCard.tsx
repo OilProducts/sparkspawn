@@ -5,6 +5,7 @@ import type { RunRecord } from '../model/shared'
 import {
     STATUS_LABELS,
     canCancelRun,
+    canContinueRun,
     cancelRunActionLabel,
     cancelRunDisabledReason,
     formatDuration,
@@ -20,10 +21,19 @@ interface RunSummaryCardProps {
     now: number
     onOpenRunArtifact: (run: RunRecord, artifactType: 'spec' | 'plan') => void
     onRequestCancel: (runId: string, currentStatus: string) => void
+    onContinueFromRun: (run: RunRecord) => void
 }
 
-export function RunSummaryCard({ run, activeProjectPath, now, onOpenRunArtifact, onRequestCancel }: RunSummaryCardProps) {
+export function RunSummaryCard({
+    run,
+    activeProjectPath,
+    now,
+    onOpenRunArtifact,
+    onRequestCancel,
+    onContinueFromRun,
+}: RunSummaryCardProps) {
     const cancelAvailable = canCancelRun(run.status)
+    const continueAvailable = canContinueRun(run.status)
     const [collapsed, setCollapsed] = useState(false)
     return (
         <Panel data-testid="run-summary-panel">
@@ -74,17 +84,30 @@ export function RunSummaryCard({ run, activeProjectPath, now, onOpenRunArtifact,
                             </Button>
                         ) : null}
                         </div>
-                        <Button
-                            type="button"
-                            data-testid="run-summary-cancel-button"
-                            onClick={() => onRequestCancel(run.run_id, run.status)}
-                            disabled={!cancelAvailable}
-                            title={cancelAvailable ? undefined : cancelRunDisabledReason(run.status)}
-                            variant={cancelAvailable ? 'destructive' : 'outline'}
-                            size="xs"
-                        >
-                            {cancelRunActionLabel(run.status)}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            {continueAvailable ? (
+                                <Button
+                                    type="button"
+                                    data-testid="run-summary-continue-button"
+                                    onClick={() => onContinueFromRun(run)}
+                                    variant="outline"
+                                    size="xs"
+                                >
+                                    Continue from node
+                                </Button>
+                            ) : null}
+                            <Button
+                                type="button"
+                                data-testid="run-summary-cancel-button"
+                                onClick={() => onRequestCancel(run.run_id, run.status)}
+                                disabled={!cancelAvailable}
+                                title={cancelAvailable ? undefined : cancelRunDisabledReason(run.status)}
+                                variant={cancelAvailable ? 'destructive' : 'outline'}
+                                size="xs"
+                            >
+                                {cancelRunActionLabel(run.status)}
+                            </Button>
+                        </div>
                 </div>
                 <div className="grid gap-x-6 gap-y-2 text-sm md:grid-cols-2">
                 <div data-testid="run-summary-status"><span className="font-medium">Status:</span> {STATUS_LABELS[run.status] || run.status}</div>
@@ -98,6 +121,7 @@ export function RunSummaryCard({ run, activeProjectPath, now, onOpenRunArtifact,
                 <div data-testid="run-summary-project-path" className="break-all"><span className="font-medium">Project Path:</span> {run.project_path || activeProjectPath || '—'}</div>
                 <div data-testid="run-summary-git-branch"><span className="font-medium">Git Branch:</span> {run.git_branch || '—'}</div>
                 <div data-testid="run-summary-git-commit"><span className="font-medium">Git Commit:</span> {run.git_commit || '—'}</div>
+                <div data-testid="run-summary-continued-from"><span className="font-medium">Continued From:</span> {run.continued_from_run_id ? `${run.continued_from_run_id} @ ${run.continued_from_node || '—'}` : '—'}</div>
                 <div data-testid="run-summary-last-error" className="break-all"><span className="font-medium">Last Error:</span> {run.last_error || '—'}</div>
                 <div data-testid="run-summary-token-usage"><span className="font-medium">Tokens:</span> {typeof run.token_usage === 'number' ? run.token_usage.toLocaleString() : '—'}</div>
                 </div>

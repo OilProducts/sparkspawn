@@ -23,6 +23,10 @@ class RunRecord:
     git_commit: Optional[str] = None
     spec_id: Optional[str] = None
     plan_id: Optional[str] = None
+    continued_from_run_id: Optional[str] = None
+    continued_from_node: Optional[str] = None
+    continued_from_flow_mode: Optional[str] = None
+    continued_from_flow_name: Optional[str] = None
     last_error: str = ""
     token_usage: Optional[int] = None
 
@@ -43,6 +47,10 @@ class RunRecord:
             "git_commit": self.git_commit,
             "spec_id": self.spec_id,
             "plan_id": self.plan_id,
+            "continued_from_run_id": self.continued_from_run_id,
+            "continued_from_node": self.continued_from_node,
+            "continued_from_flow_mode": self.continued_from_flow_mode,
+            "continued_from_flow_name": self.continued_from_flow_name,
             "last_error": self.last_error,
             "token_usage": self.token_usage,
         }
@@ -69,6 +77,18 @@ class RunRecord:
             git_commit=str(data.get("git_commit")) if data.get("git_commit") is not None else None,
             spec_id=str(data.get("spec_id")) if data.get("spec_id") is not None else None,
             plan_id=str(data.get("plan_id")) if data.get("plan_id") is not None else None,
+            continued_from_run_id=(
+                str(data.get("continued_from_run_id")) if data.get("continued_from_run_id") is not None else None
+            ),
+            continued_from_node=(
+                str(data.get("continued_from_node")) if data.get("continued_from_node") is not None else None
+            ),
+            continued_from_flow_mode=(
+                str(data.get("continued_from_flow_mode")) if data.get("continued_from_flow_mode") is not None else None
+            ),
+            continued_from_flow_name=(
+                str(data.get("continued_from_flow_name")) if data.get("continued_from_flow_name") is not None else None
+            ),
             last_error=str(data.get("last_error", "")),
             token_usage=int(data["token_usage"]) if data.get("token_usage") is not None else None,
         )

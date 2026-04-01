@@ -20,6 +20,16 @@ export interface PipelineStartPayload {
     plan_id: string | null
 }
 
+export type PipelineContinueFlowSourceMode = 'snapshot' | 'flow_name'
+
+export interface PipelineContinuePayload {
+    start_node: string
+    flow_source_mode: PipelineContinueFlowSourceMode
+    flow_name?: string | null
+    working_directory?: string
+    model?: string | null
+}
+
 const normalizePath = (value: string): string => {
     const trimmed = value.trim()
     if (!trimmed) return ''
@@ -87,4 +97,21 @@ export function buildPipelineStartPayload(
         payload.launch_context = form.launchContext
     }
     return payload
+}
+
+export function buildPipelineContinuePayload(
+    form: Pick<RunInitiationFormState, 'projectPath' | 'workingDirectory' | 'model'>,
+    continuation: {
+        startNodeId: string
+        flowSourceMode: PipelineContinueFlowSourceMode
+        flowName?: string | null
+    },
+): PipelineContinuePayload {
+    return {
+        start_node: continuation.startNodeId,
+        flow_source_mode: continuation.flowSourceMode,
+        flow_name: continuation.flowSourceMode === 'flow_name' ? (continuation.flowName || null) : undefined,
+        working_directory: resolveExecutionWorkingDirectory(form),
+        model: form.model,
+    }
 }

@@ -198,6 +198,10 @@ def record_run_start(
     resolve_runtime_workspace_path: Callable[[str], str],
     spec_id: Optional[str] = None,
     plan_id: Optional[str] = None,
+    continued_from_run_id: Optional[str] = None,
+    continued_from_node: Optional[str] = None,
+    continued_from_flow_mode: Optional[str] = None,
+    continued_from_flow_name: Optional[str] = None,
 ) -> None:
     project_path, git_branch, git_commit = resolve_run_project_git_metadata(
         working_directory,
@@ -218,6 +222,10 @@ def record_run_start(
         git_commit=git_commit,
         spec_id=spec_id,
         plan_id=plan_id,
+        continued_from_run_id=continued_from_run_id,
+        continued_from_node=continued_from_node,
+        continued_from_flow_mode=continued_from_flow_mode,
+        continued_from_flow_name=continued_from_flow_name,
     )
     with run_history_lock:
         write_run_meta(get_settings, record)

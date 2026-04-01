@@ -24,6 +24,7 @@ export {
     fetchPipelineArtifactPreviewValidated,
     fetchPipelineArtifactsValidated,
     fetchPipelineCancelValidated,
+    fetchPipelineContinueValidated,
     fetchPipelineCheckpointValidated,
     fetchPipelineContextValidated,
     pipelineEventsUrl,

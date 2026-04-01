@@ -167,6 +167,8 @@ Execution owns:
 - launch diagnostics and validation blockers
 - direct-run submission controls
 - post-launch navigation choice
+- continuation configuration and submission
+- a collapsible launch-planning graph card below the launch inputs and notice stack
 
 Runs owns:
 - selected run summary and actions
@@ -306,6 +308,22 @@ Selecting or editing a flow in the Editor must not overwrite the currently selec
 Execution should provide an explicit post-launch navigation choice such as `Open in Runs after launch`.
 That control defaults to unchecked. When unchecked, Execution remains visible after a successful launch and shows a compact success notice with a `View run` affordance.
 
+### 12.4 Continuation Launches
+
+Runs initiates continuation, but Execution owns continuation configuration and launch.
+
+The continuation UX should work as follows:
+- Runs exposes `Continue from node` only for inactive runs
+- clicking that action immediately switches to Execution
+- Execution loads a continuation draft prefilled from the source run
+- the default graph source is the stored source-run snapshot
+- selecting an installed flow in the Execution sidebar switches continuation into installed-flow override mode
+- restart-node selection happens in Execution by clicking the graph
+- Execution warns that arbitrary restart nodes may depend on upstream state and may fail when restarted cold
+- launching a continuation returns the operator to Runs with the derived run selected
+
+Execution may render the graph card for direct launches as a read-only preview, but that card is still a launch-planning surface rather than a live run monitor.
+
 ## 13. Run Inspection UX
 
 The run inspector is a frontend for Attractor runs, not for workspace artifacts.
@@ -333,7 +351,7 @@ Run-inspection state is run-local and may be shared across tabs, but it is disti
 The currently selected execution flow, selected run, launch form draft, and runtime inspection context must not be inferred from the Editor session.
 
 Runs is the canonical run-monitoring surface.
-Execution may show compact handoff notices for the currently selected run, such as a launch-success message or pending human-gate reminder, but it must not own the primary run graph or terminal surface.
+Execution may show compact handoff notices for the currently selected run, such as a launch-success message or pending human-gate reminder, and may render a launch-planning graph card. It must not own the primary live run graph, terminal, timeline, artifact, or question surfaces.
 
 `Completed + failure outcome` is not a runtime failure surface.
 It should be presented as a completed workflow that reached a negative business conclusion, optionally with a reason code or reason message supplied by Attractor.

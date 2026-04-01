@@ -9,28 +9,23 @@ import { ProjectContextChip } from '@/ui'
 export function ExecutionSidebar() {
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const executionFlow = useStore((state) => state.executionFlow)
+    const executionContinuation = useStore((state) => state.executionContinuation)
     const setExecutionFlow = useStore((state) => state.setExecutionFlow)
-    const setSelectedRunId = useStore((state) => state.setSelectedRunId)
-    const clearLogs = useStore((state) => state.clearLogs)
-    const resetNodeStatuses = useStore((state) => state.resetNodeStatuses)
-    const clearHumanGate = useStore((state) => state.clearHumanGate)
-    const setRuntimeStatus = useStore((state) => state.setRuntimeStatus)
-    const setRuntimeOutcome = useStore((state) => state.setRuntimeOutcome)
+    const setExecutionContinuationFlowSourceMode = useStore((state) => state.setExecutionContinuationFlowSourceMode)
+    const setExecutionContinuationStartNode = useStore((state) => state.setExecutionContinuationStartNode)
     const humanGate = useStore((state) => state.humanGate)
     const isNarrowViewport = useNarrowViewport()
     const [flows, setFlows] = useState<string[]>([])
 
     const handleSelectFlow = (flowName: string) => {
-        if (flowName === executionFlow) {
+        if (!executionContinuation && flowName === executionFlow) {
             return
         }
         setExecutionFlow(flowName)
-        setSelectedRunId(null)
-        setRuntimeStatus('idle')
-        setRuntimeOutcome(null)
-        clearLogs()
-        resetNodeStatuses()
-        clearHumanGate()
+        if (executionContinuation) {
+            setExecutionContinuationFlowSourceMode('flow_name')
+            setExecutionContinuationStartNode(null)
+        }
     }
 
     useEffect(() => {
@@ -74,7 +69,9 @@ export function ExecutionSidebar() {
             <div className="px-5 py-2">
                 <h2 className="font-semibold text-sm tracking-tight">Flow Library</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                    Execution keeps its own inspected flow separate from the editor.
+                    {executionContinuation
+                        ? 'Select an installed flow to override the source-run snapshot for continuation.'
+                        : 'Execution keeps its own launch target separate from the editor.'}
                 </p>
             </div>
             <div className="flex-1 overflow-y-auto px-3 pb-4">

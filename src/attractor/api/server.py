@@ -197,6 +197,8 @@ def _dot_attr_value(attrs: Dict[str, object], key: str, default: Optional[object
 
 def _resolve_launch_model(graph, requested_model: Optional[str]) -> tuple[Optional[str], str]:
     selected_model = (requested_model or "").strip() or None
+    if selected_model == "codex default (config/profile)":
+        selected_model = None
     if selected_model:
         return selected_model, selected_model
 
@@ -228,6 +230,10 @@ def _record_run_start(
     model: str,
     spec_id: Optional[str] = None,
     plan_id: Optional[str] = None,
+    continued_from_run_id: Optional[str] = None,
+    continued_from_node: Optional[str] = None,
+    continued_from_flow_mode: Optional[str] = None,
+    continued_from_flow_name: Optional[str] = None,
 ) -> None:
     pipeline_runs.record_run_start(
         get_settings,
@@ -239,6 +245,10 @@ def _record_run_start(
         resolve_runtime_workspace_path=resolve_runtime_workspace_path,
         spec_id=spec_id,
         plan_id=plan_id,
+        continued_from_run_id=continued_from_run_id,
+        continued_from_node=continued_from_node,
+        continued_from_flow_mode=continued_from_flow_mode,
+        continued_from_flow_name=continued_from_flow_name,
     )
 
 
@@ -413,6 +423,14 @@ class PipelineStartRequest(BaseModel):
     launch_context: Optional[dict[str, Any]] = None
     spec_id: Optional[str] = None
     plan_id: Optional[str] = None
+
+
+class PipelineContinueRequest(BaseModel):
+    start_node: str
+    flow_source_mode: str
+    flow_name: Optional[str] = None
+    working_directory: Optional[str] = None
+    model: Optional[str] = None
 
 
 class PreviewRequest(BaseModel):
@@ -697,46 +715,99 @@ async def preview_pipeline(req: PreviewRequest):
     return _preview_payload_from_dot_source(req.flow_content)
 
 
-async def _start_pipeline(
-    req: PipelineStartRequest,
+def _resolve_run_graph_source_path(pipeline_id: str) -> Path:
+    graph_dir = _run_root(pipeline_id) / "artifacts" / "graphviz"
+    source_path = graph_dir / "pipeline-source.dot"
+    fallback_path = graph_dir / "pipeline.dot"
+    graph_source_path = source_path if source_path.exists() else fallback_path
+    if not graph_source_path.exists():
+        raise HTTPException(status_code=404, detail="Run graph preview unavailable")
+    return graph_source_path
+
+
+def _resolve_continue_source_record(pipeline_id: str) -> tuple[RunRecord, Checkpoint]:
+    active = _get_active_run(pipeline_id)
+    record = _read_run_meta(_run_meta_path(pipeline_id))
+    if not active and record is None:
+        raise HTTPException(status_code=404, detail="Unknown pipeline")
+    checkpoint = load_checkpoint(_run_root(pipeline_id) / "state.json")
+    if checkpoint is None:
+        raise HTTPException(status_code=404, detail="Checkpoint unavailable")
+    if record is None:
+        assert active is not None
+        record = RunRecord(
+            run_id=pipeline_id,
+            flow_name=active.flow_name,
+            status=active.status,
+            outcome=active.outcome,
+            outcome_reason_code=active.outcome_reason_code,
+            outcome_reason_message=active.outcome_reason_message,
+            working_directory=active.working_directory,
+            model=active.model,
+            started_at="",
+        )
+    return record, checkpoint
+
+
+def _resolve_continue_flow_source(
     *,
-    run_id: Optional[str] = None,
+    pipeline_id: str,
+    source_record: RunRecord,
+    flow_source_mode: str,
+    flow_name: Optional[str],
+) -> tuple[str, str, Path | None]:
+    normalized_mode = flow_source_mode.strip().lower()
+    if normalized_mode not in {"snapshot", "flow_name"}:
+        raise ValueError("flow_source_mode must be either snapshot or flow_name.")
+
+    if normalized_mode == "snapshot":
+        graph_source_path = _resolve_run_graph_source_path(pipeline_id)
+        return (
+            source_record.flow_name,
+            graph_source_path.read_text(encoding="utf-8"),
+            None,
+        )
+
+    selected_flow_name = (flow_name or "").strip()
+    if not selected_flow_name:
+        raise ValueError("flow_name is required when flow_source_mode is flow_name.")
+    flow_content = _load_flow_content(selected_flow_name)
+    flow_path = _resolve_flow_path(selected_flow_name)
+    return (
+        selected_flow_name,
+        flow_content,
+        flow_path.parent.resolve(),
+    )
+
+
+async def _launch_pipeline_run(
+    *,
+    run_id: Optional[str],
+    flow_name: str,
+    flow_content: str,
+    working_directory: str,
+    backend_name: str,
+    model: Optional[str],
+    launch_context: Optional[dict[str, Any]],
+    spec_id: Optional[str] = None,
+    plan_id: Optional[str] = None,
+    flow_source_dir: Path | None = None,
+    start_node_id: Optional[str] = None,
     on_complete: Optional[Callable[[str, str], Any]] = None,
+    continued_from_run_id: Optional[str] = None,
+    continued_from_node: Optional[str] = None,
+    continued_from_flow_mode: Optional[str] = None,
+    continued_from_flow_name: Optional[str] = None,
 ) -> dict:
-    run_id = (run_id or uuid.uuid4().hex).strip()
-    if not run_id:
-        run_id = uuid.uuid4().hex
-    if _get_active_run(run_id) is not None or _read_run_meta(_run_meta_path(run_id)) is not None:
+    resolved_run_id = (run_id or uuid.uuid4().hex).strip()
+    if not resolved_run_id:
+        resolved_run_id = uuid.uuid4().hex
+    if _get_active_run(resolved_run_id) is not None or _read_run_meta(_run_meta_path(resolved_run_id)) is not None:
         return {
             "status": "validation_error",
-            "error": f"Run id already exists: {run_id}",
+            "error": f"Run id already exists: {resolved_run_id}",
         }
-    flow_name = (req.flow_name or "").strip()
-    flow_content = (req.flow_content or "").strip()
-    if not flow_content:
-        if not flow_name:
-            return {
-                "status": "validation_error",
-                "error": "Either flow_content or flow_name is required.",
-            }
-        try:
-            flow_content = _load_flow_content(flow_name)
-        except HTTPException as exc:
-            return {
-                "status": "validation_error" if exc.status_code == 400 else "failed",
-                "error": str(exc.detail),
-            }
-    if req.goal:
-        flow_content = _inject_pipeline_goal_impl(flow_content, req.goal)
-    flow_source_dir: Path | None = None
-    if flow_name:
-        try:
-            flow_path = _resolve_flow_path(flow_name)
-        except HTTPException:
-            flow_path = None
-        if flow_path is not None and flow_path.exists():
-            flow_source_dir = flow_path.parent.resolve()
-    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[0])
+    await _publish_lifecycle_phase(resolved_run_id, PIPELINE_LIFECYCLE_PHASES[0])
     try:
         graph = parse_dot(flow_content)
     except DotParseError as exc:
@@ -762,9 +833,9 @@ async def _start_pipeline(
             "errors": [parse_diag],
         }
 
-    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[1])
+    await _publish_lifecycle_phase(resolved_run_id, PIPELINE_LIFECYCLE_PHASES[1])
     graph, diagnostics = _prepare_graph_for_server(graph)
-    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[2])
+    await _publish_lifecycle_phase(resolved_run_id, PIPELINE_LIFECYCLE_PHASES[2])
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
     diagnostic_payloads = [_diagnostic_payload(d) for d in diagnostics]
     error_payloads = [_diagnostic_payload(d) for d in errors]
@@ -779,6 +850,337 @@ async def _start_pipeline(
             "diagnostics": diagnostic_payloads,
             "errors": error_payloads,
         }
+
+    resolved_start_node = (start_node_id or "").strip() or _resolve_start_node_id(graph)
+    if resolved_start_node not in graph.nodes:
+        return {
+            "status": "validation_error",
+            "error": f"Unknown start node: {resolved_start_node}",
+            "diagnostics": diagnostic_payloads,
+            "errors": error_payloads,
+        }
+
+    await _publish_lifecycle_phase(resolved_run_id, PIPELINE_LIFECYCLE_PHASES[3])
+
+    os.makedirs(working_directory, exist_ok=True)
+    working_dir = str(Path(working_directory).resolve())
+    selected_model, display_model = _resolve_launch_model(graph, model)
+
+    await _publish_run_event(
+        resolved_run_id,
+        {
+            "type": "graph",
+            **_graph_payload(graph),
+        },
+    )
+
+    loop = asyncio.get_running_loop()
+
+    def emit(message: dict):
+        asyncio.run_coroutine_threadsafe(_publish_run_event(resolved_run_id, message), loop)
+
+    try:
+        backend = _build_codergen_backend(
+            backend_name,
+            working_dir,
+            emit,
+            model=selected_model,
+        )
+    except ValueError as exc:
+        return {
+            "status": "validation_error",
+            "error": str(exc),
+        }
+
+    interviewer: Interviewer = WebInterviewer(HUMAN_BROKER, emit, flow_name, resolved_run_id)
+
+    registry = build_default_registry(
+        codergen_backend=backend,
+        interviewer=interviewer,
+    )
+    runner = BroadcastingRunner(HandlerRunner(graph, registry), emit)
+
+    run_root = _ensure_run_root_for_project(resolved_run_id, working_dir)
+    checkpoint_file = str(run_root / "state.json")
+    logs_root = str(run_root / "logs")
+    # NOTE: This artifact render intentionally uses the submitted DOT source.
+    # It does not reflect transform/normalization changes applied to `graph`.
+    # If post-transform fidelity is required, render from a serialized `graph` instead.
+    graphviz_export = export_graphviz_artifact(flow_content, run_root)
+    run_root.mkdir(parents=True, exist_ok=True)
+    Path(logs_root).mkdir(parents=True, exist_ok=True)
+
+    context = Context(values=dict(launch_context or {}))
+    context.apply_updates(_graph_attr_context_seed(graph))
+    context.set("current_node", resolved_start_node)
+    context.set("outcome", "")
+    context.set("preferred_label", "")
+    context.set("internal.run_workdir", working_dir)
+    if flow_source_dir is not None:
+        context.set("internal.flow_source_dir", str(flow_source_dir))
+
+    control = ExecutionControl()
+    executor = PipelineExecutor(
+        graph,
+        runner,
+        logs_root=logs_root,
+        checkpoint_file=checkpoint_file,
+        control=control.poll,
+        on_event=emit,
+    )
+    if start_node_id is not None:
+        executor._reset_workflow_outcome_context(context)
+        executor._clear_runtime_retry_context(context)
+        executor._mirror_graph_attrs(context)
+
+    save_checkpoint(
+        Path(checkpoint_file),
+        Checkpoint(
+            current_node=resolved_start_node,
+            completed_nodes=[],
+            context=dict(context.values),
+            retry_counts={},
+        ),
+    )
+
+    with ACTIVE_RUNS_LOCK:
+        ACTIVE_RUNS[resolved_run_id] = ActiveRun(
+            run_id=resolved_run_id,
+            flow_name=flow_name,
+            working_directory=working_dir,
+            model=display_model,
+            status="running",
+            control=control,
+        )
+
+    RUNTIME.status = "running"
+    RUNTIME.outcome = None
+    RUNTIME.outcome_reason_code = None
+    RUNTIME.outcome_reason_message = None
+    RUNTIME.last_error = ""
+    RUNTIME.last_working_directory = working_dir
+    RUNTIME.last_model = display_model
+    RUNTIME.last_flow_name = flow_name
+    RUNTIME.last_run_id = resolved_run_id
+
+    _record_run_start(
+        resolved_run_id,
+        flow_name,
+        working_dir,
+        display_model,
+        spec_id=(spec_id or "").strip() or None,
+        plan_id=(plan_id or "").strip() or None,
+        continued_from_run_id=continued_from_run_id,
+        continued_from_node=continued_from_node,
+        continued_from_flow_mode=continued_from_flow_mode,
+        continued_from_flow_name=continued_from_flow_name,
+    )
+
+    await _publish_run_event(
+        resolved_run_id,
+        {
+            "type": "runtime",
+            "status": RUNTIME.status,
+            "outcome": RUNTIME.outcome,
+            "outcome_reason_code": RUNTIME.outcome_reason_code,
+            "outcome_reason_message": RUNTIME.outcome_reason_message,
+        },
+    )
+
+    await _publish_run_event(
+        resolved_run_id,
+        {
+            "type": "run_meta",
+            "working_directory": working_dir,
+            "model": display_model,
+            "flow_name": flow_name,
+            "run_id": resolved_run_id,
+            "graph_source_path": str(graphviz_export.source_path),
+            "graph_dot_path": str(graphviz_export.dot_path),
+            "graph_render_path": str(graphviz_export.rendered_path) if graphviz_export.rendered_path else None,
+            "continued_from_run_id": continued_from_run_id,
+            "continued_from_node": continued_from_node,
+            "continued_from_flow_mode": continued_from_flow_mode,
+            "continued_from_flow_name": continued_from_flow_name,
+        },
+    )
+    if graphviz_export.error:
+        await _publish_run_event(
+            resolved_run_id,
+            {
+                "type": "log",
+                "msg": f"[System] Graph render unavailable: {graphviz_export.error}",
+            },
+        )
+    await _publish_run_event(
+        resolved_run_id,
+        {
+            "type": "log",
+            "msg": f"[System] Launching run {resolved_run_id} in {working_dir} with model: {display_model}",
+        },
+    )
+
+    async def _run():
+        final_status = "failed"
+        try:
+            await _publish_lifecycle_phase(resolved_run_id, PIPELINE_LIFECYCLE_PHASES[4])
+            if start_node_id is not None:
+                result = await asyncio.to_thread(
+                    executor.run_from,
+                    resolved_start_node,
+                    context,
+                )
+            else:
+                result = await asyncio.to_thread(
+                    executor.run,
+                    context,
+                    resume=True,
+                )
+            final_status = normalize_run_status(result.status)
+            final_outcome = result.outcome
+            final_outcome_reason_code = result.outcome_reason_code
+            final_outcome_reason_message = result.outcome_reason_message
+            final_last_error = ""
+            if final_status in {"failed", "validation_error"}:
+                final_last_error = (
+                    str(result.failure_reason or "").strip()
+                    or str(final_outcome_reason_message or "").strip()
+                    or str(final_outcome_reason_code or "").strip()
+                )
+            _set_active_run_status(
+                resolved_run_id,
+                final_status,
+                last_error=final_last_error if final_last_error else None,
+            )
+            _set_active_run_outcome(
+                resolved_run_id,
+                outcome=final_outcome,
+                outcome_reason_code=final_outcome_reason_code,
+                outcome_reason_message=final_outcome_reason_message,
+            )
+            _set_active_run_completed_nodes(resolved_run_id, result.completed_nodes)
+            RUNTIME.status = final_status
+            RUNTIME.outcome = final_outcome
+            RUNTIME.outcome_reason_code = final_outcome_reason_code
+            RUNTIME.outcome_reason_message = final_outcome_reason_message
+            RUNTIME.last_error = final_last_error
+            RUNTIME.last_completed_nodes = result.completed_nodes
+            await _publish_run_event(
+                resolved_run_id,
+                {
+                    "type": "runtime",
+                    "status": final_status,
+                    "outcome": final_outcome,
+                    "outcome_reason_code": final_outcome_reason_code,
+                    "outcome_reason_message": final_outcome_reason_message,
+                    "last_error": final_last_error or None,
+                },
+            )
+            _record_run_end(
+                resolved_run_id,
+                working_dir,
+                final_status,
+                final_last_error,
+                outcome=final_outcome,
+                outcome_reason_code=final_outcome_reason_code,
+                outcome_reason_message=final_outcome_reason_message,
+            )
+            await _publish_run_event(
+                resolved_run_id,
+                {
+                    "type": "log",
+                    "msg": _terminal_status_summary(
+                        status=final_status,
+                        outcome=final_outcome,
+                        outcome_reason_code=final_outcome_reason_code,
+                        outcome_reason_message=final_outcome_reason_message,
+                        last_error=final_last_error,
+                    ),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            import traceback
+            traceback.print_exc()
+            _set_active_run_status(resolved_run_id, "failed", last_error=str(exc))
+            _set_active_run_outcome(
+                resolved_run_id,
+                outcome=None,
+                outcome_reason_code=None,
+                outcome_reason_message=None,
+            )
+            RUNTIME.status = "failed"
+            RUNTIME.outcome = None
+            RUNTIME.outcome_reason_code = None
+            RUNTIME.outcome_reason_message = None
+            RUNTIME.last_error = str(exc)
+            await _publish_run_event(
+                resolved_run_id,
+                {
+                    "type": "runtime",
+                    "status": "failed",
+                    "outcome": None,
+                    "outcome_reason_code": None,
+                    "outcome_reason_message": None,
+                },
+            )
+            _record_run_end(resolved_run_id, working_dir, "failed", str(exc), outcome=None)
+            await _publish_run_event(resolved_run_id, {"type": "log", "msg": f"⚠️ Pipeline Failed: {exc}"})
+        finally:
+            await _publish_lifecycle_phase(resolved_run_id, PIPELINE_LIFECYCLE_PHASES[5])
+            _pop_active_run(resolved_run_id)
+            if on_complete is not None:
+                try:
+                    completion_result = on_complete(resolved_run_id, final_status)
+                    if asyncio.iscoroutine(completion_result):
+                        await completion_result
+                except Exception:  # noqa: BLE001
+                    LOGGER.exception("pipeline completion callback failed for run %s", resolved_run_id)
+
+    asyncio.create_task(_run())
+    return {
+        "status": "started",
+        "pipeline_id": resolved_run_id,
+        "run_id": resolved_run_id,
+        "working_directory": working_dir,
+        "model": display_model,
+        "diagnostics": diagnostic_payloads,
+        "errors": error_payloads,
+        "graph_dot_path": str(graphviz_export.dot_path),
+        "graph_render_path": str(graphviz_export.rendered_path) if graphviz_export.rendered_path else None,
+    }
+
+
+async def _start_pipeline(
+    req: PipelineStartRequest,
+    *,
+    run_id: Optional[str] = None,
+    on_complete: Optional[Callable[[str, str], Any]] = None,
+) -> dict:
+    flow_name = (req.flow_name or "").strip()
+    flow_content = (req.flow_content or "").strip()
+    if not flow_content:
+        if not flow_name:
+            return {
+                "status": "validation_error",
+                "error": "Either flow_content or flow_name is required.",
+            }
+        try:
+            flow_content = _load_flow_content(flow_name)
+        except HTTPException as exc:
+            return {
+                "status": "validation_error" if exc.status_code == 400 else "failed",
+                "error": str(exc.detail),
+            }
+    if req.goal:
+        flow_content = _inject_pipeline_goal_impl(flow_content, req.goal)
+    flow_source_dir: Path | None = None
+    if flow_name:
+        try:
+            flow_path = _resolve_flow_path(flow_name)
+        except HTTPException:
+            flow_path = None
+        if flow_path is not None and flow_path.exists():
+            flow_source_dir = flow_path.parent.resolve()
 
     try:
         launch_context = normalize_launch_context(
@@ -796,271 +1198,19 @@ async def _start_pipeline(
             "error": str(exc),
         }
 
-    await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[3])
-
-    os.makedirs(req.working_directory, exist_ok=True)
-    working_dir = str(Path(req.working_directory).resolve())
-    selected_model, display_model = _resolve_launch_model(graph, req.model)
-
-    await _publish_run_event(
-        run_id,
-        {
-            "type": "graph",
-            **_graph_payload(graph),
-        },
+    return await _launch_pipeline_run(
+        run_id=run_id,
+        flow_name=flow_name,
+        flow_content=flow_content,
+        working_directory=req.working_directory,
+        backend_name=req.backend,
+        model=req.model,
+        launch_context=launch_context,
+        spec_id=req.spec_id,
+        plan_id=req.plan_id,
+        flow_source_dir=flow_source_dir,
+        on_complete=on_complete,
     )
-
-    loop = asyncio.get_running_loop()
-
-    def emit(message: dict):
-        asyncio.run_coroutine_threadsafe(_publish_run_event(run_id, message), loop)
-
-    try:
-        backend = _build_codergen_backend(
-            req.backend,
-            working_dir,
-            emit,
-            model=selected_model,
-        )
-    except ValueError as exc:
-        return {
-            "status": "validation_error",
-            "error": str(exc),
-        }
-
-    interviewer: Interviewer = WebInterviewer(HUMAN_BROKER, emit, flow_name, run_id)
-
-    registry = build_default_registry(
-        codergen_backend=backend,
-        interviewer=interviewer,
-    )
-    runner = BroadcastingRunner(HandlerRunner(graph, registry), emit)
-
-    run_root = _ensure_run_root_for_project(run_id, working_dir)
-    checkpoint_file = str(run_root / "state.json")
-    logs_root = str(run_root / "logs")
-    # NOTE: This artifact render intentionally uses the submitted DOT source.
-    # It does not reflect transform/normalization changes applied to `graph`.
-    # If post-transform fidelity is required, render from a serialized `graph` instead.
-    graphviz_export = export_graphviz_artifact(flow_content, run_root)
-
-    context = Context(values=_graph_attr_context_seed(graph))
-    if launch_context:
-        context.apply_updates(launch_context)
-    context.set("internal.run_workdir", working_dir)
-    if flow_source_dir is not None:
-        context.set("internal.flow_source_dir", str(flow_source_dir))
-    run_root.mkdir(parents=True, exist_ok=True)
-    Path(logs_root).mkdir(parents=True, exist_ok=True)
-    save_checkpoint(
-        Path(checkpoint_file),
-        Checkpoint(
-            current_node=_resolve_start_node_id(graph),
-            completed_nodes=[],
-            context=dict(context.values),
-            retry_counts={},
-        ),
-    )
-
-    with ACTIVE_RUNS_LOCK:
-        ACTIVE_RUNS[run_id] = ActiveRun(
-            run_id=run_id,
-            flow_name=flow_name,
-            working_directory=working_dir,
-            model=display_model,
-            status="running",
-        )
-
-    RUNTIME.status = "running"
-    RUNTIME.outcome = None
-    RUNTIME.outcome_reason_code = None
-    RUNTIME.outcome_reason_message = None
-    RUNTIME.last_error = ""
-    RUNTIME.last_working_directory = working_dir
-    RUNTIME.last_model = display_model
-    RUNTIME.last_flow_name = flow_name
-    RUNTIME.last_run_id = run_id
-
-    _record_run_start(
-        run_id,
-        flow_name,
-        working_dir,
-        display_model,
-        spec_id=(req.spec_id or "").strip() or None,
-        plan_id=(req.plan_id or "").strip() or None,
-    )
-
-    await _publish_run_event(
-        run_id,
-        {
-            "type": "runtime",
-            "status": RUNTIME.status,
-            "outcome": RUNTIME.outcome,
-            "outcome_reason_code": RUNTIME.outcome_reason_code,
-            "outcome_reason_message": RUNTIME.outcome_reason_message,
-        },
-    )
-
-    await _publish_run_event(
-        run_id,
-        {
-            "type": "run_meta",
-            "working_directory": working_dir,
-            "model": display_model,
-            "flow_name": flow_name,
-            "run_id": run_id,
-            "graph_source_path": str(graphviz_export.source_path),
-            "graph_dot_path": str(graphviz_export.dot_path),
-            "graph_render_path": str(graphviz_export.rendered_path) if graphviz_export.rendered_path else None,
-        },
-    )
-    if graphviz_export.error:
-        await _publish_run_event(
-            run_id,
-            {
-                "type": "log",
-                "msg": f"[System] Graph render unavailable: {graphviz_export.error}",
-            },
-        )
-    await _publish_run_event(
-        run_id,
-        {
-            "type": "log",
-            "msg": f"[System] Launching run {run_id} in {working_dir} with model: {display_model}",
-        },
-    )
-
-    async def _run():
-        final_status = "failed"
-        try:
-            await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[4])
-            active = _get_active_run(run_id)
-            control = active.control if active else ExecutionControl()
-            executor = PipelineExecutor(
-                graph,
-                runner,
-                logs_root=logs_root,
-                checkpoint_file=checkpoint_file,
-                control=control.poll,
-                on_event=emit,
-            )
-            result = await asyncio.to_thread(
-                executor.run,
-                context,
-                resume=True,
-            )
-            final_status = normalize_run_status(result.status)
-            final_outcome = result.outcome
-            final_outcome_reason_code = result.outcome_reason_code
-            final_outcome_reason_message = result.outcome_reason_message
-            final_last_error = ""
-            if final_status in {"failed", "validation_error"}:
-                final_last_error = (
-                    str(result.failure_reason or "").strip()
-                    or str(final_outcome_reason_message or "").strip()
-                    or str(final_outcome_reason_code or "").strip()
-                )
-            _set_active_run_status(
-                run_id,
-                final_status,
-                last_error=final_last_error if final_last_error else None,
-            )
-            _set_active_run_outcome(
-                run_id,
-                outcome=final_outcome,
-                outcome_reason_code=final_outcome_reason_code,
-                outcome_reason_message=final_outcome_reason_message,
-            )
-            _set_active_run_completed_nodes(run_id, result.completed_nodes)
-            RUNTIME.status = final_status
-            RUNTIME.outcome = final_outcome
-            RUNTIME.outcome_reason_code = final_outcome_reason_code
-            RUNTIME.outcome_reason_message = final_outcome_reason_message
-            RUNTIME.last_error = final_last_error
-            RUNTIME.last_completed_nodes = result.completed_nodes
-            await _publish_run_event(
-                run_id,
-                {
-                    "type": "runtime",
-                    "status": final_status,
-                    "outcome": final_outcome,
-                    "outcome_reason_code": final_outcome_reason_code,
-                    "outcome_reason_message": final_outcome_reason_message,
-                    "last_error": final_last_error or None,
-                },
-            )
-            _record_run_end(
-                run_id,
-                working_dir,
-                final_status,
-                final_last_error,
-                outcome=final_outcome,
-                outcome_reason_code=final_outcome_reason_code,
-                outcome_reason_message=final_outcome_reason_message,
-            )
-            await _publish_run_event(
-                run_id,
-                {
-                    "type": "log",
-                    "msg": _terminal_status_summary(
-                        status=final_status,
-                        outcome=final_outcome,
-                        outcome_reason_code=final_outcome_reason_code,
-                        outcome_reason_message=final_outcome_reason_message,
-                        last_error=final_last_error,
-                    ),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            import traceback
-            traceback.print_exc()
-            _set_active_run_status(run_id, "failed", last_error=str(exc))
-            _set_active_run_outcome(
-                run_id,
-                outcome=None,
-                outcome_reason_code=None,
-                outcome_reason_message=None,
-            )
-            RUNTIME.status = "failed"
-            RUNTIME.outcome = None
-            RUNTIME.outcome_reason_code = None
-            RUNTIME.outcome_reason_message = None
-            RUNTIME.last_error = str(exc)
-            await _publish_run_event(
-                run_id,
-                {
-                    "type": "runtime",
-                    "status": "failed",
-                    "outcome": None,
-                    "outcome_reason_code": None,
-                    "outcome_reason_message": None,
-                },
-            )
-            _record_run_end(run_id, working_dir, "failed", str(exc), outcome=None)
-            await _publish_run_event(run_id, {"type": "log", "msg": f"⚠️ Pipeline Failed: {exc}"})
-        finally:
-            await _publish_lifecycle_phase(run_id, PIPELINE_LIFECYCLE_PHASES[5])
-            _pop_active_run(run_id)
-            if on_complete is not None:
-                try:
-                    completion_result = on_complete(run_id, final_status)
-                    if asyncio.iscoroutine(completion_result):
-                        await completion_result
-                except Exception:  # noqa: BLE001
-                    LOGGER.exception("pipeline completion callback failed for run %s", run_id)
-
-    asyncio.create_task(_run())
-    return {
-        "status": "started",
-        "pipeline_id": run_id,
-        "run_id": run_id,
-        "working_directory": working_dir,
-        "model": display_model,
-        "diagnostics": diagnostic_payloads,
-        "errors": error_payloads,
-        "graph_dot_path": str(graphviz_export.dot_path),
-        "graph_render_path": str(graphviz_export.rendered_path) if graphviz_export.rendered_path else None,
-    }
 
 
 @attractor_router.post("/pipelines")
@@ -1068,11 +1218,63 @@ async def create_pipeline(req: PipelineStartRequest):
     return await _start_pipeline(req, run_id=req.run_id)
 
 
+@attractor_router.post("/pipelines/{pipeline_id}/continue")
+async def continue_pipeline(pipeline_id: str, req: PipelineContinueRequest):
+    source_record, source_checkpoint = _resolve_continue_source_record(pipeline_id)
+
+    try:
+        flow_name, flow_content, flow_source_dir = _resolve_continue_flow_source(
+            pipeline_id=pipeline_id,
+            source_record=source_record,
+            flow_source_mode=req.flow_source_mode,
+            flow_name=req.flow_name,
+        )
+    except ValueError as exc:
+        return {
+            "status": "validation_error",
+            "error": str(exc),
+        }
+    except HTTPException as exc:
+        return {
+            "status": "validation_error" if exc.status_code == 400 else "failed",
+            "error": str(exc.detail),
+        }
+
+    start_node = (req.start_node or "").strip()
+    if not start_node:
+        return {
+            "status": "validation_error",
+            "error": "start_node is required.",
+        }
+
+    working_directory = (req.working_directory or "").strip() or source_record.working_directory
+    model = req.model if req.model is not None else source_record.model
+
+    return await _launch_pipeline_run(
+        run_id=None,
+        flow_name=flow_name,
+        flow_content=flow_content,
+        working_directory=working_directory,
+        backend_name="codex-app-server",
+        model=model,
+        launch_context=dict(source_checkpoint.context),
+        spec_id=source_record.spec_id,
+        plan_id=source_record.plan_id,
+        flow_source_dir=flow_source_dir,
+        start_node_id=start_node,
+        continued_from_run_id=source_record.run_id,
+        continued_from_node=start_node,
+        continued_from_flow_mode=req.flow_source_mode.strip().lower(),
+        continued_from_flow_name=(req.flow_name or "").strip() or None,
+    )
+
+
 @attractor_router.get("/pipelines/{pipeline_id}")
 async def get_pipeline(pipeline_id: str):
     checkpoint_current_node, checkpoint_completed_nodes = _read_checkpoint_progress(pipeline_id)
     active = _get_active_run(pipeline_id)
     if active:
+        record = _read_run_meta(_run_meta_path(pipeline_id))
         completed_nodes = list(active.completed_nodes) if active.completed_nodes else checkpoint_completed_nodes
         return {
             "pipeline_id": pipeline_id,
@@ -1086,6 +1288,10 @@ async def get_pipeline(pipeline_id: str):
             "last_error": active.last_error,
             "completed_nodes": completed_nodes,
             "progress": _pipeline_progress_payload(checkpoint_current_node, completed_nodes),
+            "continued_from_run_id": record.continued_from_run_id if record else None,
+            "continued_from_node": record.continued_from_node if record else None,
+            "continued_from_flow_mode": record.continued_from_flow_mode if record else None,
+            "continued_from_flow_name": record.continued_from_flow_name if record else None,
         }
 
     record = _read_run_meta(_run_meta_path(pipeline_id))
@@ -1105,6 +1311,10 @@ async def get_pipeline(pipeline_id: str):
         "progress": _pipeline_progress_payload(checkpoint_current_node, checkpoint_completed_nodes),
         "started_at": record.started_at,
         "ended_at": record.ended_at,
+        "continued_from_run_id": record.continued_from_run_id,
+        "continued_from_node": record.continued_from_node,
+        "continued_from_flow_mode": record.continued_from_flow_mode,
+        "continued_from_flow_name": record.continued_from_flow_name,
     }
 
 
@@ -1265,13 +1475,7 @@ async def get_pipeline_graph_preview(pipeline_id: str):
     if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
         raise HTTPException(status_code=404, detail="Unknown pipeline")
 
-    graph_dir = _run_root(pipeline_id) / "artifacts" / "graphviz"
-    source_path = graph_dir / "pipeline-source.dot"
-    fallback_path = graph_dir / "pipeline.dot"
-    graph_source_path = source_path if source_path.exists() else fallback_path
-    if not graph_source_path.exists():
-        raise HTTPException(status_code=404, detail="Run graph preview unavailable")
-
+    graph_source_path = _resolve_run_graph_source_path(pipeline_id)
     return _preview_payload_from_dot_source(graph_source_path.read_text(encoding="utf-8"))
 
 

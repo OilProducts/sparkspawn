@@ -1561,7 +1561,7 @@ describe('ProjectsPanel', () => {
     await waitFor(() => {
       expect(useStore.getState().selectedRunId).toBe('run-flow-123')
       expect(useStore.getState().executionFlow).toBe('test-dispatch.dot')
-      expect(useStore.getState().viewMode).toBe('execution')
+      expect(useStore.getState().viewMode).toBe('runs')
     })
   })
 

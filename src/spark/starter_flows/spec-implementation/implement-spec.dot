@@ -15,6 +15,7 @@ digraph implement_spec_program {
   rewrite_milestones [allow_partial=false, auto_status=false, codergen.response_contract="status_envelope", goal_gate=false, join_policy="wait_all", label="Rewrite Milestones", max_parallel=4, prompt="Read .specflow/milestones.json, .specflow/current-milestone.json, and .specflow/rewrite-milestones.json. Replace the current milestone with the milestone entries from rewrite-milestones.json, set each replacement milestone status to pending and attempts to 0 unless already provided, clear current_milestone_id in .specflow/state.json, remove or clear .specflow/current-milestone.json, keep both JSON files valid, and respond with ONLY a JSON status envelope. Return outcome success only after the milestone plan is updated.", reasoning_effort="high", shape="box"];
   run_milestone [allow_partial=false, auto_status=false, goal_gate=false, join_policy="wait_all", label="Run Milestone Worker", manager.actions="", manager.max_cycles=1, manager.poll_interval=0ms, max_parallel=4, reasoning_effort="high", shape="house", type="stack.manager_loop"];
   start [allow_partial=false, auto_status=false, goal_gate=false, join_policy="wait_all", label="Start", max_parallel=4, reasoning_effort="high", shape="Mdiamond"];
+  validate_milestone_plan [allow_partial=false, auto_status=false, codergen.response_contract="status_envelope", goal_gate=false, join_policy="wait_all", label="Validate Milestone Plan", max_parallel=4, prompt="Read .specflow/spec-source.md, .specflow/requirements.json, .specflow/milestones.json, and .specflow/architecture.md. Validate the milestone and requirement ledgers before any long-running implementation work begins. Confirm milestone ids are unique, every milestone depends_on id exists, no milestone depends on itself, the milestone dependency graph is acyclic, every requirement milestone_id points to a real milestone, every milestone requirement_ids entry exists in the requirement ledger and stays consistent with the requirements assigned to that milestone, and requirement dependency ordering is compatible with milestone ordering. Repair purely mechanical ledger inconsistencies in place when the intended decomposition is still clear, keeping both JSON files valid. If the decomposition is structurally wrong, ambiguous, or cannot be repaired truthfully from the written ledgers, leave the files valid and return outcome fail with preferred_label Replan so milestone planning can be regenerated. If the plan is coherent after any needed repairs, return outcome success. Respond with ONLY a JSON status envelope.", reasoning_effort="high", shape="box"];
   audit_milestone -> blocked_exit [condition="outcome=fail && preferred_label=Blocked", label="Blocked", loop_restart=false];
   audit_milestone -> commit_milestone [condition="outcome=success", label="Commit", loop_restart=false];
   audit_milestone -> revise_architecture [condition="outcome=fail && preferred_label=ReworkArchitecture", label="Rework Architecture", loop_restart=false];
@@ -30,14 +31,16 @@ digraph implement_spec_program {
   next_milestone -> blocked_exit [condition="outcome=fail && preferred_label=Blocked", label="Blocked", loop_restart=false];
   next_milestone -> final_conformance_audit [condition="outcome=success && preferred_label=Audit", label="Audit", loop_restart=false];
   next_milestone -> run_milestone [condition="outcome=success && preferred_label=Work", label="Work", loop_restart=false];
-  plan_milestones -> next_milestone [loop_restart=false];
+  plan_milestones -> validate_milestone_plan [loop_restart=false];
   prepare_workspace -> extract_requirements [loop_restart=false];
   review_architecture -> blocked_exit [label="Block", loop_restart=false];
   review_architecture -> plan_milestones [label="Approve", loop_restart=false];
   review_architecture -> revise_architecture [label="Request Rework", loop_restart=false];
   revise_architecture -> review_architecture [loop_restart=false];
-  rewrite_milestones -> next_milestone [loop_restart=false];
+  rewrite_milestones -> validate_milestone_plan [loop_restart=false];
   run_milestone -> audit_milestone [condition="outcome=fail", label="Audit Failure", loop_restart=false];
   run_milestone -> audit_milestone [condition="outcome=success", label="Audit Success", loop_restart=false];
   start -> prepare_workspace [loop_restart=false];
+  validate_milestone_plan -> next_milestone [condition="outcome=success", label="Validated", loop_restart=false];
+  validate_milestone_plan -> plan_milestones [condition="outcome=fail && preferred_label=Replan", label="Replan", loop_restart=false];
 }

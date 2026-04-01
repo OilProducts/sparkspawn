@@ -1,26 +1,40 @@
 import { useEffect, useState } from 'react'
 
-import { buildHydratedFlowGraph, normalizeLegacyDot } from '@/features/workflow-canvas'
+import { buildHydratedFlowGraph, normalizeLegacyDot, type HydratedFlowGraph } from '@/features/workflow-canvas'
 import { isAbortError } from '@/lib/api/shared'
 import { useStore } from '@/store'
+import type { ExecutionContinuationDraft } from '@/state/store-types'
 
-import { loadExecutionFlowPayload, loadExecutionFlowPreview } from '../services/executionPreviewTransport'
+import {
+    loadExecutionFlowPayload,
+    loadExecutionFlowPreview,
+    loadExecutionRunGraphPreview,
+} from '../services/executionPreviewTransport'
 
 const unexpectedPreviewLoadMessage = 'Unable to load flow preview for launch inputs.'
 
-export function useExecutionLaunchPreview(executionFlow: string | null) {
+export function useExecutionLaunchPreview(
+    executionFlow: string | null,
+    executionContinuation: ExecutionContinuationDraft | null,
+) {
     const uiDefaults = useStore((state) => state.uiDefaults)
     const replaceExecutionGraphAttrs = useStore((state) => state.replaceExecutionGraphAttrs)
     const setExecutionDiagnostics = useStore((state) => state.setExecutionDiagnostics)
     const clearExecutionDiagnostics = useStore((state) => state.clearExecutionDiagnostics)
     const [isLoadingPreview, setIsLoadingPreview] = useState(false)
     const [previewLoadError, setPreviewLoadError] = useState<string | null>(null)
+    const [hydratedGraph, setHydratedGraph] = useState<HydratedFlowGraph | null>(null)
 
     useEffect(() => {
-        if (!executionFlow) {
+        const useRunSnapshot =
+            executionContinuation?.flowSourceMode === 'snapshot'
+            && Boolean(executionContinuation.sourceRunId)
+        const canLoadFlowPreview = Boolean(executionFlow)
+        if (!useRunSnapshot && !canLoadFlowPreview) {
             replaceExecutionGraphAttrs({})
             clearExecutionDiagnostics()
             setPreviewLoadError(null)
+            setHydratedGraph(null)
             setIsLoadingPreview(false)
             return
         }
@@ -32,35 +46,58 @@ export function useExecutionLaunchPreview(executionFlow: string | null) {
             setIsLoadingPreview(true)
             setPreviewLoadError(null)
             try {
-                const payload = await loadExecutionFlowPayload(executionFlow, { signal: loadAbort.signal })
+                let preview
+                let hydrated: HydratedFlowGraph | null = null
+
+                if (useRunSnapshot && executionContinuation) {
+                    preview = await loadExecutionRunGraphPreview(executionContinuation.sourceRunId, { signal: loadAbort.signal })
+                    if (cancelled) {
+                        return
+                    }
+                    hydrated = buildHydratedFlowGraph(
+                        executionContinuation.sourceFlowName || executionContinuation.sourceRunId,
+                        preview,
+                        uiDefaults,
+                    )
+                } else if (executionFlow) {
+                    const payload = await loadExecutionFlowPayload(executionFlow, { signal: loadAbort.signal })
+                    if (cancelled) {
+                        return
+                    }
+
+                    const normalizedContent = normalizeLegacyDot(payload.content)
+                    preview = await loadExecutionFlowPreview(normalizedContent, { signal: loadAbort.signal })
+                    if (cancelled) {
+                        return
+                    }
+
+                    hydrated = buildHydratedFlowGraph(
+                        executionFlow,
+                        preview,
+                        uiDefaults,
+                        normalizedContent,
+                    )
+                } else {
+                    preview = null
+                }
+
                 if (cancelled) {
                     return
                 }
 
-                const normalizedContent = normalizeLegacyDot(payload.content)
-                const preview = await loadExecutionFlowPreview(normalizedContent, { signal: loadAbort.signal })
-                if (cancelled) {
-                    return
-                }
-
-                if (preview.diagnostics) {
+                if (preview?.diagnostics) {
                     setExecutionDiagnostics(preview.diagnostics)
                 } else {
                     clearExecutionDiagnostics()
                 }
-
-                const hydratedGraph = buildHydratedFlowGraph(
-                    executionFlow,
-                    preview,
-                    uiDefaults,
-                    normalizedContent,
-                )
-                replaceExecutionGraphAttrs(hydratedGraph?.graphAttrs ?? {})
+                setHydratedGraph(hydrated)
+                replaceExecutionGraphAttrs(hydrated?.graphAttrs ?? {})
             } catch (error) {
                 if (loadAbort.signal.aborted || isAbortError(error)) {
                     return
                 }
                 console.error(error)
+                setHydratedGraph(null)
                 replaceExecutionGraphAttrs({})
                 clearExecutionDiagnostics()
                 setPreviewLoadError(unexpectedPreviewLoadMessage)
@@ -79,6 +116,7 @@ export function useExecutionLaunchPreview(executionFlow: string | null) {
         }
     }, [
         clearExecutionDiagnostics,
+        executionContinuation,
         executionFlow,
         replaceExecutionGraphAttrs,
         setExecutionDiagnostics,
@@ -88,5 +126,6 @@ export function useExecutionLaunchPreview(executionFlow: string | null) {
     return {
         isLoadingPreview,
         previewLoadError,
+        hydratedGraph,
     }
 }

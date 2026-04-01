@@ -16,6 +16,10 @@ export interface RunRecord {
     ended_at?: string | null
     last_error?: string
     token_usage?: number | null
+    continued_from_run_id?: string | null
+    continued_from_node?: string | null
+    continued_from_flow_mode?: string | null
+    continued_from_flow_name?: string | null
 }
 
 export interface CheckpointResponse {
@@ -181,6 +185,8 @@ export const STATUS_LABELS: Record<string, string> = {
 }
 
 export const canCancelRun = (status: string) => status === 'running'
+
+export const canContinueRun = (status: string) => !['running', 'cancel_requested', 'abort_requested', 'pause_requested'].includes(status)
 
 export const cancelRunActionLabel = (status: string) => {
     if (status === 'cancel_requested' || status === 'abort_requested') {

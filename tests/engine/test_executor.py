@@ -16,6 +16,14 @@ REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / 
 STARTER_SPEC_IMPLEMENTATION_FIXTURE = (
     Path(__file__).resolve().parents[2] / "src" / "spark" / "starter_flows" / "spec-implementation" / "implement-spec.dot"
 )
+STARTER_SPEC_IMPLEMENTATION_MILESTONE_FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "spark"
+    / "starter_flows"
+    / "spec-implementation"
+    / "implement-milestone.dot"
+)
 
 
 class _WorkflowBackend:
@@ -1095,6 +1103,98 @@ class TestExecutor:
         graph = parse_dot(STARTER_SPEC_IMPLEMENTATION_FIXTURE.read_text(encoding="utf-8"))
 
         assert graph.nodes["prepare_workspace"].attrs["max_retries"].value == 1
+
+    def test_starter_spec_implementation_replans_invalid_milestones_before_dispatch(self):
+        graph = parse_dot(STARTER_SPEC_IMPLEMENTATION_FIXTURE.read_text(encoding="utf-8"))
+        calls: list[str] = []
+        validate_attempts = 0
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            nonlocal validate_attempts
+            del prompt, context
+            calls.append(node_id)
+            if node_id == "review_architecture":
+                return Outcome(status=OutcomeStatus.SUCCESS, preferred_label="Approve")
+            if node_id == "validate_milestone_plan":
+                validate_attempts += 1
+                if validate_attempts == 1:
+                    return Outcome(
+                        status=OutcomeStatus.FAIL,
+                        preferred_label="Replan",
+                        failure_reason="milestone cycle detected",
+                    )
+                return Outcome(status=OutcomeStatus.SUCCESS)
+            if node_id == "next_milestone":
+                return Outcome(
+                    status=OutcomeStatus.FAIL,
+                    preferred_label="Blocked",
+                    failure_reason="stop after validation coverage",
+                )
+            if node_id == "blocked_exit":
+                return Outcome(status=OutcomeStatus.SUCCESS)
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context(values={"context.request.spec_path": "spec.md"}))
+
+        assert result.status == "completed"
+        assert calls == [
+            "start",
+            "prepare_workspace",
+            "extract_requirements",
+            "design_architecture",
+            "review_architecture",
+            "plan_milestones",
+            "validate_milestone_plan",
+            "plan_milestones",
+            "validate_milestone_plan",
+            "next_milestone",
+            "blocked_exit",
+        ]
+        assert "run_milestone" not in calls
+
+    def test_starter_milestone_worker_reextracts_invalid_items_before_next_item(self):
+        graph = parse_dot(STARTER_SPEC_IMPLEMENTATION_MILESTONE_FIXTURE.read_text(encoding="utf-8"))
+        calls: list[str] = []
+        validate_attempts = 0
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            nonlocal validate_attempts
+            del prompt, context
+            calls.append(node_id)
+            if node_id == "validate_item_plan":
+                validate_attempts += 1
+                if validate_attempts == 1:
+                    return Outcome(
+                        status=OutcomeStatus.FAIL,
+                        preferred_label="Reextract",
+                        failure_reason="item dependency cycle detected",
+                    )
+                return Outcome(status=OutcomeStatus.SUCCESS)
+            if node_id == "next_item":
+                return Outcome(
+                    status=OutcomeStatus.FAIL,
+                    preferred_label="Blocked",
+                    failure_reason="stop after validation coverage",
+                )
+            if node_id == "blocked_exit":
+                return Outcome(status=OutcomeStatus.SUCCESS)
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "completed"
+        assert calls == [
+            "start",
+            "prepare_milestone_state",
+            "extract_items",
+            "validate_item_plan",
+            "extract_items",
+            "validate_item_plan",
+            "next_item",
+            "blocked_exit",
+        ]
+        assert "plan_current" not in calls
+        assert "implement_current" not in calls
 
     def test_starter_spec_implementation_flow_restarts_child_worker_for_each_selected_milestone(
         self, tmp_path

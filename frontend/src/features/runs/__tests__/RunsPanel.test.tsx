@@ -23,6 +23,9 @@ const resetRunsState = () => {
     activeProjectPath: null,
     selectedRunId: null,
     executionFlow: null,
+    executionContinuation: null,
+    workingDir: '',
+    model: '',
     projectRegistry: {},
     projectSessionsByPath: {},
     recentProjectPaths: [],
@@ -429,5 +432,200 @@ describe('RunsPanel', () => {
 
     expect(useStore.getState().viewMode).toBe('runs')
     expect(useStore.getState().selectedRunId).toBe('run-selected')
+  })
+
+  it('hands off continuation from the selected run into execution mode', async () => {
+    const selectedRun = makeRun({
+      run_id: 'run-to-continue',
+      flow_name: 'selected.dot',
+      status: 'failed',
+      project_path: '/tmp/project-one',
+      working_directory: '/tmp/project-one/worktree',
+      model: 'codex default (config/profile)',
+    })
+
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({ runs: [selectedRun] })
+      }
+      if (url.includes('/attractor/pipelines/run-to-continue/checkpoint')) {
+        return jsonResponse({
+          pipeline_id: 'run-to-continue',
+          checkpoint: {
+            completed_nodes: ['prepare'],
+            current_node: 'failed_node',
+          },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-to-continue/context')) {
+        return jsonResponse({
+          pipeline_id: 'run-to-continue',
+          context: {
+            active_item: 'REQ-001',
+          },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-to-continue/artifacts')) {
+        return jsonResponse({
+          pipeline_id: 'run-to-continue',
+          artifacts: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-to-continue/graph-preview')) {
+        return jsonResponse({
+          status: 'ok',
+          graph: {
+            graph_attrs: {},
+            nodes: [
+              { id: 'start', label: 'Start', shape: 'Mdiamond' },
+              { id: 'failed_node', label: 'Failed Node', shape: 'box' },
+              { id: 'done', label: 'Done', shape: 'Msquare' },
+            ],
+            edges: [
+              { from: 'start', to: 'failed_node', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+              { from: 'failed_node', to: 'done', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+            ],
+          },
+          diagnostics: [],
+          errors: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-to-continue/questions')) {
+        return jsonResponse({
+          pipeline_id: 'run-to-continue',
+          questions: [],
+        })
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+    })
+
+    const user = userEvent.setup()
+    renderRunsPanel()
+
+    await waitFor(() => {
+      expect(screen.getByText('selected.dot')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('run-history-row'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-summary-continue-button')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('run-summary-continue-button'))
+
+    expect(useStore.getState().viewMode).toBe('execution')
+    expect(useStore.getState().activeProjectPath).toBe('/tmp/project-one')
+    expect(useStore.getState().executionFlow).toBe('selected.dot')
+    expect(useStore.getState().workingDir).toBe('/tmp/project-one/worktree')
+    expect(useStore.getState().model).toBe('')
+    expect(useStore.getState().executionContinuation).toEqual({
+      sourceRunId: 'run-to-continue',
+      sourceFlowName: 'selected.dot',
+      sourceWorkingDirectory: '/tmp/project-one/worktree',
+      sourceModel: 'codex default (config/profile)',
+      flowSourceMode: 'snapshot',
+      startNodeId: null,
+    })
+  })
+
+  it('only shows continuation for inactive runs', async () => {
+    const runningRun = makeRun({
+      run_id: 'run-running',
+      flow_name: 'selected.dot',
+      status: 'running',
+      ended_at: null,
+    })
+
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({ runs: [runningRun] })
+      }
+      if (url.includes('/attractor/pipelines/run-running/checkpoint')) {
+        return jsonResponse({
+          pipeline_id: 'run-running',
+          checkpoint: {
+            completed_nodes: ['prepare'],
+            current_node: 'work',
+          },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-running/context')) {
+        return jsonResponse({
+          pipeline_id: 'run-running',
+          context: {},
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-running/artifacts')) {
+        return jsonResponse({
+          pipeline_id: 'run-running',
+          artifacts: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-running/graph-preview')) {
+        return jsonResponse({
+          status: 'ok',
+          graph: {
+            graph_attrs: {},
+            nodes: [
+              { id: 'start', label: 'Start', shape: 'Mdiamond' },
+              { id: 'work', label: 'Work', shape: 'box' },
+              { id: 'done', label: 'Done', shape: 'Msquare' },
+            ],
+            edges: [
+              { from: 'start', to: 'work', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+              { from: 'work', to: 'done', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+            ],
+          },
+          diagnostics: [],
+          errors: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-running/questions')) {
+        return jsonResponse({
+          pipeline_id: 'run-running',
+          questions: [],
+        })
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+    })
+
+    const user = userEvent.setup()
+    renderRunsPanel()
+
+    await waitFor(() => {
+      expect(screen.getByText('selected.dot')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('run-history-row'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-summary-panel')).toBeVisible()
+    })
+
+    expect(screen.queryByTestId('run-summary-continue-button')).not.toBeInTheDocument()
+    expect(screen.getByTestId('run-summary-cancel-button')).toBeVisible()
   })
 })

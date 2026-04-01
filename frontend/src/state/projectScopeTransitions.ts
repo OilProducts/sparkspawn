@@ -24,6 +24,7 @@ type ProjectScopeTransitionState = Pick<
     | 'workingDir'
     | 'activeFlow'
     | 'executionFlow'
+    | 'executionContinuation'
     | 'selectedRunId'
     | 'runtimeStatus'
     | 'runtimeOutcome'
@@ -66,6 +67,7 @@ const preserveEditorSession = (state: AppState) => ({
 
 const preserveExecutionSession = (state: AppState) => ({
     executionFlow: state.executionFlow,
+    executionContinuation: state.executionContinuation,
 })
 
 const preserveRunInspectionState = (state: AppState) => ({

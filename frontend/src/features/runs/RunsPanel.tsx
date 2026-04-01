@@ -25,6 +25,10 @@ export function RunsPanel() {
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const setViewMode = useStore((state) => state.setViewMode)
     const setActiveProjectPath = useStore((state) => state.setActiveProjectPath)
+    const setExecutionFlow = useStore((state) => state.setExecutionFlow)
+    const setExecutionContinuation = useStore((state) => state.setExecutionContinuation)
+    const setWorkingDir = useStore((state) => state.setWorkingDir)
+    const setModel = useStore((state) => state.setModel)
     const setSpecId = useStore((state) => state.setSpecId)
     const setPlanId = useStore((state) => state.setPlanId)
     const {
@@ -124,6 +128,27 @@ export function RunsPanel() {
         setSelectedRunId(run.run_id)
     }
 
+    const beginContinuation = (run: RunRecord) => {
+        const projectPath = run.project_path || run.working_directory || null
+        const normalizedModel = run.model === 'codex default (config/profile)' ? '' : run.model || ''
+
+        if (projectPath) {
+            setActiveProjectPath(projectPath)
+        }
+        setExecutionFlow(run.flow_name || null)
+        setWorkingDir(run.working_directory || projectPath || '')
+        setModel(normalizedModel)
+        setExecutionContinuation({
+            sourceRunId: run.run_id,
+            sourceFlowName: run.flow_name || null,
+            sourceWorkingDirectory: run.working_directory || projectPath || '',
+            sourceModel: run.model || null,
+            flowSourceMode: 'snapshot',
+            startNodeId: null,
+        })
+        setViewMode('execution')
+    }
+
     const openRunArtifact = (run: RunRecord, artifactType: 'spec' | 'plan') => {
         const artifactId = artifactType === 'spec' ? run.spec_id : run.plan_id
         if (!artifactId) {
@@ -174,6 +199,7 @@ export function RunsPanel() {
                             <RunSummaryCard
                                 activeProjectPath={activeProjectPath}
                                 now={now}
+                                onContinueFromRun={beginContinuation}
                                 onOpenRunArtifact={openRunArtifact}
                                 onRequestCancel={(runId, currentStatus) => {
                                     void requestCancel(runId, currentStatus)
