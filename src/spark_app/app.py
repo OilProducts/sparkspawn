@@ -18,7 +18,7 @@ from workspace.triggers import TriggerRuntime
 
 
 DEFAULT_EXECUTION_PLANNING_FLOW = "plan-generation.dot"
-DEFAULT_EXECUTION_DISPATCH_FLOW = "implement-spec.dot"
+DEFAULT_EXECUTION_DISPATCH_FLOW = "spec-implementation/implement-spec.dot"
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 TRIGGER_RUNTIME = TriggerRuntime(

@@ -70,7 +70,6 @@ src/spark/guides/dot-authoring.md
 src/spark/guides/spark-flow-extensions.md
 src/spark/starter_flows/human-review-loop.dot
 src/spark/starter_flows/implement-review-loop.dot
-src/spark/starter_flows/implement-spec.dot
 src/spark/starter_flows/parallel-review.dot
 src/spark/starter_flows/plan-generation.dot
 src/spark/starter_flows/simple-linear.dot

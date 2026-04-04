@@ -46,7 +46,11 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         help="Create a pending run-request artifact in a conversation",
     )
     run_request.add_argument("--conversation", required=True, help="Conversation handle in adjective-noun form.")
-    run_request.add_argument("--flow", required=True, help="Flow name, for example 'implement-spec.dot'.")
+    run_request.add_argument(
+        "--flow",
+        required=True,
+        help="Flow name, for example 'spec-implementation/implement-spec.dot'.",
+    )
     run_request.add_argument("--summary", required=True, help="Short explanation for the requested run.")
     goal_group = run_request.add_mutually_exclusive_group()
     goal_group.add_argument("--goal", dest="goal_text", help="Inline goal text, or '-' to read from stdin.")
@@ -64,7 +68,11 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         "launch",
         help="Launch a flow immediately",
     )
-    launch.add_argument("--flow", required=True, help="Flow name, for example 'implement-spec.dot'.")
+    launch.add_argument(
+        "--flow",
+        required=True,
+        help="Flow name, for example 'spec-implementation/implement-spec.dot'.",
+    )
     launch.add_argument("--summary", required=True, help="Short explanation for the launch.")
     launch.add_argument("--conversation", help="Conversation handle in adjective-noun form.")
     launch.add_argument("--project", dest="project_path", help="Explicit project path when not launching from conversation context.")

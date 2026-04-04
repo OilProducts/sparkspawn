@@ -252,7 +252,7 @@ When a run behaves unexpectedly, check these first:
 
 After this tutorial, the next useful flows are:
 
-- [starter-flows/implement-spec.dot](../starter-flows/implement-spec.dot) for long-running spec-driven implementation with flow-authored queue state under `.spark/specflow/`
+- [starter-flows/spec-implementation/implement-spec.dot](../starter-flows/spec-implementation/implement-spec.dot) for long-running greenfield spec implementation with repo-local state under `.specflow/`
 - [starter-flows/human-review-loop.dot](../starter-flows/human-review-loop.dot) for explicit human approval
 - [starter-flows/parallel-review.dot](../starter-flows/parallel-review.dot) for fan-out and fan-in
 - [starter-flows/supervision/supervised-implementation.dot](../starter-flows/supervision/supervised-implementation.dot) for parent/child supervision with `stack.manager_loop`
