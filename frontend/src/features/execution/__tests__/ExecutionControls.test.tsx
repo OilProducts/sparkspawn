@@ -264,7 +264,7 @@ describe('Execution controls behavior', () => {
 
     expect(screen.getByTestId('execution-launch-panel')).toBeVisible()
     expect(screen.getByTestId('execution-no-flow-state')).toHaveTextContent('Select a flow to launch.')
-    expect(screen.queryByTestId('run-console-panel')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('run-activity-panel')).not.toBeInTheDocument()
     expect(screen.queryByTestId('run-graph-panel')).not.toBeInTheDocument()
   })
 

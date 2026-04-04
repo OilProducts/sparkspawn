@@ -72,7 +72,12 @@ export interface PipelineStatusResponse {
     model?: string
     last_error?: string | null
     token_usage?: number | null
+    current_node?: string | null
     completed_nodes?: string[]
+    progress?: {
+        current_node?: string | null
+        completed_nodes?: string[]
+    }
     started_at?: string
     ended_at?: string | null
     continued_from_run_id?: string | null
@@ -127,6 +132,7 @@ export interface RunRecordResponse {
     ended_at?: string | null
     last_error?: string
     token_usage?: number | null
+    current_node?: string | null
     continued_from_run_id?: string | null
     continued_from_node?: string | null
     continued_from_flow_mode?: string | null
@@ -219,17 +225,33 @@ export function parsePipelineStartResponse(payload: unknown, endpoint = '/attrac
 export function parsePipelineStatusResponse(payload: unknown, endpoint = '/attractor/pipelines/{id}'): PipelineStatusResponse {
     const record = expectObjectRecord(payload, endpoint)
     const pipelineId = expectString(record.pipeline_id, endpoint, 'pipeline_id')
+    const progressRecord = asUnknownRecord(record.progress)
+    const progressCurrentNode = typeof progressRecord?.current_node === 'string'
+        ? progressRecord.current_node
+        : progressRecord?.current_node === null
+            ? null
+            : null
+    const progressCompletedNodes = asOptionalStringArray(progressRecord?.completed_nodes) ?? undefined
     const runRecord = parseRunRecord({
         ...record,
         run_id: typeof record.run_id === 'string' ? record.run_id : pipelineId,
+        current_node: progressCurrentNode,
     })
     if (!runRecord) {
         throw new ApiSchemaError(endpoint, 'Expected a valid run detail payload.')
     }
+    const completedNodes = asOptionalStringArray(record.completed_nodes) ?? progressCompletedNodes
     return {
         pipeline_id: pipelineId,
         ...runRecord,
-        completed_nodes: asOptionalStringArray(record.completed_nodes),
+        current_node: progressCurrentNode,
+        completed_nodes: completedNodes,
+        progress: progressRecord
+            ? {
+                current_node: progressCurrentNode,
+                completed_nodes: progressCompletedNodes,
+            }
+            : undefined,
     }
 }
 
@@ -335,6 +357,7 @@ function parseRunRecord(payload: unknown): RunRecordResponse | null {
             : record.token_usage === null
                 ? null
                 : undefined,
+        current_node: asOptionalNullableString(record.current_node),
         continued_from_run_id: asOptionalNullableString(record.continued_from_run_id),
         continued_from_node: asOptionalNullableString(record.continued_from_node),
         continued_from_flow_mode: asOptionalNullableString(record.continued_from_flow_mode),

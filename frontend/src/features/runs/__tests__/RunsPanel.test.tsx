@@ -207,7 +207,7 @@ describe('RunsPanel', () => {
     expect(fetchMock).toHaveBeenCalled()
   })
 
-  it('keeps the run selector ahead of the detail stack, removes row actions, and shows graph plus console in the detail pane', async () => {
+  it('keeps the run selector ahead of the detail stack, uses the new activity-first hierarchy, and collapses the graph by default', async () => {
     window.innerWidth = 1400
     window.dispatchEvent(new Event('resize'))
 
@@ -326,24 +326,48 @@ describe('RunsPanel', () => {
     })
 
     const runSummaryPanel = screen.getByTestId('run-summary-panel')
+    const runActivityPanel = screen.getByTestId('run-activity-panel')
+    const runTimelinePanel = screen.getByTestId('run-event-timeline-panel')
+    const runCheckpointPanel = screen.getByTestId('run-checkpoint-panel')
+    const runGraphPanel = screen.getByTestId('run-graph-panel')
     expect(screen.getByTestId('run-summary-spec-artifact-link')).toBeVisible()
     expect(screen.getByTestId('run-summary-plan-artifact-link')).toBeVisible()
     expect(screen.getByTestId('run-summary-cancel-button')).toBeEnabled()
-    expect(screen.getByTestId('run-graph-panel')).toBeVisible()
-    expect(screen.getByTestId('run-console-panel')).toBeVisible()
+    expect(runActivityPanel).toBeVisible()
+    expect(runTimelinePanel).toBeVisible()
+    expect(runCheckpointPanel).toBeVisible()
+    expect(runGraphPanel).toBeVisible()
     expect(screen.getByTestId('run-summary-toggle-button')).toBeVisible()
+    expect(screen.getByTestId('run-activity-toggle-button')).toBeVisible()
     expect(screen.getByTestId('run-graph-toggle-button')).toBeVisible()
-    expect(screen.getByTestId('run-console-toggle-button')).toBeVisible()
+    expect(screen.getByTestId('run-activity-logs-toggle-button')).toBeVisible()
     expect(screen.getByTestId('run-checkpoint-toggle-button')).toBeVisible()
     expect(screen.getByTestId('run-context-toggle-button')).toBeVisible()
     expect(screen.getByTestId('run-artifact-toggle-button')).toBeVisible()
     expect(screen.getByTestId('run-event-timeline-toggle-button')).toBeVisible()
+    expect(screen.queryByTestId('run-graph-canvas')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('run-activity-logs-panel')).not.toBeInTheDocument()
+
+    expect(
+      runSummaryPanel.compareDocumentPosition(runActivityPanel) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      runActivityPanel.compareDocumentPosition(runTimelinePanel) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      runTimelinePanel.compareDocumentPosition(runCheckpointPanel) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      runCheckpointPanel.compareDocumentPosition(runGraphPanel) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
 
     await user.click(screen.getByTestId('run-graph-toggle-button'))
-    expect(screen.queryByTestId('run-graph-canvas')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('run-graph-canvas')).toBeVisible()
+    })
 
-    await user.click(screen.getByTestId('run-console-toggle-button'))
-    expect(screen.queryByTestId('run-console-output')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('run-activity-logs-toggle-button'))
+    expect(screen.getByTestId('run-activity-logs-panel')).toBeVisible()
 
     expect(
       runListPanel.compareDocumentPosition(runSummaryPanel) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -644,7 +668,7 @@ describe('RunsPanel', () => {
     expect(screen.getByTestId('run-summary-cancel-button')).toBeVisible()
   })
 
-  it('converges the selected run summary, console, and list row on authoritative run detail state', async () => {
+  it('converges the selected run summary, activity surface, and list row on authoritative run detail state', async () => {
     const staleRun = makeRun({
       run_id: 'run-stale-status',
       flow_name: 'selected.dot',
@@ -709,11 +733,11 @@ describe('RunsPanel', () => {
           questions: [],
         })
       }
-      if (url.endsWith('/attractor/pipelines/run-stale-status')) {
-        return jsonResponse({
-          pipeline_id: 'run-stale-status',
-          run_id: 'run-stale-status',
-          status: 'completed',
+        if (url.endsWith('/attractor/pipelines/run-stale-status')) {
+          return jsonResponse({
+            pipeline_id: 'run-stale-status',
+            run_id: 'run-stale-status',
+            status: 'completed',
           outcome: 'success',
           outcome_reason_code: null,
           outcome_reason_message: null,
@@ -726,13 +750,18 @@ describe('RunsPanel', () => {
           plan_id: null,
           model: 'gpt-5.3-codex-spark',
           started_at: '2026-03-22T00:00:00Z',
-          ended_at: '2026-03-22T00:05:00Z',
-          last_error: '',
-          token_usage: 1234,
-          completed_nodes: ['start', 'done'],
-          continued_from_run_id: null,
-          continued_from_node: null,
-          continued_from_flow_mode: null,
+            ended_at: '2026-03-22T00:05:00Z',
+            last_error: '',
+            token_usage: 1234,
+            current_node: 'done',
+            completed_nodes: ['start', 'done'],
+            progress: {
+              current_node: 'done',
+              completed_nodes: ['start', 'done'],
+            },
+            continued_from_run_id: null,
+            continued_from_node: null,
+            continued_from_flow_mode: null,
           continued_from_flow_name: null,
         })
       }
@@ -757,7 +786,151 @@ describe('RunsPanel', () => {
       expect(screen.getByTestId('run-summary-status')).toHaveTextContent('Completed')
     })
 
-    expect(screen.getByTestId('run-console-status')).toHaveTextContent('Completed')
+    expect(screen.getByTestId('run-activity-status')).toHaveTextContent('Completed')
+    expect(screen.getByTestId('run-activity-headline')).toHaveTextContent('Completed successfully')
     expect(screen.getByTestId('run-history-row')).toHaveTextContent('Completed')
+  })
+
+  it('does not open a third explainability stream for the activity card', async () => {
+    const selectedRun = makeRun({
+      run_id: 'run-stream-count',
+      flow_name: 'selected.dot',
+      status: 'running',
+      ended_at: null,
+      project_path: '/tmp/project-one',
+    })
+
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({ runs: [selectedRun] })
+      }
+      if (url.includes('/attractor/pipelines/run-stream-count/checkpoint')) {
+        return jsonResponse({
+          pipeline_id: 'run-stream-count',
+          checkpoint: {
+            completed_nodes: ['prepare'],
+            current_node: 'validate',
+          },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-stream-count/context')) {
+        return jsonResponse({
+          pipeline_id: 'run-stream-count',
+          context: { active_item: 'REQ-001' },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-stream-count/artifacts')) {
+        return jsonResponse({
+          pipeline_id: 'run-stream-count',
+          artifacts: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-stream-count/graph-preview')) {
+        return jsonResponse({
+          status: 'ok',
+          graph: {
+            graph_attrs: {},
+            nodes: [
+              { id: 'start', label: 'Start', shape: 'Mdiamond' },
+              { id: 'validate', label: 'Validate', shape: 'box' },
+              { id: 'done', label: 'Done', shape: 'Msquare' },
+            ],
+            edges: [
+              { from: 'start', to: 'validate', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+              { from: 'validate', to: 'done', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+            ],
+          },
+          diagnostics: [],
+          errors: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-stream-count/questions')) {
+        return jsonResponse({
+          pipeline_id: 'run-stream-count',
+          questions: [],
+        })
+      }
+      if (url.endsWith('/attractor/pipelines/run-stream-count')) {
+        return jsonResponse({
+          pipeline_id: 'run-stream-count',
+          run_id: 'run-stream-count',
+          status: 'running',
+          outcome: null,
+          outcome_reason_code: null,
+          outcome_reason_message: null,
+          flow_name: 'selected.dot',
+          working_directory: '/tmp/project-one/workdir',
+          project_path: '/tmp/project-one',
+          git_branch: 'main',
+          git_commit: 'abcdef0',
+          spec_id: null,
+          plan_id: null,
+          model: 'gpt-5.4',
+          started_at: '2026-03-22T00:00:00Z',
+          ended_at: null,
+          last_error: '',
+          token_usage: 1234,
+          current_node: 'validate',
+          completed_nodes: ['prepare'],
+          progress: {
+            current_node: 'validate',
+            completed_nodes: ['prepare'],
+          },
+          continued_from_run_id: null,
+          continued_from_node: null,
+          continued_from_flow_mode: null,
+          continued_from_flow_name: null,
+        })
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    const openedUrls: string[] = []
+    class CountingEventSource {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 2
+      readonly url: string
+      readyState = CountingEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent<string>) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string | URL) {
+        this.url = String(url)
+        openedUrls.push(this.url)
+      }
+
+      close() {
+        this.readyState = CountingEventSource.CLOSED
+      }
+    }
+    vi.stubGlobal('EventSource', CountingEventSource as unknown as typeof EventSource)
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+    })
+
+    const user = userEvent.setup()
+    renderRunsWorkspace()
+
+    await waitFor(() => {
+      expect(screen.getByText('selected.dot')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('run-history-row'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-activity-panel')).toBeVisible()
+    })
+
+    expect(openedUrls).toHaveLength(2)
   })
 })

@@ -172,8 +172,7 @@ Execution owns:
 
 Runs owns:
 - selected run summary and actions
-- live run graph
-- terminal/log stream
+- run activity
 - run event timeline
 - checkpoint, context, artifacts, and questions
 
@@ -335,13 +334,22 @@ The run inspector is a frontend for Attractor runs, not for workspace artifacts.
 It should render:
 - run summary
 - run-level actions
-- run graph based on the stored run snapshot rather than the current named flow
-- terminal/log stream
+- run activity as the primary answer to `what is happening now?`
 - event timeline
 - checkpoint
+- run graph based on the stored run snapshot rather than the current named flow
 - context
 - artifacts
 - pending questions when present
+
+The primary monitoring hierarchy is:
+- summary
+- activity
+- timeline
+- checkpoint
+
+When the graph lacks live state overlays, it is a secondary reference surface rather than a primary monitoring surface.
+Raw logs remain available within the activity surface, but they are subordinate evidence rather than the main operational summary.
 
 Run history and run inspection must render lifecycle status separately from workflow outcome.
 Examples:
@@ -355,7 +363,7 @@ Run-inspection state is run-local and may be shared across tabs, but it is disti
 The currently selected execution flow, selected run, launch form draft, and runtime inspection context must not be inferred from the Editor session.
 
 Runs is the canonical run-monitoring surface.
-Execution may show compact handoff notices for the currently selected run, such as a launch-success message or pending human-gate reminder, and may render a launch-planning graph card. It must not own the primary live run graph, terminal, timeline, artifact, or question surfaces.
+Execution may show compact handoff notices for the currently selected run, such as a launch-success message or pending human-gate reminder, and may render a launch-planning graph card. It must not own the primary run activity, timeline, artifact, or question surfaces.
 
 `Completed + failure outcome` is not a runtime failure surface.
 It should be presented as a completed workflow that reached a negative business conclusion, optionally with a reason code or reason message supplied by Attractor.
@@ -365,7 +373,7 @@ Timeline and lifecycle summaries for `PipelineCompleted` should include:
 - optional outcome reason code
 - optional outcome reason message
 
-Terminal and run-log summaries should prefer a backend-provided failure reason over a generic lifecycle label when one is available.
+Run activity summaries should prefer a backend-provided failure reason over a generic lifecycle label when one is available.
 
 ## 14. Frontend State Model
 

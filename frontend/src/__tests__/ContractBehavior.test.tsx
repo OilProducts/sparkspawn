@@ -1063,6 +1063,7 @@ describe('Frontend contract behavior', () => {
       useStore.getState().setSelectedRunId(runId)
     })
 
+    const user = userEvent.setup()
     render(<RunsPanel />)
 
     await waitFor(() => {
@@ -1077,6 +1078,12 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByTestId('run-artifact-panel')).toBeVisible()
     await waitFor(() => {
       expect(screen.getByTestId('run-graph-panel')).toBeVisible()
+    })
+    expect(screen.queryByTestId('run-graph-canvas')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('run-graph-toggle-button'))
+
+    await waitFor(() => {
       expect(screen.getByTestId('run-graph-canvas')).toBeVisible()
     })
     expect(screen.getByTestId('run-partial-api-failure-banner')).toHaveTextContent(

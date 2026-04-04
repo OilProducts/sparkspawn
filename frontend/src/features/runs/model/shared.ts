@@ -16,6 +16,7 @@ export interface RunRecord {
     ended_at?: string | null
     last_error?: string
     token_usage?: number | null
+    current_node?: string | null
     continued_from_run_id?: string | null
     continued_from_node?: string | null
     continued_from_flow_mode?: string | null

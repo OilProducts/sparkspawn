@@ -5,9 +5,9 @@ import { useRunsList } from './hooks/useRunsList'
 import { useRunActions } from './hooks/useRunActions'
 import { useRunDetails } from './hooks/useRunDetails'
 import { useRunTimeline } from './hooks/useRunTimeline'
+import { RunActivityCard } from './components/RunActivityCard'
 import { RunArtifactsCard } from './components/RunArtifactsCard'
 import { RunCheckpointCard } from './components/RunCheckpointCard'
-import { RunConsoleCard } from './components/RunConsoleCard'
 import { RunContextCard } from './components/RunContextCard'
 import { RunEventTimelineCard } from './components/RunEventTimelineCard'
 import { RunGraphCard } from './components/RunGraphCard'
@@ -248,12 +248,49 @@ export function RunsPanel() {
                             </InlineNotice>
                         )}
                         {selectedRun && (
-                            <RunGraphCard
+                            <RunActivityCard
+                                key={`activity-${selectedRun.run_id}`}
+                                checkpointCompletedNodes={checkpointCompletedNodes}
+                                checkpointCurrentNode={checkpointCurrentNode}
+                                checkpointRetryCounters={checkpointRetryCounters}
+                                groupedTimelineEntries={groupedTimelineEntries}
+                                pendingGateCount={visiblePendingInterviewGates.length}
                                 run={selectedRun}
                             />
                         )}
                         {selectedRun && (
-                            <RunConsoleCard />
+                            <RunEventTimelineCard
+                                isNarrowViewport={isNarrowViewport}
+                                isTimelineLive={isTimelineLive}
+                                timelineDroppedCount={timelineDroppedCount}
+                                timelineError={timelineError}
+                                timelineEvents={timelineEvents}
+                                visiblePendingInterviewGates={visiblePendingInterviewGates}
+                                groupedPendingInterviewGates={groupedPendingInterviewGates}
+                                pendingGateActionError={pendingGateActionError}
+                                submittingGateIds={submittingGateIds}
+                                freeformAnswersByGateId={freeformAnswersByGateId}
+                                timelineTypeFilter={timelineTypeFilter}
+                                timelineTypeOptions={timelineTypeOptions}
+                                timelineNodeStageFilter={timelineNodeStageFilter}
+                                timelineCategoryFilter={timelineCategoryFilter}
+                                timelineSeverityFilter={timelineSeverityFilter}
+                                filteredTimelineEvents={filteredTimelineEvents}
+                                groupedTimelineEntries={groupedTimelineEntries}
+                                onTimelineCategoryFilterChange={setTimelineCategoryFilter}
+                                onTimelineNodeStageFilterChange={setTimelineNodeStageFilter}
+                                onTimelineSeverityFilterChange={setTimelineSeverityFilter}
+                                onTimelineTypeFilterChange={setTimelineTypeFilter}
+                                onFreeformAnswerChange={(questionId, value) => {
+                                    setFreeformAnswersByGateId((previous) => ({
+                                        ...previous,
+                                        [questionId]: value,
+                                    }))
+                                }}
+                                onSubmitPendingGateAnswer={(gate, selectedValue) => {
+                                    void submitPendingGateAnswer(gate, selectedValue)
+                                }}
+                            />
                         )}
                         {selectedRun && (
                             <RunCheckpointCard
@@ -266,6 +303,12 @@ export function RunsPanel() {
                                 onRefresh={() => {
                                     void fetchCheckpoint()
                                 }}
+                            />
+                        )}
+                        {selectedRun && (
+                            <RunGraphCard
+                                key={`graph-${selectedRun.run_id}`}
+                                run={selectedRun}
                             />
                         )}
                         {selectedRun && (
@@ -305,40 +348,6 @@ export function RunsPanel() {
                                 }}
                                 selectedArtifactEntry={selectedArtifactEntry}
                                 showPartialRunArtifactNote={showPartialRunArtifactNote}
-                            />
-                        )}
-                        {selectedRun && (
-                            <RunEventTimelineCard
-                                isNarrowViewport={isNarrowViewport}
-                                isTimelineLive={isTimelineLive}
-                                timelineDroppedCount={timelineDroppedCount}
-                                timelineError={timelineError}
-                                timelineEvents={timelineEvents}
-                                visiblePendingInterviewGates={visiblePendingInterviewGates}
-                                groupedPendingInterviewGates={groupedPendingInterviewGates}
-                                pendingGateActionError={pendingGateActionError}
-                                submittingGateIds={submittingGateIds}
-                                freeformAnswersByGateId={freeformAnswersByGateId}
-                                timelineTypeFilter={timelineTypeFilter}
-                                timelineTypeOptions={timelineTypeOptions}
-                                timelineNodeStageFilter={timelineNodeStageFilter}
-                                timelineCategoryFilter={timelineCategoryFilter}
-                                timelineSeverityFilter={timelineSeverityFilter}
-                                filteredTimelineEvents={filteredTimelineEvents}
-                                groupedTimelineEntries={groupedTimelineEntries}
-                                onTimelineCategoryFilterChange={setTimelineCategoryFilter}
-                                onTimelineNodeStageFilterChange={setTimelineNodeStageFilter}
-                                onTimelineSeverityFilterChange={setTimelineSeverityFilter}
-                                onTimelineTypeFilterChange={setTimelineTypeFilter}
-                                onFreeformAnswerChange={(questionId, value) => {
-                                    setFreeformAnswersByGateId((previous) => ({
-                                        ...previous,
-                                        [questionId]: value,
-                                    }))
-                                }}
-                                onSubmitPendingGateAnswer={(gate, selectedValue) => {
-                                    void submitPendingGateAnswer(gate, selectedValue)
-                                }}
                             />
                         )}
                     </div>

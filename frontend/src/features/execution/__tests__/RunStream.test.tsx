@@ -81,7 +81,12 @@ describe('RunStream save indicator', () => {
         ended_at: null,
         last_error: '',
         token_usage: 10,
+        current_node: 'review',
         completed_nodes: ['start'],
+        progress: {
+          current_node: 'review',
+          completed_nodes: ['start'],
+        },
         continued_from_run_id: null,
         continued_from_node: null,
         continued_from_flow_mode: null,
@@ -106,7 +111,12 @@ describe('RunStream save indicator', () => {
         ended_at: '2026-03-22T00:05:00Z',
         last_error: '',
         token_usage: 10,
+        current_node: 'done',
         completed_nodes: ['start', 'done'],
+        progress: {
+          current_node: 'done',
+          completed_nodes: ['start', 'done'],
+        },
         continued_from_run_id: null,
         continued_from_node: null,
         continued_from_flow_mode: null,
@@ -194,6 +204,7 @@ describe('RunStream save indicator', () => {
 
     expect(useStore.getState().runtimeStatus).toBe('completed')
     expect(useStore.getState().selectedRunRecord?.status).toBe('completed')
+    expect(useStore.getState().selectedRunRecord?.current_node).toBe('done')
     expect(useStore.getState().runRecordOverrides['run-reconcile']?.status).toBe('completed')
     expect(useStore.getState().selectedRunCompletedNodes).toEqual(['start', 'done'])
   })

@@ -77,6 +77,7 @@ function toRunRecord(status: PipelineStatusResponse): RunRecord {
         token_usage: typeof status.token_usage === 'number' || status.token_usage === null
             ? status.token_usage
             : undefined,
+        current_node: status.current_node ?? status.progress?.current_node ?? null,
         continued_from_run_id: status.continued_from_run_id ?? null,
         continued_from_node: status.continued_from_node ?? null,
         continued_from_flow_mode: status.continued_from_flow_mode ?? null,
@@ -266,6 +267,26 @@ export function RunStream() {
             }
         }
 
+        const patchCurrentNode = (currentNode: string | null) => {
+            const currentRecord = useStore.getState().selectedRunRecord
+            if (currentRecord?.run_id !== selectedRunId) {
+                return
+            }
+            if ((currentRecord.current_node ?? null) === currentNode) {
+                return
+            }
+            const nextRecord = {
+                ...currentRecord,
+                current_node: currentNode,
+            }
+            setSelectedRunSnapshot({
+                record: nextRecord,
+                completedNodes: useStore.getState().selectedRunCompletedNodes,
+                fetchedAtMs: useStore.getState().selectedRunStatusFetchedAtMs,
+            })
+            setRunRecordOverride(selectedRunId, nextRecord)
+        }
+
         const refreshSelectedRunStatus = async (): Promise<PipelineStatusResponse | null> => {
             try {
                 const data = await loadSelectedRunStatus(selectedRunId)
@@ -363,6 +384,9 @@ export function RunStream() {
 
                     if (shouldApplyStageStatus) {
                         setNodeStatus(runtimeNodeId, runtimeNodeStatus)
+                        if (runtimeNodeStatus === 'running') {
+                            patchCurrentNode(runtimeNodeId)
+                        }
                         if (runtimeStageIndex !== null) {
                             const stageAdvanced = previousCursor ? runtimeStageIndex > previousCursor.stageIndex : true
                             let pendingRetry = stageAdvanced ? false : (previousCursor?.pendingRetry ?? false)
@@ -408,6 +432,9 @@ export function RunStream() {
                             && !previousCursor!.pendingRetry
                         if (!stateRegression && !stateTerminalFlip) {
                             setNodeStatus(stateNodeId, stateNodeStatus)
+                            if (stateNodeStatus === 'running') {
+                                patchCurrentNode(stateNodeId)
+                            }
                             if (previousCursor && (stateNodeStatus === 'running' || stateNodeStatus === 'success' || stateNodeStatus === 'failed')) {
                                 stageCursorsRef.current[stateNodeId] = {
                                     ...previousCursor,
@@ -424,6 +451,7 @@ export function RunStream() {
                 }
                 if (data.type === 'human_gate') {
                     setNodeStatus(data.node_id, 'waiting')
+                    patchCurrentNode(typeof data.node_id === 'string' ? data.node_id : null)
                     setHumanGate({
                         id: data.question_id,
                         runId: selectedRunId,
@@ -436,6 +464,7 @@ export function RunStream() {
                 if (data.type === 'run_meta') {
                     resetNodeStatuses()
                     clearHumanGate()
+                    patchCurrentNode(typeof data.current_node === 'string' ? data.current_node : null)
                     applyRuntimePatch('running', {
                         outcome: null,
                         outcomeReasonCode: null,

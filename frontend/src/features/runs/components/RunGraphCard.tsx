@@ -186,14 +186,18 @@ export function RunGraphCard({ run }: { run: RunRecord }) {
     const [refreshToken, setRefreshToken] = useState(0)
     const [isLoading, setIsLoading] = useState(false)
     const [loadError, setLoadError] = useState<string | null>(null)
-    const [collapsed, setCollapsed] = useState(false)
+    const [collapsed, setCollapsed] = useState(true)
+
+    useEffect(() => {
+        setCollapsed(true)
+    }, [run.run_id])
 
     return (
         <Panel data-testid="run-graph-panel">
             <PanelHeader>
                 <SectionHeader
                     title="Run Graph"
-                    description="Snapshot-accurate workflow graph captured from the run's stored DOT source."
+                    description="Stored run snapshot reference for the selected workflow. This card is a structural reference, not the primary live-status surface."
                     action={(
                         <div className="flex items-center gap-2">
                             <Button
