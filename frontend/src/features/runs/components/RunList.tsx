@@ -13,6 +13,7 @@ interface RunListProps {
     activeProjectPath: string | null
     error: string | null
     isLoading: boolean
+    isRefreshing: boolean
     metadataFreshness: 'never' | 'refreshing' | 'fresh' | 'stale'
     onRefresh: () => void
     scopeMode: 'active' | 'all'
@@ -29,6 +30,7 @@ export function RunList({
     activeProjectPath,
     error,
     isLoading,
+    isRefreshing,
     metadataFreshness,
     onRefresh,
     scopeMode,
@@ -107,7 +109,7 @@ export function RunList({
                         size="xs"
                         className="ml-auto"
                     >
-                        <RefreshCcw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                        <RefreshCcw className={`h-3.5 w-3.5 ${(isLoading || isRefreshing) ? 'animate-spin' : ''}`} />
                         Refresh
                     </Button>
                 </div>
@@ -127,7 +129,7 @@ export function RunList({
                     </InlineNotice>
                 ) : null}
             </div>
-            {status !== 'ready' && status !== 'error' ? (
+            {status !== 'ready' && status !== 'error' && runs.length === 0 ? (
                 <div className="px-4 pb-4">
                     <InlineNotice data-testid="run-list-loading">
                         Restoring run history…

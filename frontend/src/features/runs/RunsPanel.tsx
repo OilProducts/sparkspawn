@@ -76,6 +76,7 @@ export function RunsPanel() {
         error,
         fetchRuns,
         isLoading,
+        isRefreshing,
         metadataFreshness,
         now,
         scopedRuns,
@@ -289,6 +290,7 @@ export function RunsPanel() {
                     activeProjectPath={activeProjectPath}
                     error={error}
                     isLoading={isLoading}
+                    isRefreshing={isRefreshing}
                     metadataFreshness={metadataFreshness}
                     onRefresh={() => {
                         void fetchRuns()

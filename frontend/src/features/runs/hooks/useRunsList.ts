@@ -44,6 +44,7 @@ export function useRunsList({
             updateRunsListSession({
                 runs: [],
                 error: null,
+                isRefreshing: false,
                 status: 'ready',
             })
             return
@@ -52,22 +53,34 @@ export function useRunsList({
             return
         }
         isFetchingRef.current = true
-        updateRunsListSession({
-            status: 'loading',
-            error: null,
-        })
+        const currentSession = useStore.getState().runsListSession
+        const useBackgroundRefresh =
+            currentSession.runs.length > 0
+            && (currentSession.status === 'ready' || currentSession.status === 'error')
+        updateRunsListSession(useBackgroundRefresh
+            ? {
+                isRefreshing: true,
+                error: null,
+            }
+            : {
+                status: 'loading',
+                isRefreshing: false,
+                error: null,
+            })
         try {
             const data = await fetchRunsListValidated(usesActiveProjectScope ? activeProjectPath : null)
             updateRunsListSession({
                 runs: data.runs,
                 lastFetchedAtMs: Date.now(),
                 status: 'ready',
+                isRefreshing: false,
                 error: null,
             })
         } catch (err) {
             logUnexpectedRunError(err)
             updateRunsListSession({
                 error: 'Unable to load runs',
+                isRefreshing: false,
                 status: 'error',
             })
         } finally {
@@ -128,7 +141,7 @@ export function useRunsList({
     }, [scopedRuns, selectedRunId])
 
     const metadataFreshness = computeRunMetadataFreshness({
-        isLoading: runsListSession.status === 'loading',
+        isLoading: runsListSession.status === 'loading' || runsListSession.isRefreshing,
         lastFetchedAtMs: runsListSession.lastFetchedAtMs,
         nowMs: runsListSession.nowMs,
         staleAfterMs: runsListSession.metadataStaleAfterMs,
@@ -138,6 +151,7 @@ export function useRunsList({
         error: runsListSession.error,
         fetchRuns,
         isLoading: runsListSession.status === 'loading',
+        isRefreshing: runsListSession.isRefreshing,
         lastFetchedAtMs: runsListSession.lastFetchedAtMs,
         metadataFreshness,
         now: runsListSession.nowMs,

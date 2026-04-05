@@ -19,6 +19,7 @@ const DEFAULT_RUNS_LIST_SESSION_STATE: RunsListSessionState = {
     scopeMode: 'active',
     selectedRunIdByScopeKey: {},
     status: 'idle',
+    isRefreshing: false,
     error: null,
     runs: [],
     lastFetchedAtMs: null,

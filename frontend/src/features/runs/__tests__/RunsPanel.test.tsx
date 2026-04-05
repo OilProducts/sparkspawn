@@ -41,6 +41,7 @@ const resetRunsState = () => {
       scopeMode: 'active',
       selectedRunIdByScopeKey: {},
       status: 'idle',
+      isRefreshing: false,
       error: null,
       runs: [],
       lastFetchedAtMs: null,

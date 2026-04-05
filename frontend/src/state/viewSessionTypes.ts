@@ -49,6 +49,7 @@ export interface RunsListSessionState {
     scopeMode: 'active' | 'all'
     selectedRunIdByScopeKey: Record<string, string | null>
     status: ResourceStatus
+    isRefreshing: boolean
     error: string | null
     runs: RunRecord[]
     lastFetchedAtMs: number | null
