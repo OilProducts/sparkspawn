@@ -25,10 +25,11 @@ def _edge_targets(graph):
     }
 
 
-def test_spec_implementation_milestone_worker_routes_validation_through_assessment() -> None:
+def test_spec_implementation_milestone_worker_uses_validation_as_a_real_gate() -> None:
     graph = _load_graph("implement-milestone.dot")
 
     assert "assess_validation" in graph.nodes
+    assert "gate_item_completion" in graph.nodes
 
     validate_node = graph.nodes["validate_repo"]
     artifact_paths = str(validate_node.attrs["tool.artifacts.paths"].value)
@@ -38,7 +39,14 @@ def test_spec_implementation_milestone_worker_routes_validation_through_assessme
     edge_targets = _edge_targets(graph)
     assert ("validate_repo", "assess_validation", "Assess Pass") in edge_targets
     assert ("validate_repo", "assess_validation", "Assess Fail") in edge_targets
-    assert ("assess_validation", "review_current", "") in edge_targets
+    assert ("assess_validation", "review_current", "Review") in edge_targets
+    assert ("assess_validation", "implement_current", "Fix Validation") in edge_targets
+    assert ("assess_validation", "rewrite_current", "Rewrite Validation") in edge_targets
+    assert ("assess_validation", "mark_current_blocked", "Blocked Validation") in edge_targets
+    assert ("review_current", "gate_item_completion", "Ready To Complete") in edge_targets
+    assert ("gate_item_completion", "mark_current_done", "Validated") in edge_targets
+    assert ("gate_item_completion", "prepare_validation", "Revalidate") in edge_targets
+    assert ("review_current", "mark_current_done", "Done") not in edge_targets
 
 
 def test_spec_implementation_milestone_worker_validates_item_queue_before_next_item() -> None:
@@ -146,6 +154,7 @@ def test_spec_implementation_flow_uses_gpt_54_for_judgment_heavy_nodes() -> None
         "prepare_validation",
         "assess_validation",
         "review_current",
+        "gate_item_completion",
         "final_milestone_audit",
         "validate_item_plan",
     }
@@ -176,14 +185,31 @@ def test_spec_implementation_flow_prompts_encode_repository_integrity_rubric() -
     assert "public bootstrap and installability" in plan_prompt
 
     prepare_validation_prompt = str(child_graph.nodes["prepare_validation"].attrs["prompt"].value)
+    assert "fields item_id, item_title" in prepare_validation_prompt
     assert "ambient tooling" in prepare_validation_prompt
     assert "test-only path hacks" in prepare_validation_prompt
     assert "committed manifests" in prepare_validation_prompt
 
+    assess_validation_prompt = str(child_graph.nodes["assess_validation"].attrs["prompt"].value)
+    assert "fields item_id, item_title, status" in assess_validation_prompt
+    assert "Return outcome success only when" in assess_validation_prompt
+    assert "preferred_label Fix" in assess_validation_prompt
+
     review_prompt = str(child_graph.nodes["review_current"].attrs["prompt"].value)
+    assert "Never return outcome success unless" in review_prompt
+    assert "item_id matches context.item.id" in review_prompt
     assert "brittle source-text checks" in review_prompt
     assert "duplicate validators" in review_prompt
     assert "mixed-responsibility growth" in review_prompt
 
+    gate_prompt = str(child_graph.nodes["gate_item_completion"].attrs["prompt"].value)
+    assert "matching item_id" in gate_prompt
+    assert "preferred_label Revalidate" in gate_prompt
+
     final_audit_prompt = str(child_graph.nodes["final_milestone_audit"].attrs["prompt"].value)
     assert "missing deliverability work" in final_audit_prompt
+
+    next_item_prompt = str(child_graph.nodes["next_item"].attrs["prompt"].value)
+    assert "cleared context.review.summary" in next_item_prompt
+    assert "context.validation.item_id" in next_item_prompt
+    assert "missing_prerequisites" in next_item_prompt
