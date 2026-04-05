@@ -6,7 +6,7 @@ import pytest
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
-from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.transforms import AttributeDefaultsTransform
 
 
@@ -861,7 +861,75 @@ class TestRetryAndGoalGate:
         assert calls["task"] == 2
         assert result.node_outcomes["task"].status is OutcomeStatus.FAIL
         assert result.node_outcomes["task"].failure_reason == "transient backend outage"
+        assert result.node_outcomes["task"].failure_kind is FailureKind.RUNTIME
         assert "fix" in result.completed_nodes
+
+    def test_business_fail_does_not_retry_even_with_max_retries(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                audit [shape=box, max_retries=1]
+                rewrite [shape=box]
+                done [shape=Msquare]
+                start -> audit
+                audit -> rewrite [condition="outcome=fail && preferred_label=Rewrite"]
+                rewrite -> done
+            }
+            """
+        )
+
+        calls = {"audit": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "audit":
+                calls["audit"] += 1
+                return Outcome(
+                    status=OutcomeStatus.FAIL,
+                    preferred_label="Rewrite",
+                    failure_reason="needs milestone rewrite",
+                    failure_kind=FailureKind.BUSINESS,
+                )
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "completed"
+        assert calls["audit"] == 1
+        assert result.route_trace == ["start", "audit", "rewrite", "done"]
+
+    def test_contract_fail_does_not_consume_node_retry_budget(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                audit [shape=box, max_retries=2]
+                fix [shape=box]
+                done [shape=Msquare]
+                start -> audit
+                audit -> fix [condition="outcome=fail"]
+                fix -> done
+            }
+            """
+        )
+
+        calls = {"audit": 0}
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "audit":
+                calls["audit"] += 1
+                return Outcome(
+                    status=OutcomeStatus.FAIL,
+                    failure_reason="invalid structured status envelope: notes must be a string",
+                    failure_kind=FailureKind.CONTRACT,
+                )
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner).run(Context())
+
+        assert result.status == "completed"
+        assert calls["audit"] == 1
+        assert result.route_trace == ["start", "audit", "fix", "done"]
 
     def test_non_retryable_exception_does_not_retry_and_routes_fail_immediately(self):
         graph = parse_dot(

@@ -54,7 +54,17 @@ class _Backend:
         self.plan = plan
         self.calls: List[str] = []
 
-    def run(self, node_id, prompt, context, *, timeout=None):  # noqa: ANN001, ANN201
+    def run(  # noqa: ANN001, ANN201
+        self,
+        node_id,
+        prompt,
+        context,
+        *,
+        response_contract="",
+        contract_repair_attempts=0,
+        timeout=None,
+    ):
+        del prompt, context, response_contract, contract_repair_attempts, timeout
         self.calls.append(node_id)
         return bool(self.plan.get(node_id, True))
 

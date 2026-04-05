@@ -156,6 +156,7 @@ Documented Attractor node attributes:
 | `llm_provider` | string | Explicit provider override. |
 | `reasoning_effort` | string | `low`, `medium`, or `high`. |
 | `codergen.response_contract` | string | Codergen-only shared response-format contract. |
+| `codergen.contract_repair_attempts` | integer | Codergen-only bounded same-thread repair budget for malformed response-contract output. |
 | `auto_status` | boolean | Auto-generate success when the handler writes no status. |
 | `allow_partial` | boolean | Accept `PARTIAL_SUCCESS` when retries exhaust. |
 
@@ -168,10 +169,12 @@ These attrs are only meaningful for specific node types:
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `codergen.response_contract` | string | Shared response-format appendix injected by the runtime. Use `status_envelope` when the node must return only Attractor's structured Outcome JSON. |
+| `codergen.contract_repair_attempts` | integer | Same-thread repair attempts for malformed response-contract output. Defaults to `1` when a response contract is set, otherwise `0`. This is not the same as node `max_retries`, which reruns the whole node. |
 
 Authoring guidance:
 
 - Use `codergen.response_contract="status_envelope"` on codergen nodes that are expected to emit structured routing/context outcomes.
+- Use `codergen.contract_repair_attempts` only when you need to override the default repair budget. The runtime already defaults to one repair attempt for response-contract nodes.
 - Keep the node prompt focused on the task and any node-specific fields it must set; the runtime supplies the canonical envelope schema.
 - Do not set this attr on `tool`, `wait.human`, `stack.manager_loop`, `start`, or `exit` nodes.
 

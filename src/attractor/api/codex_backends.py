@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -10,7 +11,7 @@ import time
 from typing import Any, Callable, Optional
 
 from attractor.engine.context import Context
-from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.handlers.base import CodergenBackend
 from spark_common.codex_app_client import CodexAppServerClient
 from spark_common import codex_app_server
@@ -26,6 +27,23 @@ _STRUCTURED_OUTCOME_KEYS = {
     "failure_reason",
     "retryable",
 }
+
+
+@dataclass(frozen=True)
+class _PlainTextParseResult:
+    raw_text: str
+
+
+@dataclass(frozen=True)
+class _ModeledOutcomeParseResult:
+    outcome: Outcome
+
+
+@dataclass(frozen=True)
+class _StructuredContractViolation:
+    response_contract: str
+    raw_text: str
+    reason: str
 
 
 class CodexAppServerBackend(CodergenBackend):
@@ -106,6 +124,8 @@ class CodexAppServerBackend(CodergenBackend):
         prompt: str,
         context: Context,
         *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
         timeout: Optional[float] = None,
     ) -> str | Outcome:
         def log_line(message: str) -> None:
@@ -114,7 +134,11 @@ class CodexAppServerBackend(CodergenBackend):
 
         def fail(reason: str) -> Outcome:
             log_line(reason)
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=reason)
+            return Outcome(
+                status=OutcomeStatus.FAIL,
+                failure_reason=reason,
+                failure_kind=FailureKind.RUNTIME,
+            )
 
         client = CodexAppServerClient(
             self.working_dir,
@@ -143,33 +167,107 @@ class CodexAppServerBackend(CodergenBackend):
             if not thread_uuid:
                 return fail("codex app-server thread/start failed")
 
-            result = client.run_turn(
-                thread_id=thread_uuid,
-                prompt=prompt,
-                model=self.model,
-                cwd=self.working_dir,
-                overall_timeout_seconds=timeout,
-                now=time.monotonic,
+            turn_text = self._run_turn_and_capture_text(
+                client,
+                thread_uuid,
+                prompt,
+                timeout,
+                log_line,
             )
-            agent_text = result.assistant_message
-            if agent_text:
-                log_line(agent_text)
-            command_text = result.command_text
-            if command_text:
-                log_line(command_text)
-            if result.token_total is not None:
-                log_line(f"tokens used: {result.token_total}")
-            if agent_text:
-                return _coerce_structured_text_outcome(agent_text)
-            if command_text:
-                return _coerce_structured_text_outcome(command_text)
-            return "codex app-server completed successfully"
+            if turn_text is None:
+                return "codex app-server completed successfully"
+            return self._coerce_or_repair_contract_result(
+                client,
+                thread_uuid,
+                node_id,
+                turn_text,
+                response_contract=response_contract,
+                contract_repair_attempts=contract_repair_attempts,
+                timeout=timeout,
+                log_line=log_line,
+            )
         except RuntimeError as exc:
             return fail(str(exc))
         finally:
             if callable(clear_raw_rpc_logger):
                 clear_raw_rpc_logger()
             client.close()
+
+    def _run_turn_and_capture_text(
+        self,
+        client: CodexAppServerClient,
+        thread_id: str,
+        prompt: str,
+        timeout: Optional[float],
+        log_line: Callable[[str], None],
+    ) -> str | None:
+        result = client.run_turn(
+            thread_id=thread_id,
+            prompt=prompt,
+            model=self.model,
+            cwd=self.working_dir,
+            overall_timeout_seconds=timeout,
+            now=time.monotonic,
+        )
+        agent_text = result.assistant_message
+        if agent_text:
+            log_line(agent_text)
+        command_text = result.command_text
+        if command_text:
+            log_line(command_text)
+        if result.token_total is not None:
+            log_line(f"tokens used: {result.token_total}")
+        return agent_text or command_text or None
+
+    def _coerce_or_repair_contract_result(
+        self,
+        client: CodexAppServerClient,
+        thread_id: str,
+        node_id: str,
+        response_text: str,
+        *,
+        response_contract: str,
+        contract_repair_attempts: int,
+        timeout: Optional[float],
+        log_line: Callable[[str], None],
+    ) -> str | Outcome:
+        result = _coerce_structured_text_outcome(response_text, response_contract=response_contract)
+        if isinstance(result, Outcome):
+            return result
+        if isinstance(result, _ModeledOutcomeParseResult):
+            return result.outcome
+        if isinstance(result, _PlainTextParseResult):
+            return result.raw_text
+
+        if contract_repair_attempts <= 0:
+            return _contract_failure_outcome(result)
+
+        current_violation = result
+        for attempt in range(1, contract_repair_attempts + 1):
+            log_line(
+                f"response contract violation for {node_id}; requesting corrected final answer "
+                f"(attempt {attempt}/{contract_repair_attempts}): {current_violation.reason}"
+            )
+            repair_prompt = _build_contract_repair_prompt(current_violation)
+            repair_text = self._run_turn_and_capture_text(
+                client,
+                thread_id,
+                repair_prompt,
+                timeout,
+                log_line,
+            )
+            if repair_text is None:
+                return _contract_failure_outcome(current_violation)
+            repaired = _coerce_structured_text_outcome(
+                repair_text,
+                response_contract=current_violation.response_contract,
+            )
+            if isinstance(repaired, _ModeledOutcomeParseResult):
+                return repaired.outcome
+            if isinstance(repaired, _PlainTextParseResult):
+                return repaired.raw_text
+            current_violation = repaired
+        return _contract_failure_outcome(current_violation)
 
 
 def build_codergen_backend(
@@ -187,12 +285,20 @@ def build_codergen_backend(
     )
 
 
-def _coerce_structured_text_outcome(text: str) -> str | Outcome:
-    candidate, envelope_error = _extract_structured_outcome_payload(text)
+def _coerce_structured_text_outcome(
+    text: str,
+    *,
+    response_contract: str = "",
+) -> _PlainTextParseResult | _ModeledOutcomeParseResult | _StructuredContractViolation:
+    raw_text = text.strip()
+    candidate, envelope_error = _extract_structured_outcome_payload(
+        text,
+        require_contract=_has_response_contract(response_contract),
+    )
     if envelope_error is not None:
-        return _invalid_structured_outcome(text, envelope_error)
+        return _contract_violation_or_invalid_outcome(raw_text, envelope_error, response_contract)
     if candidate is None:
-        return text
+        return _PlainTextParseResult(raw_text=raw_text)
 
     preferred_label = candidate.get("preferred_label")
     if preferred_label is None:
@@ -204,50 +310,73 @@ def _coerce_structured_text_outcome(text: str) -> str | Outcome:
     retryable = candidate.get("retryable", None)
 
     if not isinstance(preferred_label, str):
-        return _invalid_structured_outcome(text, "invalid structured status envelope: preferred_label must be a string")
+        return _contract_violation_or_invalid_outcome(
+            text,
+            "invalid structured status envelope: preferred_label must be a string",
+            response_contract,
+        )
     if not isinstance(suggested_next_ids, list) or any(not isinstance(item, str) for item in suggested_next_ids):
-        return _invalid_structured_outcome(
+        return _contract_violation_or_invalid_outcome(
             text,
             "invalid structured status envelope: suggested_next_ids must be a list of strings",
+            response_contract,
         )
     if not isinstance(context_updates, dict):
-        return _invalid_structured_outcome(
+        return _contract_violation_or_invalid_outcome(
             text,
             "invalid structured status envelope: context_updates must be an object",
+            response_contract,
         )
     if notes is not None and not isinstance(notes, str):
-        return _invalid_structured_outcome(text, "invalid structured status envelope: notes must be a string")
+        return _contract_violation_or_invalid_outcome(
+            text,
+            "invalid structured status envelope: notes must be a string",
+            response_contract,
+        )
     if failure_reason is not None and not isinstance(failure_reason, str):
-        return _invalid_structured_outcome(
+        return _contract_violation_or_invalid_outcome(
             text,
             "invalid structured status envelope: failure_reason must be a string",
+            response_contract,
         )
     if retryable is not None and not isinstance(retryable, bool):
-        return _invalid_structured_outcome(text, "invalid structured status envelope: retryable must be a boolean")
+        return _contract_violation_or_invalid_outcome(
+            text,
+            "invalid structured status envelope: retryable must be a boolean",
+            response_contract,
+        )
 
     outcome_name = str(candidate.get("outcome", "")).strip().lower()
     try:
         status = OutcomeStatus(outcome_name)
     except ValueError:
-        return _invalid_structured_outcome(
+        return _contract_violation_or_invalid_outcome(
             text,
             f"invalid structured status envelope: unsupported outcome status '{outcome_name or '<empty>'}'",
+            response_contract,
         )
 
     if status == OutcomeStatus.SKIPPED:
-        return _invalid_structured_outcome(
+        return _contract_violation_or_invalid_outcome(
             text,
             "invalid structured status envelope: unsupported outcome status 'skipped'",
+            response_contract,
         )
 
-    return Outcome(
-        status=status,
-        preferred_label=preferred_label,
-        suggested_next_ids=list(suggested_next_ids),
-        context_updates=dict(context_updates),
-        notes=notes or "",
-        failure_reason=failure_reason or "",
-        retryable=retryable,
+    return _ModeledOutcomeParseResult(
+        outcome=Outcome(
+            status=status,
+            preferred_label=preferred_label,
+            suggested_next_ids=list(suggested_next_ids),
+            context_updates=dict(context_updates),
+            notes=notes or "",
+            failure_reason=failure_reason or "",
+            retryable=retryable,
+            failure_kind=FailureKind.BUSINESS
+            if _has_response_contract(response_contract) and status == OutcomeStatus.FAIL
+            else None,
+            raw_response_text=raw_text,
+        )
     )
 
 
@@ -256,32 +385,95 @@ def _invalid_structured_outcome(text: str, reason: str) -> Outcome:
         status=OutcomeStatus.FAIL,
         notes=text.strip(),
         failure_reason=reason,
+        raw_response_text=text.strip(),
     )
 
 
-def _extract_structured_outcome_payload(text: str) -> tuple[dict[str, object] | None, str | None]:
+def _contract_violation_or_invalid_outcome(
+    text: str,
+    reason: str,
+    response_contract: str,
+) -> Outcome | _StructuredContractViolation:
+    if _has_response_contract(response_contract):
+        return _StructuredContractViolation(
+            response_contract=response_contract,
+            raw_text=text.strip(),
+            reason=reason,
+        )
+    return _invalid_structured_outcome(text, reason)
+
+
+def _has_response_contract(response_contract: str) -> bool:
+    return bool(str(response_contract).strip())
+
+
+def _build_contract_repair_prompt(violation: _StructuredContractViolation) -> str:
+    return "\n".join(
+        [
+            f"Your previous final answer violated the {violation.response_contract} response contract.",
+            f"Validation error: {violation.reason}",
+            "",
+            "Re-emit only a corrected final answer for the same decision.",
+            "Do not do new repository work.",
+            "Do not run commands.",
+            "Do not change the substantive decision, routing label, or context updates except as required to satisfy the response contract.",
+            "",
+            "Previous invalid final answer:",
+            violation.raw_text,
+        ]
+    )
+
+
+def _contract_failure_outcome(violation: _StructuredContractViolation) -> Outcome:
+    return Outcome(
+        status=OutcomeStatus.FAIL,
+        notes=violation.raw_text,
+        failure_reason=violation.reason,
+        failure_kind=FailureKind.CONTRACT,
+        raw_response_text=violation.raw_text,
+    )
+
+
+def _extract_structured_outcome_payload(
+    text: str,
+    *,
+    require_contract: bool = False,
+) -> tuple[dict[str, object] | None, str | None]:
     stripped = text.strip()
     if not stripped:
+        if require_contract:
+            return None, "invalid structured status envelope: empty response"
         return None, None
 
     candidates = [stripped]
     if stripped.startswith("```") and stripped.endswith("```"):
         lines = stripped.splitlines()
         if len(lines) >= 3:
-            candidates.append("\n".join(lines[1:-1]).strip())
+            inner = "\n".join(lines[1:-1]).strip()
+            if inner and inner not in candidates:
+                candidates.append(inner)
 
+    validation_errors: list[str] = []
     for candidate in candidates:
         try:
             payload = json.loads(candidate)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            if require_contract:
+                validation_errors.append(f"invalid structured status envelope: invalid JSON: {exc}")
             continue
         if not isinstance(payload, dict):
+            if require_contract:
+                validation_errors.append("invalid structured status envelope: expected a JSON object")
             continue
         if "outcome" not in payload:
+            if require_contract:
+                validation_errors.append('invalid structured status envelope: missing required top-level key "outcome"')
             continue
         if not set(payload.keys()).issubset(_STRUCTURED_OUTCOME_KEYS):
             unexpected = sorted(set(payload.keys()) - _STRUCTURED_OUTCOME_KEYS)
             unexpected_text = ", ".join(unexpected)
             return None, f"invalid structured status envelope: unexpected top-level keys {unexpected_text}"
         return payload, None
+    if require_contract and validation_errors:
+        return None, validation_errors[-1]
     return None, None

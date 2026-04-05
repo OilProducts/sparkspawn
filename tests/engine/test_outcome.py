@@ -1,4 +1,4 @@
-from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 
 
 class TestOutcomePayload:
@@ -13,6 +13,8 @@ class TestOutcomePayload:
             },
             notes="validation failed",
             failure_reason="lint failed",
+            failure_kind=FailureKind.CONTRACT,
+            raw_response_text='{"outcome":"fail"}',
         )
 
         assert outcome.to_payload() == {
@@ -25,6 +27,7 @@ class TestOutcomePayload:
             },
             "notes": "validation failed",
             "failure_reason": "lint failed",
+            "failure_kind": "contract",
         }
 
     def test_to_payload_defaults_optional_fields(self):

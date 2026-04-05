@@ -28,7 +28,7 @@ from attractor.transforms.runtime_preamble import (
 
 from .checkpoint import Checkpoint, load_checkpoint, save_checkpoint
 from .context import Context
-from .outcome import Outcome, OutcomeStatus
+from .outcome import FailureKind, Outcome, OutcomeStatus
 from .routing import select_next_edge
 
 
@@ -88,6 +88,8 @@ def _default_should_retry_outcome(outcome: Outcome) -> bool:
     if outcome.status.value == "retry":
         return True
     if outcome.status.value == "fail":
+        if outcome.failure_kind in {FailureKind.BUSINESS, FailureKind.CONTRACT}:
+            return False
         if outcome.retryable is not None:
             return outcome.retryable
         return True
@@ -1214,7 +1216,7 @@ class PipelineExecutor:
         stage_dir.mkdir(parents=True, exist_ok=True)
 
         (stage_dir / "prompt.md").write_text(prompt + "\n", encoding="utf-8")
-        response_text = outcome.notes or ""
+        response_text = self._response_text_for_artifacts(outcome)
         (stage_dir / "response.md").write_text(response_text + "\n", encoding="utf-8")
 
         suggested_next_ids = outcome.suggested_next_ids
@@ -1234,6 +1236,8 @@ class PipelineExecutor:
             "notes": str(outcome.notes or ""),
             "status_transitions": list(transitions),
         }
+        if outcome.failure_kind is not None:
+            status_payload["failure_kind"] = outcome.failure_kind.value
         with (stage_dir / "status.json").open("w", encoding="utf-8") as f:
             json.dump(status_payload, f, indent=2, sort_keys=True)
 
@@ -1312,6 +1316,8 @@ class PipelineExecutor:
             notes = "" if outcome.notes is None else str(outcome.notes)
             failure_reason = "" if outcome.failure_reason is None else str(outcome.failure_reason)
             retryable = outcome.retryable if isinstance(outcome.retryable, bool) or outcome.retryable is None else None
+            failure_kind = self._normalize_failure_kind(outcome.failure_kind)
+            raw_response_text = self._normalize_raw_response_text(getattr(outcome, "raw_response_text", ""))
 
             if normalized_status is None or normalized_status not in STATUS_FILE_ALLOWED_OUTCOMES:
                 return Outcome(
@@ -1322,6 +1328,8 @@ class PipelineExecutor:
                     notes=notes,
                     failure_reason=f"invalid outcome status: {outcome.status}",
                     retryable=False,
+                    failure_kind=FailureKind.RUNTIME,
+                    raw_response_text=raw_response_text,
                 )
 
             return Outcome(
@@ -1332,6 +1340,8 @@ class PipelineExecutor:
                 notes=notes,
                 failure_reason=failure_reason,
                 retryable=retryable,
+                failure_kind=failure_kind if normalized_status == OutcomeStatus.FAIL else None,
+                raw_response_text=raw_response_text,
             )
 
         node = self.graph.nodes[node_id]
@@ -1361,6 +1371,29 @@ class PipelineExecutor:
             return normalized
         return {}
 
+    def _normalize_failure_kind(self, failure_kind: object) -> FailureKind | None:
+        if failure_kind is None:
+            return None
+        if isinstance(failure_kind, FailureKind):
+            return failure_kind
+        try:
+            return FailureKind(str(failure_kind).strip().lower())
+        except ValueError:
+            return None
+
+    def _normalize_raw_response_text(self, raw_response_text: object) -> str:
+        if raw_response_text is None:
+            return ""
+        return str(raw_response_text)
+
+    def _response_text_for_artifacts(self, outcome: Outcome) -> str:
+        raw_response_text = self._normalize_raw_response_text(getattr(outcome, "raw_response_text", ""))
+        if raw_response_text:
+            return raw_response_text
+        if outcome.notes:
+            return str(outcome.notes)
+        return str(outcome.failure_reason or "")
+
     def _execute_node_handler(self, node_id: str, prompt: str, context: Context) -> Outcome:
         timeout = self._node_timeout_seconds(node_id)
 
@@ -1374,7 +1407,11 @@ class PipelineExecutor:
             message = "handler timed out"
             if timeout is not None:
                 message = f"handler timed out after {timeout:g}s"
-            return Outcome(status=OutcomeStatus.FAIL, failure_reason=message)
+            return Outcome(
+                status=OutcomeStatus.FAIL,
+                failure_reason=message,
+                failure_kind=FailureKind.RUNTIME,
+            )
         except BaseException as exc:
             if isinstance(exc, KeyboardInterrupt):
                 raise
@@ -1388,6 +1425,7 @@ class PipelineExecutor:
                 status=OutcomeStatus.FAIL,
                 failure_reason=failure_reason,
                 retryable=category == RuntimeErrorCategory.RETRYABLE,
+                failure_kind=FailureKind.RUNTIME,
             )
         return self._normalize_outcome(node_id, raw_outcome)
 

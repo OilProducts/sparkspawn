@@ -161,6 +161,7 @@ Graph attributes are declared in a `graph [ ... ]` block or as top-level `key = 
 | `llm_provider`      | String   | auto-detected   | LLM provider key. Auto-detected from model if unset. |
 | `reasoning_effort`  | String   | `"high"`        | LLM reasoning effort: `low`, `medium`, `high`. |
 | `codergen.response_contract` | String | `""`     | Codergen-only shared response-format contract. `status_envelope` appends the canonical structured Outcome schema to the prompt. |
+| `codergen.contract_repair_attempts` | Integer | contract-dependent | Codergen-only bounded same-thread repair budget for malformed response-contract output. Defaults to `1` when `codergen.response_contract` is set, otherwise `0`. |
 | `auto_status`       | Boolean  | `false`         | If `true` and the handler writes no status, the engine auto-generates a SUCCESS outcome. |
 | `allow_partial`     | Boolean  | `false`         | Accept PARTIAL_SUCCESS when retries are exhausted instead of failing. |
 
@@ -762,13 +763,21 @@ CodergenHandler:
 
 When `codergen.response_contract="status_envelope"`, the runtime appends a shared structured-output appendix to the prompt that enumerates the allowed top-level Outcome keys and forbids extra ones. Use this on codergen nodes that must return a structured status envelope; do not set it on non-codergen nodes.
 
+For response-contract codergen nodes, malformed contract output is not treated as a modeled business `fail`. The runtime performs up to `codergen.contract_repair_attempts` bounded same-thread repair turns, feeding the exact contract validation error back to the same agent thread and asking it to re-emit only corrected final output for the same decision. This repair budget is distinct from node `max_retries`, which still controls full node reruns for runtime failures.
+
 **Status file:** The handler writes `status.json` in the stage directory with the Outcome fields serialized as JSON. This file serves as an audit trail and enables the status-file contract: external tools or agents can write `status.json` to communicate outcomes back to the engine.
 
 #### CodergenBackend Interface
 
 ```
 INTERFACE CodergenBackend:
-    FUNCTION run(node: Node, prompt: String, context: Context) -> String | Outcome
+    FUNCTION run(
+        node: Node,
+        prompt: String,
+        context: Context,
+        response_contract: String = "",
+        contract_repair_attempts: Integer = 0
+    ) -> String | Outcome
 ```
 
 How you implement this interface is up to you. The pipeline engine only cares that it gets a String or Outcome back.
@@ -2191,6 +2200,7 @@ ASSERT "review" IN checkpoint.completed_nodes
 | `llm_provider`          | String   | auto-detected | LLM provider override |
 | `reasoning_effort`      | String   | `"high"`      | Reasoning depth: low/medium/high |
 | `codergen.response_contract` | String | `""`       | Codergen-only shared response-format contract. `status_envelope` appends the canonical structured Outcome schema to the prompt. |
+| `codergen.contract_repair_attempts` | Integer | contract-dependent | Codergen-only bounded same-thread repair budget for malformed response-contract output. Defaults to `1` when `codergen.response_contract` is set, otherwise `0`. |
 | `auto_status`           | Boolean  | `false`       | Auto-generate SUCCESS if no status written |
 | `allow_partial`         | Boolean  | `false`       | Accept PARTIAL_SUCCESS on retry exhaustion |
 | `tool.command`          | String   | `""`          | Shell command executed by tool nodes. Required when a node resolves to `tool`. |
@@ -2242,7 +2252,8 @@ Each non-terminal node writes a `status.json` file in its stage directory. This 
         "key": "value",
         "nested.key": "value"
     },
-    "notes": "Human-readable execution summary"
+    "notes": "Human-readable execution summary",
+    "failure_kind": "business | contract | runtime"  // optional, runtime-owned
 }
 ```
 
@@ -2253,17 +2264,25 @@ Each non-terminal node writes a `status.json` file in its stage directory. This 
 | `suggested_next_ids`   | List of Strings | No       | Fallback target node IDs if no label match. |
 | `context_updates`      | Map             | No       | Key-value pairs merged into the run context. |
 | `notes`                | String          | No       | Human-readable log entries. |
+| `failure_kind`         | String (enum)   | No       | Runtime-owned failure classification. Present only for failed stages. Allowed values: `business`, `contract`, `runtime`. |
 
 `preferred_label` is the canonical status-file field name. `preferred_next_label` is a legacy
 implementation alias and is not part of the current contract.
 
 When `auto_status=true` on a node and no `status.json` was written by the handler, the engine synthesizes: `{"outcome": "success", "notes": "auto-status: handler completed without writing status"}`.
 
+For response-contract codergen stages:
+- a valid structured `outcome="fail"` is a modeled business result, not a contract fault
+- malformed structured output is a contract fault, optionally repaired in-thread before surfacing as a failed stage
+- `failure_kind` is runtime-owned metadata, not a model-authored status-envelope field
+
 ---
 
 ## Appendix D: Error Categories
 
 Every error during pipeline execution falls into one of three categories:
+
+These categories describe runtime execution errors. They are distinct from modeled stage outcomes: a valid `Outcome(status=FAIL)` may still be a normal business result, while malformed response-contract output surfaces as a failed stage with `failure_kind=contract` after any bounded repair attempts are exhausted.
 
 **Retryable errors** are transient failures where re-execution may succeed. Examples: LLM rate limits, network timeouts, temporary service unavailability. The engine retries these automatically per the node's retry policy.
 

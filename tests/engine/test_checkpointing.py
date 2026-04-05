@@ -9,7 +9,7 @@ from attractor.engine import Checkpoint, load_checkpoint, save_checkpoint
 import attractor.engine.executor as executor_module
 from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
-from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.handlers import HandlerRunner, build_default_registry
 
 
@@ -217,6 +217,122 @@ class TestCheckpointAndArtifacts:
             assert status_payload["suggested_next_ids"] == []
             assert status_payload["context_updates"] == {}
             assert status_payload["notes"] == ""
+
+    def test_status_json_contract_includes_optional_failure_kind_when_present(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done [condition="outcome=fail"]
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                if node_id == "plan":
+                    return Outcome(
+                        status=OutcomeStatus.FAIL,
+                        notes="invalid envelope",
+                        failure_reason="invalid structured status envelope: notes must be a string",
+                        failure_kind=FailureKind.CONTRACT,
+                    )
+                return Outcome(status=OutcomeStatus.SUCCESS)
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "completed"
+            status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
+            assert status_payload["outcome"] == "fail"
+            assert status_payload["failure_kind"] == "contract"
+
+    def test_status_json_includes_runtime_failure_kind_for_runner_exception(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done
+            }
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                if node_id == "plan":
+                    raise RuntimeError("runner exploded")
+                return Outcome(status=OutcomeStatus.SUCCESS)
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "failed"
+            plan_outcome = result.node_outcomes["plan"]
+            assert plan_outcome.status == OutcomeStatus.FAIL
+            assert plan_outcome.failure_reason == "runner exploded"
+            assert plan_outcome.failure_kind == FailureKind.RUNTIME
+
+            status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
+            assert status_payload["outcome"] == "fail"
+            assert status_payload["failure_kind"] == "runtime"
+
+    def test_stage_response_artifact_prefers_raw_response_text_when_present(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                plan [shape=box]
+                done [shape=Msquare]
+
+                start -> plan
+                plan -> done [condition="outcome=fail"]
+            }
+            """
+        )
+
+        raw_response = '{"outcome":"fail","notes":"needs fixes"}'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+
+            def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+                if node_id == "plan":
+                    return Outcome(
+                        status=OutcomeStatus.FAIL,
+                        notes="needs fixes",
+                        raw_response_text=raw_response,
+                    )
+                return Outcome(status=OutcomeStatus.SUCCESS)
+
+            result = PipelineExecutor(
+                graph,
+                runner,
+                logs_root=str(logs_root),
+            ).run(Context())
+
+            assert result.status == "completed"
+            response_path = logs_root / "plan" / "response.md"
+            assert response_path.read_text(encoding="utf-8").strip() == raw_response
+            status_payload = json.loads((logs_root / "plan" / "status.json").read_text(encoding="utf-8"))
+            assert status_payload["notes"] == "needs fixes"
 
     def test_status_json_contract_constrains_invalid_outcome_enum_and_optional_field_values(self):
         graph = parse_dot(

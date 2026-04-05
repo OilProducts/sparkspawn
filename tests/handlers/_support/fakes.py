@@ -14,8 +14,19 @@ class _StubBackend:
         self.ok = ok
         self.calls = []
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
-        self.calls.append((node_id, prompt, dict(context.values)))
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> bool:
+        self.calls.append(
+            (node_id, prompt, dict(context.values), response_contract, contract_repair_attempts)
+        )
         return self.ok
 
 class _ArtifactProbeBackend:
@@ -25,8 +36,17 @@ class _ArtifactProbeBackend:
         self.response_exists_during_call = False
         self.prompt_text_during_call = ""
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
-        del prompt, context, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> bool:
+        del prompt, context, response_contract, contract_repair_attempts, timeout
         stage_dir = self.logs_root / node_id
         prompt_path = stage_dir / "prompt.md"
         response_path = stage_dir / "response.md"
@@ -40,16 +60,34 @@ class _TextBackend:
     def __init__(self, text: str):
         self.text = text
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> str:
-        del node_id, prompt, context, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> str:
+        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
         return self.text
 
 class _OutcomeBackend:
     def __init__(self, outcome: Outcome):
         self.outcome = outcome
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> Outcome:
-        del node_id, prompt, context, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> Outcome:
+        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
         return self.outcome
 
 class _FanInRankingBackend:
@@ -57,12 +95,23 @@ class _FanInRankingBackend:
         self.response = response
         self.calls = []
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> str:
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> str:
         self.calls.append(
             {
                 "node_id": node_id,
                 "prompt": prompt,
                 "context": dict(context.values),
+                "response_contract": response_contract,
+                "contract_repair_attempts": contract_repair_attempts,
                 "timeout": timeout,
             }
         )
@@ -85,8 +134,17 @@ class _StageLoggingBackend:
         finally:
             self._active_bindings -= 1
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> str:
-        del node_id, prompt, context, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> str:
+        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
         self.run_bound = self._active_bindings > 0
         return self.response
 

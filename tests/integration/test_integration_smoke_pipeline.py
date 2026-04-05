@@ -10,8 +10,17 @@ class _SmokeBackend:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout: float | None = None) -> str:
-        del context, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout: float | None = None,
+    ) -> str:
+        del context, response_contract, contract_repair_attempts, timeout
         self.calls.append((node_id, prompt))
         return f"{node_id} completed"
 

@@ -13,6 +13,12 @@ class OutcomeStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class FailureKind(str, Enum):
+    BUSINESS = "business"
+    CONTRACT = "contract"
+    RUNTIME = "runtime"
+
+
 @dataclass
 class Outcome:
     status: OutcomeStatus
@@ -22,9 +28,11 @@ class Outcome:
     failure_reason: str = ""
     notes: str = ""
     retryable: Optional[bool] = None
+    failure_kind: Optional[FailureKind] = None
+    raw_response_text: str = ""
 
     def to_payload(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "status": self.status.value,
             "preferred_label": self.preferred_label,
             "suggested_next_ids": list(self.suggested_next_ids),
@@ -32,3 +40,6 @@ class Outcome:
             "notes": self.notes,
             "failure_reason": self.failure_reason,
         }
+        if self.failure_kind is not None:
+            payload["failure_kind"] = self.failure_kind.value
+        return payload

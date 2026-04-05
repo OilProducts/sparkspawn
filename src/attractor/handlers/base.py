@@ -18,6 +18,8 @@ class CodergenBackend(Protocol):
         prompt: str,
         context: Context,
         *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
         timeout: Optional[float] = None,
     ) -> str | Outcome:
         ...

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 import attractor.api.codex_backends as codex_backends_module
 import attractor.api.server as server
 from attractor.engine import Context, load_checkpoint
-from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from spark_common.runtime import (
     build_codex_runtime_environment,
     build_project_id,
@@ -85,8 +85,17 @@ def test_pipeline_start_uses_flow_ui_default_model_when_request_model_missing(
     selected_models: list[str | None] = []
 
     class _Backend:
-        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
-            del node_id, prompt, context, timeout
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            node_id,
+            prompt,
+            context,
+            *,
+            response_contract="",
+            contract_repair_attempts=0,
+            timeout=None,
+        ):
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
             return ""
 
     def fake_build_backend(backend_name, working_dir, emit, *, model):  # type: ignore[no-untyped-def]
@@ -131,8 +140,17 @@ def test_pipeline_start_explicit_model_overrides_flow_ui_default_model(
     selected_models: list[str | None] = []
 
     class _Backend:
-        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
-            del node_id, prompt, context, timeout
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            node_id,
+            prompt,
+            context,
+            *,
+            response_contract="",
+            contract_repair_attempts=0,
+            timeout=None,
+        ):
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
             return ""
 
     def fake_build_backend(backend_name, working_dir, emit, *, model):  # type: ignore[no-untyped-def]
@@ -402,6 +420,7 @@ def test_codex_app_server_backend_missing_binary_returns_fail_outcome_and_emits_
     assert isinstance(result, Outcome)
     assert result.status == OutcomeStatus.FAIL
     assert result.failure_reason == "codex app-server not found on PATH"
+    assert result.failure_kind == FailureKind.RUNTIME
     assert events[-1] == {"type": "log", "msg": "[plan] codex app-server not found on PATH"}
 
 
@@ -483,6 +502,7 @@ def test_codex_app_server_backend_missing_runtime_working_directory_returns_spec
     assert isinstance(result, Outcome)
     assert result.status == OutcomeStatus.FAIL
     assert "working directory is unavailable in the runtime" in str(result.failure_reason)
+    assert result.failure_kind == FailureKind.RUNTIME
     assert str(missing_dir.resolve(strict=False)) in str(result.failure_reason)
     assert "working directory is unavailable in the runtime" in events[-1]["msg"]
 
@@ -685,13 +705,269 @@ def test_codex_app_server_backend_parses_structured_outcome_agent_text(
 
     monkeypatch.setattr(codex_backends_module.subprocess, "Popen", lambda *args, **kwargs: FakeProcess(lines))
 
-    result = backend.run("review", "hello", Context())
+    result = backend.run(
+        "review",
+        "hello",
+        Context(),
+        response_contract="status_envelope",
+        contract_repair_attempts=1,
+    )
 
     assert isinstance(result, Outcome)
     assert result.status == OutcomeStatus.FAIL
     assert result.notes == "needs fixes"
     assert result.failure_reason == "review requested changes"
+    assert result.failure_kind == FailureKind.BUSINESS
     assert result.context_updates == {"context.review.summary": "missing validation"}
+
+
+def test_codex_app_server_backend_treats_any_response_contract_fail_as_business_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+
+    class FakeResult:
+        def __init__(self, assistant_message: str) -> None:
+            self.assistant_message = assistant_message
+            self.command_text = ""
+            self.token_total = None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, **kwargs) -> None:
+            return None
+
+        def start_thread(self, **kwargs) -> str:
+            return "thread-123"
+
+        def run_turn(self, **kwargs) -> FakeResult:
+            del kwargs
+            return FakeResult('{"outcome":"fail","notes":"needs fixes","failure_reason":"review requested changes"}')
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerClient", FakeClient)
+
+    result = backend.run(
+        "review",
+        "hello",
+        Context(),
+        response_contract="custom_contract",
+        contract_repair_attempts=1,
+    )
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.failure_kind == FailureKind.BUSINESS
+
+
+def test_codex_app_server_backend_repairs_malformed_contract_output_on_same_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+    prompts: list[dict[str, object]] = []
+
+    class FakeResult:
+        def __init__(self, assistant_message: str, token_total: int | None = None) -> None:
+            self.assistant_message = assistant_message
+            self.command_text = ""
+            self.token_total = token_total
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, **kwargs) -> None:
+            return None
+
+        def start_thread(self, **kwargs) -> str:
+            return "thread-123"
+
+        def run_turn(self, **kwargs) -> FakeResult:
+            prompts.append(kwargs)
+            if len(prompts) == 1:
+                return FakeResult('{"outcome":"success","notes":["bad"]}')
+            return FakeResult('{"outcome":"success","notes":"corrected"}')
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerClient", FakeClient)
+
+    result = backend.run(
+        "audit_milestone",
+        "hello",
+        Context(),
+        response_contract="status_envelope",
+        contract_repair_attempts=1,
+    )
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.SUCCESS
+    assert result.notes == "corrected"
+    assert len(prompts) == 2
+    assert prompts[0]["thread_id"] == "thread-123"
+    assert prompts[1]["thread_id"] == "thread-123"
+    assert "violated the status_envelope response contract" in str(prompts[1]["prompt"])
+    assert "notes must be a string" in str(prompts[1]["prompt"])
+    assert "Do not do new repository work." in str(prompts[1]["prompt"])
+    assert "Do not run commands." in str(prompts[1]["prompt"])
+
+
+def test_codex_app_server_backend_repairs_malformed_output_for_any_response_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+    prompts: list[dict[str, object]] = []
+
+    class FakeResult:
+        def __init__(self, assistant_message: str) -> None:
+            self.assistant_message = assistant_message
+            self.command_text = ""
+            self.token_total = None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, **kwargs) -> None:
+            return None
+
+        def start_thread(self, **kwargs) -> str:
+            return "thread-123"
+
+        def run_turn(self, **kwargs) -> FakeResult:
+            prompts.append(kwargs)
+            if len(prompts) == 1:
+                return FakeResult('{"outcome":"success","notes":["bad"]}')
+            return FakeResult('{"outcome":"success","notes":"corrected"}')
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerClient", FakeClient)
+
+    result = backend.run(
+        "audit_milestone",
+        "hello",
+        Context(),
+        response_contract="custom_contract",
+        contract_repair_attempts=1,
+    )
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.SUCCESS
+    assert result.notes == "corrected"
+    assert len(prompts) == 2
+    assert "violated the custom_contract response contract" in str(prompts[1]["prompt"])
+
+
+def test_codex_app_server_backend_returns_contract_failure_when_repair_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+    prompts: list[dict[str, object]] = []
+    invalid_payload = '{"outcome":"success","notes":["bad"]}'
+
+    class FakeResult:
+        def __init__(self, assistant_message: str) -> None:
+            self.assistant_message = assistant_message
+            self.command_text = ""
+            self.token_total = None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, **kwargs) -> None:
+            return None
+
+        def start_thread(self, **kwargs) -> str:
+            return "thread-123"
+
+        def run_turn(self, **kwargs) -> FakeResult:
+            prompts.append(kwargs)
+            return FakeResult(invalid_payload)
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerClient", FakeClient)
+
+    result = backend.run(
+        "audit_milestone",
+        "hello",
+        Context(),
+        response_contract="status_envelope",
+        contract_repair_attempts=1,
+    )
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.failure_kind == FailureKind.CONTRACT
+    assert result.failure_reason == "invalid structured status envelope: notes must be a string"
+    assert result.notes == invalid_payload
+    assert len(prompts) == 2
+
+
+def test_codex_app_server_backend_preserves_exact_json_validation_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+    invalid_payload = '{"outcome":"success",}'
+
+    class FakeResult:
+        def __init__(self, assistant_message: str) -> None:
+            self.assistant_message = assistant_message
+            self.command_text = ""
+            self.token_total = None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, **kwargs) -> None:
+            return None
+
+        def start_thread(self, **kwargs) -> str:
+            return "thread-123"
+
+        def run_turn(self, **kwargs) -> FakeResult:
+            del kwargs
+            return FakeResult(invalid_payload)
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerClient", FakeClient)
+
+    result = backend.run(
+        "audit_milestone",
+        "hello",
+        Context(),
+        response_contract="status_envelope",
+        contract_repair_attempts=0,
+    )
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.failure_kind == FailureKind.CONTRACT
+    assert result.failure_reason.startswith("invalid structured status envelope: invalid JSON:")
+    assert "line 1 column" in result.failure_reason
+    assert "expected a JSON object with top-level key outcome" not in result.failure_reason
 
 
 def test_codex_app_server_backend_fails_closed_on_malformed_structured_outcome_agent_text(

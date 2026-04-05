@@ -15,8 +15,17 @@ class _MilestoneRecordingBackend:
     def __init__(self):
         self.milestone_ids: list[str] = []
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
-        del prompt, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> bool:
+        del prompt, response_contract, contract_repair_attempts, timeout
         if node_id == "task":
             self.milestone_ids.append(str(context.get("context.milestone.id", "")))
         return True

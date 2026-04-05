@@ -4,7 +4,7 @@ from pathlib import Path
 
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
-from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.builtin.codergen import STATUS_ENVELOPE_PROMPT_APPENDIX
 
@@ -39,6 +39,8 @@ class TestCodergenHandler:
         outcome = runner("task", "Plan for $goal", ctx)
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0][1] == "Plan for ship"
+        assert backend.calls[0][3] == ""
+        assert backend.calls[0][4] == 0
 
     def test_codergen_handler_prepends_runtime_carryover_to_rendered_prompt(self):
         graph = parse_dot(
@@ -105,6 +107,32 @@ class TestCodergenHandler:
 
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0][1] == f"Plan for ship\n\n{STATUS_ENVELOPE_PROMPT_APPENDIX}"
+        assert backend.calls[0][3] == "status_envelope"
+        assert backend.calls[0][4] == 1
+
+    def test_codergen_handler_passes_explicit_contract_repair_budget(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [
+                    shape=box,
+                    prompt="Plan for $goal",
+                    codergen.response_contract="status_envelope",
+                    codergen.contract_repair_attempts=2
+                ]
+            }
+            """
+        )
+
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("task", "Plan for $goal", Context(values={"graph.goal": "ship"}))
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0][3] == "status_envelope"
+        assert backend.calls[0][4] == 2
 
     def test_codergen_handler_falls_back_to_label_when_prompt_is_empty(self):
         graph = parse_dot(
@@ -205,6 +233,35 @@ class TestCodergenHandler:
             assert response_path.exists()
             assert response_path.read_text(encoding="utf-8").strip() == "backend text response"
 
+    def test_codergen_handler_writes_raw_response_text_when_backend_outcome_provides_it(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [shape=box, prompt="Plan for $goal"]
+            }
+            """
+        )
+
+        raw_response = '{"outcome":"fail","notes":"backend returned partial"}'
+        backend_outcome = Outcome(
+            status=OutcomeStatus.FAIL,
+            notes="backend returned partial",
+            raw_response_text=raw_response,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_root = Path(tmp) / "logs"
+            registry = build_default_registry(codergen_backend=_OutcomeBackend(backend_outcome))
+            runner = HandlerRunner(graph, registry, logs_root=logs_root)
+
+            outcome = runner("task", "Plan for $goal", Context(values={"graph.goal": "ship"}))
+
+            assert outcome is backend_outcome
+            assert outcome.context_updates["last_response"] == raw_response
+            response_path = logs_root / "task" / "response.md"
+            assert response_path.exists()
+            assert response_path.read_text(encoding="utf-8").strip() == raw_response
+
     def test_codergen_handler_writes_prompt_before_backend_and_response_afterward(self):
         graph = parse_dot(
             """
@@ -240,11 +297,12 @@ class TestCodergenHandler:
             """
         )
         backend_outcome = Outcome(
-            status=OutcomeStatus.PARTIAL_SUCCESS,
+            status=OutcomeStatus.FAIL,
             preferred_label="continue",
             suggested_next_ids=["followup"],
             context_updates={"work.last": "task"},
             notes="backend returned partial",
+            failure_kind=FailureKind.CONTRACT,
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,8 +321,9 @@ class TestCodergenHandler:
                     "last_stage": "task",
                     "work.last": "task",
                 },
+                "failure_kind": "contract",
                 "notes": "backend returned partial",
-                "outcome": "partial_success",
+                "outcome": "fail",
                 "preferred_label": "continue",
                 "suggested_next_ids": ["followup"],
             }

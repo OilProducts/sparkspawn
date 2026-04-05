@@ -13,6 +13,7 @@ from ..base import CodergenBackend, HandlerRuntime
 
 RUNTIME_CONTEXT_CARRYOVER_KEY = "_attractor.runtime.context_carryover"
 STATUS_ENVELOPE_RESPONSE_CONTRACT = "status_envelope"
+DEFAULT_CONTRACT_REPAIR_ATTEMPTS = 1
 STATUS_ENVELOPE_PROMPT_APPENDIX = "\n".join(
     [
         "Structured response contract:",
@@ -62,17 +63,26 @@ class CodergenHandler:
             return outcome
 
         timeout = _to_seconds(runtime.node_attrs.get("timeout"))
+        response_contract = _normalized_response_contract_name(runtime.node_attrs)
+        contract_repair_attempts = _contract_repair_attempts(runtime.node_attrs, response_contract)
         with _backend_stage_logging_context(self.backend, runtime.node_id, runtime.logs_root):
-            result = self.backend.run(runtime.node_id, prompt, runtime.context, timeout=timeout)
+            result = self.backend.run(
+                runtime.node_id,
+                prompt,
+                runtime.context,
+                response_contract=response_contract,
+                contract_repair_attempts=contract_repair_attempts,
+                timeout=timeout,
+            )
         outcome: Outcome
         response_text: str
         if isinstance(result, Outcome):
+            response_text = _response_text_for_outcome(result)
             outcome = _with_builtin_response_context(
                 result,
                 node_id=runtime.node_id,
-                response_text=result.notes or result.failure_reason or "",
+                response_text=response_text,
             )
-            response_text = outcome.notes or outcome.failure_reason or ""
         elif isinstance(result, str):
             response_text = result
             outcome = _with_builtin_response_context(
@@ -132,13 +142,29 @@ def _backend_stage_logging_context(backend: object, node_id: str, logs_root: Pat
 
 
 def _apply_response_contract(prompt: str, node_attrs) -> str:
-    attr = node_attrs.get("codergen.response_contract")
-    if attr is None:
-        return prompt
-    contract_name = str(attr.value).strip().lower().replace("-", "_")
+    contract_name = _normalized_response_contract_name(node_attrs)
     if contract_name != STATUS_ENVELOPE_RESPONSE_CONTRACT:
         return prompt
     return "\n\n".join([prompt, STATUS_ENVELOPE_PROMPT_APPENDIX])
+
+
+def _normalized_response_contract_name(node_attrs) -> str:
+    attr = node_attrs.get("codergen.response_contract")
+    if attr is None:
+        return ""
+    return str(attr.value).strip().lower().replace("-", "_")
+
+
+def _contract_repair_attempts(node_attrs, response_contract: str) -> int:
+    if not response_contract:
+        return 0
+    attr = node_attrs.get("codergen.contract_repair_attempts")
+    if attr is None:
+        return DEFAULT_CONTRACT_REPAIR_ATTEMPTS
+    try:
+        return max(0, int(str(attr.value).strip()))
+    except (TypeError, ValueError):
+        return DEFAULT_CONTRACT_REPAIR_ATTEMPTS
 
 
 def _with_builtin_response_context(outcome: Outcome, *, node_id: str, response_text: str) -> Outcome:
@@ -149,6 +175,17 @@ def _with_builtin_response_context(outcome: Outcome, *, node_id: str, response_t
     merged_updates.update(dict(outcome.context_updates))
     outcome.context_updates = merged_updates
     return outcome
+
+
+def _response_text_for_outcome(outcome: Outcome) -> str:
+    raw_response_text = getattr(outcome, "raw_response_text", "")
+    if raw_response_text:
+        return str(raw_response_text)
+    if outcome.notes:
+        return str(outcome.notes)
+    if outcome.failure_reason:
+        return str(outcome.failure_reason)
+    return ""
 
 
 def _to_seconds(attr) -> float | None:
@@ -199,5 +236,7 @@ def _write_status_file(stage_dir: Path | None, outcome: Outcome) -> None:
         "context_updates": dict(outcome.context_updates),
         "notes": outcome.notes,
     }
+    if outcome.status == OutcomeStatus.FAIL and outcome.failure_kind is not None:
+        payload["failure_kind"] = outcome.failure_kind.value
     with (stage_dir / "status.json").open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)

@@ -10,7 +10,7 @@ from attractor.engine.executor import (
     _classify_runtime_error,
     _is_retryable_exception,
 )
-from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 
 
 def _runner(node_id: str, prompt: str, context: Context) -> Outcome:
@@ -122,6 +122,9 @@ def test_retry_policy_should_retry_for_retry_and_retryable_fail():
     assert policy.should_retry(Outcome(status=OutcomeStatus.RETRY)) is True
     assert policy.should_retry(Outcome(status=OutcomeStatus.FAIL, retryable=True)) is True
     assert policy.should_retry(Outcome(status=OutcomeStatus.FAIL, retryable=False)) is False
+    assert policy.should_retry(Outcome(status=OutcomeStatus.FAIL, failure_kind=FailureKind.BUSINESS)) is False
+    assert policy.should_retry(Outcome(status=OutcomeStatus.FAIL, failure_kind=FailureKind.CONTRACT)) is False
+    assert policy.should_retry(Outcome(status=OutcomeStatus.FAIL, failure_kind=FailureKind.RUNTIME)) is True
     assert policy.should_retry(Outcome(status=OutcomeStatus.SUCCESS)) is False
 
 

@@ -267,8 +267,17 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
     _seed_planning_flow(TEST_PLANNING_FLOW)
 
     class _Backend:
-        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
-            del node_id, prompt, context, timeout
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            node_id,
+            prompt,
+            context,
+            *,
+            response_contract="",
+            contract_repair_attempts=0,
+            timeout=None,
+        ):
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
             return json.dumps(
                 {
                     "title": "Execution plan",
@@ -375,8 +384,17 @@ def test_execution_planning_approval_uses_project_trigger_binding_when_present(
     _seed_planning_flow("custom-plan.dot")
 
     class _Backend:
-        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
-            del node_id, prompt, context, timeout
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            node_id,
+            prompt,
+            context,
+            *,
+            response_contract="",
+            contract_repair_attempts=0,
+            timeout=None,
+        ):
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
             return json.dumps(
                 {
                     "title": "Execution plan",
@@ -451,8 +469,17 @@ def test_approved_execution_card_launches_selected_flow_run(
     _seed_dispatch_flow(TEST_DISPATCH_FLOW)
 
     class _Backend:
-        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
-            del node_id, prompt, context, timeout
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            node_id,
+            prompt,
+            context,
+            *,
+            response_contract="",
+            contract_repair_attempts=0,
+            timeout=None,
+        ):
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
             return "implemented"
 
     monkeypatch.setattr(
@@ -540,8 +567,17 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
     _seed_dispatch_flow("custom-implement.dot")
 
     class _Backend:
-        def run(self, node_id, prompt, context, *, timeout=None):  # type: ignore[no-untyped-def]
-            del node_id, prompt, context, timeout
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            node_id,
+            prompt,
+            context,
+            *,
+            response_contract="",
+            contract_repair_attempts=0,
+            timeout=None,
+        ):
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
             return "implemented"
 
     monkeypatch.setattr(

@@ -30,8 +30,17 @@ class _WorkflowBackend:
     def __init__(self, responses: dict[str, bool]):
         self._responses = responses
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> bool:
-        del prompt, context, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> bool:
+        del prompt, context, response_contract, contract_repair_attempts, timeout
         return self._responses.get(node_id, True)
 
 
@@ -40,8 +49,17 @@ class _StructuredLoopBackend:
         self.prompts: dict[str, list[str]] = {}
         self.review_calls = 0
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> str | Outcome:
-        del context, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> str | Outcome:
+        del context, response_contract, contract_repair_attempts, timeout
         self.prompts.setdefault(node_id, []).append(prompt)
         if node_id == "review":
             self.review_calls += 1
@@ -73,8 +91,17 @@ class _SpecImplementationLoopBackend:
         self.next_milestone_calls = 0
         self.child_milestone_ids: list[str] = []
 
-    def run(self, node_id: str, prompt: str, context: Context, *, timeout=None) -> Outcome:
-        del prompt, timeout
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout=None,
+    ) -> Outcome:
+        del prompt, response_contract, contract_repair_attempts, timeout
         if node_id == "next_milestone":
             self.next_milestone_calls += 1
             if self.next_milestone_calls == 1:

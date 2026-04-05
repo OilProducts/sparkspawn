@@ -14,7 +14,17 @@ class _Backend:
         self.plan = plan
         self.calls = []
 
-    def run(self, node_id, prompt, context, *, timeout=None):
+    def run(
+        self,
+        node_id,
+        prompt,
+        context,
+        *,
+        response_contract="",
+        contract_repair_attempts=0,
+        timeout=None,
+    ):
+        del context, response_contract, contract_repair_attempts, timeout
         self.calls.append((node_id, prompt))
         value = self.plan.get(node_id, True)
         if isinstance(value, list):
