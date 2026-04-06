@@ -79,6 +79,7 @@ export interface RunContextRow extends FormattedContextValue {
 export type TimelineEventCategory = 'lifecycle' | 'stage' | 'parallel' | 'interview' | 'checkpoint'
 export type TimelineSeverity = 'info' | 'warning' | 'error'
 export type TimelineCorrelationKind = 'retry' | 'interview'
+export type TimelineSourceScope = 'root' | 'child'
 
 export interface TimelineEventEntry {
     id: string
@@ -90,6 +91,9 @@ export interface TimelineEventEntry {
     stageIndex: number | null
     summary: string
     receivedAt: string
+    sourceScope: TimelineSourceScope
+    sourceParentNodeId: string | null
+    sourceFlowName: string | null
     payload: Record<string, unknown>
 }
 
@@ -118,6 +122,9 @@ export interface PendingInterviewGate {
     receivedAt: string
     nodeId: string | null
     stageIndex: number | null
+    sourceScope: TimelineSourceScope
+    sourceParentNodeId: string | null
+    sourceFlowName: string | null
     prompt: string
     questionId: string | null
     questionType: 'MULTIPLE_CHOICE' | 'YES_NO' | 'CONFIRMATION' | 'FREEFORM' | null

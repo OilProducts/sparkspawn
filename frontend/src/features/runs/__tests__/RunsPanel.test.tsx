@@ -954,4 +954,278 @@ describe('RunsPanel', () => {
 
     expect(openedUrls).toHaveLength(2)
   })
+
+  it('replays historical activity for selected completed runs, restores replayed sequence gaps, shows child events inline, and deduplicates reconnects and reselects', async () => {
+    const selectedRun = makeRun({
+      run_id: 'run-history-replay',
+      flow_name: 'selected.dot',
+      status: 'completed',
+      outcome: 'success',
+      project_path: '/tmp/project-one',
+      ended_at: '2026-03-22T00:05:00Z',
+    })
+    const otherRun = makeRun({
+      run_id: 'run-history-secondary',
+      flow_name: 'other.dot',
+      status: 'completed',
+      outcome: 'success',
+      project_path: '/tmp/project-one',
+      ended_at: '2026-03-22T00:06:00Z',
+    })
+    const runsById = {
+      [selectedRun.run_id]: selectedRun,
+      [otherRun.run_id]: otherRun,
+    }
+
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({ runs: [selectedRun, otherRun] })
+      }
+      const pipelineMatch = url.match(/\/attractor\/pipelines\/([^/]+)\/([^/?#]+)/)
+      const runId = pipelineMatch?.[1] ? decodeURIComponent(pipelineMatch[1]) : null
+      const resource = pipelineMatch?.[2] ?? null
+      if (runId && runId in runsById) {
+        if (resource === 'checkpoint') {
+          return jsonResponse({
+            pipeline_id: runId,
+            checkpoint: {
+              completed_nodes: ['prepare'],
+              current_node: 'done',
+            },
+          })
+        }
+        if (resource === 'context') {
+          return jsonResponse({
+            pipeline_id: runId,
+            context: {},
+          })
+        }
+        if (resource === 'artifacts') {
+          return jsonResponse({
+            pipeline_id: runId,
+            artifacts: [],
+          })
+        }
+        if (resource === 'graph-preview') {
+          return jsonResponse({
+            status: 'ok',
+            graph: {
+              graph_attrs: {},
+              nodes: [
+                { id: 'start', label: 'Start', shape: 'Mdiamond' },
+                { id: 'done', label: 'Done', shape: 'Msquare' },
+              ],
+              edges: [
+                { from: 'start', to: 'done', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+              ],
+            },
+            diagnostics: [],
+            errors: [],
+          })
+        }
+        if (resource === 'questions') {
+          return jsonResponse({
+            pipeline_id: runId,
+            questions: [],
+          })
+        }
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    class ReplayEventSource {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 2
+      readonly url: string
+      readyState = ReplayEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent<string>) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string | URL) {
+        this.url = String(url)
+        eventSources.push(this)
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }))
+      }
+
+      open() {
+        this.onopen?.(new Event('open'))
+      }
+
+      close() {
+        this.readyState = ReplayEventSource.CLOSED
+      }
+    }
+    const eventSources: ReplayEventSource[] = []
+    const latestEventSourceForRun = (runId: string) => (
+      eventSources
+        .filter((source) => source.url.includes(`/attractor/pipelines/${encodeURIComponent(runId)}/events`))
+        .at(-1) ?? null
+    )
+    vi.stubGlobal('EventSource', ReplayEventSource as unknown as typeof EventSource)
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+    })
+
+    const user = userEvent.setup()
+    renderRunsPanel()
+
+    await waitFor(() => {
+      expect(screen.getByText('selected.dot')).toBeVisible()
+    })
+
+    const selectedRunCard = screen.getByText('selected.dot').closest('[data-testid="run-history-row"]')
+    expect(selectedRunCard).toBeTruthy()
+    await user.click(selectedRunCard!)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-activity-panel')).toBeVisible()
+      expect(eventSources).toHaveLength(1)
+    })
+
+    const initialReplaySource = latestEventSourceForRun(selectedRun.run_id)
+    expect(initialReplaySource).toBeTruthy()
+
+    act(() => {
+      initialReplaySource!.open()
+      initialReplaySource!.emit({
+        type: 'StageCompleted',
+        sequence: 1,
+        emitted_at: '2026-03-22T00:02:00Z',
+        node_id: 'prepare',
+        index: 1,
+      })
+      initialReplaySource!.emit({
+        type: 'StageCompleted',
+        sequence: 3,
+        emitted_at: '2026-03-22T00:04:00Z',
+        node_id: 'plan_current',
+        index: 2,
+        source_scope: 'child',
+        source_parent_node_id: 'run_milestone',
+        source_flow_name: 'implement-milestone.dot',
+      })
+      initialReplaySource!.emit({
+        type: 'StageCompleted',
+        sequence: 3,
+        emitted_at: '2026-03-22T00:04:00Z',
+        node_id: 'plan_current',
+        index: 2,
+        source_scope: 'child',
+        source_parent_node_id: 'run_milestone',
+        source_flow_name: 'implement-milestone.dot',
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('run-activity-entry')).toHaveLength(2)
+    })
+
+    expect(screen.getAllByTestId('run-activity-entry-summary')[0]).toHaveTextContent(
+      'Child flow implement-milestone.dot via run_milestone: Stage plan_current completed',
+    )
+    expect(screen.getAllByTestId('run-activity-entry-label')[0]).toHaveTextContent(
+      'Child · implement-milestone.dot via run_milestone · plan_current · stage 2',
+    )
+    expect(screen.getAllByTestId('run-event-timeline-row')).toHaveLength(2)
+    expect(screen.getByTestId('run-event-timeline-row-source')).toHaveTextContent(
+      'Source: Child flow implement-milestone.dot via run_milestone',
+    )
+
+    const otherRunCard = screen.getByText('other.dot').closest('[data-testid="run-history-row"]')
+    expect(otherRunCard).toBeTruthy()
+    await user.click(otherRunCard!)
+
+    await waitFor(() => {
+      expect(eventSources).toHaveLength(2)
+      expect(initialReplaySource?.readyState).toBe(ReplayEventSource.CLOSED)
+    })
+
+    const reselectedRunCard = screen.getByText('selected.dot').closest('[data-testid="run-history-row"]')
+    expect(reselectedRunCard).toBeTruthy()
+    await user.click(reselectedRunCard!)
+
+    await waitFor(() => {
+      expect(eventSources).toHaveLength(3)
+      expect(screen.getByTestId('run-activity-panel')).toBeVisible()
+    })
+
+    const replayAfterReselect = latestEventSourceForRun(selectedRun.run_id)
+    expect(replayAfterReselect).toBeTruthy()
+    expect(replayAfterReselect).not.toBe(initialReplaySource)
+
+    act(() => {
+      replayAfterReselect!.open()
+      replayAfterReselect!.emit({
+        type: 'StageCompleted',
+        sequence: 1,
+        emitted_at: '2026-03-22T00:02:00Z',
+        node_id: 'prepare',
+        index: 1,
+      })
+      replayAfterReselect!.emit({
+        type: 'StageStarted',
+        sequence: 2,
+        emitted_at: '2026-03-22T00:03:00Z',
+        node_id: 'plan_current',
+        index: 2,
+        source_scope: 'child',
+        source_parent_node_id: 'run_milestone',
+        source_flow_name: 'implement-milestone.dot',
+      })
+      replayAfterReselect!.emit({
+        type: 'StageCompleted',
+        sequence: 3,
+        emitted_at: '2026-03-22T00:04:00Z',
+        node_id: 'plan_current',
+        index: 2,
+        source_scope: 'child',
+        source_parent_node_id: 'run_milestone',
+        source_flow_name: 'implement-milestone.dot',
+      })
+      replayAfterReselect!.emit({
+        type: 'StageCompleted',
+        sequence: 4,
+        emitted_at: '2026-03-22T00:05:00Z',
+        node_id: 'done',
+        index: 3,
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('run-activity-entry')).toHaveLength(4)
+      expect(screen.getAllByTestId('run-event-timeline-row')).toHaveLength(4)
+    })
+
+    expect(
+      useStore.getState().runDetailSessionsByRunId[selectedRun.run_id]?.timelineEvents.map(({ sequence }) => sequence),
+    ).toEqual([4, 3, 2, 1])
+
+    const activitySummaries = screen.getAllByTestId('run-activity-entry-summary').map((node) => node.textContent ?? '')
+    expect(activitySummaries[0]).toContain('Stage done completed')
+    expect(activitySummaries.filter((summary) => summary.includes('Stage plan_current started'))).toHaveLength(1)
+    expect(activitySummaries.filter((summary) => summary.includes('Stage plan_current completed'))).toHaveLength(1)
+
+    const timelineSummaries = screen.getAllByTestId('run-event-timeline-row-summary').map((node) => node.textContent ?? '')
+    expect(timelineSummaries.filter((summary) => summary.includes('Stage plan_current started'))).toHaveLength(1)
+    expect(timelineSummaries.filter((summary) => summary.includes('Stage plan_current completed'))).toHaveLength(1)
+    expect(timelineSummaries).toEqual([
+      'Stage done completed',
+      'Child flow implement-milestone.dot via run_milestone: Stage plan_current completed',
+      'Child flow implement-milestone.dot via run_milestone: Stage plan_current started',
+      'Stage prepare completed',
+    ])
+  })
 })

@@ -302,20 +302,26 @@ async def test_pipeline_failure_preserves_last_error_and_emits_descriptive_termi
     assert status_payload["last_error"] == "boom"
 
     history = server.EVENT_HUB.history(run_id)
-    assert {
-        "type": "runtime",
-        "status": "failed",
-        "outcome": None,
-        "outcome_reason_code": None,
-        "outcome_reason_message": None,
-        "last_error": "boom",
-        "run_id": run_id,
-    } in history
-    assert {
-        "type": "log",
-        "msg": "Pipeline failed: boom",
-        "run_id": run_id,
-    } in history
+    assert any(
+        event.get("type") == "runtime"
+        and event.get("status") == "failed"
+        and event.get("outcome") is None
+        and event.get("outcome_reason_code") is None
+        and event.get("outcome_reason_message") is None
+        and event.get("last_error") == "boom"
+        and event.get("run_id") == run_id
+        and isinstance(event.get("sequence"), int)
+        and isinstance(event.get("emitted_at"), str)
+        for event in history
+    )
+    assert any(
+        event.get("type") == "log"
+        and event.get("msg") == "Pipeline failed: boom"
+        and event.get("run_id") == run_id
+        and isinstance(event.get("sequence"), int)
+        and isinstance(event.get("emitted_at"), str)
+        for event in history
+    )
 
 
 def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(

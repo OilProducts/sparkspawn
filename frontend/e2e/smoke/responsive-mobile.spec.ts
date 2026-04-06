@@ -52,7 +52,6 @@ const stubResponsiveSmokeApis = async (page: Page) => {
         contentType: 'application/json',
         body: JSON.stringify({
           status: 'running',
-          last_run_id: MOBILE_RUN_ID,
           last_working_directory: MOBILE_PROJECT_PATH,
           last_flow_name: MOBILE_FLOW_NAME,
         }),

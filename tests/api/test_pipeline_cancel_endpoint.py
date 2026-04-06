@@ -55,19 +55,25 @@ def test_cancel_pipeline_requests_cancel_for_active_run(
     assert server.RUNTIME.last_error == "cancel_requested_by_user"
 
     history = server.EVENT_HUB.history(run_id)
-    assert {
-        "type": "runtime",
-        "status": "cancel_requested",
-        "outcome": None,
-        "outcome_reason_code": None,
-        "outcome_reason_message": None,
-        "run_id": run_id,
-    } in history
-    assert {
-        "type": "log",
-        "msg": "[System] Cancel requested. Stopping after current node.",
-        "run_id": run_id,
-    } in history
+    assert any(
+        event.get("type") == "runtime"
+        and event.get("status") == "cancel_requested"
+        and event.get("outcome") is None
+        and event.get("outcome_reason_code") is None
+        and event.get("outcome_reason_message") is None
+        and event.get("run_id") == run_id
+        and isinstance(event.get("sequence"), int)
+        and isinstance(event.get("emitted_at"), str)
+        for event in history
+    )
+    assert any(
+        event.get("type") == "log"
+        and event.get("msg") == "[System] Cancel requested. Stopping after current node."
+        and event.get("run_id") == run_id
+        and isinstance(event.get("sequence"), int)
+        and isinstance(event.get("emitted_at"), str)
+        for event in history
+    )
 
 
 def test_cancel_pipeline_ignores_non_running_known_pipeline(

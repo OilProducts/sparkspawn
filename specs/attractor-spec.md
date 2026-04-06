@@ -1742,7 +1742,7 @@ Implementations may expose the pipeline engine as an HTTP service for web-based 
 | `POST` | `/pipelines`                            | Submit a DOT source and start execution. Returns pipeline ID. |
 | `POST` | `/pipelines/{id}/continue`              | Create a derived run from an existing run, starting at a chosen node. |
 | `GET`  | `/pipelines/{id}`                       | Get authoritative per-run lifecycle/detail state for inspection, including progress and persisted run metadata. |
-| `GET`  | `/pipelines/{id}/events`                | SSE stream of pipeline events in real-time. |
+| `GET`  | `/pipelines/{id}/events`                | SSE stream of durable run events with history replay followed by live updates. |
 | `POST` | `/pipelines/{id}/cancel`                | Cancel a running pipeline. |
 | `GET`  | `/pipelines/{id}/graph`                 | Get rendered graph visualization (SVG). |
 | `GET`  | `/pipelines/{id}/graph-preview`         | Get structured graph preview JSON from the stored run DOT snapshot. |
@@ -1765,7 +1765,14 @@ It should return a full run-detail payload for both active and completed runs, i
 
 For active runs, implementations should read persisted run metadata first and then overlay only the live fields that can legitimately change during execution, such as lifecycle status, outcome, last error, and current completed nodes.
 Implementations must not report an active lifecycle status for an orphaned run after restart; stale persisted `running` or `cancel_requested` records must be reconciled to terminal truth during startup/runtime initialization.
-`GET /pipelines/{id}/events` is a real-time event channel for incremental updates; clients should reconcile it against `GET /pipelines/{id}` rather than treating the stream as the sole source of terminal truth.
+`GET /pipelines/{id}/events` is a history-backed event channel for run inspection.
+It must:
+- replay durable per-run event history before yielding live updates
+- use stable per-run event identity via monotonically increasing `sequence`
+- include a server-assigned `emitted_at` timestamp on every event
+- allow parent runs to include forwarded child-flow events, labeled with `source_scope="child"` plus `source_parent_node_id` and `source_flow_name`
+
+Clients should still reconcile the stream against `GET /pipelines/{id}` rather than treating the event stream as the sole source of terminal lifecycle truth.
 
 `POST /pipelines/{id}/continue` is a derived-continuation endpoint, not a same-run resume endpoint.
 It must:
@@ -1823,6 +1830,17 @@ runner.on_event = FUNCTION(event):
 FOR EACH event IN pipeline.events():
     process(event)
 ```
+
+For HTTP/SSE inspection, implementations should persist emitted run events durably per run so selected-run history survives server restarts and late inspection.
+Forwarded child-flow events from `stack.manager_loop` are part of the parent run's event history rather than a separate child-only API surface.
+Event payloads exposed through `/pipelines/{id}/events` should include:
+- `run_id`
+- `sequence`
+- `emitted_at`
+- optional child-source metadata when forwarded from a child executor:
+  - `source_scope`
+  - `source_parent_node_id`
+  - `source_flow_name`
 
 ### 9.7 Tool Call Hooks
 

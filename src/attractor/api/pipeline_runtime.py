@@ -248,7 +248,6 @@ class RuntimeState:
     last_model: str = ""
     last_completed_nodes: list[str] = None
     last_flow_name: str = ""
-    last_run_id: str = ""
 
 
 class BroadcastingRunner:

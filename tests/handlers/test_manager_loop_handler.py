@@ -69,6 +69,53 @@ class TestManagerLoopHandler:
         assert context.get("context.stack.child.outcome") == "success"
         assert context.get("context.stack.child.active_stage") == "done"
 
+    def test_manager_loop_forwards_child_events_into_parent_stream(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Child task"]
+                done [shape=Msquare]
+
+                start -> task -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+        captured_events: list[dict[str, object]] = []
+
+        outcome = runner.run_with_events(
+            "manager",
+            "",
+            Context(),
+            lambda event_type, **payload: captured_events.append({"type": event_type, **payload}),
+        )
+
+        assert outcome is not None
+        assert outcome.status == OutcomeStatus.SUCCESS
+        event_types = [event["type"] for event in captured_events]
+        assert event_types[0] == "PipelineStarted"
+        assert event_types[-1] == "PipelineCompleted"
+        assert event_types.count("StageStarted") == 2
+        assert event_types.count("StageCompleted") == 2
+        assert "CheckpointSaved" in event_types
+        assert all(event.get("source_scope") == "child" for event in captured_events)
+        assert all(event.get("source_parent_node_id") == "manager" for event in captured_events)
+        assert all(event.get("source_flow_name") == "child.dot" for event in captured_events)
+
     def test_manager_loop_autostarts_fresh_child_when_stale_completed_child_state_exists(self, tmp_path):
         child_dot_path = tmp_path / "child.dot"
         child_dot_path.write_text(

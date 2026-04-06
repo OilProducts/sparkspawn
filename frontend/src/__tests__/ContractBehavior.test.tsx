@@ -83,6 +83,19 @@ const requestUrl = (input: RequestInfo | URL): string => {
   return input.url
 }
 
+const stableTimelineTimestamp = (sequence: number): string => {
+  const offset = Math.max(0, sequence - 1)
+  const minutes = Math.floor(offset / 60)
+  const seconds = offset % 60
+  return `2026-03-04T01:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}Z`
+}
+
+const stableTimelineEvent = <T extends Record<string, unknown>>(sequence: number, payload: T) => ({
+  ...payload,
+  sequence,
+  emitted_at: stableTimelineTimestamp(sequence),
+})
+
 const resetContractState = () => {
   useStore.setState((state) => ({
     ...state,
@@ -907,7 +920,6 @@ describe('Frontend contract behavior', () => {
             last_model: undefined,
             last_completed_nodes: null,
             last_flow_name: undefined,
-            last_run_id: undefined,
           }),
       },
     ]
@@ -2539,11 +2551,11 @@ describe('Frontend contract behavior', () => {
     act(() => {
       for (let index = 0; index < totalEvents; index += 1) {
         eventSource?.onmessage?.(new MessageEvent('message', {
-          data: JSON.stringify({
+          data: JSON.stringify(stableTimelineEvent(index + 1, {
             type: 'StageStarted',
             node_id: `stage_${index}`,
             index,
-          }),
+          })),
         }))
       }
     })
@@ -2658,7 +2670,7 @@ describe('Frontend contract behavior', () => {
         return jsonResponse([])
       }
       if (url.includes('/attractor/status')) {
-        return jsonResponse({ status: 'idle', last_run_id: null })
+        return jsonResponse({ status: 'idle' })
       }
       if (url.includes('/attractor/api/flows')) {
         return jsonResponse([])
@@ -3221,13 +3233,13 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'human_gate',
               question_id: gateId,
               node_id: 'review_gate',
               prompt: pendingPrompt,
               options: [{ label: 'Approve', value: 'approve' }],
-            }),
+            })),
           }))
         }, 0)
       }
@@ -3364,7 +3376,7 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'human_gate',
               question_id: gateId,
               node_id: 'review_gate',
@@ -3373,7 +3385,7 @@ describe('Frontend contract behavior', () => {
                 { label: 'Approve', value: 'approve' },
                 { label: 'Reject', value: 'reject' },
               ],
-            }),
+            })),
           }))
         }, 0)
       }
@@ -3503,7 +3515,7 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'human_gate',
               question_id: gateId,
               question_type: 'MULTIPLE_CHOICE',
@@ -3523,7 +3535,7 @@ describe('Frontend contract behavior', () => {
                   description: 'Send build back for revision.',
                 },
               ],
-            }),
+            })),
           }))
         }, 0)
       }
@@ -3643,22 +3655,22 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'human_gate',
               question_id: yesNoGateId,
               question_type: 'YES_NO',
               node_id: 'review_gate',
               prompt: yesNoPrompt,
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(2, {
               type: 'human_gate',
               question_id: confirmationGateId,
               question_type: 'CONFIRMATION',
               node_id: 'release_gate',
               prompt: confirmationPrompt,
-            }),
+            })),
           }))
         }, 0)
       }
@@ -3792,13 +3804,13 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'human_gate',
               question_id: gateId,
               question_type: 'FREEFORM',
               node_id: 'review_gate',
               prompt: pendingPrompt,
-            }),
+            })),
           }))
         }, 0)
       }
@@ -3937,7 +3949,7 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'human_gate',
               question_id: multipleChoiceGateId,
               question_type: 'MULTIPLE_CHOICE',
@@ -3957,34 +3969,34 @@ describe('Frontend contract behavior', () => {
                   description: 'Pause rollout and gather more evidence.',
                 },
               ],
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(2, {
               type: 'human_gate',
               question_id: yesNoGateId,
               question_type: 'YES_NO',
               node_id: 'review_gate_yes_no',
               prompt: 'Continue migration?',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(3, {
               type: 'human_gate',
               question_id: confirmationGateId,
               question_type: 'CONFIRMATION',
               node_id: 'release_gate_confirmation',
               prompt: 'Finalize promotion?',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(4, {
               type: 'human_gate',
               question_id: freeformGateId,
               question_type: 'FREEFORM',
               node_id: 'release_gate_freeform',
               prompt: 'Add release notes before promotion.',
-            }),
+            })),
           }))
         }, 0)
       }
@@ -4135,7 +4147,7 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'human_gate',
               question_id: 'gate-review-1',
               node_id: 'review_gate',
@@ -4146,27 +4158,27 @@ describe('Frontend contract behavior', () => {
                 { label: 'Promote', value: 'promote' },
                 { label: 'Rollback', value: 'rollback' },
               ],
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(2, {
               type: 'human_gate',
               question_id: 'gate-review-2',
               node_id: 'review_gate',
               index: 2,
               question_type: 'FREEFORM',
               prompt: 'Why this strategy?',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(3, {
               type: 'human_gate',
               question_id: 'gate-approval-1',
               node_id: 'approval_gate',
               index: 3,
               question_type: 'CONFIRMATION',
               prompt: 'Finalize production promotion?',
-            }),
+            })),
           }))
         }, 0)
       }
@@ -4296,20 +4308,20 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'InterviewInform',
               stage: 'review_gate',
               index: 2,
               message: 'Policy reminder: include rollback evidence.',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(2, {
               type: 'InterviewInform',
               stage: 'approval_gate',
               index: 3,
               message: 'Approver is offline; escalation path is active.',
-            }),
+            })),
           }))
         }, 0)
       }
@@ -4437,7 +4449,7 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'human_gate',
               question_id: 'gate-review-1',
               node_id: 'review_gate',
@@ -4448,35 +4460,35 @@ describe('Frontend contract behavior', () => {
                 { label: 'Promote', value: 'promote' },
                 { label: 'Rollback', value: 'rollback' },
               ],
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(2, {
               type: 'InterviewInform',
               stage: 'review_gate',
               index: 2,
               message: 'Policy reminder: include rollback evidence.',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(3, {
               type: 'human_gate',
               question_id: 'gate-review-2',
               node_id: 'review_gate',
               index: 2,
               question_type: 'FREEFORM',
               prompt: 'Why this strategy?',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(4, {
               type: 'human_gate',
               question_id: 'gate-approval-1',
               node_id: 'approval_gate',
               index: 3,
               question_type: 'CONFIRMATION',
               prompt: 'Finalize production promotion?',
-            }),
+            })),
           }))
         }, 0)
       }
@@ -4618,33 +4630,33 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'InterviewTimeout',
               stage: 'review_gate',
               index: 2,
               question: 'Select release path',
               outcome_provenance: 'timeout_default_applied',
               default_choice_label: 'Fix',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(2, {
               type: 'InterviewCompleted',
               stage: 'review_gate',
               index: 2,
               question: 'Select release path',
               answer: 'Approve',
               outcome_provenance: 'accepted',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(3, {
               type: 'InterviewCompleted',
               stage: 'release_gate',
               index: 3,
               question: 'Finalize deployment?',
               answer: 'skipped',
-            }),
+            })),
           }))
         }, 0)
       }
@@ -4766,30 +4778,30 @@ describe('Frontend contract behavior', () => {
         setTimeout(() => {
           this.onopen?.(new Event('open'))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(1, {
               type: 'InterviewTimeout',
               stage: 'review_gate',
               index: 2,
               question: 'Select release path',
               default_choice_label: 'Fix',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(2, {
               type: 'InterviewTimeout',
               stage: 'approval_gate',
               index: 3,
               question: 'Finalize deployment?',
-            }),
+            })),
           }))
           this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({
+            data: JSON.stringify(stableTimelineEvent(3, {
               type: 'InterviewCompleted',
               stage: 'review_gate',
               index: 2,
               question: 'Select release path',
               answer: 'Approve',
-            }),
+            })),
           }))
         }, 0)
       }

@@ -188,6 +188,7 @@ Runs owns:
 For selected-run inspection, Runs treats backend run-detail state as authoritative.
 The selected run summary, lifecycle badge, and detail surfaces must reconcile against `GET /pipelines/{id}` rather than relying on the runs list row or event-stream-local status.
 The runs list remains an overview/navigation surface.
+Run Activity and Event Timeline must use the selected run's durable event history, not only events observed while the tab was open.
 
 ### 8.3 Bridge Surfaces
 
@@ -392,6 +393,8 @@ Timeline and lifecycle summaries for `PipelineCompleted` should include:
 - optional outcome reason message
 
 Run activity summaries should prefer a backend-provided failure reason over a generic lifecycle label when one is available.
+Run Activity is a compact excerpt of the same durable event history that powers Event Timeline.
+Nested child-flow activity should appear inline and clearly labeled in both Run Activity and Event Timeline when the parent run executed child flows through `stack.manager_loop`.
 
 ## 14. Frontend State Model
 
@@ -409,6 +412,8 @@ For run inspection specifically:
 - the runs list is an overview cache and must not outrank selected-run detail state
 - event streams are additive live-update channels for logs, node status, human gates, and timeline enrichment
 - event streams must reconcile with authoritative per-run detail state so missed terminal events do not leave the UI stale
+- selected-run activity/timeline history must survive reselecting the run later; the UI must not depend on the run having been open live
+- selected-run activity/timeline history may include inline child-flow events when the backend marks them with child-source metadata
 
 The frontend may keep local ephemeral state for:
 - selected tab

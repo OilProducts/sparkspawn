@@ -45,6 +45,9 @@ const makeGroupedEntry = (overrides: Partial<GroupedTimelineEntry> = {}): Groupe
             stageIndex: 2,
             summary: 'Stage validate started',
             receivedAt: '2026-03-22T00:02:00Z',
+            sourceScope: 'root',
+            sourceParentNodeId: null,
+            sourceFlowName: null,
             payload: {},
         },
     ],
@@ -228,6 +231,9 @@ describe('RunActivityCard', () => {
                                 stageIndex: 3,
                                 summary: 'Stage validate retrying (attempt 2)',
                                 receivedAt: '2026-03-22T00:03:00Z',
+                                sourceScope: 'root',
+                                sourceParentNodeId: null,
+                                sourceFlowName: null,
                                 payload: { attempt: 2 },
                             },
                         ],
@@ -245,6 +251,9 @@ describe('RunActivityCard', () => {
                                 stageIndex: 2,
                                 summary: 'Stage plan completed',
                                 receivedAt: '2026-03-22T00:02:00Z',
+                                sourceScope: 'root',
+                                sourceParentNodeId: null,
+                                sourceFlowName: null,
                                 payload: {},
                             },
                         ],
@@ -272,5 +281,50 @@ describe('RunActivityCard', () => {
         await user.click(screen.getByTestId('run-activity-clear-logs-button'))
 
         expect(screen.getByTestId('run-activity-logs-panel')).toHaveTextContent('No runtime logs have arrived for this run yet.')
+    })
+
+    it('labels child flow activity in the recent activity feed and retry facts', () => {
+        render(
+            <RunActivityCard
+                checkpointCompletedNodes="start, plan"
+                checkpointCurrentNode="run_milestone"
+                checkpointRetryCounters="—"
+                collapsed={false}
+                groupedTimelineEntries={[
+                    makeGroupedEntry({
+                        id: 'entry-child',
+                        events: [
+                            {
+                                id: 'event-child',
+                                sequence: 3,
+                                type: 'StageRetrying',
+                                category: 'stage',
+                                severity: 'warning',
+                                nodeId: 'plan_current',
+                                stageIndex: 4,
+                                summary: 'Child flow implement-milestone.dot via run_milestone: Stage plan_current retrying (attempt 2)',
+                                receivedAt: '2026-03-22T00:04:00Z',
+                                sourceScope: 'child',
+                                sourceParentNodeId: 'run_milestone',
+                                sourceFlowName: 'implement-milestone.dot',
+                                payload: { attempt: 2 },
+                            },
+                        ],
+                    }),
+                ]}
+                pendingGateCount={0}
+                rawLogsCollapsed={true}
+                run={makeRun({ status: 'running', current_node: 'run_milestone' })}
+                onCollapsedChange={() => {}}
+                onRawLogsCollapsedChange={() => {}}
+            />,
+        )
+
+        expect(screen.getByTestId('run-activity-fact-retry-state')).toHaveTextContent(
+            'Retrying plan_current (child implement-milestone.dot via run_milestone) (attempt 2)',
+        )
+        expect(screen.getByTestId('run-activity-entry-label')).toHaveTextContent(
+            'Child · implement-milestone.dot via run_milestone · plan_current · stage 4',
+        )
     })
 })

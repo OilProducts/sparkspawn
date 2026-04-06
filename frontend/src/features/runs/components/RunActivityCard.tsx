@@ -48,6 +48,16 @@ function deriveRetryFact(
     groupedTimelineEntries: GroupedTimelineEntry[],
     checkpointRetryCounters: string,
 ): string | null {
+    const formatEventLabel = (event: GroupedTimelineEntry['events'][number]): string => {
+        const baseLabel = event.nodeId || 'stage'
+        if (event.sourceScope !== 'child') {
+            return baseLabel
+        }
+        const sourceLabel = event.sourceFlowName
+            ? `child ${event.sourceFlowName}`
+            : 'child flow'
+        return event.sourceParentNodeId ? `${baseLabel} (${sourceLabel} via ${event.sourceParentNodeId})` : `${baseLabel} (${sourceLabel})`
+    }
     for (const entry of groupedTimelineEntries) {
         for (const event of entry.events) {
             const attempt = typeof event.payload.attempt === 'number' && Number.isFinite(event.payload.attempt)
@@ -55,11 +65,11 @@ function deriveRetryFact(
                 : null
             if (event.type === 'StageRetrying') {
                 return attempt !== null
-                    ? `Retrying ${event.nodeId || 'stage'} (attempt ${attempt})`
-                    : `Retrying ${event.nodeId || 'stage'}`
+                    ? `Retrying ${formatEventLabel(event)} (attempt ${attempt})`
+                    : `Retrying ${formatEventLabel(event)}`
             }
             if (attempt !== null && (event.type === 'StageStarted' || event.type === 'StageCompleted')) {
-                return `${event.nodeId || 'Stage'} attempt ${attempt}`
+                return `${formatEventLabel(event)} attempt ${attempt}`
             }
         }
     }
@@ -118,13 +128,19 @@ function deriveHeadline(run: RunRecord, currentNode: string | null, pendingGateC
 function buildRecentActivityRows(groupedTimelineEntries: GroupedTimelineEntry[]): RecentActivityRow[] {
     return groupedTimelineEntries.slice(0, 6).map((entry) => {
         const primaryEvent = entry.events[0]
-        const label = primaryEvent.nodeId
+        const sourceLabel = primaryEvent.sourceScope === 'child'
+            ? primaryEvent.sourceFlowName
+                ? `Child · ${primaryEvent.sourceFlowName}${primaryEvent.sourceParentNodeId ? ` via ${primaryEvent.sourceParentNodeId}` : ''}`
+                : `Child${primaryEvent.sourceParentNodeId ? ` via ${primaryEvent.sourceParentNodeId}` : ''}`
+            : null
+        const eventLabel = primaryEvent.nodeId
             ? primaryEvent.stageIndex !== null
                 ? `${primaryEvent.nodeId} · stage ${primaryEvent.stageIndex}`
                 : primaryEvent.nodeId
             : primaryEvent.stageIndex !== null
                 ? `stage ${primaryEvent.stageIndex}`
                 : primaryEvent.type
+        const label = sourceLabel ? `${sourceLabel} · ${eventLabel}` : eventLabel
         return {
             id: entry.id,
             summary: primaryEvent.summary,

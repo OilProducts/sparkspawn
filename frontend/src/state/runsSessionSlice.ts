@@ -65,6 +65,7 @@ const DEFAULT_RUN_DETAIL_SESSION_STATE: RunDetailSessionState = {
     timelineError: null,
     isTimelineLive: false,
     timelineSequence: 0,
+    timelineSeenServerSequences: {},
     timelineTypeFilter: 'all',
     timelineNodeStageFilter: '',
     timelineCategoryFilter: 'all',

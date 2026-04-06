@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 
 import { pipelineEventsUrl } from '@/lib/attractorClient'
 import { useStore } from '@/store'
+import type { TimelineEventEntry } from '../model/shared'
 
 import {
     TIMELINE_MAX_ITEMS,
@@ -14,10 +15,17 @@ type UseRunTimelineStreamArgs = {
 }
 
 const DEFAULT_TIMELINE_SESSION = {
-    timelineEvents: [],
+    timelineEvents: [] as TimelineEventEntry[],
     timelineError: null as string | null,
     isTimelineLive: false,
     timelineSequence: 0,
+    timelineSeenServerSequences: {} as Record<string, true>,
+}
+
+const mergeTimelineEvent = (currentEvents: TimelineEventEntry[], timelineEvent: TimelineEventEntry) => {
+    return [...currentEvents, timelineEvent]
+        .sort((left, right) => right.sequence - left.sequence)
+        .slice(0, TIMELINE_MAX_ITEMS)
 }
 
 export function useRunTimelineStream({
@@ -54,14 +62,25 @@ export function useRunTimelineStream({
                 const payload = JSON.parse(event.data) as unknown
                 const currentSession = useStore.getState().runDetailSessionsByRunId[selectedRunTimelineId]
                 const currentSequence = currentSession?.timelineSequence ?? 0
+                const currentSeenServerSequences = currentSession?.timelineSeenServerSequences ?? {}
                 const currentEvents = currentSession?.timelineEvents ?? []
-                const timelineEvent = toTimelineEvent(payload, currentSequence)
+                const timelineEvent = toTimelineEvent(payload)
                 if (!timelineEvent) {
                     return
                 }
+                const sequenceKey = String(timelineEvent.sequence)
+                if (currentSeenServerSequences[sequenceKey]) {
+                    return
+                }
                 updateRunDetailSession(selectedRunTimelineId, {
-                    timelineEvents: [timelineEvent, ...currentEvents].slice(0, TIMELINE_MAX_ITEMS),
+                    timelineError: null,
+                    isTimelineLive: true,
+                    timelineEvents: mergeTimelineEvent(currentEvents, timelineEvent),
                     timelineSequence: currentSequence + 1,
+                    timelineSeenServerSequences: {
+                        ...currentSeenServerSequences,
+                        [sequenceKey]: true,
+                    },
                 })
             } catch {
                 // Ignore malformed events.

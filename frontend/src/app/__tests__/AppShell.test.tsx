@@ -45,6 +45,12 @@ const resetMockEventSources = () => {
   MockEventSource.instances.length = 0
 }
 
+const stableTimelineEvent = <T extends Record<string, unknown>>(sequence: number, payload: T) => ({
+  ...payload,
+  sequence,
+  emitted_at: `2026-04-06T12:00:${String(sequence).padStart(2, '0')}Z`,
+})
+
 const setViewportWidth = (width: number) => {
   Object.defineProperty(window, 'innerWidth', {
     configurable: true,
@@ -421,7 +427,7 @@ const installCanvasWorkspaceFetchMock = () => {
         })
       }
       if (url.includes('/attractor/status')) {
-        return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
+        return new Response(JSON.stringify({ status: 'idle' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -456,7 +462,7 @@ describe('App shell behavior', () => {
           })
         }
         if (url.includes('/attractor/status')) {
-          return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
+          return new Response(JSON.stringify({ status: 'idle' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -578,7 +584,7 @@ describe('App shell behavior', () => {
           })
         }
         if (url.includes('/attractor/status')) {
-          return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
+          return new Response(JSON.stringify({ status: 'idle' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -666,7 +672,7 @@ describe('App shell behavior', () => {
         return jsonResponse([])
       }
       if (url.includes('/attractor/status')) {
-        return jsonResponse({ status: 'idle', last_run_id: null })
+        return jsonResponse({ status: 'idle' })
       }
       if (url.includes('/attractor/api/flows')) {
         return jsonResponse([])
@@ -783,7 +789,7 @@ describe('App shell behavior', () => {
           ])
         }
         if (url.includes('/attractor/status')) {
-          return jsonResponse({ status: 'idle', last_run_id: null })
+          return jsonResponse({ status: 'idle' })
         }
         if (url.includes('/attractor/api/flows')) {
           return jsonResponse([])
@@ -914,7 +920,7 @@ describe('App shell behavior', () => {
           ])
         }
         if (url.includes('/attractor/status')) {
-          return jsonResponse({ status: 'idle', last_run_id: null })
+          return jsonResponse({ status: 'idle' })
         }
         if (url.includes('/attractor/api/flows')) {
           return jsonResponse([])
@@ -1056,7 +1062,7 @@ describe('App shell behavior', () => {
           ])
         }
         if (url.includes('/attractor/status')) {
-          return jsonResponse({ status: 'idle', last_run_id: null })
+          return jsonResponse({ status: 'idle' })
         }
         if (url.includes('/attractor/api/flows')) {
           return jsonResponse([])
@@ -1210,7 +1216,7 @@ describe('App shell behavior', () => {
           ])
         }
         if (url.includes('/attractor/status')) {
-          return jsonResponse({ status: 'idle', last_run_id: null })
+          return jsonResponse({ status: 'idle' })
         }
         if (url.includes('/attractor/api/flows')) {
           return jsonResponse([])
@@ -1321,7 +1327,7 @@ describe('App shell behavior', () => {
           })
         }
         if (url.includes('/attractor/status')) {
-          return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
+          return new Response(JSON.stringify({ status: 'idle' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -1385,7 +1391,7 @@ describe('App shell behavior', () => {
           return jsonResponse([buildProjectRecord('/tmp/project-trigger')])
         }
         if (url.includes('/attractor/status')) {
-          return jsonResponse({ status: 'idle', last_run_id: null })
+          return jsonResponse({ status: 'idle' })
         }
         if (url.includes('/attractor/api/flows')) {
           return jsonResponse([])
@@ -1452,7 +1458,7 @@ describe('App shell behavior', () => {
           ])
         }
         if (url.includes('/attractor/status')) {
-          return jsonResponse({ status: 'idle', last_run_id: null })
+          return jsonResponse({ status: 'idle' })
         }
         if (url.includes('/attractor/api/flows')) {
           return jsonResponse([])
@@ -1518,7 +1524,7 @@ describe('App shell behavior', () => {
           ])
         }
         if (url.includes('/attractor/status')) {
-          return jsonResponse({ status: 'idle', last_run_id: null })
+          return jsonResponse({ status: 'idle' })
         }
         if (url.includes('/attractor/api/flows')) {
           return jsonResponse([])
@@ -1565,7 +1571,7 @@ describe('App shell behavior', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = resolveRequestUrl(input)
       if (url.includes('/attractor/status')) {
-        return jsonResponse({ status: 'idle', last_run_id: null })
+        return jsonResponse({ status: 'idle' })
       }
       if (url.includes('/attractor/api/flows')) {
         return jsonResponse([])
@@ -1672,7 +1678,7 @@ describe('App shell behavior', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
         if (url.includes('/attractor/status')) {
-          return jsonResponse({ status: 'idle', last_run_id: null })
+          return jsonResponse({ status: 'idle' })
         }
         if (url.includes('/attractor/api/flows')) {
           return jsonResponse([])
@@ -1793,11 +1799,11 @@ describe('App shell behavior', () => {
     act(() => {
       MockEventSource.instances
         .filter((source) => source.url.includes('/attractor/pipelines/run-session/events'))
-        .forEach((source) => source.emitMessage({
+        .forEach((source) => source.emitMessage(stableTimelineEvent(1, {
           type: 'StageStarted',
           node_id: 'review',
           index: 2,
-        }))
+        })))
     })
 
     await waitFor(() => {
@@ -1865,7 +1871,7 @@ describe('App shell behavior', () => {
         return jsonResponse({ branch: 'main', commit: 'abcdef0' })
       }
       if (url.includes('/attractor/status')) {
-        return jsonResponse({ status: 'idle', last_run_id: null })
+        return jsonResponse({ status: 'idle' })
       }
       if (url.includes('/attractor/api/flows')) {
         return jsonResponse([])
@@ -1956,11 +1962,11 @@ describe('App shell behavior', () => {
     await user.click(screen.getByTestId('nav-mode-projects'))
 
     act(() => {
-      runEventSource?.emitMessage({
+      runEventSource?.emitMessage(stableTimelineEvent(1, {
         type: 'StageStarted',
         node_id: 'review',
         index: 2,
-      })
+      }))
     })
 
     await user.click(screen.getByTestId('nav-mode-runs'))
@@ -2196,7 +2202,7 @@ describe('App shell behavior', () => {
           })
         }
         if (url.includes('/attractor/status')) {
-          return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
+          return new Response(JSON.stringify({ status: 'idle' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -2310,7 +2316,7 @@ describe('App shell behavior', () => {
           })
         }
         if (url.includes('/attractor/status')) {
-          return new Response(JSON.stringify({ status: 'idle', last_run_id: null }), {
+          return new Response(JSON.stringify({ status: 'idle' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })

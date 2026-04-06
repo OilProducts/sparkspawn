@@ -32,7 +32,6 @@ def _reset_api_server_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     server.RUNTIME.last_model = ""
     server.RUNTIME.last_completed_nodes = []
     server.RUNTIME.last_flow_name = ""
-    server.RUNTIME.last_run_id = ""
     server.clear_registered_transforms()
     yield
     server.shutdown_attractor_runtime()

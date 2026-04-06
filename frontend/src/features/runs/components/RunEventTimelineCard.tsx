@@ -82,6 +82,14 @@ export function RunEventTimelineCard({
     onSubmitPendingGateAnswer,
     onCollapsedChange,
 }: RunEventTimelineCardProps) {
+    const renderSourceLabel = (event: GroupedTimelineEntry['events'][number]) => {
+        if (event.sourceScope !== 'child') {
+            return null
+        }
+        const flowLabel = event.sourceFlowName ? `Child flow ${event.sourceFlowName}` : 'Child flow'
+        return event.sourceParentNodeId ? `${flowLabel} via ${event.sourceParentNodeId}` : flowLabel
+    }
+
     return (
         <Panel
             data-testid="run-event-timeline-panel"
@@ -233,51 +241,59 @@ export function RunEventTimelineCard({
                                         </span>
                                     </div>
                                 )}
-                                {entry.events.map((event) => (
-                                    <article
-                                        key={event.id}
-                                        data-testid="run-event-timeline-row"
-                                        className="rounded-md border border-border/70 bg-muted/30 px-3 py-2"
-                                    >
-                                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                                            <span
-                                                data-testid="run-event-timeline-row-type"
-                                                className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 font-semibold uppercase tracking-wide text-foreground"
-                                            >
-                                                {event.type}
-                                            </span>
-                                            <span
-                                                data-testid="run-event-timeline-row-category"
-                                                className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 uppercase tracking-wide text-muted-foreground"
-                                            >
-                                                {TIMELINE_CATEGORY_LABELS[event.category]}
-                                            </span>
-                                            <span
-                                                data-testid="run-event-timeline-row-severity"
-                                                className={`inline-flex rounded border px-1.5 py-0.5 uppercase tracking-wide ${TIMELINE_SEVERITY_STYLES[event.severity]}`}
-                                            >
-                                                {TIMELINE_SEVERITY_LABELS[event.severity]}
-                                            </span>
-                                            <span data-testid="run-event-timeline-row-time" className="text-muted-foreground">
-                                                {formatTimestamp(event.receivedAt)}
-                                            </span>
-                                        </div>
-                                        {entry.correlation && (
-                                            <p data-testid="run-event-timeline-row-correlation" className="mt-1 text-xs text-muted-foreground">
-                                                {entry.correlation.kind === 'retry' ? 'Retry correlation' : 'Interview correlation'}: {entry.correlation.label}
+                                {entry.events.map((event) => {
+                                    const sourceLabel = renderSourceLabel(event)
+                                    return (
+                                        <article
+                                            key={event.id}
+                                            data-testid="run-event-timeline-row"
+                                            className="rounded-md border border-border/70 bg-muted/30 px-3 py-2"
+                                        >
+                                            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                                <span
+                                                    data-testid="run-event-timeline-row-type"
+                                                    className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 font-semibold uppercase tracking-wide text-foreground"
+                                                >
+                                                    {event.type}
+                                                </span>
+                                                <span
+                                                    data-testid="run-event-timeline-row-category"
+                                                    className="inline-flex rounded border border-border/80 bg-background px-1.5 py-0.5 uppercase tracking-wide text-muted-foreground"
+                                                >
+                                                    {TIMELINE_CATEGORY_LABELS[event.category]}
+                                                </span>
+                                                <span
+                                                    data-testid="run-event-timeline-row-severity"
+                                                    className={`inline-flex rounded border px-1.5 py-0.5 uppercase tracking-wide ${TIMELINE_SEVERITY_STYLES[event.severity]}`}
+                                                >
+                                                    {TIMELINE_SEVERITY_LABELS[event.severity]}
+                                                </span>
+                                                <span data-testid="run-event-timeline-row-time" className="text-muted-foreground">
+                                                    {formatTimestamp(event.receivedAt)}
+                                                </span>
+                                            </div>
+                                            {entry.correlation && (
+                                                <p data-testid="run-event-timeline-row-correlation" className="mt-1 text-xs text-muted-foreground">
+                                                    {entry.correlation.kind === 'retry' ? 'Retry correlation' : 'Interview correlation'}: {entry.correlation.label}
+                                                </p>
+                                            )}
+                                            <p data-testid="run-event-timeline-row-summary" className="mt-1 text-sm text-foreground">
+                                                {event.summary}
                                             </p>
-                                        )}
-                                        <p data-testid="run-event-timeline-row-summary" className="mt-1 text-sm text-foreground">
-                                            {event.summary}
-                                        </p>
-                                        {event.nodeId && (
-                                            <p data-testid="run-event-timeline-row-node" className="text-xs text-muted-foreground">
-                                                Node: {event.nodeId}
-                                                {event.stageIndex !== null ? ` (index ${event.stageIndex})` : ''}
-                                            </p>
-                                        )}
-                                    </article>
-                                ))}
+                                            {event.nodeId && (
+                                                <p data-testid="run-event-timeline-row-node" className="text-xs text-muted-foreground">
+                                                    Node: {event.nodeId}
+                                                    {event.stageIndex !== null ? ` (index ${event.stageIndex})` : ''}
+                                                </p>
+                                            )}
+                                            {sourceLabel && (
+                                                <p data-testid="run-event-timeline-row-source" className="text-xs text-muted-foreground">
+                                                    Source: {sourceLabel}
+                                                </p>
+                                            )}
+                                        </article>
+                                    )
+                                })}
                             </section>
                         ))}
                     </div>

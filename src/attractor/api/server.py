@@ -148,6 +148,8 @@ EVENT_HUB = PipelineEventHub()
 RUNTIME = RuntimeState(last_completed_nodes=[])
 ACTIVE_RUNS_LOCK = threading.Lock()
 ACTIVE_RUNS: Dict[str, ActiveRun] = {}
+RUN_EVENT_SEQUENCE_LOCK = threading.Lock()
+RUN_EVENT_SEQUENCES: Dict[str, int] = {}
 ATTRACTOR_RUNTIME_LOCK = threading.Lock()
 ATTRACTOR_RUNTIME_INITIALIZED = False
 ORPHANED_ACTIVE_STATUSES = {"running", "cancel_requested", "pause_requested"}
@@ -244,6 +246,8 @@ def shutdown_attractor_runtime() -> None:
         ATTRACTOR_RUNTIME_INITIALIZED = False
     with ACTIVE_RUNS_LOCK:
         ACTIVE_RUNS.clear()
+    with RUN_EVENT_SEQUENCE_LOCK:
+        RUN_EVENT_SEQUENCES.clear()
 
 
 @asynccontextmanager
@@ -291,6 +295,69 @@ def _resolve_launch_model(graph, requested_model: Optional[str]) -> tuple[Option
 
 def _run_meta_path(run_id: str) -> Path:
     return pipeline_runs.run_meta_path(get_settings, run_id)
+
+
+def _run_events_path(run_id: str) -> Path:
+    return _run_root(run_id) / "events.jsonl"
+
+
+def _run_root_exists(run_id: str) -> bool:
+    return _find_run_root(run_id) is not None
+
+
+def _read_persisted_run_events(run_id: str) -> list[dict[str, Any]]:
+    events_path = _run_events_path(run_id)
+    if not events_path.exists():
+        return []
+
+    events: list[dict[str, Any]] = []
+    try:
+        with events_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    events.append(payload)
+    except OSError:
+        return []
+    return events
+
+
+def _persist_run_event(run_id: str, payload: dict[str, Any]) -> None:
+    if not _run_root_exists(run_id):
+        return
+
+    events_path = _run_events_path(run_id)
+    try:
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        with events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+def _next_run_event_sequence(run_id: str) -> int:
+    with RUN_EVENT_SEQUENCE_LOCK:
+        current = RUN_EVENT_SEQUENCES.get(run_id)
+        if current is None:
+            current = 0
+            for event in _read_persisted_run_events(run_id):
+                sequence = event.get("sequence")
+                if isinstance(sequence, int) and sequence > current:
+                    current = sequence
+        next_value = current + 1
+        RUN_EVENT_SEQUENCES[run_id] = next_value
+        return next_value
+
+
+def _has_persisted_run_events(run_id: str) -> bool:
+    events_path = _run_events_path(run_id)
+    return events_path.exists() and events_path.stat().st_size > 0
 
 
 def _write_run_meta(record: RunRecord) -> None:
@@ -401,8 +468,12 @@ def _append_run_log(run_id: str, message: str) -> None:
 async def _publish_run_event(run_id: str, message: dict) -> None:
     payload = dict(message)
     payload.setdefault("run_id", run_id)
+    payload.setdefault("source_scope", "root")
+    payload["sequence"] = _next_run_event_sequence(run_id)
+    payload["emitted_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     if payload.get("type") == "log":
         _append_run_log(run_id, str(payload.get("msg", "")))
+    _persist_run_event(run_id, payload)
     await manager.broadcast(payload)
     await EVENT_HUB.publish(run_id, payload)
 
@@ -641,7 +712,6 @@ async def get_status():
         "last_model": RUNTIME.last_model,
         "last_completed_nodes": RUNTIME.last_completed_nodes,
         "last_flow_name": RUNTIME.last_flow_name,
-        "last_run_id": RUNTIME.last_run_id,
     }
 
 
@@ -938,11 +1008,16 @@ async def _launch_pipeline_run(
     resolved_run_id = (run_id or uuid.uuid4().hex).strip()
     if not resolved_run_id:
         resolved_run_id = uuid.uuid4().hex
-    if _get_active_run(resolved_run_id) is not None or _read_run_meta(_run_meta_path(resolved_run_id)) is not None:
+    if (
+        _get_active_run(resolved_run_id) is not None
+        or _read_run_meta(_run_meta_path(resolved_run_id)) is not None
+        or _run_root_exists(resolved_run_id)
+    ):
         return {
             "status": "validation_error",
             "error": f"Run id already exists: {resolved_run_id}",
         }
+    run_root = _ensure_run_root_for_project(resolved_run_id, working_directory)
     await _publish_lifecycle_phase(resolved_run_id, PIPELINE_LIFECYCLE_PHASES[0])
     try:
         graph = parse_dot(flow_content)
@@ -960,8 +1035,7 @@ async def _launch_pipeline_run(
             "line": getattr(exc, "line", 0),
             "node": None,
         }
-        if RUNTIME.last_run_id:
-            await _publish_run_event(RUNTIME.last_run_id, {"type": "log", "msg": f"❌ Parse error: {exc}"})
+        await _publish_run_event(resolved_run_id, {"type": "log", "msg": f"❌ Parse error: {exc}"})
         return {
             "status": "validation_error",
             "error": str(exc),
@@ -1036,7 +1110,6 @@ async def _launch_pipeline_run(
     )
     runner = BroadcastingRunner(HandlerRunner(graph, registry), emit)
 
-    run_root = _ensure_run_root_for_project(resolved_run_id, working_dir)
     checkpoint_file = str(run_root / "state.json")
     logs_root = str(run_root / "logs")
     # NOTE: This artifact render intentionally uses the submitted DOT source.
@@ -1097,7 +1170,6 @@ async def _launch_pipeline_run(
     RUNTIME.last_working_directory = working_dir
     RUNTIME.last_model = display_model
     RUNTIME.last_flow_name = flow_name
-    RUNTIME.last_run_id = resolved_run_id
 
     _record_run_start(
         resolved_run_id,
@@ -1485,14 +1557,24 @@ async def get_pipeline_artifact_file(pipeline_id: str, artifact_path: str, downl
 async def pipeline_events(pipeline_id: str, request: Request):
     active = _get_active_run(pipeline_id)
     existing = _read_run_meta(_run_meta_path(pipeline_id))
-    if not active and not existing and not EVENT_HUB.history(pipeline_id):
-        raise HTTPException(status_code=404, detail="Unknown pipeline")
-
-    queue, history = EVENT_HUB.subscribe_with_history(pipeline_id)
+    queue = EVENT_HUB.subscribe(pipeline_id)
+    try:
+        # Subscribe before reading persisted history so events published during
+        # the replay handoff are captured in the live queue instead of dropped.
+        persisted_history = _read_persisted_run_events(pipeline_id)
+        if not active and not existing and not persisted_history and not EVENT_HUB.history(pipeline_id):
+            raise HTTPException(status_code=404, detail="Unknown pipeline")
+    except Exception:
+        EVENT_HUB.unsubscribe(pipeline_id, queue)
+        raise
 
     async def stream():
+        highest_sequence = 0
         try:
-            for event in history:
+            for event in persisted_history:
+                sequence = event.get("sequence")
+                if isinstance(sequence, int):
+                    highest_sequence = max(highest_sequence, sequence)
                 yield f"data: {json.dumps(event)}\n\n"
 
             while True:
@@ -1500,6 +1582,11 @@ async def pipeline_events(pipeline_id: str, request: Request):
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    sequence = event.get("sequence")
+                    if isinstance(sequence, int) and sequence <= highest_sequence:
+                        continue
+                    if isinstance(sequence, int):
+                        highest_sequence = sequence
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"

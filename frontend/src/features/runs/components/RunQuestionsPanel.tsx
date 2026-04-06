@@ -51,7 +51,7 @@ export function RunQuestionsPanel({
                             {group.heading}
                         </div>
                         <ul className="mt-1 space-y-1">
-                            {group.gates.map((gate) => {
+                            {group.gates.map((gate, gateIndex) => {
                                 const freeformAnswer = gate.questionId
                                     ? freeformAnswersByGateId[gate.questionId] ?? ''
                                     : ''
@@ -62,7 +62,7 @@ export function RunQuestionsPanel({
                                             data-testid="run-pending-human-gate-item-audit"
                                             className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-amber-900/80"
                                         >
-                                            <span className="font-mono">Order #{gate.sequence + 1}</span>
+                                            <span className="font-mono">Order #{gateIndex + 1}</span>
                                             <span>Question ID: {gate.questionId ?? '—'}</span>
                                             <span>Received: {formatTimestamp(gate.receivedAt)}</span>
                                         </div>

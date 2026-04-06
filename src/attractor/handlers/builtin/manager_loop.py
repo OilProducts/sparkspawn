@@ -131,10 +131,16 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
 
     child_logs_root = runtime.logs_root / runtime.node_id / "child" if runtime.logs_root else None
     child_runner = HandlerRunner(child_graph, registry, logs_root=child_logs_root)
+    child_flow_name = child_dot_path.name or child_graph.graph_id or "child"
+
+    def emit_child_event(event: dict[str, Any]) -> None:
+        _forward_child_event(runtime, event, child_flow_name=child_flow_name)
+
     child_executor = PipelineExecutor(
         child_graph,
         child_runner,
         logs_root=str(child_logs_root) if child_logs_root else None,
+        on_event=emit_child_event,
     )
     try:
         child_result = _run_child_executor_in_workdir(
@@ -176,6 +182,26 @@ def _clear_child_snapshot(context: Context) -> None:
             "context.stack.child.intervention": "",
         }
     )
+
+
+def _forward_child_event(
+    runtime: HandlerRuntime,
+    event: dict[str, Any],
+    *,
+    child_flow_name: str,
+) -> None:
+    event_type = str(event.get("type", "")).strip()
+    if not event_type:
+        return
+    payload = dict(event)
+    payload.pop("type", None)
+    payload.pop("run_id", None)
+    payload.pop("sequence", None)
+    payload.pop("emitted_at", None)
+    payload.setdefault("source_scope", "child")
+    payload["source_parent_node_id"] = runtime.node_id
+    payload["source_flow_name"] = child_flow_name
+    runtime.emit(event_type, **payload)
 
 
 def _poll_interval_seconds(attr: DotAttribute | None) -> float:

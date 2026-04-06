@@ -9,6 +9,7 @@ import type {
     TimelineEventCategory,
     TimelineEventEntry,
     TimelineSeverity,
+    TimelineSourceScope,
 } from './shared'
 
 const TIMELINE_EVENT_TYPES: Record<string, TimelineEventCategory> = {
@@ -54,6 +55,45 @@ const asFiniteNumber = (value: unknown): number | null => {
         return null
     }
     return value
+}
+
+const timelineSourceScopeFromEvent = (payload: Record<string, unknown>): TimelineSourceScope => (
+    payload.source_scope === 'child' ? 'child' : 'root'
+)
+
+const timelineSourceParentNodeIdFromEvent = (payload: Record<string, unknown>): string | null => (
+    asTrimmedString(payload.source_parent_node_id)
+)
+
+const timelineSourceFlowNameFromEvent = (payload: Record<string, unknown>): string | null => (
+    asTrimmedString(payload.source_flow_name)
+)
+
+const timelineSourcePrefix = (
+    sourceScope: TimelineSourceScope,
+    sourceParentNodeId: string | null,
+    sourceFlowName: string | null,
+): string => {
+    if (sourceScope !== 'child') {
+        return ''
+    }
+    const parentNodeLabel = sourceParentNodeId || 'parent node'
+    if (sourceFlowName) {
+        return `Child flow ${sourceFlowName} via ${parentNodeLabel}: `
+    }
+    return `Child flow via ${parentNodeLabel}: `
+}
+
+const timelineSourceLabel = (
+    sourceScope: TimelineSourceScope,
+    sourceParentNodeId: string | null,
+    sourceFlowName: string | null,
+): string | null => {
+    if (sourceScope !== 'child') {
+        return null
+    }
+    const flowLabel = sourceFlowName ? `Child flow ${sourceFlowName}` : 'Child flow'
+    return sourceParentNodeId ? `${flowLabel} via ${sourceParentNodeId}` : flowLabel
 }
 
 const timelineNodeIdFromEvent = (payload: Record<string, unknown>): string | null => {
@@ -135,9 +175,17 @@ const interviewDefaultChoiceLabelFromPayload = (payload: Record<string, unknown>
     ?? asTrimmedString(payload.default_choice_target)
 )
 
-const timelineSummaryFromEvent = (type: string, payload: Record<string, unknown>, nodeId: string | null): string => {
+const timelineSummaryFromEvent = (
+    type: string,
+    payload: Record<string, unknown>,
+    nodeId: string | null,
+    sourceScope: TimelineSourceScope,
+    sourceParentNodeId: string | null,
+    sourceFlowName: string | null,
+): string => {
+    const sourcePrefix = timelineSourcePrefix(sourceScope, sourceParentNodeId, sourceFlowName)
     if (type === 'PipelineStarted') {
-        return `Pipeline started at ${nodeId || 'start'}`
+        return `${sourcePrefix}Pipeline started at ${nodeId || 'start'}`
     }
     if (type === 'PipelineCompleted') {
         const outcome = asTrimmedString(payload.outcome)
@@ -145,57 +193,59 @@ const timelineSummaryFromEvent = (type: string, payload: Record<string, unknown>
         const reasonMessage = asTrimmedString(payload.outcome_reason_message)
         if (outcome === 'failure') {
             if (reasonMessage) {
-                return `Pipeline completed at ${nodeId || 'exit'} (failure: ${reasonMessage})`
+                return `${sourcePrefix}Pipeline completed at ${nodeId || 'exit'} (failure: ${reasonMessage})`
             }
             if (reasonCode) {
-                return `Pipeline completed at ${nodeId || 'exit'} (failure: ${reasonCode})`
+                return `${sourcePrefix}Pipeline completed at ${nodeId || 'exit'} (failure: ${reasonCode})`
             }
-            return `Pipeline completed at ${nodeId || 'exit'} (failure)`
+            return `${sourcePrefix}Pipeline completed at ${nodeId || 'exit'} (failure)`
         }
         return outcome
-            ? `Pipeline completed at ${nodeId || 'exit'} (${outcome})`
-            : `Pipeline completed at ${nodeId || 'exit'}`
+            ? `${sourcePrefix}Pipeline completed at ${nodeId || 'exit'} (${outcome})`
+            : `${sourcePrefix}Pipeline completed at ${nodeId || 'exit'}`
     }
     if (type === 'PipelineFailed') {
         const error = typeof payload.error === 'string' && payload.error.trim().length > 0
             ? payload.error.trim()
             : null
-        return error ? `Pipeline failed: ${error}` : 'Pipeline failed'
+        return error ? `${sourcePrefix}Pipeline failed: ${error}` : `${sourcePrefix}Pipeline failed`
     }
     if (type === 'StageStarted') {
-        return `Stage ${nodeId || 'unknown'} started`
+        return `${sourcePrefix}Stage ${nodeId || 'unknown'} started`
     }
     if (type === 'StageCompleted') {
         const outcome = typeof payload.outcome === 'string' && payload.outcome.trim().length > 0
             ? payload.outcome.trim()
             : null
         return outcome
-            ? `Stage ${nodeId || 'unknown'} completed (${outcome})`
-            : `Stage ${nodeId || 'unknown'} completed`
+            ? `${sourcePrefix}Stage ${nodeId || 'unknown'} completed (${outcome})`
+            : `${sourcePrefix}Stage ${nodeId || 'unknown'} completed`
     }
     if (type === 'StageFailed') {
         const error = typeof payload.error === 'string' && payload.error.trim().length > 0
             ? payload.error.trim()
             : null
         return error
-            ? `Stage ${nodeId || 'unknown'} failed: ${error}`
-            : `Stage ${nodeId || 'unknown'} failed`
+            ? `${sourcePrefix}Stage ${nodeId || 'unknown'} failed: ${error}`
+            : `${sourcePrefix}Stage ${nodeId || 'unknown'} failed`
     }
     if (type === 'StageRetrying') {
         const attempt = asFiniteNumber(payload.attempt)
         return attempt !== null
-            ? `Stage ${nodeId || 'unknown'} retrying (attempt ${attempt})`
-            : `Stage ${nodeId || 'unknown'} retrying`
+            ? `${sourcePrefix}Stage ${nodeId || 'unknown'} retrying (attempt ${attempt})`
+            : `${sourcePrefix}Stage ${nodeId || 'unknown'} retrying`
     }
     if (type === 'ParallelStarted') {
         const branchCount = asFiniteNumber(payload.branch_count)
-        return branchCount !== null ? `Parallel fan-out started (${branchCount} branches)` : 'Parallel fan-out started'
+        return branchCount !== null
+            ? `${sourcePrefix}Parallel fan-out started (${branchCount} branches)`
+            : `${sourcePrefix}Parallel fan-out started`
     }
     if (type === 'ParallelBranchStarted') {
         const branchName = typeof payload.branch === 'string' && payload.branch.trim().length > 0
             ? payload.branch.trim()
             : nodeId || 'unknown'
-        return `Parallel branch ${branchName} started`
+        return `${sourcePrefix}Parallel branch ${branchName} started`
     }
     if (type === 'ParallelBranchCompleted') {
         const branchName = typeof payload.branch === 'string' && payload.branch.trim().length > 0
@@ -203,71 +253,71 @@ const timelineSummaryFromEvent = (type: string, payload: Record<string, unknown>
             : nodeId || 'unknown'
         const success = payload.success === true ? 'success' : payload.success === false ? 'failed' : null
         return success
-            ? `Parallel branch ${branchName} completed (${success})`
-            : `Parallel branch ${branchName} completed`
+            ? `${sourcePrefix}Parallel branch ${branchName} completed (${success})`
+            : `${sourcePrefix}Parallel branch ${branchName} completed`
     }
     if (type === 'ParallelCompleted') {
         const successCount = asFiniteNumber(payload.success_count)
         const failureCount = asFiniteNumber(payload.failure_count)
         if (successCount !== null && failureCount !== null) {
-            return `Parallel fan-out completed (${successCount} success, ${failureCount} failed)`
+            return `${sourcePrefix}Parallel fan-out completed (${successCount} success, ${failureCount} failed)`
         }
-        return 'Parallel fan-out completed'
+        return `${sourcePrefix}Parallel fan-out completed`
     }
     if (type === 'InterviewStarted') {
-        return `Interview started for ${nodeId || 'human gate'}`
+        return `${sourcePrefix}Interview started for ${nodeId || 'human gate'}`
     }
     if (type === 'InterviewInform') {
         const message = asTrimmedString(payload.message)
             ?? asTrimmedString(payload.prompt)
             ?? asTrimmedString(payload.question)
         return message
-            ? `Interview info for ${nodeId || 'human gate'}: ${message}`
-            : `Interview info for ${nodeId || 'human gate'}`
+            ? `${sourcePrefix}Interview info for ${nodeId || 'human gate'}: ${message}`
+            : `${sourcePrefix}Interview info for ${nodeId || 'human gate'}`
     }
     if (type === 'InterviewCompleted') {
         const answer = asTrimmedString(payload.answer)
         const provenance = interviewOutcomeProvenanceFromPayload(type, payload)
         if (provenance === 'skipped') {
-            return `Interview completed for ${nodeId || 'human gate'} (skipped)`
+            return `${sourcePrefix}Interview completed for ${nodeId || 'human gate'} (skipped)`
         }
         if (provenance === 'accepted') {
             return answer
-                ? `Interview completed for ${nodeId || 'human gate'} (accepted answer: ${answer})`
-                : `Interview completed for ${nodeId || 'human gate'} (accepted answer)`
+                ? `${sourcePrefix}Interview completed for ${nodeId || 'human gate'} (accepted answer: ${answer})`
+                : `${sourcePrefix}Interview completed for ${nodeId || 'human gate'} (accepted answer)`
         }
         return answer
-            ? `Interview completed for ${nodeId || 'human gate'} (${answer})`
-            : `Interview completed for ${nodeId || 'human gate'}`
+            ? `${sourcePrefix}Interview completed for ${nodeId || 'human gate'} (${answer})`
+            : `${sourcePrefix}Interview completed for ${nodeId || 'human gate'}`
     }
     if (type === 'InterviewTimeout') {
         const provenance = interviewOutcomeProvenanceFromPayload(type, payload)
         if (provenance === 'timeout_default_applied') {
             const defaultChoiceLabel = interviewDefaultChoiceLabelFromPayload(payload)
             return defaultChoiceLabel
-                ? `Interview timed out for ${nodeId || 'human gate'} (default applied: ${defaultChoiceLabel})`
-                : `Interview timed out for ${nodeId || 'human gate'} (default applied)`
+                ? `${sourcePrefix}Interview timed out for ${nodeId || 'human gate'} (default applied: ${defaultChoiceLabel})`
+                : `${sourcePrefix}Interview timed out for ${nodeId || 'human gate'} (default applied)`
         }
         if (provenance === 'timeout_no_default') {
-            return `Interview timed out for ${nodeId || 'human gate'} (no default applied)`
+            return `${sourcePrefix}Interview timed out for ${nodeId || 'human gate'} (no default applied)`
         }
-        return `Interview timed out for ${nodeId || 'human gate'}`
+        return `${sourcePrefix}Interview timed out for ${nodeId || 'human gate'}`
     }
     if (type === 'human_gate') {
         const prompt = typeof payload.prompt === 'string' && payload.prompt.trim().length > 0
             ? payload.prompt.trim()
             : null
         return prompt
-            ? `Human gate pending: ${prompt}`
-            : `Human gate pending for ${nodeId || 'unknown'}`
+            ? `${sourcePrefix}Human gate pending: ${prompt}`
+            : `${sourcePrefix}Human gate pending for ${nodeId || 'unknown'}`
     }
     if (type === 'CheckpointSaved') {
-        return `Checkpoint saved at ${nodeId || 'current node'}`
+        return `${sourcePrefix}Checkpoint saved at ${nodeId || 'current node'}`
     }
-    return type
+    return `${sourcePrefix}${type}`
 }
 
-const toTimelineEvent = (value: unknown, sequence: number): TimelineEventEntry | null => {
+const toTimelineEvent = (value: unknown): TimelineEventEntry | null => {
     const payload = asRecord(value)
     if (!payload) {
         return null
@@ -279,16 +329,27 @@ const toTimelineEvent = (value: unknown, sequence: number): TimelineEventEntry |
     }
     const nodeId = timelineNodeIdFromEvent(payload)
     const stageIndex = asFiniteNumber(payload.index)
+    const sequence = asFiniteNumber(payload.sequence)
+    const emittedAt = asTrimmedString(payload.emitted_at)
+    if (sequence === null || emittedAt === null) {
+        return null
+    }
+    const sourceScope = timelineSourceScopeFromEvent(payload)
+    const sourceParentNodeId = timelineSourceParentNodeIdFromEvent(payload)
+    const sourceFlowName = timelineSourceFlowNameFromEvent(payload)
     return {
-        id: `${type}-${sequence}`,
+        id: `event-${sequence}`,
         sequence,
         type,
         category,
         severity: timelineSeverityFromEvent(type, payload),
         nodeId,
         stageIndex,
-        summary: timelineSummaryFromEvent(type, payload, nodeId),
-        receivedAt: new Date().toISOString(),
+        summary: timelineSummaryFromEvent(type, payload, nodeId, sourceScope, sourceParentNodeId, sourceFlowName),
+        receivedAt: emittedAt,
+        sourceScope,
+        sourceParentNodeId,
+        sourceFlowName,
         payload,
     }
 }
@@ -297,7 +358,21 @@ const timelineEntityKey = (event: TimelineEventEntry): string | null => {
     if (!event.nodeId && event.stageIndex === null) {
         return null
     }
-    return `${event.nodeId ?? 'unknown'}::${event.stageIndex !== null ? String(event.stageIndex) : 'na'}`
+    return [
+        event.sourceScope,
+        event.sourceParentNodeId ?? 'root',
+        event.nodeId ?? 'unknown',
+        event.stageIndex !== null ? String(event.stageIndex) : 'na',
+    ].join('::')
+}
+
+const timelineSubjectLabel = (event: TimelineEventEntry): string => {
+    if (event.sourceScope !== 'child') {
+        return event.nodeId ?? 'unknown'
+    }
+    const childLabel = event.nodeId ?? 'unknown'
+    const sourceLabel = timelineSourceLabel(event.sourceScope, event.sourceParentNodeId, event.sourceFlowName)
+    return sourceLabel ? `${childLabel} (${sourceLabel})` : `Child ${childLabel}`
 }
 
 const timelineCorrelationDescriptorFromEvent = (
@@ -309,13 +384,13 @@ const timelineCorrelationDescriptorFromEvent = (
         return null
     }
     const stageSuffix = event.stageIndex !== null ? ` (index ${event.stageIndex})` : ''
-    const subject = event.nodeId ?? 'unknown'
+    const subjectLabel = timelineSubjectLabel(event)
 
     if (event.category === 'interview') {
         return {
             key: `interview:${entityKey}`,
             kind: 'interview',
-            label: `Interview sequence for ${subject}${stageSuffix}`,
+            label: `Interview sequence for ${subjectLabel}${stageSuffix}`,
         }
     }
 
@@ -323,7 +398,7 @@ const timelineCorrelationDescriptorFromEvent = (
         return {
             key: `retry:${entityKey}`,
             kind: 'retry',
-            label: `Retry sequence for ${subject}${stageSuffix}`,
+            label: `Retry sequence for ${subjectLabel}${stageSuffix}`,
         }
     }
 
@@ -446,7 +521,10 @@ const filterTimelineEvents = (
 
         const nodeIdMatch = (event.nodeId ?? '').toLowerCase().includes(normalizedNodeStageFilter)
         const stageIndexMatch = event.stageIndex !== null && String(event.stageIndex).includes(normalizedNodeStageFilter)
-        return nodeIdMatch || stageIndexMatch
+        const sourceParentNodeMatch = (event.sourceParentNodeId ?? '').toLowerCase().includes(normalizedNodeStageFilter)
+        const sourceFlowMatch = (event.sourceFlowName ?? '').toLowerCase().includes(normalizedNodeStageFilter)
+        const sourceScopeMatch = event.sourceScope.toLowerCase().includes(normalizedNodeStageFilter)
+        return nodeIdMatch || stageIndexMatch || sourceParentNodeMatch || sourceFlowMatch || sourceScopeMatch
     })
 }
 
@@ -542,7 +620,13 @@ const buildPendingInterviewGates = (
                 : typeof informMessage === 'string' && informMessage.trim().length > 0
                     ? informMessage.trim()
                     : event.summary
-        const dedupeKey = `${event.nodeId ?? ''}::${prompt.toLowerCase()}`
+        const dedupeKey = [
+            event.sourceScope,
+            event.sourceParentNodeId ?? '',
+            event.sourceFlowName ?? '',
+            event.nodeId ?? '',
+            prompt.toLowerCase(),
+        ].join('::')
         if (pendingGateKeys.has(dedupeKey)) {
             continue
         }
@@ -553,6 +637,9 @@ const buildPendingInterviewGates = (
             receivedAt: event.receivedAt,
             nodeId: event.nodeId,
             stageIndex: event.stageIndex,
+            sourceScope: event.sourceScope,
+            sourceParentNodeId: event.sourceParentNodeId,
+            sourceFlowName: event.sourceFlowName,
             prompt,
             questionId,
             questionType,
@@ -577,6 +664,9 @@ const buildPendingInterviewGates = (
             receivedAt: PENDING_GATE_FALLBACK_RECEIVED_AT,
             nodeId: question.nodeId,
             stageIndex: null,
+            sourceScope: 'root',
+            sourceParentNodeId: null,
+            sourceFlowName: null,
             prompt: question.prompt,
             questionId: question.questionId,
             questionType: question.questionType,
@@ -598,13 +688,22 @@ const buildGroupedPendingInterviewGates = (
 ): PendingInterviewGateGroup[] => {
     const grouped = new Map<string, PendingInterviewGateGroup>()
     for (const gate of visiblePendingInterviewGates) {
-        const key = `${gate.nodeId ?? 'human-gate'}::${gate.stageIndex !== null ? String(gate.stageIndex) : 'na'}`
+        const key = [
+            gate.sourceScope,
+            gate.sourceParentNodeId ?? 'root',
+            gate.sourceFlowName ?? '',
+            gate.nodeId ?? 'human-gate',
+            gate.stageIndex !== null ? String(gate.stageIndex) : 'na',
+        ].join('::')
         if (!grouped.has(key)) {
             const headingNode = gate.nodeId ?? 'human gate'
             const headingStage = gate.stageIndex !== null ? ` (index ${gate.stageIndex})` : ''
+            const sourceLabel = timelineSourceLabel(gate.sourceScope, gate.sourceParentNodeId, gate.sourceFlowName)
             grouped.set(key, {
                 key,
-                heading: `${headingNode}${headingStage}`,
+                heading: sourceLabel
+                    ? `${headingNode}${headingStage} · ${sourceLabel}`
+                    : `${headingNode}${headingStage}`,
                 gates: [],
             })
         }

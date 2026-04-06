@@ -95,6 +95,7 @@ export interface RunDetailSessionState {
     timelineError: string | null
     isTimelineLive: boolean
     timelineSequence: number
+    timelineSeenServerSequences: Record<string, true>
     timelineTypeFilter: string
     timelineNodeStageFilter: string
     timelineCategoryFilter: 'all' | TimelineEventCategory

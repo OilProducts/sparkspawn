@@ -9,13 +9,14 @@ import pytest
 import attractor.api.server as server
 
 
-class _RequestDisconnectAfterOneLoop:
-    def __init__(self) -> None:
+class _RequestDisconnectAfterLoops:
+    def __init__(self, *, loops: int) -> None:
+        self._loops = loops
         self._checks = 0
 
     async def is_disconnected(self) -> bool:
         self._checks += 1
-        return self._checks > 1
+        return self._checks > self._loops
 
 
 class _RequestNeverDisconnect:
@@ -23,46 +24,63 @@ class _RequestNeverDisconnect:
         return False
 
 
-class _InterleavingEventHub:
-    def __init__(self, run_id: str) -> None:
+class _QueueOnlyEventHub:
+    def __init__(self, run_id: str, queued_events: list[dict] | None = None) -> None:
         self.run_id = run_id
         self._queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=8)
-        self._history: list[dict] = [
-            {"type": "runtime", "status": "running", "seq": "history", "run_id": run_id},
-            {"type": "runtime", "status": "running", "seq": "late", "run_id": run_id},
-        ]
-        self._injected = False
+        for event in queued_events or []:
+            self._queue.put_nowait(dict(event))
 
     async def publish(self, run_id: str, event: dict) -> None:  # pragma: no cover - helper shim
-        del run_id
+        assert run_id == self.run_id
         await self._queue.put(dict(event))
 
     def history(self, run_id: str) -> list[dict]:
         assert run_id == self.run_id
-        if not self._injected:
-            self._queue.put_nowait(
-                {"type": "runtime", "status": "running", "seq": "late", "run_id": run_id}
-            )
-            self._queue.put_nowait(
-                {"type": "runtime", "status": "running", "seq": "live", "run_id": run_id}
-            )
-            self._injected = True
-        return list(self._history)
+        return []
 
     def subscribe(self, run_id: str) -> asyncio.Queue[dict]:
         assert run_id == self.run_id
         return self._queue
 
-    def subscribe_with_history(self, run_id: str) -> tuple[asyncio.Queue[dict], list[dict]]:
-        assert run_id == self.run_id
-        self._queue.put_nowait(
-            {"type": "runtime", "status": "running", "seq": "live", "run_id": run_id}
-        )
-        return self._queue, list(self._history)
-
     def unsubscribe(self, run_id: str, queue: asyncio.Queue[dict]) -> None:
         assert run_id == self.run_id
         assert queue is self._queue
+
+
+class _SubscriberAwareEventHub:
+    def __init__(self, run_id: str) -> None:
+        self.run_id = run_id
+        self._history: list[dict] = []
+        self._subscribers: list[asyncio.Queue[dict]] = []
+
+    async def publish(self, run_id: str, event: dict) -> None:
+        assert run_id == self.run_id
+        self.inject(dict(event))
+
+    def inject(self, event: dict) -> None:
+        payload = dict(event)
+        self._history.append(payload)
+        for queue in list(self._subscribers):
+            try:
+                queue.put_nowait(dict(payload))
+            except asyncio.QueueFull:
+                continue
+
+    def history(self, run_id: str) -> list[dict]:
+        assert run_id == self.run_id
+        return list(self._history)
+
+    def subscribe(self, run_id: str) -> asyncio.Queue[dict]:
+        assert run_id == self.run_id
+        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=8)
+        self._subscribers.append(queue)
+        return queue
+
+    def unsubscribe(self, run_id: str, queue: asyncio.Queue[dict]) -> None:
+        assert run_id == self.run_id
+        if queue in self._subscribers:
+            self._subscribers.remove(queue)
 
 
 def _decode_event(chunk: str | bytes) -> dict:
@@ -72,16 +90,47 @@ def _decode_event(chunk: str | bytes) -> dict:
     return json.loads(lines[0].removeprefix("data: "))
 
 
-async def _collect_stream_events(run_id: str) -> list[dict]:
-    response = await server.pipeline_events(run_id, _RequestDisconnectAfterOneLoop())
+def _write_persisted_events(run_id: str, working_directory: Path, events: list[dict]) -> None:
+    run_root = server._ensure_run_root_for_project(run_id, str(working_directory))
+    events_path = run_root / "events.jsonl"
+    with events_path.open("w", encoding="utf-8") as handle:
+        for event in events:
+            handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
+async def _collect_stream_events(run_id: str, *, count: int) -> list[dict]:
+    response = await server.pipeline_events(run_id, _RequestDisconnectAfterLoops(loops=count))
     iterator = response.body_iterator
     chunks: list[str | bytes] = []
     try:
-        for _ in range(3):
+        for _ in range(count):
             chunks.append(await anext(iterator))
     finally:
         await iterator.aclose()
     return [_decode_event(chunk) for chunk in chunks]
+
+
+async def _collect_stream_events_until_timeout(
+    response,
+    *,
+    timeout_seconds: float,
+    max_events: int,
+) -> list[dict]:
+    iterator = response.body_iterator
+    events: list[dict] = []
+    try:
+        while len(events) < max_events:
+            try:
+                chunk = await asyncio.wait_for(anext(iterator), timeout=timeout_seconds)
+            except (asyncio.TimeoutError, StopAsyncIteration):
+                break
+            text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+            if text.startswith(": keepalive"):
+                continue
+            events.append(_decode_event(text))
+    finally:
+        await iterator.aclose()
+    return events
 
 
 async def _collect_stream_events_for_throughput(
@@ -98,7 +147,13 @@ async def _collect_stream_events_for_throughput(
     for index in range(publish_count):
         await hub.publish(
             run_id,
-            {"type": "runtime", "status": "running", "seq": index, "run_id": run_id},
+            {
+                "type": "runtime",
+                "status": "running",
+                "sequence": index + 1,
+                "emitted_at": "2026-04-06T12:00:00Z",
+                "run_id": run_id,
+            },
         )
     events: list[dict] = []
     try:
@@ -113,15 +168,212 @@ async def _collect_stream_events_for_throughput(
     return events, queue_maxsize, publish_count
 
 
-def test_pipeline_events_replays_history_without_replaying_same_event_from_live_queue(
+def test_parse_failure_persists_error_on_requested_run(tmp_path: Path) -> None:
+    run_id = "run-sse-parse-failure"
+    old_run_id = "run-sse-previous"
+    working_directory = tmp_path / "work"
+    working_directory.mkdir()
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    server._ensure_run_root_for_project(old_run_id, str(working_directory))
+
+    payload = asyncio.run(
+        server._start_pipeline(
+            server.PipelineStartRequest(
+                flow_content="digraph G { start -> ",
+                working_directory=str(working_directory),
+                backend="codex-app-server",
+            ),
+            run_id=run_id,
+        )
+    )
+
+    assert payload["status"] == "validation_error"
+    run_events = server._read_persisted_run_events(run_id)
+    assert [event["run_id"] for event in run_events] == [run_id, run_id]
+    assert run_events[0]["type"] == "lifecycle"
+    assert run_events[0]["phase"] == "PARSE"
+    assert run_events[1]["type"] == "log"
+    assert "Parse error" in str(run_events[1]["msg"])
+    assert server._read_persisted_run_events(old_run_id) == []
+
+
+def test_validation_error_attempt_reserves_run_id(tmp_path: Path) -> None:
+    run_id = "run-sse-validation"
+    working_directory = tmp_path / "work"
+    working_directory.mkdir()
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+
+    invalid_payload = asyncio.run(
+        server._start_pipeline(
+            server.PipelineStartRequest(
+                flow_content="digraph G { start -> ",
+                working_directory=str(working_directory),
+                backend="codex-app-server",
+            ),
+            run_id=run_id,
+        )
+    )
+    assert invalid_payload["status"] == "validation_error"
+
+    valid_payload = asyncio.run(
+        server._start_pipeline(
+            server.PipelineStartRequest(
+                flow_content="""
+                digraph G {
+                    start [shape=Mdiamond]
+                    done [shape=Msquare]
+                    start -> done
+                }
+                """,
+                working_directory=str(working_directory),
+                backend="codex-app-server",
+            ),
+            run_id=run_id,
+        )
+    )
+
+    assert valid_payload["status"] == "validation_error"
+    assert valid_payload["error"] == f"Run id already exists: {run_id}"
+    assert [event["type"] for event in server._read_persisted_run_events(run_id)] == ["lifecycle", "log"]
+
+
+def test_pipeline_events_replays_persisted_history_for_completed_run_without_live_executor(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    run_id = "run-sse"
+    run_id = "run-sse-history"
+    working_directory = tmp_path / "work"
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    _write_persisted_events(
+        run_id,
+        working_directory,
+        [
+            {
+                "type": "StageCompleted",
+                "run_id": run_id,
+                "sequence": 1,
+                "emitted_at": "2026-04-06T12:00:00Z",
+                "node_id": "prepare",
+                "index": 1,
+                "source_scope": "root",
+            },
+            {
+                "type": "StageStarted",
+                "run_id": run_id,
+                "sequence": 2,
+                "emitted_at": "2026-04-06T12:00:05Z",
+                "node_id": "plan_current",
+                "index": 2,
+                "source_scope": "child",
+                "source_parent_node_id": "run_milestone",
+                "source_flow_name": "implement-milestone.dot",
+            },
+        ],
+    )
+
+    hub = _QueueOnlyEventHub(run_id)
+    monkeypatch.setattr(server, "EVENT_HUB", hub)
+
+    events = asyncio.run(_collect_stream_events(run_id, count=2))
+
+    assert [event["sequence"] for event in events] == [1, 2]
+    assert events[0]["emitted_at"] == "2026-04-06T12:00:00Z"
+    assert events[1]["source_scope"] == "child"
+    assert events[1]["source_parent_node_id"] == "run_milestone"
+    assert events[1]["source_flow_name"] == "implement-milestone.dot"
+
+
+def test_pipeline_events_replays_persisted_history_without_replaying_duplicate_live_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_id = "run-sse-dedupe"
+    working_directory = tmp_path / "work"
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    _write_persisted_events(
+        run_id,
+        working_directory,
+        [
+            {
+                "type": "runtime",
+                "status": "running",
+                "run_id": run_id,
+                "sequence": 1,
+                "emitted_at": "2026-04-06T12:00:00Z",
+                "source_scope": "root",
+            },
+            {
+                "type": "runtime",
+                "status": "running",
+                "run_id": run_id,
+                "sequence": 2,
+                "emitted_at": "2026-04-06T12:00:01Z",
+                "source_scope": "root",
+            },
+        ],
+    )
+
+    hub = _QueueOnlyEventHub(
+        run_id,
+        queued_events=[
+            {
+                "type": "runtime",
+                "status": "running",
+                "run_id": run_id,
+                "sequence": 2,
+                "emitted_at": "2026-04-06T12:00:01Z",
+                "source_scope": "root",
+            },
+            {
+                "type": "runtime",
+                "status": "running",
+                "run_id": run_id,
+                "sequence": 3,
+                "emitted_at": "2026-04-06T12:00:02Z",
+                "source_scope": "root",
+            },
+        ],
+    )
+    monkeypatch.setattr(server, "EVENT_HUB", hub)
+
+    events = asyncio.run(_collect_stream_events(run_id, count=3))
+
+    assert [event["sequence"] for event in events] == [1, 2, 3]
+
+
+def test_pipeline_events_do_not_drop_live_events_published_during_history_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_id = "run-sse-handoff"
     server.configure_runtime_paths(runs_dir=tmp_path / "runs")
 
-    hub = _InterleavingEventHub(run_id)
+    hub = _SubscriberAwareEventHub(run_id)
     monkeypatch.setattr(server, "EVENT_HUB", hub)
+
+    gap_event = {
+        "type": "runtime",
+        "status": "running",
+        "run_id": run_id,
+        "sequence": 1,
+        "emitted_at": "2026-04-06T12:00:00Z",
+        "source_scope": "root",
+    }
+    follow_up_event = {
+        "type": "runtime",
+        "status": "running",
+        "run_id": run_id,
+        "sequence": 2,
+        "emitted_at": "2026-04-06T12:00:01Z",
+        "source_scope": "root",
+    }
+
+    def _read_persisted_run_events_with_gap(pipeline_id: str) -> list[dict]:
+        assert pipeline_id == run_id
+        hub.inject(gap_event)
+        return []
+
+    monkeypatch.setattr(server, "_read_persisted_run_events", _read_persisted_run_events_with_gap)
 
     with server.ACTIVE_RUNS_LOCK:
         server.ACTIVE_RUNS[run_id] = server.ActiveRun(
@@ -133,11 +385,36 @@ def test_pipeline_events_replays_history_without_replaying_same_event_from_live_
         )
 
     try:
-        events = asyncio.run(_collect_stream_events(run_id))
+        async def _exercise_stream() -> list[dict]:
+            response = await server.pipeline_events(run_id, _RequestNeverDisconnect())
+            await hub.publish(run_id, follow_up_event)
+            return await _collect_stream_events_until_timeout(
+                response,
+                timeout_seconds=0.05,
+                max_events=2,
+            )
+
+        events = asyncio.run(_exercise_stream())
     finally:
         server._pop_active_run(run_id)
 
-    assert [event["seq"] for event in events] == ["history", "late", "live"]
+    assert [event["sequence"] for event in events] == [1, 2]
+
+
+def test_publish_run_event_persists_sequence_and_timestamp(tmp_path: Path) -> None:
+    run_id = "run-sse-persist"
+    working_directory = tmp_path / "work"
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    server._ensure_run_root_for_project(run_id, str(working_directory))
+
+    asyncio.run(server._publish_run_event(run_id, {"type": "StageStarted", "node_id": "prepare", "index": 1}))
+    asyncio.run(server._publish_run_event(run_id, {"type": "StageCompleted", "node_id": "prepare", "index": 1}))
+
+    events = server._read_persisted_run_events(run_id)
+
+    assert [event["sequence"] for event in events] == [1, 2]
+    assert all(event["run_id"] == run_id for event in events)
+    assert all(isinstance(event["emitted_at"], str) and event["emitted_at"].endswith("Z") for event in events)
 
 
 def test_pipeline_events_drop_oldest_events_under_sustained_throughput(
@@ -167,5 +444,5 @@ def test_pipeline_events_drop_oldest_events_under_sustained_throughput(
         server._pop_active_run(run_id)
 
     assert len(events) == queue_maxsize
-    assert events[0]["seq"] == publish_count - queue_maxsize
-    assert events[-1]["seq"] == publish_count - 1
+    assert events[0]["sequence"] == publish_count - queue_maxsize + 1
+    assert events[-1]["sequence"] == publish_count

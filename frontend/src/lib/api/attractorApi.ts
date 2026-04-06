@@ -153,7 +153,6 @@ export interface RuntimeStatusResponse {
     last_model?: string | null
     last_completed_nodes?: string[] | null
     last_flow_name?: string | null
-    last_run_id?: string | null
 }
 
 export function parseFlowListResponse(payload: unknown, endpoint = '/attractor/api/flows'): string[] {
@@ -389,7 +388,6 @@ export function parseRuntimeStatusResponse(payload: unknown, endpoint = '/attrac
         last_model: asOptionalNullableString(record.last_model),
         last_completed_nodes: asOptionalStringArray(record.last_completed_nodes) ?? null,
         last_flow_name: asOptionalNullableString(record.last_flow_name),
-        last_run_id: asOptionalNullableString(record.last_run_id),
     }
 }
 
