@@ -283,7 +283,7 @@ export function RunsPanel() {
         <section
             data-testid="runs-panel"
             data-responsive-layout={isNarrowViewport ? 'stacked' : 'split'}
-            className={`flex-1 ${isNarrowViewport ? 'overflow-auto p-3' : 'flex min-h-0 flex-col overflow-hidden p-6'}`}
+            className={`h-full flex-1 ${isNarrowViewport ? 'overflow-auto p-3' : 'flex min-h-0 flex-col overflow-hidden p-6'}`}
         >
             <div className={`w-full ${isNarrowViewport ? 'space-y-6' : 'flex min-h-0 flex-1 overflow-hidden'}`}>
                 <RunList
@@ -307,7 +307,10 @@ export function RunsPanel() {
                     summaryLabel={`${summary.total} total runs · ${summary.running} running`}
                 />
                 <div className={`min-w-0 ${isNarrowViewport ? 'space-y-6' : 'flex min-h-0 flex-1 flex-col overflow-hidden pl-6'}`}>
-                    <div className={isNarrowViewport ? 'space-y-6' : 'min-h-0 flex-1 space-y-6 overflow-auto pr-2'}>
+                    <div
+                        data-testid="run-details-scroll-region"
+                        className={isNarrowViewport ? 'space-y-6' : 'min-h-0 flex-1 space-y-6 overflow-auto pr-2'}
+                    >
                         {showRunSelectionEmptyState && (
                             <div data-testid="run-selection-empty-state" className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
                                 Select a run from the sidebar to inspect its details.

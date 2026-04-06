@@ -320,6 +320,7 @@ describe('RunsPanel', () => {
     })
 
     expect(screen.getByTestId('runs-panel')).toHaveAttribute('data-responsive-layout', 'split')
+    expect(screen.getByTestId('runs-panel')).toHaveClass('h-full')
 
     const runListPanel = screen.getByTestId('run-list-panel')
     expect(runListPanel).toHaveClass('border-r')
@@ -339,6 +340,11 @@ describe('RunsPanel', () => {
     await waitFor(() => {
       expect(screen.getByTestId('run-summary-panel')).toBeVisible()
     })
+
+    const detailScrollRegion = screen.getByTestId('run-details-scroll-region')
+    expect(detailScrollRegion).toHaveClass('min-h-0')
+    expect(detailScrollRegion).toHaveClass('flex-1')
+    expect(detailScrollRegion).toHaveClass('overflow-auto')
 
     const runSummaryPanel = screen.getByTestId('run-summary-panel')
     const runActivityPanel = screen.getByTestId('run-activity-panel')
