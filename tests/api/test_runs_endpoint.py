@@ -276,8 +276,9 @@ def test_execution_planning_approval_launches_real_pipeline_backed_run(
             response_contract="",
             contract_repair_attempts=0,
             timeout=None,
+            model=None,
         ):
-            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
             return json.dumps(
                 {
                     "title": "Execution plan",
@@ -393,8 +394,9 @@ def test_execution_planning_approval_uses_project_trigger_binding_when_present(
             response_contract="",
             contract_repair_attempts=0,
             timeout=None,
+            model=None,
         ):
-            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
             return json.dumps(
                 {
                     "title": "Execution plan",
@@ -478,8 +480,9 @@ def test_approved_execution_card_launches_selected_flow_run(
             response_contract="",
             contract_repair_attempts=0,
             timeout=None,
+            model=None,
         ):
-            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
             return "implemented"
 
     monkeypatch.setattr(
@@ -576,8 +579,9 @@ def test_approved_execution_card_uses_project_trigger_binding_when_present(
             response_contract="",
             contract_repair_attempts=0,
             timeout=None,
+            model=None,
         ):
-            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
             return "implemented"
 
     monkeypatch.setattr(

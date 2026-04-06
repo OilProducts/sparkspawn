@@ -158,7 +158,7 @@ Graph attributes are declared in a `graph [ ... ]` block or as top-level `key = 
 | `class`             | String   | `""`            | Comma-separated class names for model stylesheet targeting. |
 | `timeout`           | Duration | unset           | Maximum execution time for this node. |
 | `llm_model`         | String   | inherited       | LLM model identifier. Overridable by stylesheet. |
-| `llm_provider`      | String   | auto-detected   | LLM provider key. Auto-detected from model if unset. |
+| `llm_provider`      | String   | unset           | LLM provider key. Declarative unless a backend explicitly supports provider-aware routing. |
 | `reasoning_effort`  | String   | `"high"`        | LLM reasoning effort: `low`, `medium`, `high`. |
 | `codergen.response_contract` | String | `""`     | Codergen-only shared response-format contract. `status_envelope` appends the canonical structured Outcome schema to the prompt. |
 | `codergen.contract_repair_attempts` | Integer | contract-dependent | Codergen-only bounded same-thread repair budget for malformed response-contract output. Defaults to `1` when `codergen.response_contract` is set, otherwise `0`. |
@@ -776,7 +776,8 @@ INTERFACE CodergenBackend:
         prompt: String,
         context: Context,
         response_contract: String = "",
-        contract_repair_attempts: Integer = 0
+        contract_repair_attempts: Integer = 0,
+        model: String? = null
     ) -> String | Outcome
 ```
 
@@ -1635,6 +1636,7 @@ The resolution order for any model-related property on a node is:
 4. Handler/system default
 
 The stylesheet is applied as a transform after parsing and before validation. The transform walks all nodes and applies matching rules, but only sets properties that the node does not already have explicitly.
+Launch-time `model` is not part of stylesheet precedence. It only acts as the runtime fallback when the node's resolved `llm_model` is empty after transforms.
 
 ### 8.6 Example
 
@@ -1764,6 +1766,7 @@ It should return a full run-detail payload for both active and completed runs, i
 - progress fields including `completed_nodes`
 
 For active runs, implementations should read persisted run metadata first and then overlay only the live fields that can legitimately change during execution, such as lifecycle status, outcome, last error, and current completed nodes.
+In run-detail and run-list payloads, the run-level `model` field refers to the launch/default model selected for the run. It does not imply that every LLM-backed node executed with that model.
 Implementations must not report an active lifecycle status for an orphaned run after restart; stale persisted `running` or `cancel_requested` records must be reconciled to terminal truth during startup/runtime initialization.
 `GET /pipelines/{id}/events` is a history-backed event channel for run inspection.
 It must:
@@ -1837,6 +1840,7 @@ Event payloads exposed through `/pipelines/{id}/events` should include:
 - `run_id`
 - `sequence`
 - `emitted_at`
+- optional `llm_model` on stage lifecycle events emitted by LLM-backed handlers
 - optional child-source metadata when forwarded from a child executor:
   - `source_scope`
   - `source_parent_node_id`
@@ -2215,7 +2219,7 @@ ASSERT "review" IN checkpoint.completed_nodes
 | `class`                 | String   | `""`          | Stylesheet class names (comma-separated) |
 | `timeout`               | Duration | unset         | Max execution time |
 | `llm_model`             | String   | inherited     | LLM model override |
-| `llm_provider`          | String   | auto-detected | LLM provider override |
+| `llm_provider`          | String   | unset         | LLM provider override |
 | `reasoning_effort`      | String   | `"high"`      | Reasoning depth: low/medium/high |
 | `codergen.response_contract` | String | `""`       | Codergen-only shared response-format contract. `status_envelope` appends the canonical structured Outcome schema to the prompt. |
 | `codergen.contract_repair_attempts` | Integer | contract-dependent | Codergen-only bounded same-thread repair budget for malformed response-contract output. Defaults to `1` when `codergen.response_contract` is set, otherwise `0`. |

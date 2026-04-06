@@ -94,8 +94,9 @@ def test_pipeline_start_uses_flow_ui_default_model_when_request_model_missing(
             response_contract="",
             contract_repair_attempts=0,
             timeout=None,
+            model=None,
         ):
-            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
             return ""
 
     def fake_build_backend(backend_name, working_dir, emit, *, model):  # type: ignore[no-untyped-def]
@@ -149,8 +150,9 @@ def test_pipeline_start_explicit_model_overrides_flow_ui_default_model(
             response_contract="",
             contract_repair_attempts=0,
             timeout=None,
+            model=None,
         ):
-            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
             return ""
 
     def fake_build_backend(backend_name, working_dir, emit, *, model):  # type: ignore[no-untyped-def]
@@ -183,6 +185,100 @@ def test_pipeline_start_explicit_model_overrides_flow_ui_default_model(
     record = server._read_run_meta(server._run_meta_path(payload["run_id"]))
     assert record is not None
     assert record.model == "gpt-explicit"
+
+
+@pytest.mark.parametrize(
+    ("flow_content", "expected_model"),
+    [
+        (
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box, llm_model="gpt-node-override"]
+                done [shape=Msquare]
+                start -> task
+                task -> done
+            }
+            """,
+            "gpt-node-override",
+        ),
+        (
+            """
+            digraph G {
+                graph [model_stylesheet="box { llm_model: gpt-style-override; }"]
+                start [shape=Mdiamond]
+                task [shape=box]
+                done [shape=Msquare]
+                start -> task
+                task -> done
+            }
+            """,
+            "gpt-style-override",
+        ),
+        (
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box]
+                done [shape=Msquare]
+                start -> task
+                task -> done
+            }
+            """,
+            "gpt-launch-default",
+        ),
+    ],
+)
+def test_pipeline_execution_resolves_effective_model_per_node(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    flow_content: str,
+    expected_model: str,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+
+    build_models: list[str | None] = []
+    run_models: list[str | None] = []
+
+    class _Backend:
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            node_id,
+            prompt,
+            context,
+            *,
+            response_contract="",
+            contract_repair_attempts=0,
+            timeout=None,
+            model=None,
+        ):
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+            run_models.append(model)
+            return ""
+
+    def fake_build_backend(backend_name, working_dir, emit, *, model):  # type: ignore[no-untyped-def]
+        del backend_name, working_dir, emit
+        build_models.append(model)
+        return _Backend()
+
+    monkeypatch.setattr(server, "_build_codergen_backend", fake_build_backend)
+
+    payload = _start_pipeline_via_http(
+        attractor_api_client,
+        {
+            "flow_content": flow_content,
+            "working_directory": str(tmp_path / "work"),
+            "backend": "codex-app-server",
+            "model": "gpt-launch-default",
+        },
+    )
+
+    assert payload["status"] == "started"
+    _wait_for_pipeline_completion(attractor_api_client, payload["run_id"])
+
+    assert build_models == ["gpt-launch-default"]
+    assert run_models == [expected_model]
 
 
 def test_pipeline_emits_lifecycle_phases_in_spec_order(
@@ -522,8 +618,8 @@ def test_codex_app_server_backend_reuses_session_for_same_thread_key(tmp_path: P
         created.append(thread_id)
         return thread_id
 
-    first = backend._resolve_session_thread_id("loop-a", _start_thread)
-    second = backend._resolve_session_thread_id("loop-a", _start_thread)
+    first = backend._resolve_session_thread_id("loop-a", "gpt-node", _start_thread)
+    second = backend._resolve_session_thread_id("loop-a", "gpt-node", _start_thread)
 
     assert first == "thread-1"
     assert second == "thread-1"
@@ -541,8 +637,8 @@ def test_codex_app_server_backend_isolates_sessions_for_different_thread_keys(
         created.append(thread_id)
         return thread_id
 
-    first = backend._resolve_session_thread_id("loop-a", _start_thread)
-    second = backend._resolve_session_thread_id("loop-b", _start_thread)
+    first = backend._resolve_session_thread_id("loop-a", "gpt-node", _start_thread)
+    second = backend._resolve_session_thread_id("loop-b", "gpt-node", _start_thread)
 
     assert first == "thread-1"
     assert second == "thread-2"
@@ -558,8 +654,27 @@ def test_codex_app_server_backend_does_not_cache_empty_thread_key(tmp_path: Path
         created.append(thread_id)
         return thread_id
 
-    first = backend._resolve_session_thread_id("", _start_thread)
-    second = backend._resolve_session_thread_id("", _start_thread)
+    first = backend._resolve_session_thread_id("", "gpt-node", _start_thread)
+    second = backend._resolve_session_thread_id("", "gpt-node", _start_thread)
+
+    assert first == "thread-1"
+    assert second == "thread-2"
+    assert created == ["thread-1", "thread-2"]
+
+
+def test_codex_app_server_backend_isolates_sessions_for_different_models_on_same_thread_key(
+    tmp_path: Path,
+) -> None:
+    backend = server.CodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
+    created: list[str] = []
+
+    def _start_thread() -> str:
+        thread_id = f"thread-{len(created) + 1}"
+        created.append(thread_id)
+        return thread_id
+
+    first = backend._resolve_session_thread_id("loop-a", "gpt-fast", _start_thread)
+    second = backend._resolve_session_thread_id("loop-a", "gpt-deep", _start_thread)
 
     assert first == "thread-1"
     assert second == "thread-2"

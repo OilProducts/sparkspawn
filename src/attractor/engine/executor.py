@@ -18,6 +18,11 @@ from attractor.graph_prep import (
     LEGACY_DEFAULT_MAX_RETRY_KEY,
     resolve_default_max_retries_value,
 )
+from attractor.llm_runtime import (
+    RUNTIME_LAUNCH_MODEL_KEY,
+    node_uses_llm_backend,
+    resolve_effective_llm_model,
+)
 from attractor.transforms.runtime_preamble import RuntimePreambleTransform
 from attractor.transforms.runtime_preamble import (
     RUNTIME_RETRY_ATTEMPT_KEY,
@@ -420,7 +425,14 @@ class PipelineExecutor:
                 prompt = self._prompt_for_node(node.node_id)
                 stage_index = len(completed)
                 stage_started_at = time.perf_counter()
-                self._emit_event("StageStarted", node_id=node.node_id, name=node.node_id, index=stage_index)
+                stage_llm_payload = self._stage_llm_event_payload(node.node_id, ctx)
+                self._emit_event(
+                    "StageStarted",
+                    node_id=node.node_id,
+                    name=node.node_id,
+                    index=stage_index,
+                    **stage_llm_payload,
+                )
                 self._enter_top_level_stage(node.node_id)
                 try:
                     outcome = self._execute_node_handler(node.node_id, prompt, ctx)
@@ -457,6 +469,7 @@ class PipelineExecutor:
                             error=outcome.failure_reason or "stage_failed",
                             will_retry=True,
                             attempt=retry_counts[node.node_id],
+                            **stage_llm_payload,
                         )
                     delay_ms = retry_policy.backoff.delay_for_attempt(retry_counts[node.node_id])
                     self._emit_event(
@@ -500,6 +513,7 @@ class PipelineExecutor:
                         index=stage_index,
                         error=outcome.failure_reason or "stage_failed",
                         will_retry=False,
+                        **stage_llm_payload,
                     )
                 else:
                     self._emit_event(
@@ -509,6 +523,7 @@ class PipelineExecutor:
                         index=stage_index,
                         duration=stage_duration,
                         outcome=outcome.status.value,
+                        **stage_llm_payload,
                     )
                 completed.append(node.node_id)
                 self._save_checkpoint(
@@ -535,6 +550,7 @@ class PipelineExecutor:
                             index=stage_index,
                             error=failure_reason,
                             will_retry=False,
+                            **stage_llm_payload,
                         )
                         self._finalize_run(
                             current_node=node.node_id,
@@ -837,7 +853,14 @@ class PipelineExecutor:
                 prompt = self._prompt_for_node(node.node_id)
                 stage_index = len(completed)
                 stage_started_at = time.perf_counter()
-                self._emit_event("StageStarted", node_id=node.node_id, name=node.node_id, index=stage_index)
+                stage_llm_payload = self._stage_llm_event_payload(node.node_id, ctx)
+                self._emit_event(
+                    "StageStarted",
+                    node_id=node.node_id,
+                    name=node.node_id,
+                    index=stage_index,
+                    **stage_llm_payload,
+                )
                 self._enter_top_level_stage(node.node_id)
                 try:
                     outcome = self._execute_node_handler(node.node_id, prompt, ctx)
@@ -874,6 +897,7 @@ class PipelineExecutor:
                             error=outcome.failure_reason or "stage_failed",
                             will_retry=True,
                             attempt=retry_counts[node.node_id],
+                            **stage_llm_payload,
                         )
                     delay_ms = retry_policy.backoff.delay_for_attempt(retry_counts[node.node_id])
                     self._emit_event(
@@ -917,6 +941,7 @@ class PipelineExecutor:
                         index=stage_index,
                         error=outcome.failure_reason or "stage_failed",
                         will_retry=False,
+                        **stage_llm_payload,
                     )
                 else:
                     self._emit_event(
@@ -926,6 +951,7 @@ class PipelineExecutor:
                         index=stage_index,
                         duration=stage_duration,
                         outcome=outcome.status.value,
+                        **stage_llm_payload,
                     )
                 completed.append(node.node_id)
                 self._save_checkpoint(
@@ -952,6 +978,7 @@ class PipelineExecutor:
                             index=stage_index,
                             error=failure_reason,
                             will_retry=False,
+                            **stage_llm_payload,
                         )
                         self._finalize_run(
                             current_node=node.node_id,
@@ -1619,6 +1646,15 @@ class PipelineExecutor:
         if shape and str(shape.value).strip() in _NON_CODEGEN_SHAPES:
             return "non-codergen"
         return "codergen"
+
+    def _stage_llm_event_payload(self, node_id: str, context: Context) -> Dict[str, object]:
+        node = self.graph.nodes[node_id]
+        if not node_uses_llm_backend(node):
+            return {}
+        effective_model = resolve_effective_llm_model(node.attrs, context)
+        if not effective_model:
+            return {}
+        return {"llm_model": effective_model}
 
     def _mirror_graph_attrs(self, context: Context) -> None:
         goal_attr = self.graph.graph_attrs.get("goal")

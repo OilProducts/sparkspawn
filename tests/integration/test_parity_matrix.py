@@ -23,8 +23,9 @@ class _Backend:
         response_contract="",
         contract_repair_attempts=0,
         timeout=None,
+        model=None,
     ):
-        del context, response_contract, contract_repair_attempts, timeout
+        del context, response_contract, contract_repair_attempts, timeout, model
         self.calls.append((node_id, prompt))
         value = self.plan.get(node_id, True)
         if isinstance(value, list):

@@ -24,8 +24,9 @@ class _MilestoneRecordingBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> bool:
-        del prompt, response_contract, contract_repair_attempts, timeout
+        del prompt, response_contract, contract_repair_attempts, timeout, model
         if node_id == "task":
             self.milestone_ids.append(str(context.get("context.milestone.id", "")))
         return True

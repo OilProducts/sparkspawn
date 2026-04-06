@@ -19,8 +19,9 @@ class _SmokeBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout: float | None = None,
+        model: str | None = None,
     ) -> str:
-        del context, response_contract, contract_repair_attempts, timeout
+        del context, response_contract, contract_repair_attempts, timeout, model
         self.calls.append((node_id, prompt))
         return f"{node_id} completed"
 

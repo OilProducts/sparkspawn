@@ -264,6 +264,7 @@ def test_pipeline_events_replays_persisted_history_for_completed_run_without_liv
                 "emitted_at": "2026-04-06T12:00:05Z",
                 "node_id": "plan_current",
                 "index": 2,
+                "llm_model": "gpt-node-override",
                 "source_scope": "child",
                 "source_parent_node_id": "run_milestone",
                 "source_flow_name": "implement-milestone.dot",
@@ -278,6 +279,8 @@ def test_pipeline_events_replays_persisted_history_for_completed_run_without_liv
 
     assert [event["sequence"] for event in events] == [1, 2]
     assert events[0]["emitted_at"] == "2026-04-06T12:00:00Z"
+    assert "llm_model" not in events[0]
+    assert events[1]["llm_model"] == "gpt-node-override"
     assert events[1]["source_scope"] == "child"
     assert events[1]["source_parent_node_id"] == "run_milestone"
     assert events[1]["source_flow_name"] == "implement-milestone.dot"

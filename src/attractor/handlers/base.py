@@ -21,6 +21,7 @@ class CodergenBackend(Protocol):
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout: Optional[float] = None,
+        model: Optional[str] = None,
     ) -> str | Outcome:
         ...
 

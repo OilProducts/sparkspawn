@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from attractor.dsl.models import Duration
 from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.llm_runtime import resolve_effective_llm_model
 
 from ..base import CodergenBackend, HandlerRuntime
 
@@ -32,6 +33,7 @@ class FanInHandler:
                 runtime.node_id,
                 runtime.prompt,
                 runtime.context,
+                runtime.node_attrs,
                 runtime.node_attrs.get("timeout"),
                 runtime.logs_root,
                 candidates,
@@ -107,14 +109,23 @@ def _backend_select(
     node_id: str,
     prompt: str,
     context,
+    node_attrs,
     timeout_attr: Any,
     logs_root: Path | None,
     candidates: List[Dict[str, Any]],
 ) -> Dict[str, Any] | None:
     ranking_prompt = _build_ranking_prompt(prompt, candidates)
     timeout = _to_seconds(timeout_attr)
+    effective_model = resolve_effective_llm_model(
+        node_attrs,
+        context,
+        fallback_model=getattr(backend, "model", None),
+    )
     with _backend_stage_logging_context(backend, node_id, logs_root):
-        response = backend.run(node_id, ranking_prompt, context, timeout=timeout)
+        backend_kwargs = {"timeout": timeout}
+        if effective_model is not None:
+            backend_kwargs["model"] = effective_model
+        response = backend.run(node_id, ranking_prompt, context, **backend_kwargs)
     best_id = _extract_best_id(response)
     if not best_id:
         return None

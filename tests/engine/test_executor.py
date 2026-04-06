@@ -10,6 +10,7 @@ from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.interviewer import Answer, QueueInterviewer
+from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
 
 BRANCHING_CONDITION_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "branching_condition_workflow.dot"
 REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "flows" / "parallel-review-reference.dot"
@@ -39,8 +40,9 @@ class _WorkflowBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> bool:
-        del prompt, context, response_contract, contract_repair_attempts, timeout
+        del prompt, context, response_contract, contract_repair_attempts, timeout, model
         return self._responses.get(node_id, True)
 
 
@@ -58,8 +60,9 @@ class _StructuredLoopBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> str | Outcome:
-        del context, response_contract, contract_repair_attempts, timeout
+        del context, response_contract, contract_repair_attempts, timeout, model
         self.prompts.setdefault(node_id, []).append(prompt)
         if node_id == "review":
             self.review_calls += 1
@@ -100,8 +103,9 @@ class _SpecImplementationLoopBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> Outcome:
-        del prompt, response_contract, contract_repair_attempts, timeout
+        del prompt, response_contract, contract_repair_attempts, timeout, model
         if node_id == "next_milestone":
             self.next_milestone_calls += 1
             if self.next_milestone_calls == 1:
@@ -901,6 +905,88 @@ class TestExecutor:
         assert [event["index"] for event in stage_completed] == [0, 1]
         assert all(isinstance(event.get("duration"), (int, float)) for event in stage_completed)
         assert all(float(event["duration"]) >= 0.0 for event in stage_completed)
+
+    def test_llm_backed_stage_events_include_llm_model(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box, llm_model="gpt-node-override"]
+                done [shape=Msquare]
+                start -> work
+                work -> done
+            }
+            """
+        )
+        events: list[dict] = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(
+            Context(values={RUNTIME_LAUNCH_MODEL_KEY: "gpt-launch-default"})
+        )
+
+        stage_started = [event for event in events if event["type"] == "StageStarted" and event["node_id"] == "work"]
+        stage_completed = [event for event in events if event["type"] == "StageCompleted" and event["node_id"] == "work"]
+
+        assert result.status == "completed"
+        assert stage_started[0]["llm_model"] == "gpt-node-override"
+        assert stage_completed[0]["llm_model"] == "gpt-node-override"
+
+    def test_llm_backed_stage_failed_events_include_llm_model(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                work [shape=box, llm_model="gpt-node-override"]
+                start -> work
+            }
+            """
+        )
+        events: list[dict] = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            if node_id == "work":
+                return Outcome(status=OutcomeStatus.FAIL, failure_reason="boom")
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(
+            Context(values={RUNTIME_LAUNCH_MODEL_KEY: "gpt-launch-default"})
+        )
+
+        stage_failed = [event for event in events if event["type"] == "StageFailed" and event["node_id"] == "work"]
+
+        assert result.status == "failed"
+        assert stage_failed
+        assert all(event["llm_model"] == "gpt-node-override" for event in stage_failed)
+
+    def test_non_llm_stage_events_do_not_include_llm_model(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                start [shape=Mdiamond]
+                gate [shape=hexagon]
+                done [shape=Msquare]
+                start -> gate
+                gate -> done
+            }
+            """
+        )
+        events: list[dict] = []
+
+        def runner(node_id: str, prompt: str, context: Context) -> Outcome:
+            return Outcome(status=OutcomeStatus.SUCCESS)
+
+        result = PipelineExecutor(graph, runner, on_event=events.append).run(
+            Context(values={RUNTIME_LAUNCH_MODEL_KEY: "gpt-launch-default"})
+        )
+
+        gate_events = [event for event in events if event.get("node_id") == "gate"]
+
+        assert result.status == "completed"
+        assert gate_events
+        assert all("llm_model" not in event for event in gate_events)
 
     def test_stage_failed_event_marks_retryable_attempts(self):
         graph = parse_dot(

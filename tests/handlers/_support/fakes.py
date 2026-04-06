@@ -23,9 +23,10 @@ class _StubBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> bool:
         self.calls.append(
-            (node_id, prompt, dict(context.values), response_contract, contract_repair_attempts)
+            (node_id, prompt, dict(context.values), response_contract, contract_repair_attempts, model)
         )
         return self.ok
 
@@ -45,8 +46,9 @@ class _ArtifactProbeBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> bool:
-        del prompt, context, response_contract, contract_repair_attempts, timeout
+        del prompt, context, response_contract, contract_repair_attempts, timeout, model
         stage_dir = self.logs_root / node_id
         prompt_path = stage_dir / "prompt.md"
         response_path = stage_dir / "response.md"
@@ -69,8 +71,9 @@ class _TextBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> str:
-        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
         return self.text
 
 class _OutcomeBackend:
@@ -86,8 +89,9 @@ class _OutcomeBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> Outcome:
-        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
         return self.outcome
 
 class _FanInRankingBackend:
@@ -104,6 +108,7 @@ class _FanInRankingBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> str:
         self.calls.append(
             {
@@ -113,6 +118,7 @@ class _FanInRankingBackend:
                 "response_contract": response_contract,
                 "contract_repair_attempts": contract_repair_attempts,
                 "timeout": timeout,
+                "model": model,
             }
         )
         return self.response
@@ -143,8 +149,9 @@ class _StageLoggingBackend:
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout=None,
+        model=None,
     ) -> str:
-        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout
+        del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
         self.run_bound = self._active_bindings > 0
         return self.response
 

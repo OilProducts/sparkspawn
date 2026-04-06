@@ -117,7 +117,7 @@ export function RunSummaryCard({
                 <div data-testid="run-summary-started-at"><span className="font-medium">Started:</span> {formatTimestamp(run.started_at)}</div>
                 <div data-testid="run-summary-ended-at"><span className="font-medium">Ended:</span> {formatTimestamp(run.ended_at)}</div>
                 <div data-testid="run-summary-duration"><span className="font-medium">Duration:</span> {formatDuration(run.started_at, run.ended_at, run.status, now)}</div>
-                <div data-testid="run-summary-model"><span className="font-medium">Model:</span> {run.model || 'default model'}</div>
+                <div data-testid="run-summary-model"><span className="font-medium">Launch model:</span> {run.model || 'default model'}</div>
                 <div data-testid="run-summary-working-directory" className="break-all"><span className="font-medium">Working Dir:</span> {run.working_directory || '—'}</div>
                 <div data-testid="run-summary-project-path" className="break-all"><span className="font-medium">Project Path:</span> {run.project_path || activeProjectPath || '—'}</div>
                 <div data-testid="run-summary-git-branch"><span className="font-medium">Git Branch:</span> {run.git_branch || '—'}</div>

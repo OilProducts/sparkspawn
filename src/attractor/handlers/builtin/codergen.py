@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Optional
 
 from attractor.dsl.models import Duration
-
 from attractor.engine.outcome import Outcome, OutcomeStatus
+from attractor.llm_runtime import resolve_effective_llm_model
 
 from ..base import CodergenBackend, HandlerRuntime
 
@@ -65,14 +65,24 @@ class CodergenHandler:
         timeout = _to_seconds(runtime.node_attrs.get("timeout"))
         response_contract = _normalized_response_contract_name(runtime.node_attrs)
         contract_repair_attempts = _contract_repair_attempts(runtime.node_attrs, response_contract)
+        effective_model = resolve_effective_llm_model(
+            runtime.node_attrs,
+            runtime.context,
+            fallback_model=getattr(self.backend, "model", None) if self.backend is not None else None,
+        )
+        backend_kwargs = {
+            "response_contract": response_contract,
+            "contract_repair_attempts": contract_repair_attempts,
+            "timeout": timeout,
+        }
+        if effective_model is not None:
+            backend_kwargs["model"] = effective_model
         with _backend_stage_logging_context(self.backend, runtime.node_id, runtime.logs_root):
             result = self.backend.run(
                 runtime.node_id,
                 prompt,
                 runtime.context,
-                response_contract=response_contract,
-                contract_repair_attempts=contract_repair_attempts,
-                timeout=timeout,
+                **backend_kwargs,
             )
         outcome: Outcome
         response_text: str

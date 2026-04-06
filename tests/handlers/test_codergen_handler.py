@@ -7,6 +7,8 @@ from attractor.engine.context import Context
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.builtin.codergen import STATUS_ENVELOPE_PROMPT_APPENDIX
+from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
+from attractor.transforms import ModelStylesheetTransform, TransformPipeline
 
 from tests.handlers._support.fakes import (
     _StubBackend,
@@ -133,6 +135,44 @@ class TestCodergenHandler:
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0][3] == "status_envelope"
         assert backend.calls[0][4] == 2
+
+    def test_codergen_handler_passes_node_level_llm_model_override(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [shape=box, prompt="Plan", llm_model="gpt-node-override"]
+            }
+            """
+        )
+
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("task", "Plan", Context(values={RUNTIME_LAUNCH_MODEL_KEY: "gpt-launch-default"}))
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0][5] == "gpt-node-override"
+
+    def test_codergen_handler_passes_stylesheet_resolved_llm_model_override(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                graph [model_stylesheet="box { llm_model: gpt-style-override; }"]
+                task [shape=box, prompt="Plan"]
+            }
+            """
+        )
+        graph = TransformPipeline([ModelStylesheetTransform()]).apply(graph)
+
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("task", "Plan", Context(values={RUNTIME_LAUNCH_MODEL_KEY: "gpt-launch-default"}))
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0][5] == "gpt-style-override"
 
     def test_codergen_handler_falls_back_to_label_when_prompt_is_empty(self):
         graph = parse_dot(

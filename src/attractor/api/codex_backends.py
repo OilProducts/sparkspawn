@@ -102,20 +102,26 @@ class CodexAppServerBackend(CodergenBackend):
     def _resolve_session_thread_id(
         self,
         thread_key: str,
+        model: Optional[str],
         start_thread: Callable[[], str | None],
     ) -> str | None:
         normalized_key = thread_key.strip()
         if not normalized_key:
             return start_thread()
 
+        cache_key = normalized_key
+        normalized_model = str(model or "").strip()
+        if normalized_model:
+            cache_key = f"{normalized_key}::{normalized_model}"
+
         with self._session_threads_lock:
-            cached = self._session_threads_by_key.get(normalized_key)
+            cached = self._session_threads_by_key.get(cache_key)
             if cached:
                 return cached
             created = start_thread()
             if not created:
                 return None
-            self._session_threads_by_key[normalized_key] = created
+            self._session_threads_by_key[cache_key] = created
             return created
 
     def run(
@@ -127,6 +133,7 @@ class CodexAppServerBackend(CodergenBackend):
         response_contract: str = "",
         contract_repair_attempts: int = 0,
         timeout: Optional[float] = None,
+        model: Optional[str] = None,
     ) -> str | Outcome:
         def log_line(message: str) -> None:
             if message:
@@ -145,6 +152,7 @@ class CodexAppServerBackend(CodergenBackend):
             requested_working_dir=self.requested_working_dir,
             on_unparsed_line=log_line,
         )
+        effective_model = str(model or "").strip() or self.model
         set_raw_rpc_logger = getattr(client, "set_raw_rpc_logger", None)
         clear_raw_rpc_logger = getattr(client, "clear_raw_rpc_logger", None)
         try:
@@ -155,7 +163,7 @@ class CodexAppServerBackend(CodergenBackend):
             def start_thread() -> str | None:
                 try:
                     return client.start_thread(
-                        model=self.model,
+                        model=effective_model,
                         cwd=self.working_dir,
                         ephemeral=True,
                     )
@@ -163,7 +171,7 @@ class CodexAppServerBackend(CodergenBackend):
                     return None
 
             thread_key = self._runtime_thread_key(context)
-            thread_uuid = self._resolve_session_thread_id(thread_key, start_thread)
+            thread_uuid = self._resolve_session_thread_id(thread_key, effective_model, start_thread)
             if not thread_uuid:
                 return fail("codex app-server thread/start failed")
 
@@ -173,6 +181,7 @@ class CodexAppServerBackend(CodergenBackend):
                 prompt,
                 timeout,
                 log_line,
+                model=effective_model,
             )
             if turn_text is None:
                 return "codex app-server completed successfully"
@@ -185,6 +194,7 @@ class CodexAppServerBackend(CodergenBackend):
                 contract_repair_attempts=contract_repair_attempts,
                 timeout=timeout,
                 log_line=log_line,
+                model=effective_model,
             )
         except RuntimeError as exc:
             return fail(str(exc))
@@ -200,11 +210,13 @@ class CodexAppServerBackend(CodergenBackend):
         prompt: str,
         timeout: Optional[float],
         log_line: Callable[[str], None],
+        *,
+        model: Optional[str],
     ) -> str | None:
         result = client.run_turn(
             thread_id=thread_id,
             prompt=prompt,
-            model=self.model,
+            model=model,
             cwd=self.working_dir,
             overall_timeout_seconds=timeout,
             now=time.monotonic,
@@ -230,6 +242,7 @@ class CodexAppServerBackend(CodergenBackend):
         contract_repair_attempts: int,
         timeout: Optional[float],
         log_line: Callable[[str], None],
+        model: Optional[str],
     ) -> str | Outcome:
         result = _coerce_structured_text_outcome(response_text, response_contract=response_contract)
         if isinstance(result, Outcome):
@@ -255,6 +268,7 @@ class CodexAppServerBackend(CodergenBackend):
                 repair_prompt,
                 timeout,
                 log_line,
+                model=model,
             )
             if repair_text is None:
                 return _contract_failure_outcome(current_violation)

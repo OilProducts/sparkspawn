@@ -5,6 +5,7 @@ from attractor.dsl import parse_dot
 from attractor.engine.context import Context
 from attractor.engine.outcome import OutcomeStatus
 from attractor.handlers import HandlerRunner, build_default_registry
+from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
 
 from tests.handlers._support.fakes import (
     _StubBackend,
@@ -120,3 +121,29 @@ class TestFanInHandler:
             assert outcome.status == OutcomeStatus.SUCCESS
             assert backend.run_bound is True
             assert backend.bind_calls == [("fan_in", logs_root)]
+
+    def test_fan_in_passes_node_level_llm_model_override(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan_in [shape=tripleoctagon, prompt="Rank the branch results", llm_model="gpt-fan-in"]
+            }
+            """
+        )
+        backend = _FanInRankingBackend('{"best_id":"branch_b"}')
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+        context = Context(
+            values={
+                RUNTIME_LAUNCH_MODEL_KEY: "gpt-launch-default",
+                "parallel.results": [
+                    {"id": "branch_a", "status": "success"},
+                    {"id": "branch_b", "status": "success"},
+                ],
+            }
+        )
+
+        outcome = runner("fan_in", "Rank the branch results", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0]["model"] == "gpt-fan-in"

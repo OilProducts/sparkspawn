@@ -63,8 +63,9 @@ class _Backend:
         response_contract="",
         contract_repair_attempts=0,
         timeout=None,
+        model=None,
     ):
-        del prompt, context, response_contract, contract_repair_attempts, timeout
+        del prompt, context, response_contract, contract_repair_attempts, timeout, model
         self.calls.append(node_id)
         return bool(self.plan.get(node_id, True))
 

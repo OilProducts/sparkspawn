@@ -583,6 +583,8 @@ describe('RunsPanel', () => {
       expect(screen.getByTestId('run-summary-continue-button')).toBeVisible()
     })
 
+    expect(screen.getByTestId('run-summary-model')).toHaveTextContent('Launch model:')
+
     await user.click(screen.getByTestId('run-summary-continue-button'))
 
     expect(useStore.getState().viewMode).toBe('execution')

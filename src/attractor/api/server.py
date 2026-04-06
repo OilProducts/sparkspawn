@@ -77,6 +77,7 @@ from attractor.api.pipeline_runtime import (
 )
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
+from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, AnswerValue, Question
 from spark_common.launch_context import normalize_launch_context
@@ -1124,6 +1125,7 @@ async def _launch_pipeline_run(
     context.set("current_node", resolved_start_node)
     context.set("outcome", "")
     context.set("preferred_label", "")
+    context.set(RUNTIME_LAUNCH_MODEL_KEY, selected_model or "")
     context.set("internal.run_workdir", working_dir)
     if flow_source_dir is not None:
         context.set("internal.flow_source_dir", str(flow_source_dir))
