@@ -252,6 +252,7 @@ When a run behaves unexpectedly, check these first:
 
 After this tutorial, the next useful flows are:
 
+- [src/spark/starter_flows/implement-from-plan.dot](../src/spark/starter_flows/implement-from-plan.dot) for implementing an existing plan document from repo-local `.planflow/` state and iterating through evaluation
 - [src/spark/starter_flows/spec-implementation/implement-spec.dot](../src/spark/starter_flows/spec-implementation/implement-spec.dot) for long-running greenfield spec implementation with repo-local state under `.specflow/`
 - [src/spark/starter_flows/human-review-loop.dot](../src/spark/starter_flows/human-review-loop.dot) for explicit human approval
 - [src/spark/starter_flows/parallel-review.dot](../src/spark/starter_flows/parallel-review.dot) for fan-out and fan-in
