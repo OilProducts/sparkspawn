@@ -5,8 +5,6 @@ import {
     MiniMap,
     ReactFlow,
     ReactFlowProvider,
-    type Edge,
-    type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 

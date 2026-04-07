@@ -8,6 +8,7 @@ import { extractApiErrorMessage } from '@/features/projects/model/projectsHomeSt
 import { useRunDetailResources } from '@/features/runs/hooks/useRunDetailResources'
 import { useRunsList } from '@/features/runs/hooks/useRunsList'
 import { useRunTimeline } from '@/features/runs/hooks/useRunTimeline'
+import type { RunRecord } from '@/features/runs/model/shared'
 import { useTriggersList } from '@/features/triggers/hooks/useTriggersList'
 import type { ProjectGitMetadata } from '@/features/projects/model/presentation'
 import type {
@@ -28,8 +29,8 @@ const completedNodesMatch = (left: string[], right: string[]) => (
 )
 
 const runRecordsMatch = (
-    left: { [key: string]: unknown } | null,
-    right: { [key: string]: unknown } | null,
+    left: RunRecord | null,
+    right: RunRecord | null,
 ) => {
     if (left === right) {
         return true
@@ -60,7 +61,7 @@ const runRecordsMatch = (
         'continued_from_node',
         'continued_from_flow_mode',
         'continued_from_flow_name',
-    ].every((key) => left[key] === right[key])
+    ].every((key) => left[key as keyof RunRecord] === right[key as keyof RunRecord])
 }
 
 type HomeConversationSyncControllerProps = {

@@ -184,11 +184,8 @@ export function ProjectsSidebar({
                     data-testid="project-event-log-surface"
                     className={`flex min-h-[280px] flex-col rounded-md border border-border bg-card p-4 shadow-sm ${isNarrowViewport ? "" : "min-h-0 flex-1 overflow-hidden"}`}
                 >
-                    <div className="mb-3 space-y-1">
+                    <div className="mb-3">
                         <h3 className="text-sm font-semibold text-foreground">Workflow Event Log</h3>
-                        <p className="text-xs text-muted-foreground">
-                            Project-scoped operational events and workflow progression.
-                        </p>
                     </div>
                     {!activeProjectPath ? (
                         <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
