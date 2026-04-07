@@ -30,6 +30,7 @@ def test_spec_implementation_milestone_worker_uses_validation_as_a_real_gate() -
 
     assert "assess_validation" in graph.nodes
     assert "gate_item_completion" in graph.nodes
+    assert "validate_active_item_state" in graph.nodes
 
     validate_node = graph.nodes["validate_repo"]
     artifact_paths = str(validate_node.attrs["tool.artifacts.paths"].value)
@@ -43,10 +44,16 @@ def test_spec_implementation_milestone_worker_uses_validation_as_a_real_gate() -
     assert ("assess_validation", "implement_current", "Fix Validation") in edge_targets
     assert ("assess_validation", "rewrite_current", "Rewrite Validation") in edge_targets
     assert ("assess_validation", "mark_current_blocked", "Blocked Validation") in edge_targets
+    assert ("implement_current", "validate_active_item_state", "Check Item State") in edge_targets
+    assert ("validate_active_item_state", "prepare_validation", "Validate") in edge_targets
+    assert ("validate_active_item_state", "blocked_exit", "Blocked State") in edge_targets
     assert ("review_current", "gate_item_completion", "Ready To Complete") in edge_targets
+    assert ("gate_item_completion", "blocked_exit", "Blocked State") in edge_targets
     assert ("gate_item_completion", "mark_current_done", "Validated") in edge_targets
     assert ("gate_item_completion", "prepare_validation", "Revalidate") in edge_targets
+    assert ("mark_current_done", "blocked_exit", "Blocked State") in edge_targets
     assert ("review_current", "mark_current_done", "Done") not in edge_targets
+    assert ("implement_current", "prepare_validation", "Validate") not in edge_targets
 
 
 def test_spec_implementation_milestone_worker_validates_item_queue_before_next_item() -> None:
@@ -155,6 +162,7 @@ def test_spec_implementation_flow_uses_gpt_54_for_judgment_heavy_nodes() -> None
         "assess_validation",
         "review_current",
         "gate_item_completion",
+        "validate_active_item_state",
         "final_milestone_audit",
         "validate_item_plan",
     }
@@ -184,11 +192,17 @@ def test_spec_implementation_flow_prompts_encode_repository_integrity_rubric() -
     plan_prompt = str(child_graph.nodes["plan_current"].attrs["prompt"].value)
     assert "public bootstrap and installability" in plan_prompt
 
+    implement_prompt = str(child_graph.nodes["implement_current"].attrs["prompt"].value)
+    assert "Do not edit milestone_dir/state.json" in implement_prompt
+    assert "Do not claim that a later item is now active" in implement_prompt
+
     prepare_validation_prompt = str(child_graph.nodes["prepare_validation"].attrs["prompt"].value)
     assert "fields item_id, item_title" in prepare_validation_prompt
     assert "ambient tooling" in prepare_validation_prompt
     assert "test-only path hacks" in prepare_validation_prompt
     assert "committed manifests" in prepare_validation_prompt
+    assert "Do not edit milestone_dir/state.json or milestone_dir/current-item.json" in prepare_validation_prompt
+    assert "Do not write .specflow/validation-result.json" in prepare_validation_prompt
 
     assess_validation_prompt = str(child_graph.nodes["assess_validation"].attrs["prompt"].value)
     assert "fields item_id, item_title, status" in assess_validation_prompt
@@ -202,9 +216,23 @@ def test_spec_implementation_flow_prompts_encode_repository_integrity_rubric() -
     assert "duplicate validators" in review_prompt
     assert "mixed-responsibility growth" in review_prompt
 
+    active_item_prompt = str(child_graph.nodes["validate_active_item_state"].attrs["prompt"].value)
+    assert "state.json.current_item_id equals context.item.id" in active_item_prompt
+    assert "preferred_label Blocked" in active_item_prompt
+
+    validate_item_plan_prompt = str(child_graph.nodes["validate_item_plan"].attrs["prompt"].value)
+    assert "at most one item is status=in_progress" in validate_item_plan_prompt
+    assert "items with attempts=0 that are already in_progress or completed" in validate_item_plan_prompt
+
     gate_prompt = str(child_graph.nodes["gate_item_completion"].attrs["prompt"].value)
-    assert "matching item_id" in gate_prompt
+    assert "state.json.current_item_id" in gate_prompt
+    assert "preferred_label Blocked" in gate_prompt
     assert "preferred_label Revalidate" in gate_prompt
+
+    mark_done_prompt = str(child_graph.nodes["mark_current_done"].attrs["prompt"].value)
+    assert "Treat context.item.id as the only item" in mark_done_prompt
+    assert "Do not modify any other item status" in mark_done_prompt
+    assert "preferred_label Blocked" in mark_done_prompt
 
     final_audit_prompt = str(child_graph.nodes["final_milestone_audit"].attrs["prompt"].value)
     assert "missing deliverability work" in final_audit_prompt
