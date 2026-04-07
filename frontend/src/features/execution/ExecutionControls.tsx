@@ -167,21 +167,9 @@ export function ExecutionControls() {
         }
 
         try {
-            const metadata = await loadExecutionProjectMetadata(projectPathForGitCheck)
-            const branch = typeof metadata.branch === 'string' ? metadata.branch.trim() : ''
-            if (branch) {
-                updateExecutionSession({ executionRunStartGitPolicyWarning: null })
-                return true
-            }
-
-            const warning = 'Project Git policy check failed: active project is not a Git repository.'
-            updateExecutionSession({ executionRunStartGitPolicyWarning: warning })
-            return confirm({
-                title: 'Run without Git metadata?',
-                description: `${warning} Continue with run start anyway?`,
-                confirmLabel: 'Continue',
-                cancelLabel: 'Cancel',
-            })
+            await loadExecutionProjectMetadata(projectPathForGitCheck)
+            updateExecutionSession({ executionRunStartGitPolicyWarning: null })
+            return true
         } catch (err) {
             const warning = 'Unable to verify project Git state before run start.'
             if (err instanceof ApiHttpError && err.detail) {

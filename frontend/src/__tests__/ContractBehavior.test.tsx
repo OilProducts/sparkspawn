@@ -2744,7 +2744,7 @@ describe('Frontend contract behavior', () => {
     expect(screen.getByText('beta.dot')).toBeVisible()
   })
 
-  it('[CID:14.0.02] enforces unique project directories and Git-repo registration invariants', async () => {
+  it('[CID:14.0.02] enforces unique project directories while allowing missing Git metadata', async () => {
     const pickedDirectories = [
       '/tmp/project-contract-behavior',
       '/tmp/non-git-project',
@@ -2817,11 +2817,9 @@ describe('Frontend contract behavior', () => {
     await user.click(newButton)
 
     await waitFor(() => {
-      expect(screen.getByTestId('top-nav-project-error')).toHaveTextContent(
-        'Project directory must be a Git repository.',
-      )
+      expect(useStore.getState().projectRegistry['/tmp/non-git-project']).toBeDefined()
     })
-    expect(useStore.getState().projectRegistry['/tmp/non-git-project']).toBeUndefined()
+    expect(screen.queryByTestId('top-nav-project-error')).not.toBeInTheDocument()
 
     await user.click(newButton)
 
@@ -2855,11 +2853,9 @@ describe('Frontend contract behavior', () => {
     await user.click(await screen.findByText('non-git-existing'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('top-nav-project-error')).toHaveTextContent(
-        'Project directory must be a Git repository.',
-      )
+      expect(useStore.getState().activeProjectPath).toBe('/tmp/non-git-existing')
     })
-    expect(useStore.getState().activeProjectPath).toBe('/tmp/project-contract-behavior')
+    expect(screen.queryByTestId('top-nav-project-error')).not.toBeInTheDocument()
   })
 
   it('[CID:6.3.01] renders edge inspector controls for required edge attrs', async () => {

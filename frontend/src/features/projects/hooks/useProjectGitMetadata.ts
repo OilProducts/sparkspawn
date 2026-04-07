@@ -85,10 +85,7 @@ export function useProjectGitMetadata({
             setProjectRegistrationError(error)
             return null
         }
-        if (!metadata.branch && !metadata.commit) {
-            setProjectRegistrationError('Project directory must be a Git repository.')
-            return null
-        }
+        setProjectRegistrationError(null)
         return metadata
     }
 

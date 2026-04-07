@@ -76,6 +76,7 @@ const installExecutionFetchMock = (options?: {
   continuePipelineId?: string
   continuationGraphNodes?: Array<{ id: string; label: string; shape: string }>
   continuationGraphEdges?: Array<Record<string, unknown>>
+  projectMetadataPayload?: Record<string, unknown>
 }) => {
   const flowName = options?.flowName ?? TEST_LINEAR_FLOW
   const flowContent = options?.flowContent ?? 'digraph simple_linear { start -> done }'
@@ -105,7 +106,7 @@ const installExecutionFetchMock = (options?: {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     if (url.includes('/workspace/api/projects/metadata')) {
-      return jsonResponse({ branch: 'main' })
+      return jsonResponse(options?.projectMetadataPayload ?? { branch: 'main' })
     }
     if (url.endsWith('/attractor/api/flows')) {
       return jsonResponse(flowList)
@@ -399,6 +400,55 @@ describe('Execution controls behavior', () => {
     expect(useStore.getState().selectedRunId).toBe('run-555')
     expect(useStore.getState().viewMode).toBe('execution')
     expect(screen.getByTestId('execution-launch-success-notice')).toBeVisible()
+  })
+
+  it('launches without a Git warning dialog when project metadata has no branch or commit', async () => {
+    const user = userEvent.setup()
+    const fetchMock = installExecutionFetchMock({
+      flowName: TEST_LINEAR_FLOW,
+      pipelineId: 'run-no-git-metadata',
+      projectMetadataPayload: {
+        branch: null,
+        commit: null,
+      },
+    })
+
+    useStore.setState((state) => ({
+      ...state,
+      viewMode: 'execution',
+      activeProjectPath: '/tmp/project',
+      executionFlow: TEST_LINEAR_FLOW,
+      projectSessionsByPath: {
+        '/tmp/project': {
+          workingDir: '/tmp/project',
+          conversationId: null,
+          projectEventLog: [],
+          specId: null,
+          specStatus: null,
+          specProvenance: null,
+          planId: null,
+          planStatus: 'draft',
+          planProvenance: null,
+        },
+      },
+    }))
+
+    renderExecutionControls()
+
+    await screen.findByTestId('execute-button')
+    await user.click(screen.getByTestId('execute-button'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/attractor/pipelines',
+        expect.objectContaining({
+          method: 'POST',
+        }),
+      )
+    })
+
+    expect(screen.queryByText('Run without Git metadata?')).not.toBeInTheDocument()
+    expect(useStore.getState().executionRunStartGitPolicyWarning).toBeNull()
   })
 
   it('stays on execution by default after launch and can jump to runs from the success notice', async () => {

@@ -84,7 +84,7 @@ When both layers run inside one process, they must still remain distinct service
 
 A project:
 - is bound to one local directory
-- resolves to one Git repository context
+- may expose Git repository context when available
 - scopes conversations, review artifacts, and relevant Attractor runs
 
 ### 5.2 Conversation

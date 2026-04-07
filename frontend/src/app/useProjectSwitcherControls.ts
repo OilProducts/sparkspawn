@@ -12,7 +12,6 @@ import {
 import { useDialogController } from '@/ui'
 import { useProjectRegistryBootstrap } from '@/features/projects/hooks/useProjectRegistryBootstrap'
 import {
-    asProjectGitMetadataField,
     buildOrderedProjects,
     deriveProjectPathFromDirectorySelection,
     extractApiErrorMessage,
@@ -83,13 +82,7 @@ export function useProjectSwitcherControls() {
 
     const ensureProjectGitRepository = async (projectPath: string) => {
         try {
-            const metadata = await fetchProjectMetadataValidated(projectPath)
-            const branch = asProjectGitMetadataField(metadata.branch)
-            const commit = asProjectGitMetadataField(metadata.commit)
-            if (!branch && !commit) {
-                setProjectRegistrationError('Project directory must be a Git repository.')
-                return false
-            }
+            await fetchProjectMetadataValidated(projectPath)
             clearProjectRegistrationError()
             return true
         } catch (error) {

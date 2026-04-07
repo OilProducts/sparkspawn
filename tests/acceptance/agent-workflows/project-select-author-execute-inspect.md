@@ -7,7 +7,7 @@ Verify that a user can complete a full project-scoped workflow in the UI without
 ## Preconditions
 
 1. At least one local project directory is available for registration.
-2. The selected project is a Git repository and is usable as a working directory.
+2. The selected project directory is usable as a working directory; Git metadata may or may not be present.
 3. At least one runnable flow exists or can be created during the workflow.
 4. The UI can reach the backend APIs needed for project selection, flow editing, execution, and run inspection.
 
