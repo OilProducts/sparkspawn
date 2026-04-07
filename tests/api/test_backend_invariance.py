@@ -457,7 +457,6 @@ def test_initialize_creates_run_dir_and_seed_checkpoint_with_transformed_graph(
     assert checkpoint.completed_nodes == []
     assert checkpoint.context["graph.goal"] == "Ship API"
     assert checkpoint.context["graph.default_max_retries"] == 7
-    assert checkpoint.context["graph.default_max_retry"] == 7
     assert checkpoint.context["graph.default_fidelity"] == "compact"
 
     history = server.EVENT_HUB.history(run_id)

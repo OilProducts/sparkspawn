@@ -38,12 +38,12 @@ After direct flow edits, validate with `spark flow validate --flow <name> --text
 
 Start with the smallest flow that matches the job:
 
-- [starter-flows/simple-linear.dot](/Users/chris/projects/spark/starter-flows/simple-linear.dot): one pass through plan -> implement -> summarize
-- [starter-flows/implement-review-loop.dot](/Users/chris/projects/spark/starter-flows/implement-review-loop.dot): plan -> implement -> review with an actual retry loop
-- [starter-flows/spec-implementation/implement-spec.dot](/Users/chris/projects/spark/starter-flows/spec-implementation/implement-spec.dot): greenfield spec-implementation program flow that keeps repo-local state under `.specflow/` and dispatches milestone workers
-- [starter-flows/human-review-loop.dot](/Users/chris/projects/spark/starter-flows/human-review-loop.dot): explicit human approval or requested fixes
-- [starter-flows/parallel-review.dot](/Users/chris/projects/spark/starter-flows/parallel-review.dot): fan-out / fan-in structure
-- [starter-flows/supervision/supervised-implementation.dot](/Users/chris/projects/spark/starter-flows/supervision/supervised-implementation.dot): parent/child composition with `stack.manager_loop`
+- [src/spark/starter_flows/simple-linear.dot](/Users/chris/projects/spark/src/spark/starter_flows/simple-linear.dot): one pass through plan -> implement -> summarize
+- [src/spark/starter_flows/implement-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-review-loop.dot): plan -> implement -> review with an actual retry loop
+- [src/spark/starter_flows/spec-implementation/implement-spec.dot](/Users/chris/projects/spark/src/spark/starter_flows/spec-implementation/implement-spec.dot): greenfield spec-implementation program flow that keeps repo-local state under `.specflow/` and dispatches milestone workers
+- [src/spark/starter_flows/human-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/human-review-loop.dot): explicit human approval or requested fixes
+- [src/spark/starter_flows/parallel-review.dot](/Users/chris/projects/spark/src/spark/starter_flows/parallel-review.dot): fan-out / fan-in structure
+- [src/spark/starter_flows/supervision/supervised-implementation.dot](/Users/chris/projects/spark/src/spark/starter_flows/supervision/supervised-implementation.dot): parent/child composition with `stack.manager_loop`
 
 Use the flow `goal` as the user-facing stated goal for the run:
 
@@ -117,7 +117,7 @@ Use hooks and model defaults deliberately:
 - [src/attractor/](/Users/chris/projects/spark/src/attractor): Attractor runtime, pipeline engine, handlers, CLI, and mounted Attractor API
 - [src/workspace/](/Users/chris/projects/spark/src/workspace): Spark workspace service, conversations, review artifacts, trigger subsystem, and mounted Workspace API
 - [frontend/](/Users/chris/projects/spark/frontend): React 19 + Vite UI
-- [starter-flows/](/Users/chris/projects/spark/starter-flows): curated starter `.dot` flows intended for first-run seeding
+- [src/spark/starter_flows/](/Users/chris/projects/spark/src/spark/starter_flows): curated starter `.dot` flows intended for first-run seeding
 - [tests/fixtures/flows/](/Users/chris/projects/spark/tests/fixtures/flows): repo-only `.dot` fixtures used by tests and local development
 - [tests/](/Users/chris/projects/spark/tests): backend tests, UI contracts, and acceptance assets
 - [specs/](/Users/chris/projects/spark/specs): Attractor, workspace, frontend, and storage specifications
@@ -289,7 +289,7 @@ pip install dist/*.whl
 - The agent-facing CLI exposes curated flow discovery commands with JSON default output: `spark flow list`, `spark flow describe --flow <name>`, and `spark flow get --flow <name>`.
 - The editor supports both structured editing and raw DOT editing, including semantic-equivalence safety checks during handoff.
 - The Runs view is intended for historical inspection, diagnostics, artifact browsing, and replaying execution context.
-- Starter flow templates live in [starter-flows/plan-generation.dot](/Users/chris/projects/spark/starter-flows/plan-generation.dot), [starter-flows/parallel-review.dot](/Users/chris/projects/spark/starter-flows/parallel-review.dot), [starter-flows/simple-linear.dot](/Users/chris/projects/spark/starter-flows/simple-linear.dot), [starter-flows/human-review-loop.dot](/Users/chris/projects/spark/starter-flows/human-review-loop.dot), [starter-flows/implement-review-loop.dot](/Users/chris/projects/spark/starter-flows/implement-review-loop.dot), [starter-flows/spec-implementation/implement-spec.dot](/Users/chris/projects/spark/starter-flows/spec-implementation/implement-spec.dot), [starter-flows/spec-implementation/implement-milestone.dot](/Users/chris/projects/spark/starter-flows/spec-implementation/implement-milestone.dot), [starter-flows/supervision/implementation-worker.dot](/Users/chris/projects/spark/starter-flows/supervision/implementation-worker.dot), and [starter-flows/supervision/supervised-implementation.dot](/Users/chris/projects/spark/starter-flows/supervision/supervised-implementation.dot).
+- Starter flow templates live in [src/spark/starter_flows/plan-generation.dot](/Users/chris/projects/spark/src/spark/starter_flows/plan-generation.dot), [src/spark/starter_flows/parallel-review.dot](/Users/chris/projects/spark/src/spark/starter_flows/parallel-review.dot), [src/spark/starter_flows/simple-linear.dot](/Users/chris/projects/spark/src/spark/starter_flows/simple-linear.dot), [src/spark/starter_flows/human-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/human-review-loop.dot), [src/spark/starter_flows/implement-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-review-loop.dot), [src/spark/starter_flows/spec-implementation/implement-spec.dot](/Users/chris/projects/spark/src/spark/starter_flows/spec-implementation/implement-spec.dot), [src/spark/starter_flows/spec-implementation/implement-milestone.dot](/Users/chris/projects/spark/src/spark/starter_flows/spec-implementation/implement-milestone.dot), [src/spark/starter_flows/supervision/implementation-worker.dot](/Users/chris/projects/spark/src/spark/starter_flows/supervision/implementation-worker.dot), and [src/spark/starter_flows/supervision/supervised-implementation.dot](/Users/chris/projects/spark/src/spark/starter_flows/supervision/supervised-implementation.dot).
 - Repo-only advanced/test fixtures live under [tests/fixtures/flows/](/Users/chris/projects/spark/tests/fixtures/flows).
 
 ## Project Status

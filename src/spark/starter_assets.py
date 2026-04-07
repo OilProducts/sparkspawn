@@ -24,21 +24,7 @@ class SeedStarterFlowsResult:
 
 
 def load_starter_flow_assets(*, project_root: Path | None = None) -> tuple[StarterFlowAsset, ...]:
-    repo_dir = _repo_starter_flows_dir(project_root)
-    if repo_dir is not None:
-        repo_paths = sorted(
-            (path for path in repo_dir.rglob("*.dot") if path.is_file()),
-            key=lambda path: path.relative_to(repo_dir).as_posix(),
-        )
-        if repo_paths:
-            return tuple(
-                StarterFlowAsset(
-                    name=path.relative_to(repo_dir).as_posix(),
-                    content=path.read_text(encoding="utf-8"),
-                )
-                for path in repo_paths
-            )
-
+    del project_root
     packaged_dir = resources.files("spark").joinpath(STARTER_ASSET_DIR_NAME)
     packaged_assets = sorted(
         (
@@ -89,15 +75,6 @@ def seed_starter_flows(
         updated=tuple(updated),
         skipped=tuple(skipped),
     )
-
-
-def _repo_starter_flows_dir(project_root: Path | None) -> Path | None:
-    if project_root is None:
-        return None
-    candidate = project_root / "starter-flows"
-    if not candidate.is_dir():
-        return None
-    return candidate
 
 
 def _iter_packaged_assets(root) -> Iterable[StarterFlowAsset]:

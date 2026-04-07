@@ -180,21 +180,17 @@ def test_run_init_creates_nested_starter_flow_directories(
     assert "created=2 updated=0 skipped=0" in output
 
 
-def test_packaged_starter_flows_match_repo_starter_flows() -> None:
+def test_packaged_starter_flows_exist_in_single_source_tree() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    repo_starter_dir = repo_root / "starter-flows"
     packaged_starter_dir = repo_root / "src" / "spark" / "starter_flows"
 
-    repo_payload = {
-        path.relative_to(repo_starter_dir).as_posix(): path.read_text(encoding="utf-8")
-        for path in sorted(repo_starter_dir.rglob("*.dot"))
-    }
     packaged_payload = {
         path.relative_to(packaged_starter_dir).as_posix(): path.read_text(encoding="utf-8")
         for path in sorted(packaged_starter_dir.rglob("*.dot"))
     }
 
-    assert packaged_payload == repo_payload
+    assert "simple-linear.dot" in packaged_payload
+    assert "spec-implementation/implement-spec.dot" in packaged_payload
 
 
 def test_packaged_authoring_references_match_repo_sources() -> None:

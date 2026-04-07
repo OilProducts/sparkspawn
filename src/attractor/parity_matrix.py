@@ -546,7 +546,7 @@ def _check_prompt_goal_variable_expansion() -> bool:
 
 
 def _check_parallel_fan_out_and_fan_in() -> bool:
-    flow_path = Path(__file__).resolve().parents[2] / "starter-flows" / "parallel-review.dot"
+    flow_path = Path(__file__).resolve().parents[2] / "src" / "spark" / "starter_flows" / "parallel-review.dot"
     graph = parse_dot(flow_path.read_text(encoding="utf-8"))
     interviewer = QueueInterviewer([Answer(selected_values=["Proceed"])])
     backend = _Backend(

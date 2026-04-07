@@ -18,7 +18,6 @@ from attractor.api.run_records import (
 from attractor.engine import load_checkpoint
 from attractor.graph_prep import (
     DEFAULT_MAX_RETRIES_KEY,
-    LEGACY_DEFAULT_MAX_RETRY_KEY,
     normalize_graph_attr_aliases,
     resolve_default_max_retries_value,
 )
@@ -106,7 +105,6 @@ def graph_attr_context_seed(graph) -> Dict[str, object]:
     seeded.setdefault("graph.goal", "")
     default_max_retries = resolve_default_max_retries_value(graph.graph_attrs, default=0)
     seeded[f"graph.{DEFAULT_MAX_RETRIES_KEY}"] = default_max_retries
-    seeded[f"graph.{LEGACY_DEFAULT_MAX_RETRY_KEY}"] = default_max_retries
     return seeded
 
 

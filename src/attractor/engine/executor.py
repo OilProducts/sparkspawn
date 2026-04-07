@@ -15,7 +15,6 @@ from attractor.dsl.models import DotEdge, DotGraph
 from attractor.dsl.models import Duration
 from attractor.graph_prep import (
     DEFAULT_MAX_RETRIES_KEY,
-    LEGACY_DEFAULT_MAX_RETRY_KEY,
     resolve_default_max_retries_value,
 )
 from attractor.llm_runtime import (
@@ -1737,7 +1736,6 @@ class PipelineExecutor:
         context.set("graph.goal", str(goal_attr.value) if goal_attr else "")
         default_max_retries = resolve_default_max_retries_value(self.graph.graph_attrs, default=0)
         context.set(f"graph.{DEFAULT_MAX_RETRIES_KEY}", default_max_retries)
-        context.set(f"graph.{LEGACY_DEFAULT_MAX_RETRY_KEY}", default_max_retries)
 
     def _seed_builtin_context(self, context: Context, current_node: str) -> None:
         outcomes = context.get(NODE_OUTCOMES_KEY, None)
