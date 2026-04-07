@@ -201,6 +201,7 @@ class PipelineExecutor:
         self._run_started_monotonic: float | None = None
         self._artifact_node_ids: set[str] = set()
         self._sync_runner_logs_root()
+        self._sync_runner_control()
 
     def run(
         self,
@@ -447,11 +448,12 @@ class PipelineExecutor:
                 self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
 
                 self._write_stage_artifacts(node.node_id, prompt, outcome)
+                post_stage_action = self._poll_control()
 
                 retry_policy = self._retry_policy_for_node(node.node_id)
                 max_retries = retry_policy.max_attempts - 1
                 retries_so_far = retry_counts.get(node.node_id, 0)
-                if self._should_retry(outcome, retries_so_far, retry_policy):
+                if post_stage_action not in {"abort", "pause"} and self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
                     self._set_runtime_retry_context(
                         ctx,
@@ -532,6 +534,40 @@ class PipelineExecutor:
                     context=ctx,
                     retry_counts=retry_counts,
                 )
+                if post_stage_action == "abort":
+                    self._finalize_run(
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelineFailed",
+                        error="aborted_by_user",
+                    )
+                    return PipelineResult(
+                        status="aborted",
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                        failure_reason="aborted_by_user",
+                    )
+                if post_stage_action == "pause":
+                    self._finalize_run(
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelinePaused",
+                    )
+                    return PipelineResult(
+                        status="paused",
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
                 outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
                 routing_outcome = self._routing_outcome(
                     node.node_id,
@@ -875,11 +911,12 @@ class PipelineExecutor:
                 self._remember_node_outcome(ctx, node.node_id, outcome.status.value)
 
                 self._write_stage_artifacts(node.node_id, prompt, outcome)
+                post_stage_action = self._poll_control()
 
                 retry_policy = self._retry_policy_for_node(node.node_id)
                 max_retries = retry_policy.max_attempts - 1
                 retries_so_far = retry_counts.get(node.node_id, 0)
-                if self._should_retry(outcome, retries_so_far, retry_policy):
+                if post_stage_action not in {"abort", "pause"} and self._should_retry(outcome, retries_so_far, retry_policy):
                     retry_counts[node.node_id] = retries_so_far + 1
                     self._set_runtime_retry_context(
                         ctx,
@@ -960,6 +997,40 @@ class PipelineExecutor:
                     context=ctx,
                     retry_counts=retry_counts,
                 )
+                if post_stage_action == "abort":
+                    self._finalize_run(
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelineFailed",
+                        error="aborted_by_user",
+                    )
+                    return PipelineResult(
+                        status="aborted",
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                        failure_reason="aborted_by_user",
+                    )
+                if post_stage_action == "pause":
+                    self._finalize_run(
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=ctx,
+                        retry_counts=retry_counts,
+                        event_type="PipelinePaused",
+                    )
+                    return PipelineResult(
+                        status="paused",
+                        current_node=node.node_id,
+                        completed_nodes=completed,
+                        context=dict(ctx.values),
+                        node_outcomes=outcomes,
+                        route_trace=route_trace,
+                    )
                 outgoing = [edge for edge in self.graph.edges if edge.source == node.node_id]
                 routing_outcome = self._routing_outcome(
                     node.node_id,
@@ -1325,6 +1396,11 @@ class PipelineExecutor:
         setter = getattr(self.runner, "set_logs_root", None)
         if callable(setter):
             setter(self.logs_root)
+
+    def _sync_runner_control(self) -> None:
+        setter = getattr(self.runner, "set_control", None)
+        if callable(setter):
+            setter(self.control)
 
     def _resolve_start_node(self) -> str:
         starts = [node.node_id for node in self.graph.nodes.values() if self._is_start_node(node.node_id)]

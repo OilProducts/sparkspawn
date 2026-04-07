@@ -37,6 +37,7 @@ class HandlerRunner:
     registry: HandlerRegistry
     logs_root: Path | None = None
     artifact_store: ArtifactStore | None = None
+    control: Callable[[], str | None] | None = None
     _concurrency_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _active_calls: int = field(default=0, init=False, repr=False)
     _concurrency_overrides: int = field(default=0, init=False, repr=False)
@@ -88,6 +89,7 @@ class HandlerRunner:
                 artifact_store=self._artifact_store(),
                 runner=self,
                 event_emitter=emit_event,
+                control=self.control,
             )
             timeout = _to_seconds(node.attrs.get("timeout"))
             if timeout is None or timeout <= 0:
@@ -133,6 +135,9 @@ class HandlerRunner:
             return
         self.logs_root = Path(logs_root)
         self._sync_artifact_store()
+
+    def set_control(self, control: Callable[[], str | None] | None) -> None:
+        self.control = control
 
     def _artifact_store(self) -> ArtifactStore | None:
         return self.artifact_store

@@ -5,8 +5,13 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+from tests.api._support import (
+    start_pipeline as _start_pipeline,
+    wait_for_pipeline_completion as _wait_for_pipeline_completion,
+)
 
 
 class _RequestDisconnectAfterLoops:
@@ -418,6 +423,79 @@ def test_publish_run_event_persists_sequence_and_timestamp(tmp_path: Path) -> No
     assert [event["sequence"] for event in events] == [1, 2]
     assert all(event["run_id"] == run_id for event in events)
     assert all(isinstance(event["emitted_at"], str) and event["emitted_at"].endswith("Z") for event in events)
+
+
+def test_pipeline_persists_forwarded_child_stage_events_through_broadcasting_runner(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+
+    child_dot_path = tmp_path / "child.dot"
+    child_dot_path.write_text(
+        """
+        digraph Child {
+            start [shape=Mdiamond]
+            task [shape=box, prompt="Child task"]
+            done [shape=Msquare]
+
+            start -> task -> done
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    class _Backend:
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            node_id,
+            prompt,
+            context,
+            *,
+            response_contract="",
+            contract_repair_attempts=0,
+            timeout=None,
+            model=None,
+        ):
+            del node_id, prompt, context, response_contract, contract_repair_attempts, timeout, model
+            return "child ok"
+
+    monkeypatch.setattr(
+        server,
+        "_build_codergen_backend",
+        lambda backend_name, working_dir, emit, model=None: _Backend(),
+    )
+
+    start_payload = _start_pipeline(
+        attractor_api_client,
+        tmp_path / "work",
+        flow_content=f"""
+        digraph Parent {{
+            graph [stack.child_dotfile="{child_dot_path}"]
+            start [shape=Mdiamond]
+            manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            done [shape=Msquare]
+
+            start -> manager -> done
+        }}
+        """,
+    )
+    run_id = str(start_payload["pipeline_id"])
+    final_payload = _wait_for_pipeline_completion(attractor_api_client, run_id)
+
+    assert final_payload["status"] == "completed"
+
+    events = server._read_persisted_run_events(run_id)
+    child_stage_events = [
+        event
+        for event in events
+        if event.get("source_scope") == "child" and event.get("type") in {"StageStarted", "StageCompleted"}
+    ]
+
+    assert [event["node_id"] for event in child_stage_events] == ["start", "start", "task", "task"]
+    assert all(event.get("source_parent_node_id") == "manager" for event in child_stage_events)
+    assert all(event.get("source_flow_name") == "child.dot" for event in child_stage_events)
 
 
 def test_pipeline_events_drop_oldest_events_under_sustained_throughput(

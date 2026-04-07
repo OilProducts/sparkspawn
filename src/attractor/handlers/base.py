@@ -39,6 +39,7 @@ class HandlerRuntime:
     artifact_store: ArtifactStore | None
     runner: Callable[[str, str, Context], Outcome]
     event_emitter: Optional[Callable[..., None]] = None
+    control: Callable[[], str | None] | None = None
 
     def emit(self, event_type: str, **payload: object) -> None:
         if not self.event_emitter:

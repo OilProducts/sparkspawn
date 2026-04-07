@@ -117,6 +117,49 @@ class TestManagerLoopHandler:
         assert all(event.get("source_parent_node_id") == "manager" for event in captured_events)
         assert all(event.get("source_flow_name") == "child.dot" for event in captured_events)
 
+    def test_manager_loop_propagates_parent_cancel_control_to_child_executor(self, tmp_path):
+        child_dot_path = tmp_path / "child.dot"
+        child_dot_path.write_text(
+            """
+            digraph Child {
+                start [shape=Mdiamond]
+                task1 [shape=box, prompt="Child task 1"]
+                task2 [shape=box, prompt="Child task 2"]
+                done [shape=Msquare]
+
+                start -> task1 -> task2 -> done
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        graph = parse_dot(
+            f"""
+            digraph G {{
+                graph [stack.child_dotfile="{child_dot_path}"]
+                manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            }}
+            """
+        )
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry, logs_root=tmp_path / "logs")
+        def control() -> str | None:
+            if backend.calls:
+                return "abort"
+            return None
+
+        runner.set_control(control)
+        context = Context()
+
+        outcome = runner("manager", "", context)
+
+        assert outcome.status == OutcomeStatus.FAIL
+        assert outcome.failure_reason == "aborted_by_user"
+        assert [call[0] for call in backend.calls] == ["task1"]
+        assert context.get("context.stack.child.status") == "aborted"
+        assert context.get("context.stack.child.failure_reason") == "aborted_by_user"
+
     def test_manager_loop_autostarts_fresh_child_when_stale_completed_child_state_exists(self, tmp_path):
         child_dot_path = tmp_path / "child.dot"
         child_dot_path.write_text(

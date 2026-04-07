@@ -15,6 +15,14 @@ digraph G {
 }
 """
 
+TERMINAL_PIPELINE_STATUSES = {
+    "completed",
+    "failed",
+    "validation_error",
+    "paused",
+    "canceled",
+}
+
 
 def close_task_immediately(coro: Any) -> object:
     coro.close()
@@ -59,7 +67,7 @@ def wait_for_pipeline_terminal_status(
         response = api_client.get(f"/pipelines/{pipeline_id}")
         assert response.status_code == 200
         status = str(response.json()["status"])
-        if status != "running":
+        if status in TERMINAL_PIPELINE_STATUSES:
             return status
         time.sleep(interval_seconds)
     raise AssertionError("timed out waiting for pipeline completion")
@@ -76,7 +84,7 @@ def wait_for_pipeline_completion(
         response = api_client.get(f"/pipelines/{pipeline_id}")
         assert response.status_code == 200
         payload = response.json()
-        if payload["status"] != "running":
+        if str(payload["status"]) in TERMINAL_PIPELINE_STATUSES:
             return payload
         time.sleep(interval_seconds)
     raise AssertionError("timed out waiting for pipeline completion")

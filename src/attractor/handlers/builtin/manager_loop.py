@@ -140,6 +140,7 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
         child_graph,
         child_runner,
         logs_root=str(child_logs_root) if child_logs_root else None,
+        control=runtime.control,
         on_event=emit_child_event,
     )
     try:
@@ -154,7 +155,12 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
             failure_reason=f"Unable to run child pipeline from {child_workdir_path}: {exc}",
         )
 
-    child_status = "completed" if child_result.status == "completed" else "failed"
+    if child_result.status == "completed":
+        child_status = "completed"
+    elif child_result.status == "aborted":
+        child_status = "aborted"
+    else:
+        child_status = "failed"
     runtime.context.set("context.stack.child.status", child_status)
     runtime.context.set("context.stack.child.outcome", child_result.outcome or "")
     runtime.context.set("context.stack.child.outcome_reason_code", child_result.outcome_reason_code or "")
@@ -342,7 +348,7 @@ def _stop_condition_met(stop_condition: str, context: Context) -> bool:
 
 def _resolve_child_status(context: Context) -> Outcome | None:
     child_status = str(context.get("context.stack.child.status", "")).strip().lower()
-    if child_status not in {"completed", "failed"}:
+    if child_status not in {"completed", "failed", "aborted"}:
         return None
 
     child_outcome = str(context.get("context.stack.child.outcome", "")).strip().lower()
@@ -356,6 +362,8 @@ def _resolve_child_status(context: Context) -> Outcome | None:
         )
     if child_status == "failed":
         return Outcome(status=OutcomeStatus.FAIL, failure_reason="Child failed")
+    if child_status == "aborted":
+        return Outcome(status=OutcomeStatus.FAIL, failure_reason="aborted_by_user")
     return None
 
 
