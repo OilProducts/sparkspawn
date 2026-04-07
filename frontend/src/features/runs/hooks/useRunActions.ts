@@ -13,11 +13,10 @@ const logUnexpectedRunError = (error: unknown) => {
 }
 
 type UseRunActionsArgs = {
-    fetchRuns: () => Promise<void>
     setRuns: React.Dispatch<React.SetStateAction<RunRecord[]>>
 }
 
-export function useRunActions({ fetchRuns, setRuns }: UseRunActionsArgs) {
+export function useRunActions({ setRuns }: UseRunActionsArgs) {
     const { alert, confirm } = useDialogController()
 
     const requestCancel = useCallback(async (runId: string, currentStatus: string) => {
@@ -43,7 +42,6 @@ export function useRunActions({ fetchRuns, setRuns }: UseRunActionsArgs) {
         )
         try {
             await fetchPipelineCancelValidated(runId)
-            void fetchRuns()
         } catch (err) {
             logUnexpectedRunError(err)
             setRuns((current) =>
@@ -58,7 +56,7 @@ export function useRunActions({ fetchRuns, setRuns }: UseRunActionsArgs) {
                 description: 'Failed to cancel run.',
             })
         }
-    }, [alert, confirm, fetchRuns, setRuns])
+    }, [alert, confirm, setRuns])
 
     return {
         requestCancel,

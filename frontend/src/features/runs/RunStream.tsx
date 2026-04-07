@@ -6,8 +6,10 @@ import { resolveSaveRemediation } from '@/lib/saveRemediation'
 import { useStore, type RuntimeStatus } from '@/store'
 import { Button } from '@/ui'
 
-import type { RunRecord } from './model/shared'
+import type { RunRecord, TimelineEventEntry } from './model/shared'
+import { TIMELINE_MAX_ITEMS, toTimelineEvent } from './model/timelineModel'
 import { ApiHttpError, buildRunEventsUrl, loadSelectedRunStatus } from './services/runStreamTransport'
+import { useRunsTransportReconnectSignal } from './services/runsTransportReconnect'
 
 function classifyLog(message: string): 'info' | 'success' | 'error' {
     const lower = message.toLowerCase()
@@ -26,9 +28,7 @@ const RUNTIME_STAGE_STATUS_MAP: Record<string, 'running' | 'success' | 'failed'>
 }
 
 const SELECTED_RUN_STATUS_DEGRADED_MESSAGE =
-    'Selected run status endpoint is unavailable or incompatible. Live event streaming preflight is in degraded mode.'
-
-const SELECTED_RUN_STATUS_RECONCILE_MS = 5_000
+    'Selected run live updates are unavailable. Reconnect to restore the selected run stream.'
 
 interface RuntimeStageCursor {
     stageIndex: number
@@ -50,10 +50,6 @@ const RUNTIME_STATUS_SET = new Set<RuntimeStatus>([
 
 function isRuntimeStatus(value: string): value is RuntimeStatus {
     return RUNTIME_STATUS_SET.has(value as RuntimeStatus)
-}
-
-function isActiveRunStatus(status: string | null | undefined): boolean {
-    return status === 'running' || status === 'abort_requested' || status === 'cancel_requested' || status === 'pause_requested'
 }
 
 function toRunRecord(status: PipelineStatusResponse): RunRecord {
@@ -102,6 +98,12 @@ function patchRunRecordFromRuntime(record: RunRecord, runtime: {
     }
 }
 
+const mergeTimelineEvent = (currentEvents: TimelineEventEntry[], nextEvent: NonNullable<ReturnType<typeof toTimelineEvent>>) => {
+    return [...currentEvents, nextEvent]
+        .sort((left, right) => right.sequence - left.sequence)
+        .slice(0, TIMELINE_MAX_ITEMS)
+}
+
 export function RunStream() {
     const addLog = useStore((state) => state.addLog)
     const clearLogs = useStore((state) => state.clearLogs)
@@ -114,15 +116,14 @@ export function RunStream() {
     const selectedRunId = useStore((state) => state.selectedRunId)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const setSelectedRunSnapshot = useStore((state) => state.setSelectedRunSnapshot)
-    const selectedRunStatusSync = useStore((state) => state.selectedRunStatusSync)
-    const selectedRunStatusError = useStore((state) => state.selectedRunStatusError)
     const setSelectedRunStatusSync = useStore((state) => state.setSelectedRunStatusSync)
-    const setRunRecordOverride = useStore((state) => state.setRunRecordOverride)
+    const updateRunDetailSession = useStore((state) => state.updateRunDetailSession)
     const saveState = useStore((state) => state.saveState)
     const saveStateVersion = useStore((state) => state.saveStateVersion)
     const saveErrorMessage = useStore((state) => state.saveErrorMessage)
     const saveErrorKind = useStore((state) => state.saveErrorKind)
     const resetSaveState = useStore((state) => state.resetSaveState)
+    const reconnectSignal = useRunsTransportReconnectSignal(true)
     const [showSavedToast, setShowSavedToast] = useState(false)
     const [fadeSavedToast, setFadeSavedToast] = useState(false)
     const stageCursorsRef = useRef<Record<string, RuntimeStageCursor>>({})
@@ -139,16 +140,9 @@ export function RunStream() {
                         ? 'Save Failed'
                         : ''
     const remediation = resolveSaveRemediation(saveState, saveErrorKind)
-    const runtimeApiDegradedMessage =
-        selectedRunStatusSync === 'degraded' ? selectedRunStatusError || SELECTED_RUN_STATUS_DEGRADED_MESSAGE : null
     const shouldShowPersistentSaveIndicator = saveState === 'saving' || saveState === 'error' || saveState === 'conflict'
-    const showSaveStateIndicator = (
-        saveState === 'saved'
-        || showSavedToast
-        || shouldShowPersistentSaveIndicator
-        || Boolean(runtimeApiDegradedMessage)
-    )
-    const shouldFadeSaveCard = showSavedToast && !shouldShowPersistentSaveIndicator && !runtimeApiDegradedMessage
+    const showSaveStateIndicator = saveState === 'saved' || showSavedToast || shouldShowPersistentSaveIndicator
+    const shouldFadeSaveCard = showSavedToast && !shouldShowPersistentSaveIndicator
 
     useEffect(() => {
         stageCursorsRef.current = {}
@@ -165,15 +159,20 @@ export function RunStream() {
         setSelectedRunStatusSync('loading', null)
         setRuntimeStatus('idle')
         setRuntimeOutcome(null)
+        updateRunDetailSession(selectedRunId, {
+            isTimelineLive: false,
+            timelineError: null,
+        })
     }, [
-        selectedRunId,
-        resetNodeStatuses,
         clearHumanGate,
         clearLogs,
-        setRuntimeStatus,
+        resetNodeStatuses,
+        selectedRunId,
         setRuntimeOutcome,
+        setRuntimeStatus,
         setSelectedRunSnapshot,
         setSelectedRunStatusSync,
+        updateRunDetailSession,
     ])
 
     useEffect(() => {
@@ -221,38 +220,50 @@ export function RunStream() {
         }
 
         let eventSource: EventSource | null = null
-        let reconcileTimer: number | null = null
         let closed = false
-        const currentSelectedRunRecord = useStore.getState().selectedRunRecord
-        let runStatus: string | null =
-            currentSelectedRunRecord?.run_id === selectedRunId ? currentSelectedRunRecord.status : null
-        const metadataAbort = new AbortController()
-
-        const stopReconcile = () => {
-            if (reconcileTimer !== null) {
-                window.clearInterval(reconcileTimer)
-                reconcileTimer = null
-            }
-        }
 
         const closeStream = () => {
             eventSource?.close()
             eventSource = null
-            stopReconcile()
         }
 
-        const applyStatusSnapshot = (
-            statusPayload: PipelineStatusResponse,
-            options: { syncState?: 'ready' | 'degraded' } = {},
-        ) => {
+        const patchTimelineSession = (patch: Parameters<typeof updateRunDetailSession>[1]) => {
+            updateRunDetailSession(selectedRunId, patch)
+        }
+
+        const appendTimelineEvent = (payload: unknown) => {
+            const timelineEvent = toTimelineEvent(payload)
+            if (!timelineEvent) {
+                return
+            }
+            const currentSession = useStore.getState().runDetailSessionsByRunId[selectedRunId]
+            const currentSequence = currentSession?.timelineSequence ?? 0
+            const currentSeenServerSequences = currentSession?.timelineSeenServerSequences ?? {}
+            const currentEvents = currentSession?.timelineEvents ?? []
+            const sequenceKey = String(timelineEvent.sequence)
+            if (currentSeenServerSequences[sequenceKey]) {
+                return
+            }
+            patchTimelineSession({
+                timelineError: null,
+                isTimelineLive: true,
+                timelineEvents: mergeTimelineEvent(currentEvents, timelineEvent),
+                timelineSequence: currentSequence + 1,
+                timelineSeenServerSequences: {
+                    ...currentSeenServerSequences,
+                    [sequenceKey]: true,
+                },
+            })
+        }
+
+        const applyStatusSnapshot = (statusPayload: PipelineStatusResponse) => {
             const record = toRunRecord(statusPayload)
-            runStatus = record.status
             setSelectedRunSnapshot({
                 record,
                 completedNodes: statusPayload.completed_nodes ?? [],
                 fetchedAtMs: Date.now(),
             })
-            setSelectedRunStatusSync(options.syncState ?? 'ready', null)
+            setSelectedRunStatusSync('ready', null)
             if (isRuntimeStatus(record.status)) {
                 setRuntimeStatus(record.status)
             }
@@ -261,10 +272,6 @@ export function RunStream() {
                 record.outcome_reason_code ?? null,
                 record.outcome_reason_message ?? null,
             )
-            setRunRecordOverride(record.run_id, record)
-            if (!isActiveRunStatus(record.status)) {
-                closeStream()
-            }
         }
 
         const patchCurrentNode = (currentNode: string | null) => {
@@ -275,28 +282,26 @@ export function RunStream() {
             if ((currentRecord.current_node ?? null) === currentNode) {
                 return
             }
-            const nextRecord = {
-                ...currentRecord,
-                current_node: currentNode,
-            }
             setSelectedRunSnapshot({
-                record: nextRecord,
+                record: {
+                    ...currentRecord,
+                    current_node: currentNode,
+                },
                 completedNodes: useStore.getState().selectedRunCompletedNodes,
                 fetchedAtMs: useStore.getState().selectedRunStatusFetchedAtMs,
             })
-            setRunRecordOverride(selectedRunId, nextRecord)
         }
 
         const refreshSelectedRunStatus = async (): Promise<PipelineStatusResponse | null> => {
             try {
                 const data = await loadSelectedRunStatus(selectedRunId)
-                if (metadataAbort.signal.aborted || closed) {
+                if (closed) {
                     return null
                 }
                 applyStatusSnapshot(data)
                 return data
             } catch (error) {
-                if (metadataAbort.signal.aborted || closed) {
+                if (closed) {
                     return null
                 }
                 if (error instanceof ApiHttpError && error.status === 404) {
@@ -305,21 +310,20 @@ export function RunStream() {
                     setSelectedRunId(null)
                     setRuntimeStatus('idle')
                     setRuntimeOutcome(null)
+                    patchTimelineSession({
+                        isTimelineLive: false,
+                        timelineError: null,
+                    })
                     closeStream()
                     return null
                 }
                 setSelectedRunStatusSync('degraded', SELECTED_RUN_STATUS_DEGRADED_MESSAGE)
+                patchTimelineSession({
+                    isTimelineLive: false,
+                    timelineError: null,
+                })
                 return null
             }
-        }
-
-        const ensureReconcileLoop = () => {
-            if (!isActiveRunStatus(runStatus) || reconcileTimer !== null) {
-                return
-            }
-            reconcileTimer = window.setInterval(() => {
-                void refreshSelectedRunStatus()
-            }, SELECTED_RUN_STATUS_RECONCILE_MS)
         }
 
         const applyRuntimePatch = (runtimeStatus: RuntimeStatus, runtime: {
@@ -328,36 +332,30 @@ export function RunStream() {
             outcomeReasonMessage: string | null
             lastError?: string | null
         }) => {
-            runStatus = runtimeStatus
             setRuntimeStatus(runtimeStatus)
             setRuntimeOutcome(runtime.outcome, runtime.outcomeReasonCode, runtime.outcomeReasonMessage)
             const currentRecord = useStore.getState().selectedRunRecord
-            if (currentRecord?.run_id === selectedRunId) {
-                const nextRecord = patchRunRecordFromRuntime(currentRecord, {
+            if (currentRecord?.run_id !== selectedRunId) {
+                return
+            }
+            setSelectedRunSnapshot({
+                record: patchRunRecordFromRuntime(currentRecord, {
                     status: runtimeStatus,
                     outcome: runtime.outcome,
                     outcomeReasonCode: runtime.outcomeReasonCode,
                     outcomeReasonMessage: runtime.outcomeReasonMessage,
                     lastError: runtime.lastError,
-                })
-                setSelectedRunSnapshot({
-                    record: nextRecord,
-                    completedNodes: useStore.getState().selectedRunCompletedNodes,
-                    fetchedAtMs: useStore.getState().selectedRunStatusFetchedAtMs,
-                })
-                setRunRecordOverride(selectedRunId, nextRecord)
-            }
-            if (!isActiveRunStatus(runtimeStatus)) {
-                stopReconcile()
-                void refreshSelectedRunStatus()
-            } else {
-                ensureReconcileLoop()
-            }
+                }),
+                completedNodes: useStore.getState().selectedRunCompletedNodes,
+                fetchedAtMs: useStore.getState().selectedRunStatusFetchedAtMs,
+            })
         }
 
         const handleMessage = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data)
+                appendTimelineEvent(data)
+
                 const runtimeNodeId = typeof data.node_id === 'string' ? data.node_id : null
                 const runtimeNodeStatus = RUNTIME_STAGE_STATUS_MAP[data.type]
                 const runtimeStageIndex = typeof data.index === 'number' && Number.isFinite(data.index) ? data.index : null
@@ -480,48 +478,67 @@ export function RunStream() {
                     })
                 }
             } catch {
-                // ignore malformed events
+                // Ignore malformed events.
             }
         }
 
         const startScopedStream = async () => {
+            setSelectedRunStatusSync('loading', null)
+            patchTimelineSession({
+                isTimelineLive: false,
+                timelineError: null,
+            })
             const data = await refreshSelectedRunStatus()
-            if (metadataAbort.signal.aborted || closed || !data) {
-                return
-            }
-            if (!isActiveRunStatus(data.status)) {
+            if (closed || !data) {
                 return
             }
 
-            ensureReconcileLoop()
-            const eventStream = new EventSource(buildRunEventsUrl(selectedRunId))
-            eventStream.onmessage = handleMessage
-            eventStream.onerror = () => {
-                void refreshSelectedRunStatus()
+            const nextSource = new EventSource(buildRunEventsUrl(selectedRunId))
+            nextSource.onopen = () => {
+                setSelectedRunStatusSync('ready', null)
+                patchTimelineSession({
+                    isTimelineLive: true,
+                    timelineError: null,
+                })
             }
-            eventSource = eventStream
+            nextSource.onmessage = handleMessage
+            nextSource.onerror = () => {
+                if (closed) {
+                    return
+                }
+                closeStream()
+                setSelectedRunStatusSync('degraded', SELECTED_RUN_STATUS_DEGRADED_MESSAGE)
+                patchTimelineSession({
+                    isTimelineLive: false,
+                    timelineError: null,
+                })
+            }
+            eventSource = nextSource
         }
 
         void startScopedStream()
 
         return () => {
             closed = true
-            metadataAbort.abort()
             closeStream()
+            patchTimelineSession({
+                isTimelineLive: false,
+            })
         }
     }, [
-        selectedRunId,
         addLog,
-        setNodeStatus,
         clearHumanGate,
+        reconnectSignal,
         resetNodeStatuses,
+        selectedRunId,
         setHumanGate,
-        setRuntimeStatus,
+        setNodeStatus,
         setRuntimeOutcome,
+        setRuntimeStatus,
         setSelectedRunId,
         setSelectedRunSnapshot,
         setSelectedRunStatusSync,
-        setRunRecordOverride,
+        updateRunDetailSession,
     ])
 
     const handleRetrySave = () => {
@@ -546,11 +563,6 @@ export function RunStream() {
                 >
                     {saveStateLabel ? <span>{saveStateLabel}</span> : null}
                     {saveErrorMessage ? <span className="ml-1">- {saveErrorMessage}</span> : null}
-                    {runtimeApiDegradedMessage ? (
-                        <p data-testid="runtime-api-degraded-banner" className="mt-1 text-[10px] font-normal leading-4 text-amber-800">
-                            {runtimeApiDegradedMessage}
-                        </p>
-                    ) : null}
                     {remediation ? (
                         <p data-testid="global-save-remediation-hint" className="mt-1 text-[10px] font-normal leading-4">
                             {remediation.message}

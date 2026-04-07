@@ -21,7 +21,6 @@ const resetProjectWorkflowState = () => {
     selectedRunStatusSync: 'idle',
     selectedRunStatusError: null,
     selectedRunStatusFetchedAtMs: null,
-    runRecordOverrides: {},
     workingDir: DEFAULT_WORKING_DIRECTORY,
     model: 'gpt-5.3',
     projectRegistry: {},

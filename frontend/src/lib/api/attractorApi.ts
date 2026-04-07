@@ -25,6 +25,12 @@ export function pipelineEventsUrl(pipelineId: string): string {
     return attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/events`)
 }
 
+export function runsEventsUrl(projectPath?: string | null): string {
+    return projectPath
+        ? `${attractorUrl('/runs/events')}?project_path=${encodeURIComponent(projectPath)}`
+        : attractorUrl('/runs/events')
+}
+
 export interface FlowPayloadResponse {
     name: string
     content: string
@@ -482,9 +488,9 @@ export async function fetchPipelineContinueValidated(
     )
 }
 
-export async function fetchPipelineStatusValidated(pipelineId: string): Promise<PipelineStatusResponse> {
+export async function fetchPipelineStatusValidated(pipelineId: string, init?: RequestInit): Promise<PipelineStatusResponse> {
     const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}`)
-    return fetchJsonWithValidation(url, undefined, '/attractor/pipelines/{id}', parsePipelineStatusResponse)
+    return fetchJsonWithValidation(url, init, '/attractor/pipelines/{id}', parsePipelineStatusResponse)
 }
 
 export async function fetchPipelineCancelValidated(pipelineId: string): Promise<PipelineCancelResponse> {

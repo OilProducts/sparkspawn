@@ -456,28 +456,38 @@ export function RunsSessionController() {
     const hasScopedSelectedRun = scopedSelectedRunId
         ? scopedRuns.some((run) => run.run_id === scopedSelectedRunId)
         : false
+    const authoritativeSelectedRunRecord = selectedRunRecord?.run_id === selectedRunId
+        ? selectedRunRecord
+        : null
     const selectedRunSessionRecord = scopedSelectedRunSession?.summaryRecord ?? null
     const selectedRun =
-        selectedRunSummary
-            ?? (
-                selectedRunSessionRecord
-                && selectedRunSessionRecord.run_id === scopedSelectedRunId
-                && (isLoading || Boolean(error) || hasScopedSelectedRun || scopedRuns.length === 0)
-                    ? selectedRunSessionRecord
-                    : null
-            )
+        authoritativeSelectedRunRecord
+        ?? (
+            selectedRunSessionRecord
+            && selectedRunSessionRecord.run_id === scopedSelectedRunId
+                ? selectedRunSessionRecord
+                : (
+                    selectedRunSummary
+                    ?? (
+                        selectedRunSessionRecord
+                        && selectedRunSessionRecord.run_id === scopedSelectedRunId
+                        && (isLoading || Boolean(error) || hasScopedSelectedRun || scopedRuns.length === 0)
+                            ? selectedRunSessionRecord
+                            : null
+                    )
+                )
+        )
 
     const {
         pendingQuestionSnapshots,
     } = useRunDetailResources({
-        selectedRunSummary: selectedRun,
+        selectedRunId: selectedRun?.run_id ?? null,
         manageSync: true,
     })
 
     useRunTimeline({
         pendingQuestionSnapshots,
         selectedRunTimelineId: selectedRun?.run_id ?? null,
-        manageSync: true,
     })
 
     return null

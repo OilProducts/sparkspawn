@@ -187,8 +187,12 @@ Runs owns:
 
 For selected-run inspection, Runs treats backend run-detail state as authoritative.
 The selected run summary, lifecycle badge, and detail surfaces must reconcile against `GET /pipelines/{id}` rather than relying on the runs list row or event-stream-local status.
-The runs list remains an overview/navigation surface.
+The runs list hydrates from `GET /runs` and then updates from `GET /runs/events`; it remains an overview/navigation surface rather than a second authority for the selected run.
+Selected-run inspection hydrates from `GET /pipelines/{id}` and then updates from `GET /pipelines/{id}/events`.
 Run Activity and Event Timeline must use the selected run's durable event history, not only events observed while the tab was open.
+Steady-state polling is not part of the Runs contract.
+The runs list must not show polling-era stale-data warnings or background-refresh affordances.
+Runs must own exactly one per-run SSE transport for the selected run; activity, timeline, raw logs, node status, and pending human-gate state all share that transport.
 
 ### 8.3 Bridge Surfaces
 
@@ -412,6 +416,9 @@ For run inspection specifically:
 - the runs list is an overview cache and must not outrank selected-run detail state
 - event streams are additive live-update channels for logs, node status, human gates, and timeline enrichment
 - event streams must reconcile with authoritative per-run detail state so missed terminal events do not leave the UI stale
+- run-list live updates come from `/runs/events`, not from steady-state timer refreshes
+- selected-run live updates come from `/pipelines/{id}/events` after initial `GET /pipelines/{id}` hydration
+- the selected run may have only one live per-run stream subscription at a time
 - selected-run activity/timeline history must survive reselecting the run later; the UI must not depend on the run having been open live
 - selected-run activity/timeline history may include inline child-flow events when the backend marks them with child-source metadata
 
@@ -444,6 +451,9 @@ When a backend surface is unavailable or incompatible:
 - unaffected surfaces should remain usable where feasible
 - the client must not fabricate missing authority from stale local state
 - save and launch paths should remain non-destructive
+- Runs transport degradation must surface as one Runs-tab reconnect notice summarizing whether the run-list stream, the selected-run stream, or both are degraded
+- Runs reconnect must rehydrate `GET /runs` and, when a run is selected, `GET /pipelines/{id}` before reopening the corresponding SSE streams
+- selected-run stream degradation belongs to Runs, not to the app-wide save indicator
 
 Degraded behavior is part of the operator contract, not an implementation accident.
 

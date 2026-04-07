@@ -1743,6 +1743,8 @@ Implementations may expose the pipeline engine as an HTTP service for web-based 
 |--------|-----------------------------------------|-------------|
 | `POST` | `/pipelines`                            | Submit a DOT source and start execution. Returns pipeline ID. |
 | `POST` | `/pipelines/{id}/continue`              | Create a derived run from an existing run, starting at a chosen node. |
+| `GET`  | `/runs`                                 | Authoritative snapshot run overview, optionally scoped by `project_path`. |
+| `GET`  | `/runs/events`                          | SSE stream of scoped run-overview updates: initial snapshot, then live run upserts. |
 | `GET`  | `/pipelines/{id}`                       | Get authoritative per-run lifecycle/detail state for inspection, including progress and persisted run metadata. |
 | `GET`  | `/pipelines/{id}/events`                | SSE stream of durable run events with history replay followed by live updates. |
 | `POST` | `/pipelines/{id}/cancel`                | Cancel a running pipeline. |
@@ -1768,6 +1770,14 @@ It should return a full run-detail payload for both active and completed runs, i
 For active runs, implementations should read persisted run metadata first and then overlay only the live fields that can legitimately change during execution, such as lifecycle status, outcome, last error, and current completed nodes.
 In run-detail and run-list payloads, the run-level `model` field refers to the launch/default model selected for the run. It does not imply that every LLM-backed node executed with that model.
 Implementations must not report an active lifecycle status for an orphaned run after restart; stale persisted `running` or `cancel_requested` records must be reconciled to terminal truth during startup/runtime initialization.
+`GET /runs` is the authoritative snapshot-inspection endpoint for run overview lists.
+`GET /runs/events` is the live run-overview channel.
+It must:
+- optionally scope by `project_path`
+- emit a `snapshot` event first with payload `{ "type": "snapshot", "runs": [RunRecord] }`
+- then emit `run_upsert` events with payload `{ "type": "run_upsert", "run": RunRecord }`
+- publish `run_upsert` whenever run-list truth changes because of run start, runtime status transition, metadata update, terminal completion, or orphaned-run reconciliation
+- keep no durable list-history contract beyond the initial current snapshot on connect
 `GET /pipelines/{id}/events` is a history-backed event channel for run inspection.
 It must:
 - replay durable per-run event history before yielding live updates
@@ -1836,6 +1846,9 @@ FOR EACH event IN pipeline.events():
 
 For HTTP/SSE inspection, implementations should persist emitted run events durably per run so selected-run history survives server restarts and late inspection.
 Forwarded child-flow events from `stack.manager_loop` are part of the parent run's event history rather than a separate child-only API surface.
+Run-overview payloads exposed through `/runs/events` should include:
+- `snapshot` events with a `runs` array of full `RunRecord` payloads
+- `run_upsert` events with one full `RunRecord` in `run`
 Event payloads exposed through `/pipelines/{id}/events` should include:
 - `run_id`
 - `sequence`

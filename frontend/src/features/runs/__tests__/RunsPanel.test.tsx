@@ -29,7 +29,6 @@ const resetRunsState = () => {
     selectedRunStatusSync: 'idle',
     selectedRunStatusError: null,
     selectedRunStatusFetchedAtMs: null,
-    runRecordOverrides: {},
     executionFlow: null,
     executionContinuation: null,
     workingDir: '',
@@ -41,12 +40,10 @@ const resetRunsState = () => {
       scopeMode: 'active',
       selectedRunIdByScopeKey: {},
       status: 'idle',
-      isRefreshing: false,
       error: null,
       runs: [],
-      lastFetchedAtMs: null,
-      nowMs: Date.now(),
-      metadataStaleAfterMs: 15000,
+      streamStatus: 'idle',
+      streamError: null,
     },
     runDetailSessionsByRunId: {},
   })
@@ -88,6 +85,67 @@ const makeRun = (overrides: Partial<Record<string, unknown>> = {}) => ({
   last_error: (overrides.last_error as string | null | undefined) ?? null,
   token_usage: (overrides.token_usage as number | null | undefined) ?? 1234,
 })
+
+const installControllableEventSource = () => {
+  const eventSources: ControllableEventSource[] = []
+
+  class ControllableEventSource {
+    static readonly CONNECTING = 0
+    static readonly OPEN = 1
+    static readonly CLOSED = 2
+    readonly url: string
+    readyState = ControllableEventSource.OPEN
+    onopen: ((event: Event) => void) | null = null
+    onmessage: ((event: MessageEvent<string>) => void) | null = null
+    onerror: ((event: Event) => void) | null = null
+
+    constructor(url: string | URL) {
+      this.url = String(url)
+      eventSources.push(this)
+    }
+
+    emit(payload: unknown) {
+      if (this.readyState === ControllableEventSource.CLOSED) {
+        return
+      }
+      this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }))
+    }
+
+    open() {
+      if (this.readyState === ControllableEventSource.CLOSED) {
+        return
+      }
+      this.onopen?.(new Event('open'))
+    }
+
+    fail() {
+      if (this.readyState === ControllableEventSource.CLOSED) {
+        return
+      }
+      this.onerror?.(new Event('error'))
+    }
+
+    close() {
+      this.readyState = ControllableEventSource.CLOSED
+      this.onopen = null
+      this.onmessage = null
+      this.onerror = null
+    }
+  }
+
+  vi.stubGlobal('EventSource', ControllableEventSource as unknown as typeof EventSource)
+
+  return {
+    eventSources,
+    latestSourceMatching: (pattern: string) => (
+      eventSources.filter((source) => source.url.includes(pattern)).at(-1) ?? null
+    ),
+    sourcesMatching: (pattern: string) => (
+      eventSources.filter((source) => source.url.includes(pattern))
+    ),
+    CLOSED: ControllableEventSource.CLOSED,
+  }
+}
 
 describe('RunsPanel', () => {
   beforeEach(() => {
@@ -163,7 +221,7 @@ describe('RunsPanel', () => {
     })
 
     const user = userEvent.setup()
-    renderRunsPanel()
+    renderRunsWorkspace()
 
     await waitFor(() => {
       expect(screen.getByText('project-one.dot')).toBeVisible()
@@ -189,6 +247,131 @@ describe('RunsPanel', () => {
     expect(screen.getByText('Run history across all projects.')).toBeVisible()
   })
 
+  it('switches between active and all scopes by replacing the scoped runs stream', async () => {
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({
+          runs: [
+            makeRun({
+              run_id: 'run-project-one',
+              flow_name: 'project-one.dot',
+              project_path: '/tmp/project-one',
+            }),
+          ],
+        })
+      }
+      if (url.endsWith('/attractor/runs')) {
+        return jsonResponse({
+          runs: [
+            makeRun({
+              run_id: 'run-project-one',
+              flow_name: 'project-one.dot',
+              project_path: '/tmp/project-one',
+            }),
+            makeRun({
+              run_id: 'run-project-two',
+              flow_name: 'project-two.dot',
+              project_path: '/tmp/project-two',
+            }),
+          ],
+        })
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    const { CLOSED, latestSourceMatching } = installControllableEventSource()
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+    })
+
+    const user = userEvent.setup()
+    renderRunsWorkspace()
+
+    await waitFor(() => {
+      expect(screen.getByText('project-one.dot')).toBeVisible()
+      expect(latestSourceMatching('/attractor/runs/events')).toBeTruthy()
+    })
+
+    const activeScopeSource = latestSourceMatching('/attractor/runs/events')
+    expect(activeScopeSource?.url).toContain('/attractor/runs/events?project_path=%2Ftmp%2Fproject-one')
+
+    act(() => {
+      activeScopeSource?.emit({
+        type: 'run_upsert',
+        run: makeRun({
+          run_id: 'run-streamed-active',
+          flow_name: 'streamed-active.dot',
+          project_path: '/tmp/project-one',
+          status: 'running',
+          outcome: null,
+          ended_at: null,
+          started_at: '2026-03-22T00:06:00Z',
+        }),
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('streamed-active.dot')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('runs-scope-all-projects'))
+
+    await waitFor(() => {
+      expect(screen.getByText('project-two.dot')).toBeVisible()
+    })
+
+    const allProjectsSource = latestSourceMatching('/attractor/runs/events')
+    expect(allProjectsSource).not.toBe(activeScopeSource)
+    expect(activeScopeSource?.readyState).toBe(CLOSED)
+    expect(allProjectsSource?.url).toMatch(/\/attractor\/runs\/events$/)
+    expect(allProjectsSource?.url).not.toContain('project_path=')
+
+    act(() => {
+      activeScopeSource?.emit({
+        type: 'run_upsert',
+        run: makeRun({
+          run_id: 'run-closed-source',
+          flow_name: 'closed-source-update.dot',
+          project_path: '/tmp/project-one',
+        }),
+      })
+      allProjectsSource?.emit({
+        type: 'run_upsert',
+        run: makeRun({
+          run_id: 'run-streamed-all',
+          flow_name: 'streamed-all.dot',
+          project_path: '/tmp/project-three',
+          started_at: '2026-03-22T00:07:00Z',
+        }),
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('streamed-all.dot')).toBeVisible()
+    })
+    expect(screen.queryByText('closed-source-update.dot')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('runs-scope-active-project'))
+
+    await waitFor(() => {
+      expect(screen.getByText('project-one.dot')).toBeVisible()
+      expect(screen.queryByText('project-two.dot')).not.toBeInTheDocument()
+    })
+
+    const restoredActiveScopeSource = latestSourceMatching('/attractor/runs/events')
+    expect(restoredActiveScopeSource).not.toBe(allProjectsSource)
+    expect(allProjectsSource?.readyState).toBe(CLOSED)
+    expect(restoredActiveScopeSource?.url).toContain('/attractor/runs/events?project_path=%2Ftmp%2Fproject-one')
+  })
+
   it('shows an explicit no-project notice before fetching all-project runs', async () => {
     const fetchMock = vi.mocked(global.fetch)
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -209,7 +392,7 @@ describe('RunsPanel', () => {
     })
 
     const user = userEvent.setup()
-    renderRunsPanel()
+    renderRunsWorkspace()
 
     expect(screen.getByText('Choose an active project or switch to all projects to view run history.')).toBeVisible()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -312,7 +495,7 @@ describe('RunsPanel', () => {
     })
 
     const user = userEvent.setup()
-    renderRunsPanel()
+    renderRunsWorkspace()
 
     await waitFor(() => {
       expect(screen.getByTestId('run-list-panel')).toBeVisible()
@@ -476,7 +659,7 @@ describe('RunsPanel', () => {
     })
 
     const user = userEvent.setup()
-    renderRunsPanel()
+    renderRunsWorkspace()
 
     await waitFor(() => {
       expect(screen.getByText('selected.dot')).toBeVisible()
@@ -571,7 +754,7 @@ describe('RunsPanel', () => {
     })
 
     const user = userEvent.setup()
-    renderRunsPanel()
+    renderRunsWorkspace()
 
     await waitFor(() => {
       expect(screen.getByText('selected.dot')).toBeVisible()
@@ -675,7 +858,7 @@ describe('RunsPanel', () => {
     })
 
     const user = userEvent.setup()
-    renderRunsPanel()
+    renderRunsWorkspace()
 
     await waitFor(() => {
       expect(screen.getByText('selected.dot')).toBeVisible()
@@ -791,6 +974,35 @@ describe('RunsPanel', () => {
       throw new Error(`Unhandled request: ${method} ${url}`)
     })
 
+    class ConvergingEventSource {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 2
+      readonly url: string
+      readyState = ConvergingEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent<string>) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string | URL) {
+        this.url = String(url)
+        eventSources.push(this)
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }))
+      }
+
+      close() {
+        this.readyState = ConvergingEventSource.CLOSED
+      }
+    }
+    const eventSources: ConvergingEventSource[] = []
+    const runsListSource = () => (
+      eventSources.find((source) => source.url.includes('/attractor/runs/events')) ?? null
+    )
+    vi.stubGlobal('EventSource', ConvergingEventSource as unknown as typeof EventSource)
+
     act(() => {
       useStore.getState().registerProject('/tmp/project-one')
       useStore.getState().setActiveProjectPath('/tmp/project-one')
@@ -811,10 +1023,25 @@ describe('RunsPanel', () => {
 
     expect(screen.getByTestId('run-activity-status')).toHaveTextContent('Completed')
     expect(screen.getByTestId('run-activity-headline')).toHaveTextContent('Completed successfully')
-    expect(screen.getByTestId('run-history-row')).toHaveTextContent('Completed')
+
+    act(() => {
+      runsListSource()?.emit({
+        type: 'run_upsert',
+        run: {
+          ...staleRun,
+          status: 'completed',
+          outcome: 'success',
+          ended_at: '2026-03-22T00:05:00Z',
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-history-row')).toHaveTextContent('Completed')
+    })
   })
 
-  it('does not open a third explainability stream for the activity card', async () => {
+  it('opens one runs-list stream and one selected-run stream while a run is selected', async () => {
     const selectedRun = makeRun({
       run_id: 'run-stream-count',
       flow_name: 'selected.dot',
@@ -954,7 +1181,382 @@ describe('RunsPanel', () => {
       expect(screen.getByTestId('run-activity-panel')).toBeVisible()
     })
 
-    expect(openedUrls).toHaveLength(2)
+    expect(openedUrls.filter((url) => url.includes('/attractor/runs/events'))).toHaveLength(1)
+    expect(openedUrls.filter((url) => url.includes('/attractor/pipelines/run-stream-count/events'))).toHaveLength(1)
+  })
+
+  it('keeps selected-run detail fetches scoped to run id changes instead of same-run stream updates', async () => {
+    const selectedRun = makeRun({
+      run_id: 'run-refetch-selected',
+      flow_name: 'selected.dot',
+      status: 'running',
+      outcome: null,
+      ended_at: null,
+      project_path: '/tmp/project-one',
+    })
+    const otherRun = makeRun({
+      run_id: 'run-refetch-other',
+      flow_name: 'other.dot',
+      status: 'running',
+      outcome: null,
+      ended_at: null,
+      project_path: '/tmp/project-one',
+    })
+    const runsById = {
+      [selectedRun.run_id]: selectedRun,
+      [otherRun.run_id]: otherRun,
+    }
+    const currentNodeByRunId = {
+      [selectedRun.run_id]: 'validate',
+      [otherRun.run_id]: 'review',
+    }
+    const detailResources = ['checkpoint', 'context', 'artifacts', 'questions'] as const
+
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({ runs: [selectedRun, otherRun] })
+      }
+      const pipelineStatusMatch = url.match(/\/attractor\/pipelines\/([^/?#]+)$/)
+      const pipelineStatusRunId = pipelineStatusMatch?.[1] ? decodeURIComponent(pipelineStatusMatch[1]) : null
+      if (pipelineStatusRunId && pipelineStatusRunId in runsById) {
+        const run = runsById[pipelineStatusRunId as keyof typeof runsById]
+        const currentNode = currentNodeByRunId[pipelineStatusRunId as keyof typeof currentNodeByRunId]
+        return jsonResponse({
+          pipeline_id: run.run_id,
+          run_id: run.run_id,
+          flow_name: run.flow_name,
+          status: run.status,
+          outcome: run.outcome,
+          outcome_reason_code: null,
+          outcome_reason_message: null,
+          working_directory: run.working_directory,
+          project_path: run.project_path,
+          git_branch: run.git_branch,
+          git_commit: run.git_commit,
+          spec_id: null,
+          plan_id: null,
+          model: run.model,
+          started_at: run.started_at,
+          ended_at: run.ended_at,
+          last_error: run.last_error ?? '',
+          token_usage: run.token_usage,
+          current_node: currentNode,
+          completed_nodes: ['prepare'],
+          progress: {
+            current_node: currentNode,
+            completed_nodes: ['prepare'],
+          },
+          continued_from_run_id: null,
+          continued_from_node: null,
+          continued_from_flow_mode: null,
+          continued_from_flow_name: null,
+        })
+      }
+      const pipelineMatch = url.match(/\/attractor\/pipelines\/([^/]+)\/([^/?#]+)/)
+      const runId = pipelineMatch?.[1] ? decodeURIComponent(pipelineMatch[1]) : null
+      const resource = pipelineMatch?.[2] ?? null
+      if (runId && runId in runsById) {
+        if (resource === 'checkpoint') {
+          return jsonResponse({
+            pipeline_id: runId,
+            checkpoint: {
+              completed_nodes: ['prepare'],
+              current_node: currentNodeByRunId[runId as keyof typeof currentNodeByRunId],
+            },
+          })
+        }
+        if (resource === 'context') {
+          return jsonResponse({
+            pipeline_id: runId,
+            context: { active_item: `REQ-${runId}` },
+          })
+        }
+        if (resource === 'artifacts') {
+          return jsonResponse({
+            pipeline_id: runId,
+            artifacts: [],
+          })
+        }
+        if (resource === 'graph-preview') {
+          return jsonResponse({
+            status: 'ok',
+            graph: {
+              graph_attrs: {},
+              nodes: [
+                { id: 'start', label: 'Start', shape: 'Mdiamond' },
+                { id: 'work', label: 'Work', shape: 'box' },
+                { id: 'done', label: 'Done', shape: 'Msquare' },
+              ],
+              edges: [
+                { from: 'start', to: 'work', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+                { from: 'work', to: 'done', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+              ],
+            },
+            diagnostics: [],
+            errors: [],
+          })
+        }
+        if (resource === 'questions') {
+          return jsonResponse({
+            pipeline_id: runId,
+            questions: [],
+          })
+        }
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    const { latestSourceMatching, sourcesMatching } = installControllableEventSource()
+    const countDetailFetches = (runId: string, resource: typeof detailResources[number]) => (
+      fetchMock.mock.calls.filter(([request, init]) => {
+        const method = init?.method ?? 'GET'
+        return method === 'GET'
+          && resolveRequestUrl(request as RequestInfo | URL).includes(`/attractor/pipelines/${encodeURIComponent(runId)}/${resource}`)
+      }).length
+    )
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+    })
+
+    const user = userEvent.setup()
+    renderRunsWorkspace()
+
+    await waitFor(() => {
+      expect(screen.getByText('selected.dot')).toBeVisible()
+    })
+
+    const selectedRunCard = screen.getByText('selected.dot').closest('[data-testid="run-history-row"]')
+    expect(selectedRunCard).toBeTruthy()
+    await user.click(selectedRunCard!)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-activity-panel')).toBeVisible()
+      expect(sourcesMatching(`/attractor/pipelines/${selectedRun.run_id}/events`)).toHaveLength(1)
+    })
+
+    detailResources.forEach((resource) => {
+      expect(countDetailFetches(selectedRun.run_id, resource)).toBe(1)
+    })
+
+    const selectedRunSource = latestSourceMatching(`/attractor/pipelines/${selectedRun.run_id}/events`)
+    expect(selectedRunSource).toBeTruthy()
+
+    act(() => {
+      selectedRunSource?.open()
+      selectedRunSource?.emit({
+        type: 'StageStarted',
+        sequence: 1,
+        emitted_at: '2026-03-22T00:02:00Z',
+        node_id: 'work',
+        index: 2,
+      })
+      selectedRunSource?.emit({
+        type: 'state',
+        node: 'done',
+        status: 'running',
+      })
+    })
+
+    await waitFor(() => {
+      expect(useStore.getState().selectedRunRecord?.current_node).toBe('done')
+    })
+
+    detailResources.forEach((resource) => {
+      expect(countDetailFetches(selectedRun.run_id, resource)).toBe(1)
+    })
+
+    const otherRunCard = screen.getByText('other.dot').closest('[data-testid="run-history-row"]')
+    expect(otherRunCard).toBeTruthy()
+    await user.click(otherRunCard!)
+
+    await waitFor(() => {
+      expect(sourcesMatching(`/attractor/pipelines/${otherRun.run_id}/events`)).toHaveLength(1)
+      expect(useStore.getState().selectedRunId).toBe(otherRun.run_id)
+    })
+
+    detailResources.forEach((resource) => {
+      expect(countDetailFetches(otherRun.run_id, resource)).toBe(1)
+    })
+  })
+
+  it('reconnects the runs list and selected run transports from the global reconnect control', async () => {
+    const selectedRun = makeRun({
+      run_id: 'run-reconnect',
+      flow_name: 'selected.dot',
+      status: 'running',
+      outcome: null,
+      ended_at: null,
+      project_path: '/tmp/project-one',
+    })
+    const pipelineStatusUrl = '/attractor/pipelines/run-reconnect'
+    const pipelineEventsUrl = '/attractor/pipelines/run-reconnect/events'
+    const scopedRunsUrl = '/attractor/runs?project_path=%2Ftmp%2Fproject-one'
+    const scopedRunsEventsUrl = '/attractor/runs/events?project_path=%2Ftmp%2Fproject-one'
+
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes(scopedRunsUrl)) {
+        return jsonResponse({ runs: [selectedRun] })
+      }
+      if (url.includes('/attractor/pipelines/run-reconnect/checkpoint')) {
+        return jsonResponse({
+          pipeline_id: 'run-reconnect',
+          checkpoint: {
+            completed_nodes: ['prepare'],
+            current_node: 'validate',
+          },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-reconnect/context')) {
+        return jsonResponse({
+          pipeline_id: 'run-reconnect',
+          context: { active_item: 'REQ-001' },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-reconnect/artifacts')) {
+        return jsonResponse({
+          pipeline_id: 'run-reconnect',
+          artifacts: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-reconnect/graph-preview')) {
+        return jsonResponse({
+          status: 'ok',
+          graph: {
+            graph_attrs: {},
+            nodes: [
+              { id: 'start', label: 'Start', shape: 'Mdiamond' },
+              { id: 'validate', label: 'Validate', shape: 'box' },
+              { id: 'done', label: 'Done', shape: 'Msquare' },
+            ],
+            edges: [
+              { from: 'start', to: 'validate', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+              { from: 'validate', to: 'done', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+            ],
+          },
+          diagnostics: [],
+          errors: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-reconnect/questions')) {
+        return jsonResponse({
+          pipeline_id: 'run-reconnect',
+          questions: [],
+        })
+      }
+      if (url.endsWith(pipelineStatusUrl)) {
+        return jsonResponse({
+          pipeline_id: 'run-reconnect',
+          run_id: 'run-reconnect',
+          status: 'running',
+          outcome: null,
+          outcome_reason_code: null,
+          outcome_reason_message: null,
+          flow_name: 'selected.dot',
+          working_directory: '/tmp/project-one/workdir',
+          project_path: '/tmp/project-one',
+          git_branch: 'main',
+          git_commit: 'abcdef0',
+          spec_id: null,
+          plan_id: null,
+          model: 'gpt-5.4',
+          started_at: '2026-03-22T00:00:00Z',
+          ended_at: null,
+          last_error: '',
+          token_usage: 1234,
+          current_node: 'validate',
+          completed_nodes: ['prepare'],
+          progress: {
+            current_node: 'validate',
+            completed_nodes: ['prepare'],
+          },
+          continued_from_run_id: null,
+          continued_from_node: null,
+          continued_from_flow_mode: null,
+          continued_from_flow_name: null,
+        })
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    const { latestSourceMatching, sourcesMatching } = installControllableEventSource()
+
+    const countGetRequests = (predicate: (url: string) => boolean) => (
+      fetchMock.mock.calls.filter(([request, init]) => {
+        const method = init?.method ?? 'GET'
+        return method === 'GET' && predicate(resolveRequestUrl(request as RequestInfo | URL))
+      }).length
+    )
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+    })
+
+    const user = userEvent.setup()
+    renderRunsWorkspace()
+
+    await waitFor(() => {
+      expect(screen.getByText('selected.dot')).toBeVisible()
+      expect(sourcesMatching('/attractor/runs/events')).toHaveLength(1)
+    })
+
+    await user.click(screen.getByTestId('run-history-row'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-activity-panel')).toBeVisible()
+      expect(sourcesMatching(pipelineEventsUrl)).toHaveLength(1)
+    })
+
+    const initialRunsFetchCount = countGetRequests((url) => url.includes(scopedRunsUrl))
+    const initialPipelineFetchCount = countGetRequests((url) => url.endsWith(pipelineStatusUrl))
+    const initialRunsSource = latestSourceMatching(scopedRunsEventsUrl)
+    const initialPipelineSource = latestSourceMatching(pipelineEventsUrl)
+
+    act(() => {
+      initialRunsSource?.fail()
+      initialPipelineSource?.fail()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runs-transport-reconnect-banner')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('runs-transport-reconnect-button'))
+
+    await waitFor(() => {
+      expect(countGetRequests((url) => url.includes(scopedRunsUrl))).toBe(initialRunsFetchCount + 1)
+      expect(countGetRequests((url) => url.endsWith(pipelineStatusUrl))).toBe(initialPipelineFetchCount + 1)
+      expect(sourcesMatching(scopedRunsEventsUrl)).toHaveLength(2)
+      expect(sourcesMatching(pipelineEventsUrl)).toHaveLength(2)
+    })
+
+    const reconnectedRunsSource = latestSourceMatching(scopedRunsEventsUrl)
+    const reconnectedPipelineSource = latestSourceMatching(pipelineEventsUrl)
+    expect(reconnectedRunsSource).not.toBe(initialRunsSource)
+    expect(reconnectedPipelineSource).not.toBe(initialPipelineSource)
+
+    act(() => {
+      reconnectedRunsSource?.open()
+      reconnectedPipelineSource?.open()
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('runs-transport-reconnect-banner')).not.toBeInTheDocument()
+    })
   })
 
   it('replays historical activity for selected completed runs, restores replayed sequence gaps, shows child events inline, and deduplicates reconnects and reselects', async () => {
@@ -988,6 +1590,41 @@ describe('RunsPanel', () => {
       }
       if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
         return jsonResponse({ runs: [selectedRun, otherRun] })
+      }
+      const pipelineStatusMatch = url.match(/\/attractor\/pipelines\/([^/?#]+)$/)
+      const pipelineStatusRunId = pipelineStatusMatch?.[1] ? decodeURIComponent(pipelineStatusMatch[1]) : null
+      if (pipelineStatusRunId && pipelineStatusRunId in runsById) {
+        const run = runsById[pipelineStatusRunId as keyof typeof runsById]
+        return jsonResponse({
+          pipeline_id: run.run_id,
+          run_id: run.run_id,
+          flow_name: run.flow_name,
+          status: run.status,
+          outcome: run.outcome,
+          outcome_reason_code: null,
+          outcome_reason_message: null,
+          working_directory: run.working_directory,
+          project_path: run.project_path,
+          git_branch: run.git_branch,
+          git_commit: run.git_commit,
+          spec_id: null,
+          plan_id: null,
+          model: run.model,
+          started_at: run.started_at,
+          ended_at: run.ended_at,
+          last_error: run.last_error ?? '',
+          token_usage: run.token_usage,
+          current_node: 'done',
+          completed_nodes: ['prepare', 'done'],
+          progress: {
+            current_node: 'done',
+            completed_nodes: ['prepare', 'done'],
+          },
+          continued_from_run_id: null,
+          continued_from_node: null,
+          continued_from_flow_mode: null,
+          continued_from_flow_name: null,
+        })
       }
       const pipelineMatch = url.match(/\/attractor\/pipelines\/([^/]+)\/([^/?#]+)/)
       const runId = pipelineMatch?.[1] ? decodeURIComponent(pipelineMatch[1]) : null
@@ -1069,8 +1706,11 @@ describe('RunsPanel', () => {
       }
     }
     const eventSources: ReplayEventSource[] = []
+    const runEventSources = () => (
+      eventSources.filter((source) => source.url.includes('/attractor/pipelines/'))
+    )
     const latestEventSourceForRun = (runId: string) => (
-      eventSources
+      runEventSources()
         .filter((source) => source.url.includes(`/attractor/pipelines/${encodeURIComponent(runId)}/events`))
         .at(-1) ?? null
     )
@@ -1082,7 +1722,7 @@ describe('RunsPanel', () => {
     })
 
     const user = userEvent.setup()
-    renderRunsPanel()
+    renderRunsWorkspace()
 
     await waitFor(() => {
       expect(screen.getByText('selected.dot')).toBeVisible()
@@ -1094,7 +1734,7 @@ describe('RunsPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('run-activity-panel')).toBeVisible()
-      expect(eventSources).toHaveLength(1)
+      expect(runEventSources()).toHaveLength(1)
     })
 
     const initialReplaySource = latestEventSourceForRun(selectedRun.run_id)
@@ -1151,7 +1791,7 @@ describe('RunsPanel', () => {
     await user.click(otherRunCard!)
 
     await waitFor(() => {
-      expect(eventSources).toHaveLength(2)
+      expect(runEventSources()).toHaveLength(2)
       expect(initialReplaySource?.readyState).toBe(ReplayEventSource.CLOSED)
     })
 
@@ -1160,7 +1800,7 @@ describe('RunsPanel', () => {
     await user.click(reselectedRunCard!)
 
     await waitFor(() => {
-      expect(eventSources).toHaveLength(3)
+      expect(runEventSources()).toHaveLength(3)
       expect(screen.getByTestId('run-activity-panel')).toBeVisible()
     })
 

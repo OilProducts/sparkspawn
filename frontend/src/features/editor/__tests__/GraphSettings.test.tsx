@@ -25,7 +25,6 @@ const resetGraphSettingsState = () => {
     selectedRunStatusSync: 'idle',
     selectedRunStatusError: null,
     selectedRunStatusFetchedAtMs: null,
-    runRecordOverrides: {},
     workingDir: DEFAULT_WORKING_DIRECTORY,
     projectRegistry: {
       '/tmp/project-graph-settings': {

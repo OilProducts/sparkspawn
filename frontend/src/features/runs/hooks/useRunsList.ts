@@ -1,15 +1,41 @@
-import { useCallback, useEffect, useMemo, useRef, type SetStateAction } from 'react'
-import { fetchRunsListValidated } from '@/lib/attractorClient'
-import {
-    computeRunMetadataFreshness,
-} from '@/lib/runMetadataFreshness'
+import { useCallback, useEffect, useMemo, type SetStateAction } from 'react'
+
+import { fetchRunsListValidated, runsEventsUrl } from '@/lib/attractorClient'
 import { useStore } from '@/store'
+
+import type { RunRecord } from '../model/shared'
+import { useRunsTransportReconnectSignal } from '../services/runsTransportReconnect'
 
 const logUnexpectedRunError = (error: unknown) => {
     if (error instanceof Error && error.name === 'ApiHttpError') {
         return
     }
     console.error(error)
+}
+
+const sortRuns = (runs: RunRecord[]) => {
+    return [...runs].sort((left, right) => {
+        const leftKey = left.started_at || left.ended_at || ''
+        const rightKey = right.started_at || right.ended_at || ''
+        return rightKey.localeCompare(leftKey)
+    })
+}
+
+const mergeRunUpsert = (currentRuns: RunRecord[], nextRun: RunRecord) => {
+    const existingIndex = currentRuns.findIndex((run) => run.run_id === nextRun.run_id)
+    if (existingIndex === -1) {
+        return sortRuns([...currentRuns, nextRun])
+    }
+    const nextRuns = [...currentRuns]
+    nextRuns[existingIndex] = nextRun
+    return sortRuns(nextRuns)
+}
+
+const asRunRecord = (value: unknown): RunRecord | null => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null
+    }
+    return value as RunRecord
 }
 
 export function useRunsList({
@@ -23,11 +49,10 @@ export function useRunsList({
     selectedRunId: string | null
     manageSync?: boolean
 }) {
-    const runRecordOverrides = useStore((state) => state.runRecordOverrides)
     const viewMode = useStore((state) => state.viewMode)
     const runsListSession = useStore((state) => state.runsListSession)
     const updateRunsListSession = useStore((state) => state.updateRunsListSession)
-    const isFetchingRef = useRef(false)
+    const reconnectSignal = useRunsTransportReconnectSignal(manageSync)
     const usesActiveProjectScope = scopeMode === 'active'
     const hasRunsSession =
         viewMode === 'runs'
@@ -44,47 +69,29 @@ export function useRunsList({
             updateRunsListSession({
                 runs: [],
                 error: null,
-                isRefreshing: false,
                 status: 'ready',
+                streamStatus: 'idle',
+                streamError: null,
             })
             return
         }
-        if (isFetchingRef.current) {
-            return
-        }
-        isFetchingRef.current = true
-        const currentSession = useStore.getState().runsListSession
-        const useBackgroundRefresh =
-            currentSession.runs.length > 0
-            && (currentSession.status === 'ready' || currentSession.status === 'error')
-        updateRunsListSession(useBackgroundRefresh
-            ? {
-                isRefreshing: true,
-                error: null,
-            }
-            : {
-                status: 'loading',
-                isRefreshing: false,
-                error: null,
-            })
+        updateRunsListSession({
+            status: 'loading',
+            error: null,
+        })
         try {
             const data = await fetchRunsListValidated(usesActiveProjectScope ? activeProjectPath : null)
             updateRunsListSession({
                 runs: data.runs,
-                lastFetchedAtMs: Date.now(),
                 status: 'ready',
-                isRefreshing: false,
                 error: null,
             })
         } catch (err) {
             logUnexpectedRunError(err)
             updateRunsListSession({
                 error: 'Unable to load runs',
-                isRefreshing: false,
                 status: 'error',
             })
-        } finally {
-            isFetchingRef.current = false
         }
     }, [activeProjectPath, hasRunsSession, updateRunsListSession, usesActiveProjectScope])
 
@@ -92,70 +99,146 @@ export function useRunsList({
         if (!manageSync || !hasRunsSession) {
             return
         }
-        void fetchRuns()
-    }, [fetchRuns, hasRunsSession, manageSync])
 
-    useEffect(() => {
-        if (!manageSync || !hasRunsSession) {
+        if (usesActiveProjectScope && !activeProjectPath) {
+            updateRunsListSession({
+                runs: [],
+                error: null,
+                status: 'ready',
+                streamStatus: 'idle',
+                streamError: null,
+            })
             return
         }
-        const refreshInterval = window.setInterval(() => {
-            void fetchRuns()
-        }, 15_000)
-        return () => window.clearInterval(refreshInterval)
-    }, [fetchRuns, hasRunsSession, manageSync])
 
-    useEffect(() => {
-        if (!manageSync || !hasRunsSession) {
-            return
-        }
-        const interval = window.setInterval(() => {
-            updateRunsListSession({ nowMs: Date.now() })
-        }, 1000)
-        return () => window.clearInterval(interval)
-    }, [hasRunsSession, manageSync, updateRunsListSession])
+        let closed = false
+        let eventSource: EventSource | null = null
 
-    const scopedRuns = useMemo(() => {
-        if (Object.keys(runRecordOverrides).length === 0) {
-            return runsListSession.runs
+        const closeStream = () => {
+            eventSource?.close()
+            eventSource = null
         }
-        return runsListSession.runs.map((run) => {
-            const override = runRecordOverrides[run.run_id]
-            return override ? { ...run, ...override } : run
-        })
-    }, [runRecordOverrides, runsListSession.runs])
+
+        const startScopedSync = async () => {
+            updateRunsListSession({
+                status: 'loading',
+                error: null,
+                streamStatus: 'loading',
+                streamError: null,
+            })
+            try {
+                const data = await fetchRunsListValidated(usesActiveProjectScope ? activeProjectPath : null)
+                if (closed) {
+                    return
+                }
+                updateRunsListSession({
+                    runs: data.runs,
+                    status: 'ready',
+                    error: null,
+                })
+
+                const nextSource = new EventSource(runsEventsUrl(usesActiveProjectScope ? activeProjectPath : null))
+                nextSource.onopen = () => {
+                    updateRunsListSession({
+                        streamStatus: 'ready',
+                        streamError: null,
+                    })
+                }
+                nextSource.onmessage = (event) => {
+                    try {
+                        const payload = JSON.parse(event.data) as {
+                            type?: string
+                            runs?: unknown[]
+                            run?: unknown
+                        }
+                        if (payload.type === 'snapshot' && Array.isArray(payload.runs)) {
+                            const nextRuns = payload.runs
+                                .map((run) => asRunRecord(run))
+                                .filter((run): run is RunRecord => run !== null)
+                            updateRunsListSession({
+                                runs: sortRuns(nextRuns),
+                                status: 'ready',
+                                error: null,
+                                streamError: null,
+                            })
+                            return
+                        }
+                        if (payload.type === 'run_upsert') {
+                            const nextRun = asRunRecord(payload.run)
+                            if (!nextRun) {
+                                return
+                            }
+                            updateRunsListSession({
+                                runs: mergeRunUpsert(useStore.getState().runsListSession.runs, nextRun),
+                                status: 'ready',
+                                error: null,
+                                streamError: null,
+                            })
+                        }
+                    } catch {
+                        // Ignore malformed stream events.
+                    }
+                }
+                nextSource.onerror = () => {
+                    if (closed) {
+                        return
+                    }
+                    closeStream()
+                    updateRunsListSession({
+                        streamStatus: 'degraded',
+                        streamError: 'Run history live updates are unavailable. Reconnect to restore them.',
+                    })
+                }
+                eventSource = nextSource
+            } catch (err) {
+                if (closed) {
+                    return
+                }
+                logUnexpectedRunError(err)
+                updateRunsListSession({
+                    error: 'Unable to load runs',
+                    status: 'error',
+                    streamStatus: 'degraded',
+                    streamError: 'Run history transport is unavailable. Reconnect to retry.',
+                })
+            }
+        }
+
+        void startScopedSync()
+
+        return () => {
+            closed = true
+            closeStream()
+        }
+    }, [
+        activeProjectPath,
+        hasRunsSession,
+        manageSync,
+        reconnectSignal,
+        updateRunsListSession,
+        usesActiveProjectScope,
+    ])
 
     const summary = useMemo(() => {
-        const total = scopedRuns.length
-        const running = scopedRuns.filter(
+        const total = runsListSession.runs.length
+        const running = runsListSession.runs.filter(
             (run) => run.status === 'running' || run.status === 'cancel_requested' || run.status === 'abort_requested',
         ).length
         return { total, running }
-    }, [scopedRuns])
+    }, [runsListSession.runs])
 
     const selectedRunSummary = useMemo(() => {
         if (!selectedRunId) {
             return null
         }
-        return scopedRuns.find((run) => run.run_id === selectedRunId) || null
-    }, [scopedRuns, selectedRunId])
-
-    const metadataFreshness = computeRunMetadataFreshness({
-        isLoading: runsListSession.status === 'loading' || runsListSession.isRefreshing,
-        lastFetchedAtMs: runsListSession.lastFetchedAtMs,
-        nowMs: runsListSession.nowMs,
-        staleAfterMs: runsListSession.metadataStaleAfterMs,
-    })
+        return runsListSession.runs.find((run) => run.run_id === selectedRunId) || null
+    }, [runsListSession.runs, selectedRunId])
 
     return {
         error: runsListSession.error,
         fetchRuns,
         isLoading: runsListSession.status === 'loading',
-        isRefreshing: runsListSession.isRefreshing,
-        lastFetchedAtMs: runsListSession.lastFetchedAtMs,
-        metadataFreshness,
-        now: runsListSession.nowMs,
-        scopedRuns,
+        scopedRuns: runsListSession.runs,
         selectedRunSummary,
         setRuns: (next: SetStateAction<typeof runsListSession.runs>) => {
             updateRunsListSession({
@@ -163,6 +246,8 @@ export function useRunsList({
             })
         },
         status: runsListSession.status,
+        streamError: runsListSession.streamError,
+        streamStatus: runsListSession.streamStatus,
         summary,
         usesActiveProjectScope,
     }

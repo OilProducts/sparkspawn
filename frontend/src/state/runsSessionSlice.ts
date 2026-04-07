@@ -1,5 +1,4 @@
 import { type StateCreator } from 'zustand'
-import { RUN_METADATA_STALE_AFTER_MS } from '@/lib/runMetadataFreshness'
 import type { AppState } from './store-types'
 import type {
     RunDetailSessionState,
@@ -7,24 +6,14 @@ import type {
     RunsSessionSlice,
 } from './viewSessionTypes'
 
-const resolveMetadataStaleAfterMs = () => {
-    const override = (globalThis as typeof globalThis & { __RUNS_METADATA_STALE_AFTER_MS__?: unknown })
-        .__RUNS_METADATA_STALE_AFTER_MS__
-    return typeof override === 'number' && Number.isFinite(override) && override > 0
-        ? override
-        : RUN_METADATA_STALE_AFTER_MS
-}
-
 const DEFAULT_RUNS_LIST_SESSION_STATE: RunsListSessionState = {
     scopeMode: 'active',
     selectedRunIdByScopeKey: {},
     status: 'idle',
-    isRefreshing: false,
     error: null,
     runs: [],
-    lastFetchedAtMs: null,
-    nowMs: Date.now(),
-    metadataStaleAfterMs: resolveMetadataStaleAfterMs(),
+    streamStatus: 'idle',
+    streamError: null,
 }
 
 const DEFAULT_RUN_DETAIL_SESSION_STATE: RunDetailSessionState = {

@@ -21,6 +21,7 @@ export function useRunDetails({
     selectedRunSummary,
     manageSync = true,
 }: UseRunDetailsArgs) {
+    const selectedRunId = selectedRunSummary?.run_id ?? null
     const {
         artifactData,
         artifactDownloadHref,
@@ -51,7 +52,7 @@ export function useRunDetails({
         setContextSearchQuery,
         viewArtifact,
     } = useRunDetailResources({
-        selectedRunSummary,
+        selectedRunId,
         manageSync,
     })
     const {
@@ -64,14 +65,14 @@ export function useRunDetails({
         return filterContextRows(contextRows, contextSearchQuery)
     }, [contextRows, contextSearchQuery])
     const contextExportPayload = useMemo(() => {
-        if (!selectedRunSummary) {
+        if (!selectedRunId) {
             return ''
         }
         return buildContextExportPayload(
-            selectedRunSummary.run_id,
+            selectedRunId,
             filteredContextRows.map((row) => ({ key: row.key, value: row.rawValue })),
         )
-    }, [filteredContextRows, selectedRunSummary])
+    }, [filteredContextRows, selectedRunId])
     const contextExportHref = useMemo(() => {
         if (!contextExportPayload) {
             return ''

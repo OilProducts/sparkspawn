@@ -32,7 +32,6 @@ type ProjectScopeTransitionState = Pick<
     | 'selectedRunStatusSync'
     | 'selectedRunStatusError'
     | 'selectedRunStatusFetchedAtMs'
-    | 'runRecordOverrides'
     | 'runtimeStatus'
     | 'runtimeOutcome'
     | 'runtimeOutcomeReasonCode'
@@ -82,7 +81,7 @@ const runBelongsToProject = (
 )
 
 const pruneRunsSessionsForProject = (
-    state: Pick<AppState, 'runsListSession' | 'runDetailSessionsByRunId' | 'runRecordOverrides'>,
+    state: Pick<AppState, 'runsListSession' | 'runDetailSessionsByRunId'>,
     projectPath: string,
 ) => {
     const removedScopeKey = buildRunsScopeKey('active', projectPath)
@@ -100,12 +99,6 @@ const pruneRunsSessionsForProject = (
         }
     })
 
-    Object.entries(state.runRecordOverrides).forEach(([runId, patch]) => {
-        if (runBelongsToProject(patch, projectPath)) {
-            removedRunIds.add(runId)
-        }
-    })
-
     return {
         runsListSession: {
             ...state.runsListSession,
@@ -117,9 +110,6 @@ const pruneRunsSessionsForProject = (
         },
         runDetailSessionsByRunId: Object.fromEntries(
             Object.entries(state.runDetailSessionsByRunId).filter(([runId]) => !removedRunIds.has(runId)),
-        ),
-        runRecordOverrides: Object.fromEntries(
-            Object.entries(state.runRecordOverrides).filter(([runId]) => !removedRunIds.has(runId)),
         ),
     }
 }
@@ -153,7 +143,6 @@ const preserveRunInspectionState = (state: AppState) => ({
     selectedRunStatusSync: state.selectedRunStatusSync,
     selectedRunStatusError: state.selectedRunStatusError,
     selectedRunStatusFetchedAtMs: state.selectedRunStatusFetchedAtMs,
-    runRecordOverrides: state.runRecordOverrides,
     runtimeStatus: state.runtimeStatus,
     runtimeOutcome: state.runtimeOutcome,
     runtimeOutcomeReasonCode: state.runtimeOutcomeReasonCode,
@@ -170,7 +159,6 @@ const resetRunInspectionState = (runtimeStatus: RuntimeStatus = 'idle') => ({
     selectedRunStatusSync: 'idle' as const,
     selectedRunStatusError: null,
     selectedRunStatusFetchedAtMs: null,
-    runRecordOverrides: {},
     runtimeStatus,
     runtimeOutcome: null,
     runtimeOutcomeReasonCode: null,
@@ -427,7 +415,6 @@ export const buildRegisterProjectTransition = (
         selectedRunStatusSync: state.activeProjectPath ? state.selectedRunStatusSync : 'idle',
         selectedRunStatusError: state.activeProjectPath ? state.selectedRunStatusError : null,
         selectedRunStatusFetchedAtMs: state.activeProjectPath ? state.selectedRunStatusFetchedAtMs : null,
-        runRecordOverrides: state.activeProjectPath ? state.runRecordOverrides : {},
         workingDir: state.activeProjectPath ? state.workingDir : nextActiveProjectScope.workingDir,
     }
 }

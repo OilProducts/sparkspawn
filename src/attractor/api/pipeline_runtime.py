@@ -222,6 +222,43 @@ class PipelineEventHub:
                 self._subscribers.pop(run_id, None)
 
 
+class RunListEventHub:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._subscribers: list[asyncio.Queue[dict]] = []
+
+    async def publish(self, event: dict) -> None:
+        with self._lock:
+            queues = list(self._subscribers)
+        for queue in queues:
+            try:
+                queue.put_nowait(dict(event))
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    continue
+                try:
+                    queue.put_nowait(dict(event))
+                except asyncio.QueueFull:
+                    continue
+
+    def subscribe(self) -> asyncio.Queue[dict]:
+        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
+        with self._lock:
+            self._subscribers.append(queue)
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue[dict]) -> None:
+        with self._lock:
+            if queue in self._subscribers:
+                self._subscribers.remove(queue)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._subscribers.clear()
+
+
 @dataclass
 class ActiveRun:
     run_id: str

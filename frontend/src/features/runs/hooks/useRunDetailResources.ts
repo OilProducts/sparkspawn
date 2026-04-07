@@ -19,7 +19,6 @@ import type {
     ContextErrorState,
     ContextResponse,
     PendingQuestionSnapshot,
-    RunRecord,
 } from '../model/shared'
 import {
     artifactErrorFromResponse,
@@ -31,7 +30,7 @@ import {
 } from '../model/runDetailsModel'
 
 type UseRunDetailResourcesArgs = {
-    selectedRunSummary: RunRecord | null
+    selectedRunId: string | null
     manageSync?: boolean
 }
 
@@ -56,12 +55,11 @@ const DEFAULT_RUN_DETAIL_SESSION = {
 }
 
 export function useRunDetailResources({
-    selectedRunSummary,
+    selectedRunId,
     manageSync = true,
 }: UseRunDetailResourcesArgs) {
     const runDetailSessionsByRunId = useStore((state) => state.runDetailSessionsByRunId)
     const updateRunDetailSession = useStore((state) => state.updateRunDetailSession)
-    const selectedRunId = selectedRunSummary?.run_id ?? null
     const session = useMemo(() => {
         if (!selectedRunId) {
             return DEFAULT_RUN_DETAIL_SESSION
@@ -73,23 +71,23 @@ export function useRunDetailResources({
     }, [runDetailSessionsByRunId, selectedRunId])
 
     const fetchCheckpoint = useCallback(async () => {
-        if (!selectedRunSummary) {
+        if (!selectedRunId) {
             return
         }
-        updateRunDetailSession(selectedRunSummary.run_id, {
+        updateRunDetailSession(selectedRunId, {
             checkpointStatus: 'loading',
             checkpointError: null,
         })
         try {
-            const payload = await fetchPipelineCheckpointValidated(selectedRunSummary.run_id) as CheckpointResponse
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            const payload = await fetchPipelineCheckpointValidated(selectedRunId) as CheckpointResponse
+            updateRunDetailSession(selectedRunId, {
                 checkpointData: payload,
                 checkpointStatus: 'ready',
                 checkpointError: null,
             })
         } catch (err) {
             logUnexpectedRunError(err)
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            updateRunDetailSession(selectedRunId, {
                 checkpointData: null,
                 checkpointStatus: 'error',
                 checkpointError: err instanceof ApiHttpError
@@ -100,26 +98,26 @@ export function useRunDetailResources({
                     },
             })
         }
-    }, [selectedRunSummary, updateRunDetailSession])
+    }, [selectedRunId, updateRunDetailSession])
 
     const fetchContext = useCallback(async () => {
-        if (!selectedRunSummary) {
+        if (!selectedRunId) {
             return
         }
-        updateRunDetailSession(selectedRunSummary.run_id, {
+        updateRunDetailSession(selectedRunId, {
             contextStatus: 'loading',
             contextError: null,
         })
         try {
-            const payload = await fetchPipelineContextValidated(selectedRunSummary.run_id) as ContextResponse
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            const payload = await fetchPipelineContextValidated(selectedRunId) as ContextResponse
+            updateRunDetailSession(selectedRunId, {
                 contextData: payload,
                 contextStatus: 'ready',
                 contextError: null,
             })
         } catch (err) {
             logUnexpectedRunError(err)
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            updateRunDetailSession(selectedRunId, {
                 contextData: null,
                 contextStatus: 'error',
                 contextError: err instanceof ApiHttpError
@@ -130,26 +128,26 @@ export function useRunDetailResources({
                     },
             })
         }
-    }, [selectedRunSummary, updateRunDetailSession])
+    }, [selectedRunId, updateRunDetailSession])
 
     const fetchArtifacts = useCallback(async () => {
-        if (!selectedRunSummary) {
+        if (!selectedRunId) {
             return
         }
-        updateRunDetailSession(selectedRunSummary.run_id, {
+        updateRunDetailSession(selectedRunId, {
             artifactStatus: 'loading',
             artifactError: null,
         })
         try {
-            const payload = await fetchPipelineArtifactsValidated(selectedRunSummary.run_id)
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            const payload = await fetchPipelineArtifactsValidated(selectedRunId)
+            updateRunDetailSession(selectedRunId, {
                 artifactData: payload,
                 artifactStatus: 'ready',
                 artifactError: null,
             })
         } catch (err) {
             logUnexpectedRunError(err)
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            updateRunDetailSession(selectedRunId, {
                 artifactData: null,
                 artifactStatus: 'error',
                 artifactError: err instanceof ApiHttpError
@@ -160,89 +158,89 @@ export function useRunDetailResources({
                     },
             })
         }
-    }, [selectedRunSummary, updateRunDetailSession])
+    }, [selectedRunId, updateRunDetailSession])
 
     const fetchPendingQuestions = useCallback(async () => {
-        if (!selectedRunSummary) {
+        if (!selectedRunId) {
             return
         }
-        updateRunDetailSession(selectedRunSummary.run_id, {
+        updateRunDetailSession(selectedRunId, {
             questionsStatus: 'loading',
         })
         try {
-            const payload = await fetchPipelineQuestionsValidated(selectedRunSummary.run_id)
+            const payload = await fetchPipelineQuestionsValidated(selectedRunId)
             const rawQuestions = payload.questions
             const parsedQuestions = Array.isArray(rawQuestions)
                 ? rawQuestions
                     .map((question) => asPendingQuestionSnapshot(question))
                     .filter((question): question is PendingQuestionSnapshot => question !== null)
                 : []
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            updateRunDetailSession(selectedRunId, {
                 pendingQuestionSnapshots: parsedQuestions,
                 questionsStatus: 'ready',
             })
         } catch (error) {
             logUnexpectedRunError(error)
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            updateRunDetailSession(selectedRunId, {
                 pendingQuestionSnapshots: [],
                 questionsStatus: 'error',
             })
         }
-    }, [selectedRunSummary, updateRunDetailSession])
+    }, [selectedRunId, updateRunDetailSession])
 
     useEffect(() => {
-        if (!manageSync || !selectedRunSummary) {
+        if (!manageSync || !selectedRunId) {
             return
         }
         void fetchCheckpoint()
         void fetchContext()
         void fetchArtifacts()
         void fetchPendingQuestions()
-    }, [fetchArtifacts, fetchCheckpoint, fetchContext, fetchPendingQuestions, manageSync, selectedRunSummary])
+    }, [fetchArtifacts, fetchCheckpoint, fetchContext, fetchPendingQuestions, manageSync, selectedRunId])
 
     const viewArtifact = useCallback(async (entry: { path: string; viewable: boolean }) => {
-        if (!selectedRunSummary) {
+        if (!selectedRunId) {
             return
         }
-        updateRunDetailSession(selectedRunSummary.run_id, {
+        updateRunDetailSession(selectedRunId, {
             selectedArtifactPath: entry.path,
             artifactViewerPayload: '',
             artifactViewerError: null,
         })
         if (!entry.viewable) {
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            updateRunDetailSession(selectedRunId, {
                 artifactViewerStatus: 'error',
                 artifactViewerError: 'Preview unavailable for this artifact type. Use download action.',
             })
             return
         }
-        updateRunDetailSession(selectedRunSummary.run_id, {
+        updateRunDetailSession(selectedRunId, {
             artifactViewerStatus: 'loading',
         })
         try {
-            const payload = await fetchPipelineArtifactPreviewValidated(selectedRunSummary.run_id, entry.path)
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            const payload = await fetchPipelineArtifactPreviewValidated(selectedRunId, entry.path)
+            updateRunDetailSession(selectedRunId, {
                 artifactViewerPayload: payload,
                 artifactViewerError: null,
                 artifactViewerStatus: 'ready',
             })
         } catch (error) {
             logUnexpectedRunError(error)
-            updateRunDetailSession(selectedRunSummary.run_id, {
+            updateRunDetailSession(selectedRunId, {
                 artifactViewerStatus: 'error',
                 artifactViewerError: error instanceof ApiHttpError
                     ? artifactPreviewErrorFromResponse(error.status, error.detail)
                     : 'Unable to load artifact preview. Check your network/backend connection and retry.',
             })
         }
-    }, [selectedRunSummary, updateRunDetailSession])
+    }, [selectedRunId, updateRunDetailSession])
 
     const artifactDownloadHref = useCallback((artifactPath: string) => {
-        if (!selectedRunSummary) {
+        if (!selectedRunId) {
             return ''
         }
-        return pipelineArtifactHref(selectedRunSummary.run_id, artifactPath, true)
-    }, [selectedRunSummary])
+        return pipelineArtifactHref(selectedRunId, artifactPath, true)
+    }, [selectedRunId])
 
     return {
         artifactData: session.artifactData,
@@ -271,16 +269,16 @@ export function useRunDetailResources({
         questionsStatus: session.questionsStatus,
         selectedArtifactPath: session.selectedArtifactPath,
         setContextCopyStatus: (value: string) => {
-            if (!selectedRunSummary) {
+            if (!selectedRunId) {
                 return
             }
-            updateRunDetailSession(selectedRunSummary.run_id, { contextCopyStatus: value })
+            updateRunDetailSession(selectedRunId, { contextCopyStatus: value })
         },
         setContextSearchQuery: (value: string) => {
-            if (!selectedRunSummary) {
+            if (!selectedRunId) {
                 return
             }
-            updateRunDetailSession(selectedRunSummary.run_id, { contextSearchQuery: value })
+            updateRunDetailSession(selectedRunId, { contextSearchQuery: value })
         },
         viewArtifact,
     }

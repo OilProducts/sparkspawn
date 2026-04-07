@@ -12,7 +12,6 @@ const resetRunStreamState = () => {
     selectedRunStatusSync: 'idle',
     selectedRunStatusError: null,
     selectedRunStatusFetchedAtMs: null,
-    runRecordOverrides: {},
     saveState: 'idle',
     saveStateVersion: 0,
     saveErrorMessage: null,
@@ -60,74 +59,40 @@ describe('RunStream save indicator', () => {
     expect(useStore.getState().saveState).toBe('idle')
   })
 
-  it('reconciles the selected run to a terminal state when SSE misses the final runtime event', async () => {
-    const responses = [
-      {
-        pipeline_id: 'run-reconcile',
-        run_id: 'run-reconcile',
-        status: 'running',
-        outcome: null,
-        outcome_reason_code: null,
-        outcome_reason_message: null,
-        flow_name: 'selected.dot',
-        working_directory: '/tmp/project-one/workdir',
-        project_path: '/tmp/project-one',
-        git_branch: 'main',
-        git_commit: 'abcdef0',
-        spec_id: null,
-        plan_id: null,
-        model: 'gpt-5.4',
-        started_at: '2026-03-22T00:00:00Z',
-        ended_at: null,
-        last_error: '',
-        token_usage: 10,
-        current_node: 'review',
-        completed_nodes: ['start'],
-        progress: {
-          current_node: 'review',
-          completed_nodes: ['start'],
-        },
-        continued_from_run_id: null,
-        continued_from_node: null,
-        continued_from_flow_mode: null,
-        continued_from_flow_name: null,
-      },
-      {
-        pipeline_id: 'run-reconcile',
-        run_id: 'run-reconcile',
-        status: 'completed',
-        outcome: 'success',
-        outcome_reason_code: null,
-        outcome_reason_message: null,
-        flow_name: 'selected.dot',
-        working_directory: '/tmp/project-one/workdir',
-        project_path: '/tmp/project-one',
-        git_branch: 'main',
-        git_commit: 'abcdef0',
-        spec_id: null,
-        plan_id: null,
-        model: 'gpt-5.4',
-        started_at: '2026-03-22T00:00:00Z',
-        ended_at: '2026-03-22T00:05:00Z',
-        last_error: '',
-        token_usage: 10,
-        current_node: 'done',
-        completed_nodes: ['start', 'done'],
-        progress: {
-          current_node: 'done',
-          completed_nodes: ['start', 'done'],
-        },
-        continued_from_run_id: null,
-        continued_from_node: null,
-        continued_from_flow_mode: null,
-        continued_from_flow_name: null,
-      },
-    ]
-
+  it('updates the selected run to a terminal state from the streamed runtime event', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
       if (url.endsWith('/attractor/pipelines/run-reconcile')) {
-        return new Response(JSON.stringify(responses.shift() ?? responses.at(-1)), {
+        return new Response(JSON.stringify({
+          pipeline_id: 'run-reconcile',
+          run_id: 'run-reconcile',
+          status: 'running',
+          outcome: null,
+          outcome_reason_code: null,
+          outcome_reason_message: null,
+          flow_name: 'selected.dot',
+          working_directory: '/tmp/project-one/workdir',
+          project_path: '/tmp/project-one',
+          git_branch: 'main',
+          git_commit: 'abcdef0',
+          spec_id: null,
+          plan_id: null,
+          model: 'gpt-5.4',
+          started_at: '2026-03-22T00:00:00Z',
+          ended_at: null,
+          last_error: '',
+          token_usage: 10,
+          current_node: 'review',
+          completed_nodes: ['start'],
+          progress: {
+            current_node: 'review',
+            completed_nodes: ['start'],
+          },
+          continued_from_run_id: null,
+          continued_from_node: null,
+          continued_from_flow_mode: null,
+          continued_from_flow_name: null,
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -136,6 +101,7 @@ describe('RunStream save indicator', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
+    const eventSources: MockEventSource[] = []
     class MockEventSource {
       static readonly OPEN = 1
       static readonly CLOSED = 2
@@ -147,6 +113,15 @@ describe('RunStream save indicator', () => {
 
       constructor(url: string | URL) {
         this.url = String(url)
+        eventSources.push(this)
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }))
+      }
+
+      open() {
+        this.onopen?.(new Event('open'))
       }
 
       close() {
@@ -195,17 +170,23 @@ describe('RunStream save indicator', () => {
     })
 
     expect(useStore.getState().runtimeStatus).toBe('running')
+    expect(eventSources).toHaveLength(1)
 
     await act(async () => {
-      vi.advanceTimersByTime(5_000)
+      eventSources[0]?.open()
+      eventSources[0]?.emit({
+        type: 'runtime',
+        status: 'completed',
+        outcome: 'success',
+        outcome_reason_code: null,
+        outcome_reason_message: null,
+      })
       await Promise.resolve()
       await Promise.resolve()
     })
 
     expect(useStore.getState().runtimeStatus).toBe('completed')
     expect(useStore.getState().selectedRunRecord?.status).toBe('completed')
-    expect(useStore.getState().selectedRunRecord?.current_node).toBe('done')
-    expect(useStore.getState().runRecordOverrides['run-reconcile']?.status).toBe('completed')
-    expect(useStore.getState().selectedRunCompletedNodes).toEqual(['start', 'done'])
+    expect(useStore.getState().selectedRunRecord?.outcome).toBe('success')
   })
 })

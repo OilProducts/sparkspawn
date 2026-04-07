@@ -1,4 +1,3 @@
-import { RefreshCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { Button, EmptyState, InlineNotice, ProjectContextChip } from '@/ui'
@@ -12,14 +11,9 @@ import {
 interface RunListProps {
     activeProjectPath: string | null
     error: string | null
-    isLoading: boolean
-    isRefreshing: boolean
-    metadataFreshness: 'never' | 'refreshing' | 'fresh' | 'stale'
-    onRefresh: () => void
     scopeMode: 'active' | 'all'
     onScopeModeChange: (mode: 'active' | 'all') => void
     status: 'idle' | 'loading' | 'ready' | 'error'
-    now: number
     onSelectRun: (run: RunRecord) => void
     runs: RunRecord[]
     selectedRunId: string | null
@@ -29,14 +23,9 @@ interface RunListProps {
 export function RunList({
     activeProjectPath,
     error,
-    isLoading,
-    isRefreshing,
-    metadataFreshness,
-    onRefresh,
     scopeMode,
     onScopeModeChange,
     status,
-    now,
     onSelectRun,
     runs,
     selectedRunId,
@@ -102,22 +91,7 @@ export function RunList({
                     >
                         All projects
                     </Button>
-                    <Button
-                        onClick={onRefresh}
-                        data-testid="runs-refresh-button"
-                        variant="outline"
-                        size="xs"
-                        className="ml-auto"
-                    >
-                        <RefreshCcw className={`h-3.5 w-3.5 ${(isLoading || isRefreshing) ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </Button>
                 </div>
-                {metadataFreshness === 'stale' && (
-                    <InlineNotice data-testid="run-metadata-stale-indicator" tone="warning">
-                        Run history may be out of date. Refresh to load the latest status.
-                    </InlineNotice>
-                )}
                 {error ? (
                     <InlineNotice tone="error">
                         {error}
@@ -156,7 +130,7 @@ export function RunList({
                             const shortRunId = run.run_id.slice(0, 8)
                             const projectLabel = scopeMode === 'all' ? compactProjectLabel(run.project_path) : null
                             const metaParts = [
-                                formatDuration(run.started_at, run.ended_at, run.status, now),
+                                formatDuration(run.started_at, run.ended_at, run.status),
                                 shortRunId,
                             ].filter((value) => Boolean(value) && value !== '—')
 

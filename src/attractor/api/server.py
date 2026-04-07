@@ -73,6 +73,7 @@ from attractor.api.pipeline_runtime import (
     ExecutionControl,
     HumanGateBroker,
     PipelineEventHub,
+    RunListEventHub,
     RuntimeState,
     WebInterviewer,
 )
@@ -147,6 +148,7 @@ def _registered_transforms_snapshot() -> List[object]:
 manager = ConnectionManager()
 HUMAN_BROKER = HumanGateBroker()
 EVENT_HUB = PipelineEventHub()
+RUNS_EVENT_HUB = RunListEventHub()
 RUNTIME = RuntimeState(last_completed_nodes=[])
 ACTIVE_RUNS_LOCK = threading.Lock()
 ACTIVE_RUNS: Dict[str, ActiveRun] = {}
@@ -233,13 +235,14 @@ def reconcile_orphaned_runs_on_startup() -> list[str]:
     return reconciled
 
 
-def initialize_attractor_runtime() -> None:
+def initialize_attractor_runtime() -> list[str]:
     global ATTRACTOR_RUNTIME_INITIALIZED
     with ATTRACTOR_RUNTIME_LOCK:
         if ATTRACTOR_RUNTIME_INITIALIZED:
-            return
-        reconcile_orphaned_runs_on_startup()
+            return []
+        reconciled_run_ids = reconcile_orphaned_runs_on_startup()
         ATTRACTOR_RUNTIME_INITIALIZED = True
+    return reconciled_run_ids
 
 
 def shutdown_attractor_runtime() -> None:
@@ -250,11 +253,14 @@ def shutdown_attractor_runtime() -> None:
         ACTIVE_RUNS.clear()
     with RUN_EVENT_SEQUENCE_LOCK:
         RUN_EVENT_SEQUENCES.clear()
+    RUNS_EVENT_HUB.reset()
 
 
 @asynccontextmanager
 async def _attractor_lifespan(_: FastAPI):
-    initialize_attractor_runtime()
+    reconciled_run_ids = initialize_attractor_runtime()
+    for run_id in reconciled_run_ids:
+        await _publish_run_list_upsert(run_id)
     try:
         yield
     finally:
@@ -616,6 +622,55 @@ def _pipeline_status_payload(run_id: str) -> Dict[str, object]:
     return payload
 
 
+def _list_run_records(project_path: Optional[str] = None) -> List[RunRecord]:
+    records: List[RunRecord] = []
+    for run_dir in _iter_run_roots():
+        if not run_dir.is_dir():
+            continue
+        meta_path = run_dir / "run.json"
+        record = _read_run_meta(meta_path)
+        if record:
+            hydrate_run_record_from_log(record, run_dir)
+            records.append(record)
+            continue
+
+        run_id = run_dir.name
+        record = RunRecord(
+            run_id=run_id,
+            flow_name="",
+            status="unknown",
+            outcome=None,
+            outcome_reason_code=None,
+            outcome_reason_message=None,
+            working_directory="",
+            model="",
+            started_at="",
+        )
+        hydrate_run_record_from_log(record, run_dir)
+        records.append(record)
+
+    def _sort_key(item: RunRecord) -> str:
+        return item.started_at or item.ended_at or ""
+
+    if project_path:
+        records = [record for record in records if run_matches_project_scope(record, project_path)]
+
+    records.sort(key=_sort_key, reverse=True)
+    return records
+
+
+async def _publish_run_list_upsert(run_id: str) -> None:
+    record = _read_hydrated_run_record(run_id)
+    if record is None:
+        return
+    await RUNS_EVENT_HUB.publish(
+        {
+            "type": "run_upsert",
+            "run": record.to_dict(),
+        }
+    )
+
+
 def _pop_active_run(run_id: str) -> Optional[ActiveRun]:
     with ACTIVE_RUNS_LOCK:
         return ACTIVE_RUNS.pop(run_id, None)
@@ -719,40 +774,49 @@ async def get_status():
 
 @attractor_router.get("/runs")
 async def list_runs(project_path: Optional[str] = None):
-    records: List[RunRecord] = []
-    for run_dir in _iter_run_roots():
-        if not run_dir.is_dir():
-            continue
-        meta_path = run_dir / "run.json"
-        record = _read_run_meta(meta_path)
-        if record:
-            hydrate_run_record_from_log(record, run_dir)
-            records.append(record)
-            continue
-
-        run_id = run_dir.name
-        record = RunRecord(
-            run_id=run_id,
-            flow_name="",
-            status="unknown",
-            outcome=None,
-            outcome_reason_code=None,
-            outcome_reason_message=None,
-            working_directory="",
-            model="",
-            started_at="",
-        )
-        hydrate_run_record_from_log(record, run_dir)
-        records.append(record)
-
-    def _sort_key(item: RunRecord) -> str:
-        return item.started_at or item.ended_at or ""
-
-    if project_path:
-        records = [record for record in records if run_matches_project_scope(record, project_path)]
-
-    records.sort(key=_sort_key, reverse=True)
+    records = _list_run_records(project_path)
     return {"runs": [record.to_dict() for record in records]}
+
+
+@attractor_router.get("/runs/events")
+async def runs_events(request: Request, project_path: Optional[str] = None):
+    queue = RUNS_EVENT_HUB.subscribe()
+    try:
+        snapshot_payload = {
+            "type": "snapshot",
+            "runs": [record.to_dict() for record in _list_run_records(project_path)],
+        }
+    except Exception:
+        RUNS_EVENT_HUB.unsubscribe(queue)
+        raise
+
+    async def stream():
+        try:
+            yield f"data: {json.dumps(snapshot_payload)}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    if event.get("type") == "run_upsert" and project_path:
+                        run_payload = event.get("run")
+                        record = RunRecord.from_dict(run_payload) if isinstance(run_payload, dict) else None
+                        if record is None or not run_matches_project_scope(record, project_path):
+                            continue
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            RUNS_EVENT_HUB.unsubscribe(queue)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 def _graph_payload(graph) -> dict:
@@ -1174,6 +1238,7 @@ async def _launch_pipeline_run(
         continued_from_flow_mode=continued_from_flow_mode,
         continued_from_flow_name=continued_from_flow_name,
     )
+    await _publish_run_list_upsert(resolved_run_id)
 
     await _publish_run_event(
         resolved_run_id,
@@ -1284,6 +1349,7 @@ async def _launch_pipeline_run(
                 outcome_reason_code=final_outcome_reason_code,
                 outcome_reason_message=final_outcome_reason_message,
             )
+            await _publish_run_list_upsert(resolved_run_id)
             await _publish_run_event(
                 resolved_run_id,
                 {
@@ -1323,6 +1389,7 @@ async def _launch_pipeline_run(
                 },
             )
             _record_run_end(resolved_run_id, working_dir, "failed", str(exc), outcome=None)
+            await _publish_run_list_upsert(resolved_run_id)
             await _publish_run_event(resolved_run_id, {"type": "log", "msg": f"⚠️ Pipeline Failed: {exc}"})
         finally:
             await _publish_lifecycle_phase(resolved_run_id, PIPELINE_LIFECYCLE_PHASES[5])
@@ -1510,6 +1577,7 @@ async def update_pipeline_metadata(pipeline_id: str, req: PipelineMetadataUpdate
         spec_id=(req.spec_id or "").strip() or None,
         plan_id=(req.plan_id or "").strip() or None,
     )
+    await _publish_run_list_upsert(pipeline_id)
     record = _read_run_meta(_run_meta_path(pipeline_id))
     if record is None:
         raise HTTPException(status_code=404, detail="Unknown pipeline")
@@ -1604,6 +1672,7 @@ async def cancel_pipeline(pipeline_id: str):
     active.control.request_cancel()
     _set_active_run_status(pipeline_id, "cancel_requested", last_error="cancel_requested_by_user")
     _record_run_status(pipeline_id, "cancel_requested", "cancel_requested_by_user")
+    await _publish_run_list_upsert(pipeline_id)
     RUNTIME.status = "cancel_requested"
     RUNTIME.outcome = None
     RUNTIME.outcome_reason_code = None

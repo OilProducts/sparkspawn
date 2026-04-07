@@ -58,7 +58,6 @@ const resetTaskNodeState = () => {
         selectedRunStatusSync: 'idle',
         selectedRunStatusError: null,
         selectedRunStatusFetchedAtMs: null,
-        runRecordOverrides: {},
     })
 }
 

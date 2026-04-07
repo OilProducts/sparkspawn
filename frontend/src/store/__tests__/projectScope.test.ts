@@ -17,7 +17,6 @@ const resetStore = () => {
     selectedRunStatusSync: 'idle',
     selectedRunStatusError: null,
     selectedRunStatusFetchedAtMs: null,
-    runRecordOverrides: {},
     workingDir: DEFAULT_WORKING_DIRECTORY,
     projectRegistry: {},
     projectSessionsByPath: {},
@@ -243,14 +242,6 @@ describe('project scope store behavior', () => {
     })
     store.setRunsSelectedRunIdForScope(buildRunsScopeKey('active', '/tmp/project-a'), 'run-a')
     store.setRunsSelectedRunIdForScope(buildRunsScopeKey('active', '/tmp/project-b'), 'run-b')
-    store.setRunRecordOverride('run-a', {
-      project_path: '/tmp/project-a',
-      current_node: 'plan',
-    })
-    store.setRunRecordOverride('run-b', {
-      project_path: '/tmp/project-b',
-      current_node: 'review',
-    })
 
     store.removeProject('/tmp/project-a', '/tmp/project-b')
 
@@ -261,10 +252,5 @@ describe('project scope store behavior', () => {
     expect(next.runsListSession.selectedRunIdByScopeKey[buildRunsScopeKey('active', '/tmp/project-b')]).toBe('run-b')
     expect(next.runDetailSessionsByRunId['run-a']).toBeUndefined()
     expect(next.runDetailSessionsByRunId['run-b']?.summaryRecord?.run_id).toBe('run-b')
-    expect(next.runRecordOverrides['run-a']).toBeUndefined()
-    expect(next.runRecordOverrides['run-b']).toMatchObject({
-      project_path: '/tmp/project-b',
-      current_node: 'review',
-    })
   })
 })

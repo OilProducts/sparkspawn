@@ -89,6 +89,10 @@ REQUIRED_UI_ENDPOINT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"pipelineEventsUrl\(|new EventSource\(\s*`/attractor/pipelines/\$\{encodeURIComponent\([^)]+\)\}/events`"),
     ),
     (
+        "/attractor/runs/events",
+        re.compile(r"runsEventsUrl\(|new EventSource\(\s*`?/attractor/runs/events"),
+    ),
+    (
         "/attractor/pipelines/{id}/cancel",
         re.compile(r"fetch\(\s*`/attractor/pipelines/\$\{encodeURIComponent\([^)]+\)\}/cancel`\s*,\s*\{\s*method:\s*['\"]POST['\"]|fetchPipelineCancelValidated\("),
     ),

@@ -59,17 +59,115 @@ test("run summary panel renders populated metadata for item 9.1-01", async ({ pa
   await page.screenshot({ path: screenshotPath("08b-runs-panel-populated-summary.png"), fullPage: true })
 })
 
-test("run summary metadata refresh and stale-state indicator for item 9.1-02", async ({ page }) => {
-  const projectPath = `/tmp/ui-smoke-project-runs-refresh-${Date.now()}`
-  const runId = `run-refresh-${Date.now()}`
-  let refreshCount = 0
+test("run summary updates from the scoped runs stream for item 9.1-02", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-runs-stream-${Date.now()}`
+  const runId = `run-stream-${Date.now()}`
+  let hydrationCount = 0
 
-  await page.addInitScript(() => {
-    ;(globalThis as typeof globalThis & { __RUNS_METADATA_STALE_AFTER_MS__?: number }).__RUNS_METADATA_STALE_AFTER_MS__ = 250
-  })
+  await page.addInitScript(
+    ({
+      targetProjectPath,
+      targetRunId,
+    }: {
+      targetProjectPath: string
+      targetRunId: string
+    }) => {
+      class MockEventSource {
+        url: string
+        withCredentials = false
+        readyState = 1
+        onopen: ((event: Event) => void) | null = null
+        onmessage: ((event: MessageEvent) => void) | null = null
+        onerror: ((event: Event) => void) | null = null
 
-  await page.route("**/attractor/runs", async (route) => {
-    refreshCount += 1
+        constructor(url: string) {
+          this.url = url
+
+          setTimeout(() => {
+            this.onopen?.(new Event("open"))
+          }, 0)
+
+          const runsEventsUrl = `/runs/events?project_path=${encodeURIComponent(targetProjectPath)}`
+          if (!url.includes(runsEventsUrl)) {
+            return
+          }
+
+          const globalState = globalThis as typeof globalThis & { __runs_events_urls__?: string[] }
+          globalState.__runs_events_urls__ = [...(globalState.__runs_events_urls__ ?? []), url]
+
+          const emit = (payload: Record<string, unknown>) => {
+            this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(payload) }))
+          }
+
+          setTimeout(() => {
+            emit({
+              type: "snapshot",
+              runs: [
+                {
+                  run_id: targetRunId,
+                  flow_name: "StreamFlow",
+                  status: "running",
+                  outcome: null,
+                  working_directory: `${targetProjectPath}/workspace`,
+                  project_path: targetProjectPath,
+                  git_branch: "main",
+                  git_commit: "def5678",
+                  model: "gpt-5",
+                  started_at: "2026-03-03T12:00:00Z",
+                  ended_at: null,
+                  last_error: "none",
+                  token_usage: 7,
+                },
+              ],
+            })
+          }, 25)
+
+          setTimeout(() => {
+            emit({
+              type: "run_upsert",
+              run: {
+                run_id: targetRunId,
+                flow_name: "StreamFlow",
+                status: "completed",
+                outcome: "success",
+                working_directory: `${targetProjectPath}/workspace`,
+                project_path: targetProjectPath,
+                git_branch: "main",
+                git_commit: "def5678",
+                model: "gpt-5",
+                started_at: "2026-03-03T12:00:00Z",
+                ended_at: "2026-03-03T12:00:10Z",
+                last_error: "none",
+                token_usage: 108,
+              },
+            })
+          }, 450)
+        }
+
+        close() {
+          this.readyState = 2
+        }
+
+        addEventListener() {}
+
+        removeEventListener() {}
+
+        dispatchEvent() {
+          return false
+        }
+      }
+
+      ;(window as typeof window & { EventSource: typeof EventSource }).EventSource =
+        MockEventSource as unknown as typeof EventSource
+    },
+    {
+      targetProjectPath: projectPath,
+      targetRunId: runId,
+    },
+  )
+
+  await page.route("**/attractor/runs**", async (route) => {
+    hydrationCount += 1
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -77,18 +175,18 @@ test("run summary metadata refresh and stale-state indicator for item 9.1-02", a
         runs: [
           {
             run_id: runId,
-            flow_name: "RefreshFlow",
-            status: refreshCount >= 2 ? "completed" : "running",
-            outcome: refreshCount >= 2 ? "success" : null,
+            flow_name: "StreamFlow",
+            status: "running",
+            outcome: null,
             working_directory: `${projectPath}/workspace`,
             project_path: projectPath,
             git_branch: "main",
             git_commit: "def5678",
             model: "gpt-5",
             started_at: "2026-03-03T12:00:00Z",
-            ended_at: refreshCount >= 2 ? "2026-03-03T12:00:10Z" : null,
+            ended_at: null,
             last_error: "none",
-            token_usage: refreshCount >= 2 ? 108 : 7,
+            token_usage: 7,
           },
         ],
       }),
@@ -101,21 +199,20 @@ test("run summary metadata refresh and stale-state indicator for item 9.1-02", a
   await page.getByTestId("nav-mode-runs").click()
 
   await expect(page.getByTestId("run-summary-panel")).toBeVisible()
+  await expect(page.getByTestId("run-summary-status")).toContainText("Running")
   await expect(page.getByTestId("run-summary-token-usage")).toContainText("7")
-  await expect(page.getByTestId("run-metadata-freshness-indicator")).toContainText("Fresh")
-  await expect(page.getByTestId("run-metadata-last-updated")).toContainText("Updated")
+  await expect(page.getByTestId("run-history-row")).toContainText("Running")
+  await expect.poll(() => hydrationCount).toBe(1)
+  await expect
+    .poll(() => page.evaluate(() => ((globalThis as typeof globalThis & { __runs_events_urls__?: string[] }).__runs_events_urls__ ?? []).join("\n")))
+    .toContain(`/attractor/runs/events?project_path=${encodeURIComponent(projectPath)}`)
 
-  await page.waitForTimeout(1300)
-  await expect(page.getByTestId("run-metadata-freshness-indicator")).toContainText("Stale")
-  await expect(page.getByTestId("run-metadata-stale-indicator")).toContainText(
-    "Run metadata may be stale. Refresh to load the latest run status."
-  )
-
-  await page.getByTestId("runs-refresh-button").click()
+  await expect(page.getByTestId("run-summary-status")).toContainText("Completed")
+  await expect(page.getByTestId("run-summary-outcome")).toContainText("Success")
   await expect(page.getByTestId("run-summary-token-usage")).toContainText("108")
-  await expect(page.getByTestId("run-metadata-freshness-indicator")).toContainText("Fresh")
-  await expect(page.getByTestId("run-metadata-stale-indicator")).toHaveCount(0)
-  await page.screenshot({ path: screenshotPath("08c-runs-panel-refresh-stale-indicator.png"), fullPage: true })
+  await expect(page.getByTestId("run-history-row")).toContainText("Completed")
+  await expect.poll(() => hydrationCount).toBe(1)
+  await page.screenshot({ path: screenshotPath("08c-runs-panel-stream-driven-summary-update.png"), fullPage: true })
 })
 
 test("run history rows include project identity and git metadata for item 9.6-02", async ({ page }) => {

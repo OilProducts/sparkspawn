@@ -36,6 +36,7 @@ export {
     fetchPipelineStatusValidated,
     fetchPreviewValidated,
     fetchRunsListValidated,
+    runsEventsUrl,
     fetchRuntimeStatusValidated,
     parseFlowListResponse,
     parseFlowPayloadResponse,

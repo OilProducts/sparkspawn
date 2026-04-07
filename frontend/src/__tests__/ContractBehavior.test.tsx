@@ -96,6 +96,49 @@ const stableTimelineEvent = <T extends Record<string, unknown>>(sequence: number
   emitted_at: stableTimelineTimestamp(sequence),
 })
 
+const buildPipelineStatusPayload = (
+  runRecord: Record<string, unknown>,
+  options?: {
+    currentNode?: string | null
+    completedNodes?: string[]
+    overrides?: Record<string, unknown>
+  },
+) => {
+  const currentNode = options?.currentNode ?? null
+  const completedNodes = options?.completedNodes ?? []
+  return {
+    pipeline_id: String(runRecord.run_id ?? ''),
+    run_id: String(runRecord.run_id ?? ''),
+    flow_name: String(runRecord.flow_name ?? ''),
+    status: String(runRecord.status ?? 'running'),
+    outcome: (runRecord.outcome as string | null | undefined) ?? null,
+    outcome_reason_code: (runRecord.outcome_reason_code as string | null | undefined) ?? null,
+    outcome_reason_message: (runRecord.outcome_reason_message as string | null | undefined) ?? null,
+    working_directory: String(runRecord.working_directory ?? ''),
+    project_path: String(runRecord.project_path ?? ''),
+    git_branch: (runRecord.git_branch as string | null | undefined) ?? null,
+    git_commit: (runRecord.git_commit as string | null | undefined) ?? null,
+    spec_id: (runRecord.spec_id as string | null | undefined) ?? null,
+    plan_id: (runRecord.plan_id as string | null | undefined) ?? null,
+    model: String(runRecord.model ?? ''),
+    started_at: String(runRecord.started_at ?? ''),
+    ended_at: (runRecord.ended_at as string | null | undefined) ?? null,
+    last_error: (runRecord.last_error as string | null | undefined) ?? '',
+    token_usage: (runRecord.token_usage as number | null | undefined) ?? 0,
+    current_node: currentNode,
+    completed_nodes: completedNodes,
+    progress: {
+      current_node: currentNode,
+      completed_nodes: completedNodes,
+    },
+    continued_from_run_id: null,
+    continued_from_node: null,
+    continued_from_flow_mode: null,
+    continued_from_flow_name: null,
+    ...(options?.overrides ?? {}),
+  }
+}
+
 const resetContractState = () => {
   useStore.setState((state) => ({
     ...state,
@@ -109,17 +152,15 @@ const resetContractState = () => {
     selectedRunStatusSync: 'idle',
     selectedRunStatusError: null,
     selectedRunStatusFetchedAtMs: null,
-    runRecordOverrides: {},
     runsListSession: {
       ...state.runsListSession,
       scopeMode: 'active',
       selectedRunIdByScopeKey: {},
       status: 'idle',
-      isRefreshing: false,
       error: null,
       runs: [],
-      lastFetchedAtMs: null,
-      nowMs: Date.now(),
+      streamStatus: 'idle',
+      streamError: null,
     },
     runDetailSessionsByRunId: {},
     workingDir: DEFAULT_WORKING_DIRECTORY,
@@ -179,6 +220,7 @@ const renderRunsPanelWithController = () =>
   render(
     <>
       <RunsSessionController />
+      <RunStream />
       <RunsPanel />
     </>,
   )
@@ -335,6 +377,34 @@ describe('Frontend contract behavior', () => {
         return jsonResponse({})
       }),
     )
+    class DefaultMockEventSource {
+      url: string
+      withCredentials = false
+      readyState = 1
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string | URL) {
+        this.url = String(url)
+        setTimeout(() => {
+          this.onopen?.(new Event('open'))
+        }, 0)
+      }
+
+      close() {
+        this.readyState = 2
+      }
+
+      addEventListener() {}
+
+      removeEventListener() {}
+
+      dispatchEvent() {
+        return false
+      }
+    }
+    vi.stubGlobal('EventSource', DefaultMockEventSource as unknown as typeof EventSource)
   })
 
   afterEach(() => {
@@ -979,12 +1049,42 @@ describe('Frontend contract behavior', () => {
 
   it('[CID:12.2.01] shows degraded-state UX when runtime status endpoint responses are unavailable or incompatible', async () => {
     const runId = 'run-contract-degraded'
+    const runRecord = {
+      run_id: runId,
+      flow_name: 'contract-behavior.dot',
+      status: 'running',
+      outcome: null,
+      working_directory: '/tmp/project-contract-behavior/workspace',
+      project_path: '/tmp/project-contract-behavior',
+      git_branch: 'main',
+      git_commit: 'abc1234',
+      model: 'gpt-5',
+      started_at: '2026-03-04T01:00:00Z',
+      ended_at: null,
+      last_error: '',
+      token_usage: 0,
+    }
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input)
+        if (url.includes('/attractor/runs')) {
+          return jsonResponse({ runs: [runRecord] })
+        }
         if (url.endsWith(`/attractor/pipelines/${encodeURIComponent(runId)}`)) {
           return jsonResponse({ runtime: 'idle' })
+        }
+        if (url.endsWith(`/attractor/pipelines/${encodeURIComponent(runId)}/checkpoint`)) {
+          return jsonResponse({ pipeline_id: runId, checkpoint: { current_node: null, completed_nodes: [] } })
+        }
+        if (url.endsWith(`/attractor/pipelines/${encodeURIComponent(runId)}/context`)) {
+          return jsonResponse({ pipeline_id: runId, context: {} })
+        }
+        if (url.endsWith(`/attractor/pipelines/${encodeURIComponent(runId)}/artifacts`)) {
+          return jsonResponse({ pipeline_id: runId, artifacts: [] })
+        }
+        if (url.endsWith(`/attractor/pipelines/${encodeURIComponent(runId)}/questions`)) {
+          return jsonResponse({ pipeline_id: runId, questions: [] })
         }
         return jsonResponse({})
       }),
@@ -994,16 +1094,19 @@ describe('Frontend contract behavior', () => {
       useStore.getState().setSelectedRunId(runId)
     })
 
-    render(<RunStream />)
+    renderRunsPanelWithController()
 
     await waitFor(() => {
-      expect(screen.getByTestId('runtime-api-degraded-banner')).toBeVisible()
+      expect(screen.getByTestId('runs-transport-reconnect-banner')).toBeVisible()
     })
 
-    expect(screen.getByTestId('runtime-api-degraded-banner')).toHaveTextContent(
-      'Selected run status endpoint is unavailable or incompatible.',
+    expect(screen.getByTestId('runs-transport-reconnect-banner')).toHaveTextContent(
+      'Live run transport degraded for selected run.',
     )
-    expect(screen.getByTestId('global-save-state-indicator')).not.toHaveTextContent('Idle')
+    expect(screen.getByTestId('runs-transport-reconnect-banner')).toHaveTextContent(
+      'Selected run live updates are unavailable. Reconnect to restore the selected run stream.',
+    )
+    expect(screen.queryByTestId('global-save-state-indicator')).not.toBeInTheDocument()
   })
 
   it('[CID:12.2.02] keeps non-dependent run-inspector surfaces functional under partial API failure', async () => {
@@ -1031,6 +1134,9 @@ describe('Frontend contract behavior', () => {
         const url = requestUrl(input)
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord))
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({ detail: 'backend unavailable' }, { status: 503 })
@@ -2051,6 +2157,9 @@ describe('Frontend contract behavior', () => {
           if (url.includes('/attractor/runs')) {
             return jsonResponse({ runs: [runRecord] })
           }
+          if (url.endsWith(runApiPath)) {
+            return jsonResponse(buildPipelineStatusPayload(runRecord))
+          }
           if (url.endsWith(`${runApiPath}/checkpoint`)) {
             return jsonResponse({ pipeline_id: runId, checkpoint: { node_statuses: {} } })
           }
@@ -2299,6 +2408,9 @@ describe('Frontend contract behavior', () => {
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord))
+        }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({ pipeline_id: runId, checkpoint: { node_statuses: {} } })
         }
@@ -2471,6 +2583,9 @@ describe('Frontend contract behavior', () => {
         const url = requestUrl(input)
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord))
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({ pipeline_id: runId, checkpoint: { node_statuses: {} } })
@@ -3181,6 +3296,12 @@ describe('Frontend contract behavior', () => {
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
+        }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({
             pipeline_id: runId,
@@ -3320,6 +3441,12 @@ describe('Frontend contract behavior', () => {
       const url = requestUrl(input)
       if (url.includes('/attractor/runs')) {
         return jsonResponse({ runs: [runRecord] })
+      }
+      if (url.endsWith(runApiPath)) {
+        return jsonResponse(buildPipelineStatusPayload(runRecord, {
+          currentNode: 'review_gate',
+          completedNodes: ['start'],
+        }))
       }
       if (url.endsWith(`${runApiPath}/checkpoint`)) {
         return jsonResponse({
@@ -3463,6 +3590,12 @@ describe('Frontend contract behavior', () => {
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
+        }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({
             pipeline_id: runId,
@@ -3602,6 +3735,12 @@ describe('Frontend contract behavior', () => {
         const url = requestUrl(input)
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({
@@ -3748,6 +3887,12 @@ describe('Frontend contract behavior', () => {
       const url = requestUrl(input)
       if (url.includes('/attractor/runs')) {
         return jsonResponse({ runs: [runRecord] })
+      }
+      if (url.endsWith(runApiPath)) {
+        return jsonResponse(buildPipelineStatusPayload(runRecord, {
+          currentNode: 'review_gate',
+          completedNodes: ['start'],
+        }))
       }
       if (url.endsWith(`${runApiPath}/checkpoint`)) {
         return jsonResponse({
@@ -3896,6 +4041,12 @@ describe('Frontend contract behavior', () => {
         const url = requestUrl(input)
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({
@@ -4095,6 +4246,12 @@ describe('Frontend contract behavior', () => {
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
+        }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({
             pipeline_id: runId,
@@ -4256,6 +4413,12 @@ describe('Frontend contract behavior', () => {
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
+        }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({
             pipeline_id: runId,
@@ -4396,6 +4559,12 @@ describe('Frontend contract behavior', () => {
         const url = requestUrl(input)
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({
@@ -4578,6 +4747,12 @@ describe('Frontend contract behavior', () => {
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
         }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
+        }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({
             pipeline_id: runId,
@@ -4725,6 +4900,12 @@ describe('Frontend contract behavior', () => {
         const url = requestUrl(input)
         if (url.includes('/attractor/runs')) {
           return jsonResponse({ runs: [runRecord] })
+        }
+        if (url.endsWith(runApiPath)) {
+          return jsonResponse(buildPipelineStatusPayload(runRecord, {
+            currentNode: 'review_gate',
+            completedNodes: ['start'],
+          }))
         }
         if (url.endsWith(`${runApiPath}/checkpoint`)) {
           return jsonResponse({

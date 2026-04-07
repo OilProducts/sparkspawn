@@ -17,6 +17,7 @@ import type { RunRecord } from './model/shared'
 import type { RunDetailSessionState } from '@/state/viewSessionTypes'
 import { buildRunsScopeKey, getRunsSelectedRunIdForScope } from '@/state/runsSessionScope'
 import { InlineNotice } from '@/ui'
+import { requestRunsTransportReconnect } from './services/runsTransportReconnect'
 
 const runRecordsMatch = (left: RunRecord | null, right: RunRecord | null) => {
     if (left === right) {
@@ -62,6 +63,9 @@ export function RunsPanel() {
     const globalSelectedRunId = useStore((state) => state.selectedRunId)
     const selectedRunId = getRunsSelectedRunIdForScope(runsListSession, activeProjectPath) ?? globalSelectedRunId
     const selectedRunRecord = useStore((state) => state.selectedRunRecord)
+    const selectedRunStatusFetchedAtMs = useStore((state) => state.selectedRunStatusFetchedAtMs)
+    const selectedRunStatusSync = useStore((state) => state.selectedRunStatusSync)
+    const selectedRunStatusError = useStore((state) => state.selectedRunStatusError)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const setSelectedRunSnapshot = useStore((state) => state.setSelectedRunSnapshot)
     const setViewMode = useStore((state) => state.setViewMode)
@@ -74,15 +78,13 @@ export function RunsPanel() {
     const setPlanId = useStore((state) => state.setPlanId)
     const {
         error,
-        fetchRuns,
         isLoading,
-        isRefreshing,
-        metadataFreshness,
-        now,
         scopedRuns,
         selectedRunSummary,
         setRuns,
         status,
+        streamError,
+        streamStatus,
         summary,
     } = useRunsList({
         activeProjectPath,
@@ -90,26 +92,34 @@ export function RunsPanel() {
         selectedRunId,
         manageSync: false,
     })
-    const { requestCancel } = useRunActions({
-        fetchRuns,
-        setRuns,
-    })
+    const { requestCancel } = useRunActions({ setRuns })
     const selectedRunDetailSession = useStore((state) => (
         selectedRunId ? state.runDetailSessionsByRunId[selectedRunId] ?? null : null
     ))
     const hasScopedSelectedRun = selectedRunId
         ? scopedRuns.some((run) => run.run_id === selectedRunId)
         : false
+    const authoritativeSelectedRunRecord = selectedRunRecord?.run_id === selectedRunId
+        ? selectedRunRecord
+        : null
     const selectedRunSessionRecord = selectedRunDetailSession?.summaryRecord ?? null
     const selectedRun =
-        selectedRunSummary
-            ?? (
-                selectedRunSessionRecord
-                && selectedRunSessionRecord.run_id === selectedRunId
-                && (isLoading || Boolean(error) || hasScopedSelectedRun || scopedRuns.length === 0)
-                    ? selectedRunSessionRecord
-                    : null
-            )
+        authoritativeSelectedRunRecord
+        ?? (
+            selectedRunSessionRecord
+            && selectedRunSessionRecord.run_id === selectedRunId
+                ? selectedRunSessionRecord
+                : (
+                    selectedRunSummary
+                    ?? (
+                        selectedRunSessionRecord
+                        && selectedRunSessionRecord.run_id === selectedRunId
+                        && (isLoading || Boolean(error) || hasScopedSelectedRun || scopedRuns.length === 0)
+                            ? selectedRunSessionRecord
+                            : null
+                    )
+                )
+        )
     const selectedRunTimelineId = selectedRun?.run_id ?? null
     const {
         artifactDownloadHref,
@@ -176,7 +186,6 @@ export function RunsPanel() {
     } = useRunTimeline({
         pendingQuestionSnapshots,
         selectedRunTimelineId,
-        manageSync: false,
     })
     const selectedRunSessionState = useStore((state) => (
         selectedRun?.run_id ? state.runDetailSessionsByRunId[selectedRun.run_id] ?? null : null
@@ -208,6 +217,13 @@ export function RunsPanel() {
         && !selectedRun
         && status !== 'ready'
         && status !== 'error'
+    const degradedTransportLabels = [
+        ...(streamStatus === 'degraded' ? ['run list'] : []),
+        ...(selectedRunStatusSync === 'degraded' ? ['selected run'] : []),
+    ]
+    const showRunsTransportReconnectNotice = degradedTransportLabels.length > 0
+    const runsTransportError = [streamError, selectedRunStatusError].filter(Boolean).join(' ')
+    const now = Date.now()
 
     const selectRun = (run: RunRecord) => {
         setRunsSelectedRunIdForScope(
@@ -220,6 +236,12 @@ export function RunsPanel() {
 
     useEffect(() => {
         if (!selectedRunId || !selectedRunSummary) {
+            return
+        }
+        if (
+            selectedRunStatusFetchedAtMs !== null
+            || (selectedRunSessionState?.statusFetchedAtMs ?? null) !== null
+        ) {
             return
         }
         if (
@@ -238,6 +260,7 @@ export function RunsPanel() {
         selectedRunSessionRecord,
         selectedRunSessionState?.completedNodesSnapshot,
         selectedRunSessionState?.statusFetchedAtMs,
+        selectedRunStatusFetchedAtMs,
         selectedRunSummary,
         setSelectedRunSnapshot,
     ])
@@ -285,22 +308,33 @@ export function RunsPanel() {
             data-responsive-layout={isNarrowViewport ? 'stacked' : 'split'}
             className={`h-full flex-1 ${isNarrowViewport ? 'overflow-auto p-3' : 'flex min-h-0 flex-col overflow-hidden p-6'}`}
         >
+            {showRunsTransportReconnectNotice ? (
+                <div className="mb-4">
+                    <InlineNotice data-testid="runs-transport-reconnect-banner" tone="warning">
+                        Live run transport degraded for {degradedTransportLabels.join(' and ')}.
+                        {runsTransportError ? ` ${runsTransportError}` : ''}
+                        <button
+                            type="button"
+                            data-testid="runs-transport-reconnect-button"
+                            onClick={() => {
+                                requestRunsTransportReconnect()
+                            }}
+                            className="ml-2 inline-flex text-xs font-semibold underline underline-offset-4"
+                        >
+                            Reconnect
+                        </button>
+                    </InlineNotice>
+                </div>
+            ) : null}
             <div className={`w-full ${isNarrowViewport ? 'space-y-6' : 'flex min-h-0 flex-1 overflow-hidden'}`}>
                 <RunList
                     activeProjectPath={activeProjectPath}
                     error={error}
-                    isLoading={isLoading}
-                    isRefreshing={isRefreshing}
-                    metadataFreshness={metadataFreshness}
-                    onRefresh={() => {
-                        void fetchRuns()
-                    }}
                     scopeMode={scopeMode}
                     onScopeModeChange={(mode) => {
                         updateRunsListSession({ scopeMode: mode })
                     }}
                     status={status}
-                    now={now}
                     onSelectRun={selectRun}
                     runs={scopedRuns}
                     selectedRunId={selectedRunId}

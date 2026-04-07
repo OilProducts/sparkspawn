@@ -23,7 +23,6 @@ import { useRunTimelineStream } from './useRunTimelineStream'
 type UseRunTimelineArgs = {
     pendingQuestionSnapshots: PendingQuestionSnapshot[]
     selectedRunTimelineId: string | null
-    manageSync?: boolean
 }
 
 const DEFAULT_TIMELINE_SESSION = {
@@ -40,7 +39,6 @@ const DEFAULT_TIMELINE_SESSION = {
 export function useRunTimeline({
     pendingQuestionSnapshots,
     selectedRunTimelineId,
-    manageSync = true,
 }: UseRunTimelineArgs) {
     const runDetailSessionsByRunId = useStore((state) => state.runDetailSessionsByRunId)
     const updateRunDetailSession = useStore((state) => state.updateRunDetailSession)
@@ -57,7 +55,6 @@ export function useRunTimeline({
         timelineEvents,
     } = useRunTimelineStream({
         selectedRunTimelineId,
-        manageSync,
     })
 
     const timelineTypeOptions = useMemo(

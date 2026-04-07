@@ -34,11 +34,6 @@ describe('RunList', () => {
             <RunList
                 activeProjectPath="/tmp/project-one"
                 error={null}
-                isLoading={true}
-                isRefreshing={false}
-                metadataFreshness="refreshing"
-                now={Date.now()}
-                onRefresh={vi.fn()}
                 onScopeModeChange={vi.fn()}
                 onSelectRun={vi.fn()}
                 runs={[]}
@@ -53,16 +48,11 @@ describe('RunList', () => {
         expect(screen.queryByTestId('run-list-scroll-region')).not.toBeInTheDocument()
     })
 
-    it('keeps the run history visible during background refresh', () => {
+    it('renders run rows without polling-era refresh affordances', () => {
         render(
             <RunList
                 activeProjectPath="/tmp/project-one"
                 error={null}
-                isLoading={false}
-                isRefreshing={true}
-                metadataFreshness="refreshing"
-                now={Date.now()}
-                onRefresh={vi.fn()}
                 onScopeModeChange={vi.fn()}
                 onSelectRun={vi.fn()}
                 runs={[makeRun({ flow_name: 'refreshing.dot' })]}
@@ -76,5 +66,6 @@ describe('RunList', () => {
         expect(screen.queryByTestId('run-list-loading')).not.toBeInTheDocument()
         expect(screen.getByTestId('run-list-scroll-region')).toBeVisible()
         expect(screen.getByText('refreshing.dot')).toBeVisible()
+        expect(screen.queryByTestId('runs-refresh-button')).not.toBeInTheDocument()
     })
 })

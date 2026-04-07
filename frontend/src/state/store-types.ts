@@ -238,9 +238,6 @@ export interface RunInspectorSlice {
         fetchedAtMs?: number | null
     }) => void
     setSelectedRunStatusSync: (status: SelectedRunStatusSync, error?: string | null) => void
-    runRecordOverrides: Record<string, Partial<RunRecord>>
-    setRunRecordOverride: (runId: string, patch: Partial<RunRecord> | null) => void
-    clearRunRecordOverrides: () => void
     runGraphAttrs: GraphAttrs
     replaceRunGraphAttrs: (attrs: GraphAttrs) => void
     runDiagnostics: DiagnosticEntry[]

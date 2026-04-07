@@ -35,23 +35,6 @@ export const createRunInspectorSlice: StateCreator<AppState, [], [], RunInspecto
             selectedRunStatusSync: status,
             selectedRunStatusError: error,
         }),
-    runRecordOverrides: {},
-    setRunRecordOverride: (runId, patch) =>
-        set((state) => {
-            const nextOverrides = { ...state.runRecordOverrides }
-            if (!patch) {
-                delete nextOverrides[runId]
-            } else {
-                nextOverrides[runId] = {
-                    ...(state.runRecordOverrides[runId] ?? {}),
-                    ...patch,
-                }
-            }
-            return {
-                runRecordOverrides: nextOverrides,
-            }
-        }),
-    clearRunRecordOverrides: () => set({ runRecordOverrides: {} }),
     runGraphAttrs: {},
     replaceRunGraphAttrs: (attrs) =>
         set({
