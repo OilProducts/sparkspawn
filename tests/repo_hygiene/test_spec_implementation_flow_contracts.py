@@ -72,6 +72,28 @@ def test_spec_implementation_milestone_worker_validates_item_queue_before_next_i
     assert ("final_milestone_audit", "next_item", "Extend") not in edge_targets
 
 
+def test_spec_implementation_milestone_worker_handles_partial_success_on_status_envelope_judgment_nodes() -> None:
+    graph = _load_graph("implement-milestone.dot")
+
+    edge_targets = _edge_targets(graph)
+    assert ("assess_validation", "implement_current", "Fix Validation Partial") in edge_targets
+    assert ("assess_validation", "mark_current_blocked", "Blocked Validation Partial") in edge_targets
+    assert ("assess_validation", "rewrite_current", "Rewrite Validation Partial") in edge_targets
+    assert ("blocked_exit", "done", "Finish Partial Blocked") in edge_targets
+    assert ("final_milestone_audit", "validate_item_plan", "Extend Partial") in edge_targets
+    assert ("final_milestone_audit", "blocked_exit", "Blocked Partial") in edge_targets
+    assert ("gate_item_completion", "prepare_validation", "Revalidate Partial") in edge_targets
+    assert ("gate_item_completion", "blocked_exit", "Blocked State Partial") in edge_targets
+    assert ("next_item", "plan_current", "Work Partial") in edge_targets
+    assert ("next_item", "final_milestone_audit", "Audit Partial") in edge_targets
+    assert ("next_item", "blocked_exit", "Blocked Partial") in edge_targets
+    assert ("review_current", "implement_current", "Fix Partial") in edge_targets
+    assert ("review_current", "mark_current_blocked", "Block Partial") in edge_targets
+    assert ("review_current", "rewrite_current", "Rewrite Partial") in edge_targets
+    assert ("validate_active_item_state", "blocked_exit", "Blocked State Partial") in edge_targets
+    assert ("validate_item_plan", "extract_items", "Reextract Partial") in edge_targets
+
+
 def test_spec_implementation_parent_flow_commits_after_milestone_acceptance() -> None:
     graph = _load_graph("implement-spec.dot")
 
@@ -99,6 +121,26 @@ def test_spec_implementation_parent_flow_validates_milestone_plan_before_dispatc
     assert ("validate_milestone_plan", "plan_milestones", "Replan") in edge_targets
     assert ("plan_milestones", "next_milestone", "") not in edge_targets
     assert ("rewrite_milestones", "next_milestone", "") not in edge_targets
+
+
+def test_spec_implementation_parent_flow_handles_partial_success_on_status_envelope_judgment_nodes() -> None:
+    graph = _load_graph("implement-spec.dot")
+
+    edge_targets = _edge_targets(graph)
+    assert ("audit_milestone", "run_milestone", "Extend") in edge_targets
+    assert ("audit_milestone", "blocked_exit", "Blocked Partial") in edge_targets
+    assert ("audit_milestone", "rewrite_milestones", "Rewrite Milestones Partial") in edge_targets
+    assert ("blocked_exit", "done", "Finish Partial Blocked") in edge_targets
+    assert ("evaluate_architecture", "revise_architecture", "Request Partial Rework") in edge_targets
+    assert ("evaluate_architecture", "blocked_exit", "Blocked Partial") in edge_targets
+    assert ("final_conformance_audit", "plan_milestones", "Extend Partial") in edge_targets
+    assert ("final_conformance_audit", "blocked_exit", "Blocked Partial") in edge_targets
+    assert ("next_milestone", "run_milestone", "Work Partial") in edge_targets
+    assert ("next_milestone", "final_conformance_audit", "Audit Partial") in edge_targets
+    assert ("next_milestone", "blocked_exit", "Blocked Partial") in edge_targets
+    assert ("repository_integrity_audit", "plan_cleanup_milestone", "Cleanup Partial") in edge_targets
+    assert ("repository_integrity_audit", "blocked_exit", "Blocked Partial") in edge_targets
+    assert ("validate_milestone_plan", "plan_milestones", "Replan Partial") in edge_targets
 
 
 def test_spec_implementation_parent_flow_automates_architecture_evaluation() -> None:
@@ -180,6 +222,7 @@ def test_spec_implementation_flow_prompts_encode_repository_integrity_rubric() -
     audit_prompt = str(parent_graph.nodes["audit_milestone"].attrs["prompt"].value)
     assert "honestly deliverable" in audit_prompt
     assert "test-only bootstrap hacks" in audit_prompt
+    assert "outcome partial_success with preferred_label Extend" in audit_prompt
 
     integrity_prompt = str(parent_graph.nodes["repository_integrity_audit"].attrs["prompt"].value)
     assert ".specflow/repository-integrity-gaps.md" in integrity_prompt
