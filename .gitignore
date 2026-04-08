@@ -1,4 +1,5 @@
 agent-notes.md
+node_modules/
 __pycache__/
 *.pyc
 *.egg-info/
@@ -9,3 +10,4 @@ artifacts/
 frontend/.tmp-*/
 src/spark_app/ui_dist/
 .idea/
+.planflow/
