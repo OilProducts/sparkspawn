@@ -123,6 +123,38 @@ def test_spec_implementation_parent_flow_validates_milestone_plan_before_dispatc
     assert ("rewrite_milestones", "next_milestone", "") not in edge_targets
 
 
+def test_spec_implementation_parent_flow_tracks_contract_decisions_through_architecture_and_milestones() -> None:
+    graph = _load_graph("implement-spec.dot")
+
+    design_prompt = str(graph.nodes["design_architecture"].attrs["prompt"].value)
+    assert ".specflow/contract-decisions.json" in design_prompt
+    assert "top-level decisions array" in design_prompt
+    assert "behavioral_contract" in design_prompt
+    assert "implementation_contract" in design_prompt
+    assert "validation_expectations" in design_prompt
+
+    evaluate_prompt = str(graph.nodes["evaluate_architecture"].attrs["prompt"].value)
+    assert ".specflow/contract-decisions.json" in evaluate_prompt
+    assert "silently narrow, rename, or reinterpret" in evaluate_prompt
+
+    revise_prompt = str(graph.nodes["revise_architecture"].attrs["prompt"].value)
+    assert "Update .specflow/contract-decisions.json" in revise_prompt
+
+    plan_prompt = str(graph.nodes["plan_milestones"].attrs["prompt"].value)
+    assert "decision_ids" in plan_prompt
+    assert "Every relevant contract decision must appear" in plan_prompt
+
+    validate_prompt = str(graph.nodes["validate_milestone_plan"].attrs["prompt"].value)
+    assert ".specflow/contract-decisions.json" in validate_prompt
+    assert "every relevant decision is covered" in validate_prompt
+    assert "do not contradict their bound decisions" in validate_prompt
+
+    next_prompt = str(graph.nodes["next_milestone"].attrs["prompt"].value)
+    assert "context.milestone.decision_ids" in next_prompt
+    writes_context = str(graph.nodes["next_milestone"].attrs["spark.writes_context"].value)
+    assert "context.milestone.decision_ids" in writes_context
+
+
 def test_spec_implementation_parent_flow_handles_partial_success_on_status_envelope_judgment_nodes() -> None:
     graph = _load_graph("implement-spec.dot")
 
@@ -215,6 +247,45 @@ def test_spec_implementation_flow_uses_gpt_54_for_judgment_heavy_nodes() -> None
     assert "llm_model" not in child_graph.nodes["implement_current"].attrs
 
 
+def test_spec_implementation_child_flow_binds_items_to_contract_decisions() -> None:
+    graph = _load_graph("implement-milestone.dot")
+
+    prepare_state_reads = str(graph.nodes["prepare_milestone_state"].attrs["spark.reads_context"].value)
+    assert "context.milestone.decision_ids" in prepare_state_reads
+
+    extract_prompt = str(graph.nodes["extract_items"].attrs["prompt"].value)
+    assert ".specflow/architecture.md" in extract_prompt
+    assert ".specflow/contract-decisions.json" in extract_prompt
+    assert "decision_ids" in extract_prompt
+    assert "rather than buried only in notes" in extract_prompt
+
+    next_prompt = str(graph.nodes["next_item"].attrs["prompt"].value)
+    assert "context.item.decision_ids" in next_prompt
+    next_writes = str(graph.nodes["next_item"].attrs["spark.writes_context"].value)
+    assert "context.item.decision_ids" in next_writes
+
+    plan_prompt = str(graph.nodes["plan_current"].attrs["prompt"].value)
+    assert ".specflow/contract-decisions.json" in plan_prompt
+    assert "Convert the item's decision_ids into explicit implementation and validation goals" in plan_prompt
+    plan_reads = str(graph.nodes["plan_current"].attrs["spark.reads_context"].value)
+    assert "context.item.decision_ids" in plan_reads
+
+    review_prompt = str(graph.nodes["review_current"].attrs["prompt"].value)
+    assert ".specflow/architecture.md" in review_prompt
+    assert ".specflow/contract-decisions.json" in review_prompt
+    assert "weaker contract than the item's bound decisions" in review_prompt
+
+    final_audit_prompt = str(graph.nodes["final_milestone_audit"].attrs["prompt"].value)
+    assert ".specflow/contract-decisions.json" in final_audit_prompt
+    assert "schema including decision_ids" in final_audit_prompt
+    assert "Metadata-only repair items are allowed only when all bound decision_ids are already satisfied" in final_audit_prompt
+
+    validate_prompt = str(graph.nodes["validate_item_plan"].attrs["prompt"].value)
+    assert ".specflow/contract-decisions.json" in validate_prompt
+    assert "every decision bound to the current milestone appears in at least one item's decision_ids" in validate_prompt
+    assert "survives only in notes" in validate_prompt
+
+
 def test_spec_implementation_flow_prompts_encode_repository_integrity_rubric() -> None:
     parent_graph = _load_graph("implement-spec.dot")
     child_graph = _load_graph("implement-milestone.dot")
@@ -231,6 +302,7 @@ def test_spec_implementation_flow_prompts_encode_repository_integrity_rubric() -
 
     cleanup_prompt = str(parent_graph.nodes["plan_cleanup_milestone"].attrs["prompt"].value)
     assert "empty requirement_ids list" in cleanup_prompt
+    assert "empty decision_ids" in cleanup_prompt
 
     plan_prompt = str(child_graph.nodes["plan_current"].attrs["prompt"].value)
     assert "public bootstrap and installability" in plan_prompt
