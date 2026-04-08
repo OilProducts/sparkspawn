@@ -5,8 +5,6 @@ export interface RunInitiationFormState {
     backend: string
     model: string | null
     launchContext?: Record<string, unknown> | null
-    specArtifactId: string | null
-    planArtifactId: string | null
 }
 
 export interface PipelineStartPayload {
@@ -16,8 +14,6 @@ export interface PipelineStartPayload {
     model: string | null
     launch_context?: Record<string, unknown> | null
     flow_name: string | null
-    spec_id: string | null
-    plan_id: string | null
 }
 
 export type PipelineContinueFlowSourceMode = 'snapshot' | 'flow_name'
@@ -90,8 +86,6 @@ export function buildPipelineStartPayload(
         backend: form.backend,
         model: form.model,
         flow_name: form.flowSource || null,
-        spec_id: form.specArtifactId,
-        plan_id: form.planArtifactId,
     }
     if (form.launchContext && Object.keys(form.launchContext).length > 0) {
         payload.launch_context = form.launchContext

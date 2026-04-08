@@ -72,11 +72,11 @@ const snapshot: ConversationSnapshotResponse = {
     },
   ],
   event_log: [],
-  spec_edit_proposals: [],
+
   flow_run_requests: [],
   flow_launches: [],
-  execution_cards: [],
-  execution_workflow: null,
+
+
 }
 
 describe('buildConversationTimelineEntries', () => {

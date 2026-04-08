@@ -25,8 +25,8 @@ console.log(dot)
 
 def test_graph_attr_edit_round_trip_serializes_and_rehydrates_item_6_1_04() -> None:
     graph_attrs_input: dict[str, object] = {
-        "spark.title": "Execution Planning",
-        "spark.description": "Turn approved spec edits into execution plans.",
+        "spark.title": "Implement From Plan File",
+        "spark.description": "Snapshot a plan file, implement it, and iterate until complete.",
         "spark.launch_inputs": '[{"key":"context.request.summary","label":"Request Summary","type":"string","description":"Brief request summary.","required":true}]',
         "goal": "Ship release",
         "label": "Release Graph",
@@ -44,8 +44,8 @@ def test_graph_attr_edit_round_trip_serializes_and_rehydrates_item_6_1_04() -> N
     payload = preview_pipeline(flow)
     graph_attrs = payload["graph"]["graph_attrs"]
 
-    assert graph_attrs["spark.title"] == "Execution Planning"
-    assert graph_attrs["spark.description"] == "Turn approved spec edits into execution plans."
+    assert graph_attrs["spark.title"] == "Implement From Plan File"
+    assert graph_attrs["spark.description"] == "Snapshot a plan file, implement it, and iterate until complete."
     assert graph_attrs["spark.launch_inputs"] == '[{"key":"context.request.summary","label":"Request Summary","type":"string","description":"Brief request summary.","required":true}]'
     assert graph_attrs["goal"] == "Ship release"
     assert graph_attrs["label"] == "Release Graph"

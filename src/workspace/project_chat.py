@@ -4,7 +4,6 @@ import json
 import logging
 import threading
 import uuid
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 from spark.authoring_assets import (
@@ -17,7 +16,6 @@ from workspace.project_chat_common import (
     iso_now as _iso_now,
     log_project_chat_debug as _log_project_chat_debug,
     normalize_flow_run_request_payload as _normalize_flow_run_request_payload,
-    normalize_spec_edit_proposal_payload as _normalize_spec_edit_proposal_payload,
     normalize_project_path_value as _normalize_project_path,
     parse_chat_response_payload as _parse_chat_response_payload,
     summarize_turns_for_debug as _summarize_turns_for_debug,
@@ -31,11 +29,8 @@ from workspace.project_chat_models import (
     ConversationSessionState,
     ConversationState,
     ConversationTurn,
-    ExecutionCard,
     FlowRunRequest,
-    ExecutionWorkflowLaunchSpec,
     PreparedChatTurn,
-    SpecEditProposal,
     ToolCallRecord,
 )
 from workspace.project_chat_reviews import ProjectChatReviewService
@@ -46,7 +41,6 @@ from workspace.project_chat_storage import ProjectChatRepository
 from workspace.prompt_templates import (
     load_prompt_templates,
     render_chat_prompt,
-    render_execution_planning_prompt,
 )
 from workspace.storage import ProjectPaths
 
@@ -121,17 +115,8 @@ class ProjectChatService:
     def _conversation_raw_log_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         return self._repository.conversation_raw_log_path(conversation_id, project_path)
 
-    def _workflow_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
-        return self._repository.workflow_state_path(conversation_id, project_path)
-
-    def _proposals_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
-        return self._repository.proposals_state_path(conversation_id, project_path)
-
     def _flow_run_requests_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         return self._repository.flow_run_requests_state_path(conversation_id, project_path)
-
-    def _execution_cards_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
-        return self._repository.execution_cards_state_path(conversation_id, project_path)
 
     def _touch_conversation_state(self, state: ConversationState, *, title_hint: Optional[str] = None) -> None:
         self._repository.touch_conversation_state(state, title_hint=title_hint)
@@ -201,21 +186,6 @@ class ProjectChatService:
 
     def _append_event(self, state: ConversationState, message: str) -> None:
         self._repository.append_event(state, message)
-
-    def _persist_spec_edit_proposal(
-        self,
-        state: ConversationState,
-        parent_turn: ConversationTurn,
-        spec_proposal_payload: dict[str, Any],
-        *,
-        assistant_message_fallback: str = "",
-    ) -> Optional[tuple[SpecEditProposal, ConversationSegment]]:
-        return self._reviews.persist_spec_edit_proposal(
-            state,
-            parent_turn,
-            spec_proposal_payload,
-            assistant_message_fallback=assistant_message_fallback,
-        )
 
     def _next_turn_segment_order(self, state: ConversationState, turn_id: str) -> int:
         return self._repository.next_turn_segment_order(state, turn_id)
@@ -442,31 +412,6 @@ class ProjectChatService:
                 "flow_validation_command": "spark flow validate --file <path> --text",
                 "recent_conversation": history_text,
                 "latest_user_message": message,
-            },
-        )
-
-    def _build_execution_planning_prompt(
-        self,
-        state: ConversationState,
-        proposal: SpecEditProposal,
-        review_feedback: Optional[str],
-    ) -> str:
-        recent_turns = state.turns[-12:]
-        history_lines = []
-        for turn in recent_turns:
-            if turn.kind != "message":
-                continue
-            history_lines.append(f"{turn.role.upper()}: {turn.content}")
-        history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
-        review_text = review_feedback or "None."
-        proposal_payload = json.dumps(proposal.to_dict(), indent=2, sort_keys=True)
-        return render_execution_planning_prompt(
-            self._prompt_templates.execution_planning,
-            {
-                "project_path": state.project_path,
-                "approved_spec_edit_proposal": proposal_payload,
-                "recent_conversation": history_text,
-                "review_feedback": review_text,
             },
         )
 
@@ -823,40 +768,6 @@ class ProjectChatService:
         )
         return self._run_prepared_turn(prepared, progress_callback)
 
-    def reject_spec_edit(self, conversation_id: str, project_path: str, proposal_id: str) -> dict[str, Any]:
-        return self._reviews.reject_spec_edit(conversation_id, project_path, proposal_id)
-
-    def create_spec_edit_proposal(
-        self,
-        conversation_id: str,
-        project_path: str,
-        payload: dict[str, Any],
-    ) -> dict[str, object]:
-        normalized_project_path = _normalize_project_path(project_path)
-        if not normalized_project_path:
-            raise ValueError("Project path is required.")
-        normalized_payload = _normalize_spec_edit_proposal_payload(
-            payload,
-            source_name="spark convo spec-proposal",
-        )
-        return self._reviews.create_spec_edit_proposal(
-            conversation_id,
-            normalized_project_path,
-            normalized_payload,
-        )
-
-    def create_spec_edit_proposal_by_handle(
-        self,
-        conversation_handle: str,
-        payload: dict[str, Any],
-    ) -> dict[str, object]:
-        conversation_id, project_path = self._repository.resolve_conversation_handle(conversation_handle)
-        result = self.create_spec_edit_proposal(conversation_id, project_path, payload)
-        return {
-            **result,
-            "conversation_handle": conversation_handle,
-        }
-
     def resolve_conversation_handle(self, conversation_handle: str) -> tuple[str, str]:
         return self._repository.resolve_conversation_handle(conversation_handle)
 
@@ -922,14 +833,6 @@ class ProjectChatService:
             "conversation_handle": conversation_handle,
         }
 
-    def approve_spec_edit(
-        self,
-        conversation_id: str,
-        project_path: str,
-        proposal_id: str,
-    ) -> tuple[dict[str, Any], SpecEditProposal]:
-        return self._reviews.approve_spec_edit(conversation_id, project_path, proposal_id)
-
     def review_flow_run_request(
         self,
         conversation_id: str,
@@ -949,63 +852,6 @@ class ProjectChatService:
             flow_name,
             model,
         )
-
-    def mark_execution_workflow_started(
-        self,
-        conversation_id: str,
-        workflow_run_id: str,
-        flow_source: Optional[str],
-    ) -> dict[str, Any]:
-        return self._reviews.mark_execution_workflow_started(conversation_id, workflow_run_id, flow_source)
-
-    def prepare_execution_workflow_launch(
-        self,
-        conversation_id: str,
-        proposal_id: str,
-        review_feedback: Optional[str],
-    ) -> ExecutionWorkflowLaunchSpec:
-        return self._reviews.prepare_execution_workflow_launch(
-            conversation_id,
-            proposal_id,
-            review_feedback,
-            build_execution_planning_prompt=self._build_execution_planning_prompt,
-        )
-
-    def complete_execution_workflow(
-        self,
-        conversation_id: str,
-        proposal_id: str,
-        flow_source: Optional[str],
-        execution_flow_source: Optional[str],
-        workflow_run_id: str,
-        raw_response: str,
-    ) -> ExecutionCard:
-        return self._reviews.complete_execution_workflow(
-            conversation_id,
-            proposal_id,
-            flow_source,
-            execution_flow_source,
-            workflow_run_id,
-            raw_response,
-        )
-
-    def fail_execution_workflow(
-        self,
-        conversation_id: str,
-        workflow_run_id: str,
-        flow_source: Optional[str],
-        error: str,
-    ) -> dict[str, Any]:
-        return self._reviews.fail_execution_workflow(conversation_id, workflow_run_id, flow_source, error)
-
-    def note_execution_card_dispatched(
-        self,
-        conversation_id: str,
-        execution_card_id: str,
-        run_id: str,
-        flow_source: Optional[str],
-    ) -> dict[str, Any]:
-        return self._reviews.note_execution_card_dispatched(conversation_id, execution_card_id, run_id, flow_source)
 
     def note_flow_run_request_launched(
         self,
@@ -1042,21 +888,3 @@ class ProjectChatService:
         error: str,
     ) -> dict[str, Any]:
         return self._reviews.fail_flow_launch(conversation_id, launch_id, flow_name, error)
-
-    def review_execution_card(
-        self,
-        conversation_id: str,
-        project_path: str,
-        execution_card_id: str,
-        disposition: str,
-        message: str,
-        flow_source: Optional[str],
-    ) -> tuple[dict[str, Any], ExecutionCard, Optional[str], Optional[str]]:
-        return self._reviews.review_execution_card(
-            conversation_id,
-            project_path,
-            execution_card_id,
-            disposition,
-            message,
-            flow_source,
-        )

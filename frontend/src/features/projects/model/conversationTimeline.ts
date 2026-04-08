@@ -107,16 +107,6 @@ function buildAssistantTimelineEntries(
             hadWorkActivity = true
             return
         }
-        if (segment.kind === 'spec_edit_proposal' && segment.artifact_id) {
-            entries.push({
-                id: segment.id,
-                kind: 'spec_edit_proposal',
-                role: 'system',
-                artifactId: segment.artifact_id,
-                timestamp: segment.timestamp,
-            })
-            return
-        }
         if (segment.kind === 'flow_run_request' && segment.artifact_id) {
             entries.push({
                 id: segment.id,
@@ -136,15 +126,6 @@ function buildAssistantTimelineEntries(
                 timestamp: segment.timestamp,
             })
             return
-        }
-        if (segment.kind === 'execution_card' && segment.artifact_id) {
-            entries.push({
-                id: segment.id,
-                kind: 'execution_card',
-                role: 'system',
-                artifactId: segment.artifact_id,
-                timestamp: segment.timestamp,
-            })
         }
     })
 

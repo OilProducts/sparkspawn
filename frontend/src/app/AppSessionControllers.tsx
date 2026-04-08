@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 
 import { usePersistProjectState } from '@/features/projects/hooks/usePersistProjectState'
 import { useConversationStream } from '@/features/projects/hooks/useConversationStream'
@@ -10,7 +10,6 @@ import { useRunsList } from '@/features/runs/hooks/useRunsList'
 import { useRunTimeline } from '@/features/runs/hooks/useRunTimeline'
 import type { RunRecord } from '@/features/runs/model/shared'
 import { useTriggersList } from '@/features/triggers/hooks/useTriggersList'
-import type { ProjectGitMetadata } from '@/features/projects/model/presentation'
 import type {
     ConversationSegmentUpsertEventResponse,
     ConversationSnapshotResponse,
@@ -175,13 +174,6 @@ export function HomeSessionController() {
     const updateProjectSessionState = useStore((state) => state.updateProjectSessionState)
     const updateHomeProjectSession = useStore((state) => state.updateHomeProjectSession)
     const persistProjectState = usePersistProjectState(upsertProjectRegistryEntry)
-    const setProjectGitMetadata: Dispatch<SetStateAction<Record<string, ProjectGitMetadata>>> = useCallback((next) => {
-        const current = useStore.getState().homeProjectGitMetadataByPath
-        const resolved = typeof next === 'function' ? next(current) : next
-        useStore.setState(() => ({
-            homeProjectGitMetadataByPath: resolved,
-        }))
-    }, [])
     const {
         applyConversationSnapshot,
         applyConversationStreamEvent,
@@ -189,7 +181,6 @@ export function HomeSessionController() {
     } = useProjectConversationCache({
         persistProjectState,
         projectSessionsByPath,
-        setProjectGitMetadata,
         updateProjectSessionState,
     })
 
@@ -253,15 +244,7 @@ export function HomeSessionController() {
     }, [updateHomeProjectSession])
 
     const activateConversationThread = useCallback((projectPath: string, conversationId: string) => {
-        updateProjectSessionState(projectPath, {
-            conversationId,
-            specId: null,
-            specStatus: 'draft',
-            specProvenance: null,
-            planId: null,
-            planStatus: 'draft',
-            planProvenance: null,
-        })
+        updateProjectSessionState(projectPath, { conversationId })
         void persistProjectState(projectPath, {
             active_conversation_id: conversationId,
             last_accessed_at: new Date().toISOString(),

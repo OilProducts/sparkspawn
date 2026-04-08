@@ -87,7 +87,6 @@ export function TriggerEditor({
                         <option value="poll">Poll</option>
                         <option value="webhook">Webhook</option>
                         <option value="flow_event">Flow Event</option>
-                        {protectedTrigger ? <option value="workspace_event">Workspace Event</option> : null}
                     </NativeSelect>
                 </FieldRow>
                 <FieldRow label="Execution Target" htmlFor={fieldId('execution-target')} className="text-sm">

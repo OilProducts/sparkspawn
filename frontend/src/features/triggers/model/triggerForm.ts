@@ -75,9 +75,6 @@ export function triggerSourceSummary(trigger: TriggerResponse): string {
     if (trigger.source_type === 'webhook') {
         return `Webhook · key ${String(trigger.source.webhook_key ?? '')}`
     }
-    if (trigger.source_type === 'workspace_event') {
-        return `System event · ${String(trigger.source.event_name ?? '')}`
-    }
     return `Flow event · ${String(trigger.source.flow_name ?? 'any flow')}`
 }
 

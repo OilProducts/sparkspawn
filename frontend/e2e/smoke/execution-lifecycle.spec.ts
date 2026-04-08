@@ -4,6 +4,7 @@ import {
   createFlowForSmokeTest,
   deleteFlowAfterSmoke,
   ensureScreenshotDir,
+  gotoWithRegisteredProject,
   screenshotPath,
   stubProjectMetadata,
 } from '../fixtures/smoke-helpers'
@@ -49,9 +50,7 @@ test("warning-only diagnostics still allow execute with explicit banner for item
       await route.continue()
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -150,9 +149,7 @@ test("diagnostics transitions toggle execute blocking and warning state for item
       await route.continue()
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -202,74 +199,38 @@ test("diagnostics transitions toggle execute blocking and warning state for item
   }
 })
 
-test("planning/build failures show diagnostics and rerun affordances for item 8.5-05", async ({ page }) => {
-  const projectPath = `/tmp/ui-smoke-project-workflow-failure-${Date.now()}`
-  const flowName = await createFlowForSmokeTest(page, "ui-smoke-workflow-failure")
+test("launch failures surface diagnostics and retry affordances for direct runs", async ({ page }) => {
+  const projectPath = `/tmp/ui-smoke-project-launch-failure-${Date.now()}`
+  const flowName = await createFlowForSmokeTest(page, "ui-smoke-launch-failure")
+  let pipelineStartAttempts = 0
 
   try {
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
-
-    await page.getByTestId("nav-mode-editor").click()
-    const flowButton = page.getByRole("button", { name: flowName })
-    await expect(flowButton).toBeVisible()
-    await flowButton.click()
-    await expect(page.getByTestId("top-nav-active-flow")).not.toContainText("No active flow")
-
-    await page.getByTestId("nav-mode-projects").click()
-
-    const specEntrypoint = page.getByTestId("project-spec-entrypoint")
-    await specEntrypoint.getByRole("button").click()
-    await page.getByTestId("project-spec-approve-for-plan-button").click()
-    await expect(page.getByText("Spec status:")).toContainText("approved")
-
-    await page.route("**/workspace/api/projects/metadata?*", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ branch: "main" }),
-      })
-    })
-    await page.route("**/attractor/api/flows/*", async (route) => {
+    await page.route("**/attractor/pipelines", async (route) => {
+      pipelineStartAttempts += 1
       await route.fulfill({
         status: 500,
         contentType: "application/json",
-        body: JSON.stringify({ error: "forced smoke launch failure" }),
+        body: JSON.stringify({ detail: "forced smoke launch failure" }),
       })
     })
 
-    await page.getByTestId("project-plan-generation-launch-button").click()
-    await expect(page.getByTestId("project-plan-failure-diagnostics")).toBeVisible()
-    await expect(page.getByTestId("project-plan-failure-message")).toBeVisible()
-    await expect(page.getByTestId("project-plan-generation-rerun-button")).toBeEnabled()
-    await page.screenshot({ path: screenshotPath("20a-plan-failure-rerun-enabled.png"), fullPage: true })
-
-    await page.getByTestId("project-spec-edit-proposal-preview-button").click()
-    await expect(page.getByTestId("project-spec-edit-proposal-preview")).toBeVisible()
-    page.once("dialog", async (dialog) => {
-      await dialog.accept()
-    })
-    await page.getByTestId("project-spec-edit-proposal-apply-button").click()
-    await expect(page.getByText("Spec status:")).toContainText("draft")
-    await expect(page.getByTestId("project-plan-generation-rerun-button")).toBeDisabled()
-    await expect(page.getByTestId("project-plan-generation-rerun-disabled-reason")).toBeVisible()
-    await page.screenshot({ path: screenshotPath("20b-plan-failure-rerun-disabled.png"), fullPage: true })
-
-    const planEntrypoint = page.getByTestId("project-plan-entrypoint")
-    await planEntrypoint.getByRole("button").click()
-    await page.getByTestId("project-plan-approve-button").click()
-
+    await gotoWithRegisteredProject(page, projectPath)
+    await page.getByTestId("nav-mode-execution").click()
+    const flowButton = page.getByRole("button", { name: flowName })
+    await expect(flowButton).toBeVisible()
+    await flowButton.click()
+    await expect(page.getByTestId("execution-launch-panel")).toBeVisible()
+    await expect(page.getByTestId("execution-launch-flow-name")).toContainText(flowName)
     await page.getByTestId("execute-button").click()
-    await expect(page.getByTestId("build-workflow-failure-diagnostics")).toBeVisible()
-    await expect(page.getByTestId("build-workflow-failure-message")).toBeVisible()
-    await expect(page.getByTestId("build-workflow-rerun-button")).toBeEnabled()
-    await page.screenshot({ path: screenshotPath("20c-build-failure-rerun-enabled.png"), fullPage: true })
+    await expect(page.getByTestId("run-start-error-banner")).toContainText("forced smoke launch failure")
+    await expect(page.getByTestId("launch-failure-diagnostics")).toBeVisible()
+    await expect(page.getByTestId("launch-failure-message")).toContainText("forced smoke launch failure")
+    await expect(page.getByTestId("launch-retry-button")).toBeEnabled()
+    await expect.poll(() => pipelineStartAttempts).toBe(1)
+    await page.screenshot({ path: screenshotPath("20-launch-failure-retry-enabled.png"), fullPage: true })
 
-    await page.getByTestId("project-plan-reject-button").click()
-    await expect(page.getByTestId("build-workflow-rerun-button")).toBeDisabled()
-    await expect(page.getByTestId("build-workflow-rerun-disabled-reason")).toBeVisible()
-    await page.screenshot({ path: screenshotPath("20d-build-failure-rerun-disabled.png"), fullPage: true })
+    await page.getByTestId("launch-retry-button").click()
+    await expect.poll(() => pipelineStartAttempts).toBe(2)
   } finally {
     await deleteFlowAfterSmoke(page, flowName)
   }

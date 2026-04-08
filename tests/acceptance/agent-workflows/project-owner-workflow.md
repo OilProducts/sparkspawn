@@ -2,7 +2,7 @@
 
 ## Goal
 
-Verify that a project owner can work inside a single project-scoped Home workflow from conversation through spec-edit review and execution-card review.
+Verify that a project owner can work inside a single project-scoped Home workflow from conversation through flow-run request review and execution follow-through.
 
 ## Preconditions
 
@@ -16,17 +16,16 @@ Verify that a project owner can work inside a single project-scoped Home workflo
 2. Select or create a project conversation thread.
 3. Send a project-scoped message in chat.
 4. Observe streaming assistant activity and any inline tool calls.
-5. Review any proposed spec-edit card that appears.
-6. Approve or reject the spec-edit card explicitly.
-7. If approved, observe workflow progress in the workflow event log.
-8. Review the resulting execution card when it appears in the conversation timeline.
-9. Approve, reject, or request revision on the execution card.
-10. If approved and supported by the selected flow, continue toward build execution.
+5. Review any proposed flow-run request card that appears.
+6. Approve or reject the flow-run request explicitly.
+7. If approved, observe launch progress in the workflow event log.
+8. If a direct launch is used instead, confirm the conversation records the launched run.
+9. Continue toward build execution when supported by the selected flow.
 
 ## Expected Outcomes
 
 - Threaded project chat remains scoped to the active project.
 - Tool activity and assistant output are visible in the conversation timeline.
-- Spec edits are explicit review artifacts, not silent mutations.
-- Execution planning returns as an execution card in the same conversation context.
+- Flow-run requests are explicit review artifacts, not silent launches.
+- Direct launches remain visible in the same conversation context.
 - Workflow/system progress stays in the event log rather than polluting the chat timeline.

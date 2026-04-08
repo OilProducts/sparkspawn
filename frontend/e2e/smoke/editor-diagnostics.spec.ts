@@ -4,7 +4,10 @@ import {
   createFlowForSmokeTest,
   deleteFlowAfterSmoke,
   ensureScreenshotDir,
+  gotoWithRegisteredProject,
+  registerProjectForSmokeTest,
   screenshotPath,
+  stubProjectRegistration,
   stubProjectMetadata,
 } from '../fixtures/smoke-helpers'
 
@@ -21,9 +24,11 @@ test.afterEach(async ({ page }) => {
 })
 
 test("primary UI shells render and can be navigated", async ({ page }) => {
+  const projectPath = "/tmp/ui-smoke-project"
   const flowName = await createFlowForSmokeTest(page, "ui-smoke-shell")
 
   try {
+    await stubProjectRegistration(page, projectPath)
     await page.goto("/")
 
     await expect(page.getByTestId("top-nav")).toBeVisible()
@@ -32,32 +37,15 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
     await expect(page.getByTestId("nav-mode-settings")).toBeVisible()
     await expect(page.getByTestId("nav-mode-runs")).toBeVisible()
     await expect(page.getByTestId("projects-panel")).toBeVisible()
-    await expect(page.getByTestId("canvas-workspace-primary")).toHaveCount(0)
+    await expect(page.getByTestId("canvas-workspace-primary")).toHaveAttribute("data-canvas-active", "false")
     await page.screenshot({ path: screenshotPath("01-projects-shell.png"), fullPage: true })
 
-    await page.getByTestId("project-path-input").fill("/tmp/ui-smoke-project")
-    await page.getByTestId("project-register-button").click()
-    await expect(page.getByTestId("project-registry-list").getByText("/tmp/ui-smoke-project")).toBeVisible()
-    await expect(page.getByTestId("project-metadata-name")).toBeVisible()
-    await expect(page.getByTestId("project-metadata-directory")).toBeVisible()
-    await expect(page.getByTestId("project-metadata-branch")).toBeVisible()
-    await expect(page.getByTestId("project-metadata-last-activity")).toBeVisible()
-    await expect(page.getByTestId("project-metadata-branch")).toContainText("Branch:")
-    await expect(page.getByTestId("project-metadata-last-activity")).toContainText("Last activity:")
-    await expect(page.getByTestId("project-metadata-last-activity")).not.toContainText("No activity yet")
-    await page.getByTestId("project-metadata-last-activity").scrollIntoViewIfNeeded()
-    await expect(page.getByTestId("top-nav-active-project")).toContainText("/tmp/ui-smoke-project")
+    await registerProjectForSmokeTest(page, projectPath)
+    await expect(page.getByTestId("top-nav-project-switcher")).toContainText("ui-smoke-project")
+    await expect(page.getByTestId("project-thread-list")).toBeVisible()
+    await expect(page.getByTestId("project-event-log-surface")).toBeVisible()
+    await expect(page.getByTestId("project-ai-conversation-surface")).toBeVisible()
     await page.screenshot({ path: screenshotPath("02-projects-panel.png"), fullPage: true })
-
-    const proposalPreviewButton = page.getByTestId("project-spec-edit-proposal-preview-button")
-    await expect(proposalPreviewButton).toBeVisible()
-    await proposalPreviewButton.click()
-    const proposalPreview = page.getByTestId("project-spec-edit-proposal-preview")
-    await expect(proposalPreview).toBeVisible()
-    await expect(proposalPreview).toContainText("Proposal preview")
-    await expect(proposalPreview).toContainText("Before:")
-    await expect(proposalPreview).toContainText("After:")
-    await page.screenshot({ path: screenshotPath("02b-spec-edit-proposal-preview.png"), fullPage: true })
 
     await page.getByTestId("nav-mode-editor").click()
     const flowButton = page.getByRole("button", { name: flowName })
@@ -82,18 +70,18 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
     await page.screenshot({ path: screenshotPath("05-edge-inspector.png"), fullPage: true })
 
     await page.getByTestId("nav-mode-execution").click()
-    await expect(page.getByTestId("canvas-workspace-primary")).toBeVisible()
-    await expect(page.getByText("Terminal Output")).toBeVisible()
+    await expect(page.getByTestId("execution-launch-panel")).toBeVisible()
+    await expect(page.getByTestId("execution-no-flow-state")).toBeVisible()
     await page.screenshot({ path: screenshotPath("06-execution-panel.png"), fullPage: true })
 
     await page.getByTestId("nav-mode-settings").click()
     await expect(page.getByTestId("settings-panel")).toBeVisible()
-    await expect(page.getByTestId("canvas-workspace-primary")).toHaveCount(0)
+    await expect(page.getByTestId("canvas-workspace-primary")).toHaveAttribute("data-canvas-active", "false")
     await page.screenshot({ path: screenshotPath("07-settings-panel.png"), fullPage: true })
 
     await page.getByTestId("nav-mode-runs").click()
     await expect(page.getByTestId("runs-panel")).toBeVisible()
-    await expect(page.getByTestId("canvas-workspace-primary")).toHaveCount(0)
+    await expect(page.getByTestId("canvas-workspace-primary")).toHaveAttribute("data-canvas-active", "false")
     await page.screenshot({ path: screenshotPath("08-runs-panel.png"), fullPage: true })
   } finally {
     await deleteFlowAfterSmoke(page, flowName)
@@ -129,9 +117,7 @@ test("prompt edits trigger live preview diagnostics before blur for item 5.1-03"
       await route.continue()
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -196,9 +182,7 @@ test("medium graph performance profile renders optimizations for item 13.3-02", 
       })
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -260,9 +244,7 @@ test("validation panel supports filter and sort controls for item 7.1-01", async
       await route.continue()
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -343,9 +325,7 @@ test("inline node and edge diagnostic badges render for item 7.1-02", async ({ p
       await route.continue()
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -438,9 +418,7 @@ test("inspector field-level diagnostics map to matching fields for item 7.1-03",
       await route.continue()
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -528,9 +506,7 @@ test("validation diagnostics navigate to matching canvas entities for item 7.3-0
       await route.continue()
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -608,9 +584,7 @@ test("stylesheet parse diagnostics render in graph settings for item 6.5-02", as
       await route.continue()
     })
 
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })
@@ -648,9 +622,7 @@ test("stylesheet selector/effective previews render in graph settings for item 6
   const flowName = await createFlowForSmokeTest(page, "ui-smoke-stylesheet-preview")
 
   try {
-    await page.goto("/")
-    await page.getByTestId("project-path-input").fill(projectPath)
-    await page.getByTestId("project-register-button").click()
+    await gotoWithRegisteredProject(page, projectPath)
     await page.getByTestId("nav-mode-editor").click()
 
     const flowButton = page.getByRole("button", { name: flowName })

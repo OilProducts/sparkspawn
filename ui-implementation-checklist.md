@@ -46,7 +46,7 @@ Status key:
 - [x] [3.1-01] Capture author/operator/reviewer/project-owner workflows as high-level acceptance assets. (See `tests/acceptance/agent-workflows/`.)
 
 ### 3.2 Primary Workflows
-- Deferred to `Deferred Tasks` until project-scoped conversation/spec/plan/build surfaces exist.
+- Deferred to `Deferred Tasks` until the remaining project-scoped conversation, launch, and audit workflows have full end-to-end coverage.
 
 ---
 
@@ -64,9 +64,9 @@ Status key:
 ### 4.2 Project Scope and Invariants
 - [x] [4.2-01] Implement project registry keyed by unique directory path and reject duplicate registrations.
 - [x] [4.2-03] Enforce exactly one active project for authoring/execution actions.
-- [x] [4.2-04] Scope conversations/specs/plans/runs/artifacts to active project boundaries.
+- [x] [4.2-04] Scope conversations/runs/artifacts to active project boundaries.
 - [x] [4.2-05] Prevent cross-project context and file leakage across navigation and run transitions.
-- [x] [4.2-06] Expose project-scoped conversation/spec/plan entry points in the Projects area.
+- [x] [4.2-06] Expose project-scoped conversation and run-history entry points in the Projects area.
 
 ### 4.3 Projects Workspace Requirements
 - [x] [4.3-01] Implement create/register project UX from local directory path.
@@ -99,13 +99,13 @@ Status key:
 - [x] [5.4-01] Require an active project for mutating flow edits and run start actions.
 - [x] [5.4-03] Reset flow/run/conversation selections correctly on project switch with no hidden state carryover.
 
-### 5.5 AI Conversation and Spec Authoring Loop
+### 5.5 AI Conversation Loop
 - [x] [5.5-01] Implement project-scoped AI conversation surface for start/continue flows.
 - [x] [5.5-02] Persist and render conversation history per project.
-- [x] [5.5-03] Implement explicit proposal UX for AI-generated spec edits (preview before apply).
-- [x] [5.5-04] Require explicit user confirmation before applying proposed spec edits.
-- [x] [5.5-05] Ensure reject actions do not mutate spec files.
-- [x] [5.5-06] Add tests proving proposal artifacts and conversation context remain project-isolated.
+- [x] [5.5-03] Retired on 2026-04-07 with removal of the proposal-review workflow from project chat.
+- [x] [5.5-04] Retired on 2026-04-07 with removal of the proposal-review workflow from project chat.
+- [x] [5.5-05] Retired on 2026-04-07 with removal of the proposal-review workflow from project chat.
+- [x] [5.5-06] Retired on 2026-04-07 with removal of the proposal-review workflow from project chat.
 
 ---
 
@@ -194,15 +194,8 @@ Status key:
 - [x] [8.4-01] Keep execution controls/status visible in canvas footer during active runs.
 - [x] [8.4-02] Ensure footer reflects current run identity and terminal state.
 
-### 8.5 Spec -> Plan -> Build Workflow Orchestration
-- [x] [8.5-01] Implement plan-generation workflow launch from approved project spec state.
-- Deferred to `Deferred Tasks` until project-scoped plan artifact persistence/retrieval APIs exist.
-- [x] [8.5-03] Implement plan gate controls (`approve`, `reject`, `request-revision`) with clear state transitions.
-- [x] [8.5-04] Enforce build workflow launch from approved plan state only.
-- [x] [8.5-05] Implement planning/build failure diagnostics with rerun affordances.
-  - Evidence: Evaluator marked this `pass` with UI-smoke visual QA covering enabled/disabled rerun states for planning and build failures (`20a`-`20d` screenshots).
-- [x] [8.5-06] Ensure live status/log/artifact surfaces support both planning and build workflows.
-  - Evidence: Shared execution-footer status/log/artifact surfaces now serve planning + build launches (`tests/integration/test_ui_plan_build_live_surfaces.py`), with UI-smoke visual evidence in `frontend/artifacts/ui-smoke/06-execution-panel.png`.
+### 8.5 Removed Spec/Plan Workflow (Historical)
+- Historical note: former items `8.5-01` through `8.5-06` were retired on 2026-04-07 when spec proposals and execution cards were removed from project chat. Current execution requirements are covered by sections `8.1` through `8.4`.
 
 ---
 
@@ -253,8 +246,7 @@ Status key:
   - Evidence (2026-03-03): Evaluator `pass`; `/attractor/runs` now supports project-scoped filtering via `project_path` with normalized scope matching against durable run metadata (`project_path`/`working_directory`), covered by `tests/api/test_runs_endpoint.py::test_list_runs_filters_durable_history_by_project_item_9_6_01`.
 - [x] [9.6-02] Include project identity and available Git metadata on run records.
   - Evidence (2026-03-03): Evaluator `pass`; `RunsPanel` run-history rows now render per-record `Project`, `Branch`, and `Commit` metadata with dedicated test hooks, covered by `tests/integration/test_ui_run_history_traceability.py` and UI-smoke visual QA screenshot `frontend/artifacts/ui-smoke/08p-runs-panel-run-history-traceability.png`.
-- [x] [9.6-03] Link run records to associated spec/plan artifacts when available.
-  - Evidence (2026-03-03): Evaluator `pass`; run-start payload and durable run metadata now carry `spec_id`/`plan_id`, and `RunsPanel` run-history rows render clickable spec/plan artifact links, covered by `tests/api/test_runs_endpoint.py`, `tests/integration/test_ui_execution_run_initiation.py`, `tests/integration/test_ui_run_history_traceability.py`, and ui-smoke screenshot `frontend/artifacts/ui-smoke/08q-runs-panel-run-history-spec-plan-links.png`.
+- [x] [9.6-03] Retired on 2026-04-07 with removal of chat-owned spec/plan artifacts from current product scope.
 - [x] [9.6-04] Add audit-focused tests for timestamp completeness and historical reconstruction.
   - Evidence (2026-03-03): Evaluator `pass`; `/attractor/runs` now backfills missing `started_at`/`ended_at` from `run.log` for durable history reconstruction, covered by `tests/api/test_runs_endpoint.py::test_list_runs_backfills_missing_timestamps_from_run_log_item_9_6_04` and `tests/api/test_runs_endpoint.py::test_list_runs_reconstructs_timestamp_ordering_from_run_logs_item_9_6_04`.
 
@@ -331,18 +323,13 @@ Status key:
 ### 11.5 Project Workspace Persistence
 - [x] [11.5-01] Persist project registry across sessions with unique-directory enforcement.
   - Evidence (2026-03-04): Evaluator `pass`; added persisted project-registry load/save hydration (`spark.project_registry_state`) with normalized absolute-path dedupe and duplicate-directory enforcement retained in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) and screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
-- [x] [11.5-02] Persist and restore project-scoped conversation/spec/plan linkage.
-  - Evidence (2026-03-04): Evaluator `pass`; normalized project-key hydration now restores persisted `conversationId`/`specId`/`planId` linkage for project-scoped workspaces in `frontend/src/store.ts`, covered by frontend contract `CID:11.5.02` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`) with screenshot-based visual QA review using `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
+- [x] [11.5-02] Persist and restore project-scoped conversation linkage.
+  - Evidence (2026-04-07): current workspace state stores `conversationId` in `projectSessionsByPath`, and project registry hydration restores `activeConversationId` into that field in `frontend/src/state/store-types.ts` and `frontend/src/state/workspaceSlice.ts`.
 - [x] [11.5-03] Rehydrate last active project context safely on reopen.
   - Evidence (2026-03-11): active project reopen now restores only project-scoped workspace context such as `activeFlow`; run inspection is no longer persisted in route or project workspace state, leaving run provenance durable but run selection ephemeral (`frontend/src/store.ts`, `frontend/src/components/ProjectsPanel.tsx`, `frontend/src/components/RunStream.tsx`, `frontend/src/components/RunsPanel.tsx`).
 
-### 11.6 Spec and Plan Artifact Provenance
-- [x] [11.6-01] Store spec/plan provenance metadata or references for workflow-generated artifacts.
-  - Evidence (2026-03-04): Evaluator `pass`; project-scoped workspace persistence now stores/restores `specProvenance` and `planProvenance` references in `frontend/src/store.ts`, with workflow-origin provenance stamping on spec proposal apply and plan-generation launch in `frontend/src/components/ProjectsPanel.tsx`, covered by frontend contract `CID:11.6.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`).
-- [x] [11.6-02] Ensure provenance captures run linkage and timestamps, plus branch/commit when available.
-  - Evidence (2026-03-04): Evaluator `pass`; project-scoped provenance now persists/restores `runId` + `capturedAt` with optional `gitBranch`/`gitCommit` context (`frontend/src/store.ts`), workflow stamping now records these fields for spec proposal apply and plan-generation launch (`frontend/src/components/ProjectsPanel.tsx`), and `/workspace/api/projects/metadata` now supplies commit metadata when available (`src/workspace/api.py`), covered by frontend contract `CID:11.6.02`, workflow unit tests, and API metadata tests with screenshot-based visual QA references `frontend/artifacts/ui-smoke/02-projects-panel.png`, `frontend/artifacts/ui-smoke/08b-runs-panel-populated-summary.png`, `frontend/artifacts/ui-smoke/08p-runs-panel-run-history-traceability.png`, and `frontend/artifacts/ui-smoke/08q-runs-panel-run-history-spec-plan-links.png`.
-- [x] [11.6-03] Persist and restore plan status lifecycle (`draft`, `approved`, `rejected`, `revision-requested`).
-  - Evidence (2026-03-04): Evaluator `pass`; added frontend contract `CID:11.6.03` to verify plan-status lifecycle persistence writes for `approved`/`rejected`/`revision-requested`/`draft` and reopen recovery in `frontend/src/components/__tests__/ContractBehavior.test.tsx`, wired through `tests/contracts/frontend/test_project_workspace_persistence_contracts.py`, with screenshot-based visual QA review on `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png`.
+### 11.6 Removed Spec/Plan Artifact Provenance (Historical)
+- Historical note: former items `11.6-01` through `11.6-03` were retired on 2026-04-07 with the hard removal of project-chat spec proposals and execution cards. Project workspace persistence no longer treats spec/plan provenance as current UI state.
 
 ---
 
@@ -369,16 +356,11 @@ Status key:
   - Evidence (2026-03-04): Evaluator `pass`; active-project selection now canonicalizes/validates project paths before state + route persistence (`frontend/src/store.ts`), covered by frontend contract `CID:12.3.01` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`) and screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/01-editor-shell.png` (ui-smoke command reported unrelated backend `ECONNREFUSED`/HTTP 500 failures in other scenarios).
 - [x] [12.3-02] Ensure execution payload/project identity resolves to concrete working-directory context.
   - Evidence (2026-03-04): Evaluator `pass`; execution payload generation now resolves blank/relative working-directory input to concrete project-scoped paths via `resolveExecutionWorkingDirectory` in `frontend/src/lib/pipelineStartPayload.ts`, covered by frontend contract `CID:12.3.02` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`) with screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-editor-shell.png`, `frontend/artifacts/ui-smoke/06-execution-panel.png`, and `frontend/artifacts/ui-smoke/20c-build-failure-rerun-enabled.png` (`just ui-smoke` reported unrelated backend `ECONNREFUSED`/HTTP 500 failures in other scenarios).
-- [x] [12.3-03] Ensure conversation/spec/plan retrieval is keyed by project identity.
-  - Evidence (2026-03-04): Evaluator `pass`; added project-identity keyed retrieval accessor `getProjectScopedArtifactState` with path normalization/absolute-path guards in `frontend/src/store.ts`, covered by frontend contract `CID:12.3.03` in `frontend/src/components/__tests__/ContractBehavior.test.tsx` and Python bridge `tests/contracts/frontend/test_api_integration_contracts.py`, validated by `just test` (`600 passed`) plus screenshot-based visual QA review of `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, and `frontend/artifacts/ui-smoke/08q-runs-panel-run-history-spec-plan-links.png` (`just ui-smoke` had unrelated backend `ECONNREFUSED`/HTTP 500 failures in other scenarios).
+- [x] [12.3-03] Ensure conversation retrieval is keyed by project identity.
+  - Evidence (2026-04-07): conversation API adapters require both `conversationId` and `projectPath`, and the Home controller restores conversation scope through project-keyed state in `frontend/src/lib/api/conversationsApi.ts` and `frontend/src/features/projects/hooks/useProjectsHomeController.ts`.
 
-### 12.4 Workflow Orchestration Contract
-- [x] [12.4-03] Integrate plan-generation invocation/status contract with degraded-state handling.
-  - Evidence (2026-03-04): Evaluator `pass`; plan-generation launch now performs validated `/pipelines/{id}` status retrieval and surfaces explicit degraded-state messaging without aborting successful launches (`frontend/src/components/ProjectsPanel.tsx`), covered by frontend contract `CID:12.4.03` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`) plus workflow integration coverage (`frontend/src/components/__tests__/ProjectSpecWorkflow.test.tsx`) and screenshot-based visual QA references `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, `frontend/artifacts/ui-smoke/20a-plan-failure-rerun-enabled.png`, and `frontend/artifacts/ui-smoke/20b-plan-failure-rerun-disabled.png`.
-- [x] [12.4-04] Integrate plan approval/rejection/revision transition contract.
-  - Evidence (2026-03-05): Evaluator `pass`; plan gate transitions now enforce UI contract state changes with explicit approval/rejection/revision audit messages in `frontend/src/components/ProjectsPanel.tsx`, covered by frontend contract `CID:12.4.04` (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`) and screenshot-based visual QA review on `frontend/artifacts/ui-smoke/01-projects-shell.png`, `frontend/artifacts/ui-smoke/02-projects-panel.png`, `frontend/artifacts/ui-smoke/20a-plan-failure-rerun-enabled.png`, and `frontend/artifacts/ui-smoke/20b-plan-failure-rerun-disabled.png` (`just ui-smoke` reported unrelated backend `ECONNREFUSED`/HTTP 500 failures in other scenarios).
-- [x] [12.4-05] Integrate build invocation-from-approved-plan contract and error paths.
-  - Evidence (2026-03-05): Evaluator `pass`; added frontend contract `CID:12.4.05` to verify unapproved-plan launch gating surfaces build-failure diagnostics without network invocation and approved-plan launch failures preserve rerun affordances + `plan_id` payload propagation (`frontend/src/components/__tests__/ContractBehavior.test.tsx`, `tests/contracts/frontend/test_api_integration_contracts.py`), with Navbar gate-failure diagnostics wiring in `frontend/src/components/Navbar.tsx` and screenshot-based visual QA references `frontend/artifacts/ui-smoke/20c-build-failure-rerun-enabled.png`, `frontend/artifacts/ui-smoke/20d-build-failure-rerun-disabled.png`, `frontend/artifacts/ui-smoke/01-editor-shell.png`, and `frontend/artifacts/ui-smoke/01-projects-shell.png` (`just ui-smoke` reported unrelated failures in other scenarios).
+### 12.4 Removed Workflow Orchestration Contract (Historical)
+- Historical note: former items `12.4-01` through `12.4-05` were retired on 2026-04-07 with removal of spec proposals, execution cards, and the follow-on spec/plan/build workflow. Current validated client adapters focus on conversation, flow-run request review, direct launches, and run inspection.
 
 ---
 
@@ -489,15 +471,11 @@ Status key:
 - [ ] [14.14-02] Add CI parity job that fails on uncovered checklist items.
 - [ ] [14.14-03] Publish parity certification evidence bundle for release readiness.
 
-### 14.15 E15 - Spec-to-Plan Conversation Workflow (P0)
-- [ ] [14.15-01] Implement project-scoped AI conversation and spec-drafting UX end-to-end.
-- [ ] [14.15-02] Implement explicit proposal/review/apply flow for AI spec edits.
-- [ ] [14.15-03] Add isolation and durability tests for conversation history + proposal artifacts per project.
+### 14.15 E15 - Historical Project-Chat Workflow (Retired)
+- Historical note: former items `14.15-01` through `14.15-03` were retired on 2026-04-07 with removal of the proposal-driven spec authoring workflow.
 
-### 14.16 E16 - Plan Governance and Build Launch (P0)
-- [ ] [14.16-01] Implement plan-generation and persisted plan artifact workflow.
-- [ ] [14.16-02] Implement plan governance state machine and operator controls.
-- [ ] [14.16-03] Implement approved-plan build launch path with traceability and recovery UX.
+### 14.16 E16 - Historical Plan Governance Workflow (Retired)
+- Historical note: former items `14.16-01` through `14.16-03` were retired on 2026-04-07 with removal of the spec/plan/build governance chain from project chat.
 
 ---
 
@@ -510,9 +488,9 @@ Status key:
 - [ ] [15-05] Verify human gates are fully operable for all supported question types.
 - [ ] [15-06] Verify frontend build/lint/tests and parity e2e suite are green.
 - [ ] [15-07] Verify Projects is first-class and unique-directory + Git invariants + project isolation are enforced.
-- [ ] [15-08] Verify project-scoped AI conversation/spec-authoring loop with explicit apply/reject gates is fully operable.
-- [ ] [15-09] Verify spec->plan->build orchestration with plan approval gates is fully operable.
-- [ ] [15-10] Verify per-project history/provenance supports audit reconstruction of spec/plan/build outcomes.
+- [ ] [15-08] Verify project-scoped AI conversation and flow-run request review are fully operable.
+- [ ] [15-09] Verify direct launch and approved flow-run request paths are fully operable.
+- [ ] [15-10] Verify per-project history/provenance supports audit reconstruction of conversation, launch, and run outcomes.
 
 ---
 
@@ -589,7 +567,7 @@ Status key:
 - [ ] [B-16] Implement + test project registration with unique-directory enforcement.
 - [ ] [B-17] Implement + test Git-repository gating for project-scoped workflow starts.
 - [ ] [B-18] Implement + test active-project deep-link and restoration behavior.
-- [ ] [B-19] Implement + test project-scoped conversation/spec/plan/run linkage.
+- [ ] [B-19] Implement + test project-scoped conversation/run linkage.
 - [ ] [B-20] Implement + test cross-project context/file isolation guarantees.
 
 ---
@@ -597,7 +575,7 @@ Status key:
 ## Appendix C: User Story Coverage Map
 
 - [ ] [C-01] Add a maintained story-to-spec-to-checklist trace matrix for all `US-*` IDs.
-- [ ] [C-02] Add acceptance tests that collectively cover every story cluster (project selection, conversation/spec, plan/build governance, traceability).
+- [ ] [C-02] Add acceptance tests that collectively cover every story cluster (project selection, conversation/launch, run governance, traceability).
 - [ ] [C-03] Add CI gate failing when any `US-*` story lacks mapped implementation evidence.
 
 ---
@@ -605,17 +583,17 @@ Status key:
 ## Deferred Tasks
 
 - [ ] [1.2-02] Add CI acceptance checks proving the full journey works without raw DOT fallback.
-  Deferred because the required full-journey UI surfaces (project registration/selection and project-scoped conversation/spec/plan flow) are not yet implemented, so a CI proof would be non-representative.
+  Deferred because the required full-journey UI surfaces (project registration/selection plus project-scoped conversation and launch flows) are not yet implemented, so a CI proof would be non-representative.
 - [ ] [3.1-02] Add role-oriented smoke tests (project onboarding, authoring, live operation, post-run audit).
   Deferred because project onboarding and active-project workflow surfaces from `spark-ui-ux.md` are not yet implemented, so role smoke tests would be partial and misleading.
 - [ ] [3.2-01] Implement workflow guardrails from create/open to iterate/re-run as explicit state machine transitions.
-  Deferred because the required project-scoped workflow surfaces (project registry/Git gating, conversation/spec loop, and spec->plan->build chain) are not yet implemented in the UI.
+  Deferred because the required project-scoped workflow surfaces (project registry/Git gating, conversation loop, and launch/re-run path) are not yet implemented in the UI.
 - [ ] [3.2-02] Add test coverage for the full 12-step primary workflow sequence (project registration/selection through re-run).
-  Deferred because the project registration/Git gating and project-scoped conversation/spec/plan/run surfaces required by `spark-ui-ux.md` are not yet implemented for behavioral end-to-end coverage.
+  Deferred because the project registration/Git gating and project-scoped conversation/run surfaces required by `spark-ui-ux.md` are not yet implemented for behavioral end-to-end coverage.
 - [ ] [3.2-03] Ensure every step has a first-class UI surface (no hidden or CLI-only transition).
-  Deferred because the required project-scoped conversation/spec/plan/build surfaces are not implemented yet, so the workflow still has unavoidable non-UI transitions.
-- [ ] [3.2-04] Add explicit workflow coverage for project-scoped AI conversation -> spec refinement -> plan generation/approval -> build execution chain.
-  Deferred because the project-scoped conversation/spec/plan/build chain is not fully implemented, so coverage would only validate placeholders instead of the real workflow.
+  Deferred because the required project-scoped conversation and launch surfaces are not implemented yet, so the workflow still has unavoidable non-UI transitions.
+- [ ] [3.2-04] Add explicit workflow coverage for project-scoped AI conversation -> flow-run request review -> launch execution chain.
+  Deferred because the project-scoped conversation/review/launch chain is not fully implemented, so coverage would only validate placeholders instead of the real workflow.
 - [ ] [4-02] Add deterministic deep-link state for active project/flow/run/conversation and panel selection.
   Deferred because active-project identity and project-scoped conversation state are not implemented yet, so full deep-link determinism cannot be validated end-to-end.
 - [ ] [4.2-02] Enforce Git-repository requirement before workflow execution (with explicit initialize path when user confirms).
@@ -636,9 +614,3 @@ Status key:
   Deferred because the current frontend/API model and serializer flatten subgraph/default scopes, so the test would fail on known model loss instead of catching regressions.
 - [ ] [8.2-02] Provide Pause/Resume controls when backend/API supports them.
   Deferred because the current UI/API contract only exposes `/pipelines/{id}/cancel` with no pause/resume endpoint or capability metadata to drive those controls safely.
-- [ ] [8.5-02] Persist generated implementation plans to project files with visible status/provenance.
-  Deferred because the current API/UI contract has no project-scoped plan artifact write/read endpoint (only flow save and pipeline launch), so file persistence with visible status/provenance cannot be implemented correctly yet.
-- [ ] [12.4-01] Integrate project-scoped conversation turn/history contract in UI client adapters.
-  Deferred because `spark-workspace.md` section 12.4 requires backend workflow-orchestration contracts, but the current API surface has no project-scoped conversation turn/history endpoint to integrate or validate against.
-- [ ] [12.4-02] Integrate spec-edit proposal/apply/reject contract with schema validation.
-  Deferred because the current backend API surface does not expose a project-scoped spec-edit proposal/apply/reject contract endpoint for validated client adapters.

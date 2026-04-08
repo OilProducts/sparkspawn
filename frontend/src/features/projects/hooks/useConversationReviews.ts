@@ -1,13 +1,8 @@
 import { useState } from 'react'
 import {
-    approveSpecEditProposalValidated,
-    rejectSpecEditProposalValidated,
-    reviewExecutionCardValidated,
     reviewFlowRunRequestValidated,
     type ConversationSnapshotResponse,
-    type ExecutionCardResponse,
     type FlowRunRequestResponse,
-    type SpecEditProposalResponse,
 } from '@/lib/workspaceClient'
 import { useDialogController } from '@/ui'
 
@@ -30,109 +25,8 @@ export function useConversationReviews({
     model,
     setPanelError,
 }: UseConversationReviewsArgs) {
-    const { confirm, prompt } = useDialogController()
-    const [pendingSpecProposalId, setPendingSpecProposalId] = useState<string | null>(null)
+    const { prompt } = useDialogController()
     const [pendingFlowRunRequestId, setPendingFlowRunRequestId] = useState<string | null>(null)
-    const [pendingExecutionCardId, setPendingExecutionCardId] = useState<string | null>(null)
-
-    const onApproveSpecEditProposal = async (proposal: SpecEditProposalResponse) => {
-        if (!activeProjectPath || !activeConversationId) {
-            return
-        }
-        const confirmed = await confirm({
-            title: 'Apply spec edits?',
-            description: 'Approve these spec edits, commit them to git, and start execution planning?',
-            confirmLabel: 'Approve and plan',
-            cancelLabel: 'Cancel',
-        })
-        if (!confirmed) {
-            return
-        }
-
-        setPendingSpecProposalId(proposal.id)
-        setPanelError(null)
-        try {
-            const snapshot = await approveSpecEditProposalValidated(activeConversationId, proposal.id, {
-                project_path: activeProjectPath,
-                model: model.trim() || null,
-            })
-            applyConversationSnapshot(activeProjectPath, snapshot, 'spec-approve')
-        } catch (error) {
-            const message = formatErrorMessage(error, 'Unable to approve the spec edit proposal.')
-            setPanelError(message)
-            appendLocalProjectEvent(`Spec edit approval failed: ${message}`)
-        } finally {
-            setPendingSpecProposalId(null)
-        }
-    }
-
-    const onRejectSpecEditProposal = async (proposal: SpecEditProposalResponse) => {
-        if (!activeProjectPath || !activeConversationId) {
-            return
-        }
-
-        setPendingSpecProposalId(proposal.id)
-        setPanelError(null)
-        try {
-            const snapshot = await rejectSpecEditProposalValidated(activeConversationId, proposal.id, {
-                project_path: activeProjectPath,
-            })
-            applyConversationSnapshot(activeProjectPath, snapshot, 'spec-reject')
-        } catch (error) {
-            const message = formatErrorMessage(error, 'Unable to reject the spec edit proposal.')
-            setPanelError(message)
-            appendLocalProjectEvent(`Spec edit rejection failed: ${message}`)
-        } finally {
-            setPendingSpecProposalId(null)
-        }
-    }
-
-    const onReviewExecutionCard = async (
-        executionCard: ExecutionCardResponse,
-        disposition: 'approved' | 'rejected' | 'revision_requested',
-    ) => {
-        if (!activeProjectPath || !activeConversationId) {
-            return
-        }
-
-        const reviewMessage = disposition === 'approved'
-            ? 'Approved for dispatch.'
-            : await prompt({
-                title: disposition === 'revision_requested'
-                    ? 'Request execution-card revision'
-                    : 'Reject execution card',
-                description: disposition === 'revision_requested'
-                    ? 'Describe what should change before execution planning is regenerated.'
-                    : 'Describe why this execution card should be rejected.',
-                label: 'Review feedback',
-                confirmLabel: disposition === 'revision_requested' ? 'Request revision' : 'Reject card',
-                cancelLabel: 'Cancel',
-                multiline: true,
-                requireInput: true,
-            }) || ''
-
-        if (!reviewMessage) {
-            return
-        }
-
-        setPendingExecutionCardId(executionCard.id)
-        setPanelError(null)
-        try {
-            const snapshot = await reviewExecutionCardValidated(activeConversationId, executionCard.id, {
-                project_path: activeProjectPath,
-                disposition,
-                message: reviewMessage,
-                model: model.trim() || null,
-            })
-            applyConversationSnapshot(activeProjectPath, snapshot, 'execution-review')
-        } catch (error) {
-            const message = formatErrorMessage(error, 'Unable to review the execution card.')
-            setPanelError(message)
-            appendLocalProjectEvent(`Execution card review failed: ${message}`)
-        } finally {
-            setPendingExecutionCardId(null)
-        }
-    }
 
     const onReviewFlowRunRequest = async (
         flowRunRequest: FlowRunRequestResponse,
@@ -178,12 +72,7 @@ export function useConversationReviews({
     }
 
     return {
-        onApproveSpecEditProposal,
-        onRejectSpecEditProposal,
-        onReviewExecutionCard,
         onReviewFlowRunRequest,
-        pendingExecutionCardId,
         pendingFlowRunRequestId,
-        pendingSpecProposalId,
     }
 }

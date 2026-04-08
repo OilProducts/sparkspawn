@@ -25,7 +25,6 @@ export type RuntimeStatus =
     | 'completed'
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict'
 export type SaveErrorKind = 'parse_error' | 'validation_error' | 'conflict' | 'network' | 'http' | 'unknown'
-export type PlanStatus = 'draft' | 'approved' | 'rejected' | 'revision-requested'
 export type SelectedRunStatusSync = 'idle' | 'loading' | 'ready' | 'degraded'
 export type { ResourceStatus }
 
@@ -87,15 +86,6 @@ export interface ProjectRegistrationResult {
 export interface ProjectEventLogEntry {
     message: string
     timestamp: string
-}
-
-export interface ArtifactProvenanceReference {
-    source: string
-    referenceId: string
-    capturedAt: string
-    runId?: string | null
-    gitBranch?: string | null
-    gitCommit?: string | null
 }
 
 export interface DiagnosticEntry {
@@ -168,23 +158,9 @@ export interface ProjectSessionState {
     workingDir: string
     conversationId: string | null
     projectEventLog: ProjectEventLogEntry[]
-    specId: string | null
-    specStatus: 'draft' | 'approved'
-    specProvenance?: ArtifactProvenanceReference | null
-    planId: string | null
-    planStatus: PlanStatus
-    planProvenance?: ArtifactProvenanceReference | null
 }
 
 export type ProjectSessionStatePatch = Partial<ProjectSessionState>
-
-export interface ProjectSessionArtifactState {
-    conversationId: string | null
-    specId: string | null
-    specStatus: 'draft' | 'approved'
-    planId: string | null
-    planStatus: PlanStatus
-}
 
 export interface HydratedProjectRecord {
     directoryPath: string
@@ -215,13 +191,6 @@ export interface WorkspaceSlice {
     setConversationId: (id: string | null) => void
     appendProjectEventEntry: (entry: ProjectEventLogEntry) => void
     updateProjectSessionState: (projectPath: string, patch: ProjectSessionStatePatch) => void
-    setSpecId: (id: string | null) => void
-    setSpecStatus: (status: 'draft' | 'approved') => void
-    setSpecProvenance: (provenance: ArtifactProvenanceReference | null) => void
-    setPlanId: (id: string | null) => void
-    setPlanStatus: (status: PlanStatus) => void
-    setPlanProvenance: (provenance: ArtifactProvenanceReference | null) => void
-    getProjectSessionArtifactState: (projectPath: string | null) => ProjectSessionArtifactState | null
 }
 
 export interface RunInspectorSlice {

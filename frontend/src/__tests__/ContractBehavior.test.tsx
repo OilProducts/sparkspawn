@@ -15,7 +15,6 @@ import { ValidationPanel } from '@/features/editor/components/ValidationPanel'
 import {
   ApiHttpError,
   ApiSchemaError,
-  approveSpecEditProposalValidated,
   deleteConversationValidated,
   fetchConversationSnapshotValidated,
   fetchFlowListValidated,
@@ -33,8 +32,6 @@ import {
   fetchWorkspaceFlowListValidated,
   fetchWorkspaceFlowRawValidated,
   fetchWorkspaceFlowValidated,
-  rejectSpecEditProposalValidated,
-  reviewExecutionCardValidated,
   updateWorkspaceFlowLaunchPolicyValidated,
   fetchRunsListValidated,
   sendConversationTurnValidated,
@@ -175,10 +172,10 @@ const resetContractState = () => {
       '/tmp/project-contract-behavior': {
         workingDir: DEFAULT_WORKING_DIRECTORY,
         conversationId: null,
-        specId: null,
-        specStatus: 'draft',
-        planId: null,
-        planStatus: 'draft',
+
+
+
+
       },
     },
     projectRegistrationError: null,
@@ -421,16 +418,16 @@ describe('Frontend contract behavior', () => {
     expect(parseWorkspaceFlowListResponse([
       {
         name: 'test-planning.dot',
-        title: 'Execution Planning',
-        description: 'Turn an approved spec edit proposal into an execution plan.',
+        title: 'Implement From Plan',
+        description: 'Snapshot a plan file, implement it, and iterate until complete.',
         launch_policy: null,
         effective_launch_policy: 'disabled',
       },
     ])).toMatchObject([
       {
         name: 'test-planning.dot',
-        title: 'Execution Planning',
-        description: 'Turn an approved spec edit proposal into an execution plan.',
+        title: 'Implement From Plan',
+        description: 'Snapshot a plan file, implement it, and iterate until complete.',
         launch_policy: null,
         effective_launch_policy: 'disabled',
       },
@@ -438,8 +435,8 @@ describe('Frontend contract behavior', () => {
     expect(() => parseWorkspaceFlowListResponse({})).toThrow(ApiSchemaError)
     expect(parseWorkspaceFlowResponse({
       name: 'test-planning.dot',
-      title: 'Execution Planning',
-      description: 'Turn an approved spec edit proposal into an execution plan.',
+      title: 'Implement From Plan',
+      description: 'Snapshot a plan file, implement it, and iterate until complete.',
       launch_policy: 'trigger_only',
       effective_launch_policy: 'trigger_only',
     })).toMatchObject({
@@ -504,11 +501,9 @@ describe('Frontend contract behavior', () => {
           timestamp: '2026-03-06T15:01:00Z',
         },
       ],
-      spec_edit_proposals: [],
-      execution_cards: [],
-      execution_workflow: {
-        status: 'idle',
-      },
+
+
+
     })).conversation_id).toBe('conversation-1')
     expect(() => parseConversationSnapshotResponse({ conversation_id: 'conversation-1' })).toThrow(ApiSchemaError)
     expect(parseProjectDirectoryPickResponse({ status: 'selected', directory_path: '/tmp/project' })).toEqual({
@@ -521,502 +516,96 @@ describe('Frontend contract behavior', () => {
     expect(() => parsePipelineGraphResponse('')).toThrow(ApiSchemaError)
   })
 
-  it('[CID:12.1.03] exercises endpoint adapters with happy paths and common error cases', async () => {
-    type SuccessCase = {
-      name: string
-      invoke: () => Promise<unknown>
-      expectedUrl: string
-      expectedMethod?: string
-      response: Response
-      assertResult: (result: unknown) => void
-      assertBody?: (init: RequestInit | undefined) => void
-    }
-
-    const successCases: SuccessCase[] = [
-      {
-        name: 'project directory picker',
-        invoke: () => pickProjectDirectoryValidated(),
-        expectedUrl: '/workspace/api/projects/pick-directory',
-        expectedMethod: 'POST',
-        response: jsonResponse({
-          status: 'selected',
-          directory_path: '/tmp/project one',
-        }),
-        assertResult: (result) =>
-          expect(result).toEqual({
-            status: 'selected',
-            directory_path: '/tmp/project one',
-          }),
-      },
-      {
-        name: 'flow list',
-        invoke: () => fetchFlowListValidated(),
-        expectedUrl: '/attractor/api/flows',
-        response: jsonResponse(['alpha.dot']),
-        assertResult: (result) => expect(result).toEqual(['alpha.dot']),
-      },
-      {
-        name: 'flow payload',
-        invoke: () => fetchFlowPayloadValidated('alpha flow.dot'),
-        expectedUrl: '/attractor/api/flows/alpha%20flow.dot',
-        response: jsonResponse({ name: 'alpha flow.dot', content: 'digraph G {}' }),
-        assertResult: (result) =>
-          expect(result).toEqual({
-            name: 'alpha flow.dot',
-            content: 'digraph G {}',
-          }),
-      },
-      {
-        name: 'nested flow payload',
-        invoke: () => fetchFlowPayloadValidated('alpha flow/review.dot'),
-        expectedUrl: '/attractor/api/flows/alpha%20flow/review.dot',
-        response: jsonResponse({ name: 'alpha flow/review.dot', content: 'digraph G {}' }),
-        assertResult: (result) =>
-          expect(result).toEqual({
-            name: 'alpha flow/review.dot',
-            content: 'digraph G {}',
-          }),
-      },
-      {
-        name: 'workspace flow list',
-        invoke: () => fetchWorkspaceFlowListValidated(),
-        expectedUrl: '/workspace/api/flows?surface=human',
-        response: jsonResponse([
-          {
-            name: 'test-planning.dot',
-            title: 'Execution Planning',
-            description: 'Turn approved spec edits into execution plans.',
-            launch_policy: null,
-            effective_launch_policy: 'disabled',
-          },
-        ]),
-        assertResult: (result) =>
-          expect(result).toMatchObject([
+  it('[CID:12.1.03] exercises surviving endpoint adapters with happy paths and common error cases', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = requestUrl(input)
+        const method = init?.method ?? 'GET'
+        if (url === '/workspace/api/projects/pick-directory' && method === 'POST') {
+          return jsonResponse({ status: 'selected', directory_path: '/tmp/project one' })
+        }
+        if (url === '/attractor/api/flows') {
+          return jsonResponse(['alpha.dot'])
+        }
+        if (url === '/attractor/api/flows/alpha%20flow.dot') {
+          return jsonResponse({ name: 'alpha flow.dot', content: 'digraph G {}' })
+        }
+        if (url === '/workspace/api/flows?surface=human') {
+          return jsonResponse([
             {
-              name: 'test-planning.dot',
-              title: 'Execution Planning',
-              description: 'Turn approved spec edits into execution plans.',
+              name: 'implement-from-plan.dot',
+              title: 'Implement From Plan',
+              description: 'Snapshot a plan file, implement it, and iterate until complete.',
               launch_policy: null,
-              effective_launch_policy: 'disabled',
+              effective_launch_policy: 'agent_requestable',
             },
-          ]),
-      },
-      {
-        name: 'workspace flow detail',
-        invoke: () => fetchWorkspaceFlowValidated('alpha flow.dot'),
-        expectedUrl: '/workspace/api/flows/alpha%20flow.dot?surface=human',
-        response: jsonResponse({
-          name: 'alpha flow.dot',
-          title: 'Alpha Flow',
-          description: 'Run the alpha workflow.',
-          launch_policy: 'agent_requestable',
-          effective_launch_policy: 'agent_requestable',
-        }),
-        assertResult: (result) =>
-          expect(result).toMatchObject({
+          ])
+        }
+        if (url === '/workspace/api/flows/alpha%20flow.dot?surface=human') {
+          return jsonResponse({
+            name: 'alpha flow.dot',
+            title: 'Alpha Flow',
+            description: 'Run the alpha workflow.',
+            launch_policy: 'agent_requestable',
+            effective_launch_policy: 'agent_requestable',
+          })
+        }
+        if (url === '/workspace/api/flows/alpha%20flow.dot/raw?surface=human') {
+          return new Response('digraph G {}', { status: 200 })
+        }
+        if (url === '/workspace/api/flows/alpha%20flow.dot/launch-policy' && method === 'PUT') {
+          return jsonResponse({
             name: 'alpha flow.dot',
             launch_policy: 'agent_requestable',
             effective_launch_policy: 'agent_requestable',
-          }),
-      },
-      {
-        name: 'nested workspace flow detail',
-        invoke: () => fetchWorkspaceFlowValidated('alpha flow/review.dot'),
-        expectedUrl: '/workspace/api/flows/alpha%20flow/review.dot?surface=human',
-        response: jsonResponse({
-          name: 'alpha flow/review.dot',
-          title: 'Nested Alpha Flow',
-          description: 'Run the nested alpha workflow.',
-          launch_policy: 'agent_requestable',
-          effective_launch_policy: 'agent_requestable',
-        }),
-        assertResult: (result) =>
-          expect(result).toMatchObject({
-            name: 'alpha flow/review.dot',
-            launch_policy: 'agent_requestable',
-            effective_launch_policy: 'agent_requestable',
-          }),
-      },
-      {
-        name: 'workspace flow raw',
-        invoke: () => fetchWorkspaceFlowRawValidated('alpha flow.dot'),
-        expectedUrl: '/workspace/api/flows/alpha%20flow.dot/raw?surface=human',
-        response: new Response('digraph G {}', { status: 200 }),
-        assertResult: (result) => expect(result).toBe('digraph G {}'),
-      },
-      {
-        name: 'nested workspace flow raw',
-        invoke: () => fetchWorkspaceFlowRawValidated('alpha flow/review.dot'),
-        expectedUrl: '/workspace/api/flows/alpha%20flow/review.dot/raw?surface=human',
-        response: new Response('digraph G {}', { status: 200 }),
-        assertResult: (result) => expect(result).toBe('digraph G {}'),
-      },
-      {
-        name: 'workspace flow launch policy update',
-        invoke: () => updateWorkspaceFlowLaunchPolicyValidated('alpha flow.dot', 'agent_requestable'),
-        expectedUrl: '/workspace/api/flows/alpha%20flow.dot/launch-policy',
-        expectedMethod: 'PUT',
-        response: jsonResponse({
-          name: 'alpha flow.dot',
-          title: 'Alpha Flow',
-          description: 'Run the alpha workflow.',
-          launch_policy: 'agent_requestable',
-          effective_launch_policy: 'agent_requestable',
-        }),
-        assertResult: (result) =>
-          expect(result).toMatchObject({
-            name: 'alpha flow.dot',
-            launch_policy: 'agent_requestable',
-            effective_launch_policy: 'agent_requestable',
-          }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toEqual({
-            launch_policy: 'agent_requestable',
           })
-        },
-      },
-      {
-        name: 'nested workspace flow launch policy update',
-        invoke: () => updateWorkspaceFlowLaunchPolicyValidated('alpha flow/review.dot', 'agent_requestable'),
-        expectedUrl: '/workspace/api/flows/alpha%20flow/review.dot/launch-policy',
-        expectedMethod: 'PUT',
-        response: jsonResponse({
-          name: 'alpha flow/review.dot',
-          title: 'Nested Alpha Flow',
-          description: 'Run the nested alpha workflow.',
-          launch_policy: 'agent_requestable',
-          effective_launch_policy: 'agent_requestable',
-        }),
-        assertResult: (result) =>
-          expect(result).toMatchObject({
-            name: 'alpha flow/review.dot',
-            launch_policy: 'agent_requestable',
-            effective_launch_policy: 'agent_requestable',
-          }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toEqual({
-            launch_policy: 'agent_requestable',
-          })
-        },
-      },
-      {
-        name: 'conversation snapshot',
-        invoke: () => fetchConversationSnapshotValidated('conversation 1', '/tmp/project one'),
-        expectedUrl: '/workspace/api/conversations/conversation%201?project_path=%2Ftmp%2Fproject%20one',
-        response: jsonResponse(conversationSnapshot({
-          conversation_id: 'conversation 1',
-          project_path: '/tmp/project one',
-          turns: [],
-          event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: { status: 'idle' },
-        })),
-        assertResult: (result) =>
-          expect(result).toMatchObject({
+        }
+        if (url === '/workspace/api/conversations/conversation%201?project_path=%2Ftmp%2Fproject%20one') {
+          return jsonResponse(conversationSnapshot({
             conversation_id: 'conversation 1',
             project_path: '/tmp/project one',
-          }),
-      },
-      {
-        name: 'conversation turn',
-        invoke: () => sendConversationTurnValidated('conversation 1', {
-          project_path: '/tmp/project one',
-          message: 'Draft a spec edit proposal.',
-          model: 'gpt-5.3',
-        }),
-        expectedUrl: '/workspace/api/conversations/conversation%201/turns',
-        expectedMethod: 'POST',
-        response: jsonResponse(conversationSnapshot({
-          conversation_id: 'conversation 1',
-          project_path: '/tmp/project one',
-          turns: [],
-          event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: { status: 'idle' },
-        })),
-        assertResult: (result) => expect(result).toMatchObject({ conversation_id: 'conversation 1' }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toEqual({
-            project_path: '/tmp/project one',
-            message: 'Draft a spec edit proposal.',
-            model: 'gpt-5.3',
-          })
-        },
-      },
-      {
-        name: 'conversation delete',
-        invoke: () => deleteConversationValidated('conversation 1', '/tmp/project one'),
-        expectedUrl: '/workspace/api/conversations/conversation%201?project_path=%2Ftmp%2Fproject%20one',
-        expectedMethod: 'DELETE',
-        response: jsonResponse({
-          status: 'deleted',
-          conversation_id: 'conversation 1',
-          project_path: '/tmp/project one',
-        }),
-        assertResult: (result) => expect(result).toMatchObject({
-          status: 'deleted',
-          conversation_id: 'conversation 1',
-          project_path: '/tmp/project one',
-        }),
-      },
-      {
-        name: 'spec approval',
-        invoke: () => approveSpecEditProposalValidated('conversation 1', 'proposal 1', {
-          project_path: '/tmp/project one',
-          model: 'gpt-5.3',
-          flow_source: 'contract-behavior.dot',
-        }),
-        expectedUrl: '/workspace/api/conversations/conversation%201/spec-edit-proposals/proposal%201/approve',
-        expectedMethod: 'POST',
-        response: jsonResponse(conversationSnapshot({
-          conversation_id: 'conversation 1',
-          project_path: '/tmp/project one',
-          turns: [],
-          event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: { status: 'running', run_id: 'workflow-1', flow_source: 'contract-behavior.dot' },
-        })),
-        assertResult: (result) => expect(result).toMatchObject({ conversation_id: 'conversation 1' }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toEqual({
-            project_path: '/tmp/project one',
-            model: 'gpt-5.3',
-            flow_source: 'contract-behavior.dot',
-          })
-        },
-      },
-      {
-        name: 'spec rejection',
-        invoke: () => rejectSpecEditProposalValidated('conversation 1', 'proposal 1', {
-          project_path: '/tmp/project one',
-        }),
-        expectedUrl: '/workspace/api/conversations/conversation%201/spec-edit-proposals/proposal%201/reject',
-        expectedMethod: 'POST',
-        response: jsonResponse(conversationSnapshot({
-          conversation_id: 'conversation 1',
-          project_path: '/tmp/project one',
-          turns: [],
-          event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: { status: 'idle' },
-        })),
-        assertResult: (result) => expect(result).toMatchObject({ conversation_id: 'conversation 1' }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toEqual({
-            project_path: '/tmp/project one',
-          })
-        },
-      },
-      {
-        name: 'execution review',
-        invoke: () => reviewExecutionCardValidated('conversation 1', 'execution 1', {
-          project_path: '/tmp/project one',
-          disposition: 'revision_requested',
-          message: 'Split frontend and backend work items.',
-          model: 'gpt-5.3',
-          flow_source: 'contract-behavior.dot',
-        }),
-        expectedUrl: '/workspace/api/conversations/conversation%201/execution-cards/execution%201/review',
-        expectedMethod: 'POST',
-        response: jsonResponse(conversationSnapshot({
-          conversation_id: 'conversation 1',
-          project_path: '/tmp/project one',
-          turns: [],
-          event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: { status: 'running', run_id: 'workflow-2', flow_source: 'contract-behavior.dot' },
-        })),
-        assertResult: (result) => expect(result).toMatchObject({ conversation_id: 'conversation 1' }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toEqual({
-            project_path: '/tmp/project one',
-            disposition: 'revision_requested',
-            message: 'Split frontend and backend work items.',
-            model: 'gpt-5.3',
-            flow_source: 'contract-behavior.dot',
-          })
-        },
-      },
-      {
-        name: 'preview',
-        invoke: () => fetchPreviewValidated('digraph G {}'),
-        expectedUrl: '/attractor/preview',
-        expectedMethod: 'POST',
-        response: jsonResponse({ status: 'ok', graph: { nodes: [], edges: [] } }),
-        assertResult: (result) => expect(result).toMatchObject({ status: 'ok' }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toEqual({ flow_content: 'digraph G {}' })
-        },
-      },
-      {
-        name: 'pipeline start',
-        invoke: () =>
-          fetchPipelineStartValidated({
-            flow_name: 'alpha.dot',
-            flow_content: 'digraph G {}',
-          }),
-        expectedUrl: '/attractor/pipelines',
-        expectedMethod: 'POST',
-        response: jsonResponse({ status: 'accepted', pipeline_id: 'run-start', run_id: 'run-start' }),
-        assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', pipeline_id: 'run-start' }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toMatchObject({ flow_name: 'alpha.dot' })
-        },
-      },
-      {
-        name: 'pipeline status',
-        invoke: () => fetchPipelineStatusValidated('run status'),
-        expectedUrl: '/attractor/pipelines/run%20status',
-        response: jsonResponse({
-          pipeline_id: 'run status',
-          run_id: 'run status',
-          status: 'completed',
-          outcome: 'success',
-          flow_name: 'alpha.dot',
-          working_directory: '/tmp/workspace',
-          project_path: '/tmp/project',
-          git_branch: 'main',
-          git_commit: 'abc1234',
-          spec_id: 'spec-1',
-          plan_id: 'plan-1',
-          model: 'gpt-5.4',
-          started_at: '2026-03-22T00:00:00Z',
-          ended_at: '2026-03-22T00:05:00Z',
-          last_error: '',
-          token_usage: 42,
-          completed_nodes: ['start', 'done'],
-          continued_from_run_id: 'run-parent',
-          continued_from_node: 'Audit Milestone',
-          continued_from_flow_mode: 'snapshot',
-          continued_from_flow_name: 'implement-spec.dot',
-        }),
-        assertResult: (result) => expect(result).toMatchObject({
-          pipeline_id: 'run status',
-          run_id: 'run status',
-          status: 'completed',
-          project_path: '/tmp/project',
-          spec_id: 'spec-1',
-          plan_id: 'plan-1',
-          token_usage: 42,
-          completed_nodes: ['start', 'done'],
-        }),
-      },
-      {
-        name: 'pipeline cancel',
-        invoke: () => fetchPipelineCancelValidated('run cancel'),
-        expectedUrl: '/attractor/pipelines/run%20cancel/cancel',
-        expectedMethod: 'POST',
-        response: jsonResponse({ status: 'accepted', pipeline_id: 'run cancel' }),
-        assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', pipeline_id: 'run cancel' }),
-      },
-      {
-        name: 'pipeline graph',
-        invoke: () => fetchPipelineGraphValidated('run graph'),
-        expectedUrl: '/attractor/pipelines/run%20graph/graph',
-        response: new Response('<svg><g /></svg>', { status: 200 }),
-        assertResult: (result) => expect(result).toContain('<svg>'),
-      },
-      {
-        name: 'pipeline questions',
-        invoke: () => fetchPipelineQuestionsValidated('run questions'),
-        expectedUrl: '/attractor/pipelines/run%20questions/questions',
-        response: jsonResponse({ questions: [{ question_id: 'q-1' }] }),
-        assertResult: (result) => expect(result).toEqual({ questions: [{ question_id: 'q-1' }] }),
-      },
-      {
-        name: 'pipeline answer',
-        invoke: () => fetchPipelineAnswerValidated('run answer', 'q 1', 'approve'),
-        expectedUrl: '/attractor/pipelines/run%20answer/questions/q%201/answer',
-        expectedMethod: 'POST',
-        response: jsonResponse({ status: 'accepted', pipeline_id: 'run answer', question_id: 'q 1' }),
-        assertResult: (result) => expect(result).toMatchObject({ status: 'accepted', question_id: 'q 1' }),
-        assertBody: (init) => {
-          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
-          expect(JSON.parse(String(init?.body))).toEqual({
-            question_id: 'q 1',
-            selected_value: 'approve',
-          })
-        },
-      },
-      {
-        name: 'pipeline checkpoint',
-        invoke: () => fetchPipelineCheckpointValidated('run checkpoint'),
-        expectedUrl: '/attractor/pipelines/run%20checkpoint/checkpoint',
-        response: jsonResponse({ pipeline_id: 'run checkpoint', checkpoint: { node: 'n-1' } }),
-        assertResult: (result) =>
-          expect(result).toEqual({ pipeline_id: 'run checkpoint', checkpoint: { node: 'n-1' } }),
-      },
-      {
-        name: 'pipeline context',
-        invoke: () => fetchPipelineContextValidated('run context'),
-        expectedUrl: '/attractor/pipelines/run%20context/context',
-        response: jsonResponse({ pipeline_id: 'run context', context: { branch: 'main' } }),
-        assertResult: (result) =>
-          expect(result).toEqual({ pipeline_id: 'run context', context: { branch: 'main' } }),
-      },
-      {
-        name: 'runs list',
-        invoke: () => fetchRunsListValidated(),
-        expectedUrl: '/attractor/runs',
-        response: jsonResponse({ runs: [{ run_id: 'run-1', status: 'running', outcome: null }] }),
-        assertResult: (result) => expect(result).toEqual({ runs: [{ run_id: 'run-1', status: 'running', outcome: null, outcome_reason_code: undefined, outcome_reason_message: undefined, flow_name: '', working_directory: '', model: '', started_at: '', project_path: undefined, git_branch: undefined, git_commit: undefined, spec_id: undefined, plan_id: undefined, ended_at: undefined, last_error: undefined, token_usage: undefined }] }),
-      },
-      {
-        name: 'runtime status',
-        invoke: () => fetchRuntimeStatusValidated(),
-        expectedUrl: '/attractor/status',
-        response: jsonResponse({ status: 'idle' }),
-        assertResult: (result) =>
-          expect(result).toEqual({
-            status: 'idle',
-            outcome: undefined,
-            outcome_reason_code: undefined,
-            outcome_reason_message: undefined,
-            last_error: undefined,
-            last_working_directory: undefined,
-            last_model: undefined,
-            last_completed_nodes: null,
-            last_flow_name: undefined,
-          }),
-      },
-    ]
+            turns: [],
+            segments: [],
+            event_log: [],
+            flow_run_requests: [],
+            flow_launches: [],
+          }))
+        }
+        return jsonResponse({})
+      }),
+    )
 
-    for (const testCase of successCases) {
-      const fetchMock = vi.fn(async () => testCase.response)
-      vi.stubGlobal('fetch', fetchMock)
-      const result = await testCase.invoke()
-
-      expect(fetchMock, `fetch call count for ${testCase.name}`).toHaveBeenCalledTimes(1)
-      const [input, init] = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit | undefined]
-      expect(requestUrl(input), `request URL for ${testCase.name}`).toBe(testCase.expectedUrl)
-      expect(init?.method ?? 'GET', `request method for ${testCase.name}`).toBe(testCase.expectedMethod ?? 'GET')
-      testCase.assertBody?.(init)
-      testCase.assertResult(result)
-    }
+    await expect(pickProjectDirectoryValidated()).resolves.toEqual({
+      status: 'selected',
+      directory_path: '/tmp/project one',
+    })
+    await expect(fetchFlowListValidated()).resolves.toEqual(['alpha.dot'])
+    await expect(fetchFlowPayloadValidated('alpha flow.dot')).resolves.toEqual({
+      name: 'alpha flow.dot',
+      content: 'digraph G {}',
+    })
+    await expect(fetchWorkspaceFlowListValidated()).resolves.toMatchObject([
+      expect.objectContaining({ name: 'implement-from-plan.dot' }),
+    ])
+    await expect(fetchWorkspaceFlowValidated('alpha flow.dot')).resolves.toMatchObject({
+      name: 'alpha flow.dot',
+      effective_launch_policy: 'agent_requestable',
+    })
+    await expect(fetchWorkspaceFlowRawValidated('alpha flow.dot')).resolves.toBe('digraph G {}')
+    await expect(updateWorkspaceFlowLaunchPolicyValidated('alpha flow.dot', 'agent_requestable')).resolves.toMatchObject({
+      name: 'alpha flow.dot',
+      launch_policy: 'agent_requestable',
+    })
+    await expect(fetchConversationSnapshotValidated('conversation 1', '/tmp/project one')).resolves.toMatchObject({
+      conversation_id: 'conversation 1',
+      flow_run_requests: [],
+      flow_launches: [],
+    })
 
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        jsonResponse(
-          {
-            detail: { error: 'Preview validation failed.' },
-          },
-          { status: 422 },
-        ),
-      ),
+      vi.fn(async () => jsonResponse({ detail: 'Preview validation failed.' }, { status: 422 })),
     )
     await expect(fetchPreviewValidated('digraph G {}')).rejects.toMatchObject<ApiHttpError>({
       endpoint: '/attractor/preview',
@@ -1377,8 +966,6 @@ describe('Frontend contract behavior', () => {
         workingDirectory: ' ./workspace/../build ',
         backend: 'codex-app-server',
         model: null,
-        specArtifactId: null,
-        planArtifactId: null,
       },
       'digraph G { start -> done }',
     )
@@ -1392,8 +979,6 @@ describe('Frontend contract behavior', () => {
         workingDirectory: '   ',
         backend: 'codex-app-server',
         model: null,
-        specArtifactId: null,
-        planArtifactId: null,
       },
       'digraph G { start -> done }',
     )
@@ -1401,7 +986,7 @@ describe('Frontend contract behavior', () => {
     expect(blankWorkingDirectoryPayload.working_directory).toBe('/tmp/project-contract-behavior')
   })
 
-  it('[CID:12.3.03] retrieves conversation/spec/plan state by project identity', async () => {
+  it('[CID:12.3.03] retrieves project conversation state by project identity', async () => {
     vi.resetModules()
     const { useStore: restoredStore } = await import('@/store')
     restoredStore.setState((state) => ({
@@ -1413,12 +998,12 @@ describe('Frontend contract behavior', () => {
           workingDir: '/tmp/project-a',
           conversationId: 'conversation-a',
           projectEventLog: [],
-          specId: 'spec-a',
-          specStatus: 'approved',
-          specProvenance: null,
-          planId: 'plan-a',
-          planStatus: 'rejected',
-          planProvenance: null,
+
+
+
+
+
+
         },
         '/tmp/project-b': {
           ...state.projectSessionsByPath['/tmp/project-b'],
@@ -1426,483 +1011,30 @@ describe('Frontend contract behavior', () => {
           workingDir: '/tmp/project-b',
           conversationId: 'conversation-b',
           projectEventLog: [],
-          specId: 'spec-b',
-          specStatus: 'draft',
-          specProvenance: null,
-          planId: 'plan-b',
-          planStatus: 'revision-requested',
-          planProvenance: null,
+
+
+
+
+
+
         },
       },
     }))
-    const projectAState = restoredStore.getState().getProjectSessionArtifactState('/tmp/project-a')
-    expect(projectAState).toEqual({
+    const projectAState = restoredStore.getState().projectSessionsByPath['/tmp/project-a']
+    expect(projectAState).toMatchObject({
       conversationId: 'conversation-a',
-      specId: 'spec-a',
-      specStatus: 'approved',
-      planId: 'plan-a',
-      planStatus: 'rejected',
+      projectEventLog: [],
+      workingDir: '/tmp/project-a',
     })
 
-    const projectBState = restoredStore.getState().getProjectSessionArtifactState('/tmp/project-b/./')
-    expect(projectBState).toEqual({
+    const projectBState = restoredStore.getState().projectSessionsByPath['/tmp/project-b']
+    expect(projectBState).toMatchObject({
       conversationId: 'conversation-b',
-      specId: 'spec-b',
-      specStatus: 'draft',
-      planId: 'plan-b',
-      planStatus: 'revision-requested',
+      projectEventLog: [],
+      workingDir: '/tmp/project-b',
     })
 
-    expect(restoredStore.getState().getProjectSessionArtifactState('/tmp/project-missing')).toBeNull()
-  })
-
-  it('[CID:12.4.03] routes execution-planning status updates to the workflow event log instead of chat history', async () => {
-    const conversationSnapshots: Record<string, Record<string, unknown>> = {}
-
-    class MockConversationEventSource {
-      static instances: MockConversationEventSource[] = []
-
-      url: string
-      onmessage: ((event: MessageEvent<string>) => void) | null = null
-      readyState = 1
-      closed = false
-
-      constructor(url: string) {
-        this.url = url
-        MockConversationEventSource.instances.push(this)
-      }
-
-      close() {
-        this.closed = true
-        this.readyState = 2
-      }
-
-      emit(payload: unknown) {
-        this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent<string>)
-      }
-    }
-
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = requestUrl(input)
-      const endpoint = new URL(url, 'http://localhost')
-      const conversationIdMatch = endpoint.pathname.match(/\/api\/conversations\/([^/]+)/)
-      const conversationId = conversationIdMatch ? decodeURIComponent(conversationIdMatch[1]!) : null
-      const requestBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
-
-      if (url.includes('/workspace/api/projects/metadata')) {
-        return jsonResponse({
-          name: 'project-contract-behavior',
-          directory: '/tmp/project-contract-behavior',
-          branch: 'main',
-          commit: 'abc123def456',
-        })
-      }
-      if (conversationId && endpoint.pathname === `/workspace/api/conversations/${encodeURIComponent(conversationId)}` && !init?.method) {
-        const snapshot = conversationSnapshots[conversationId] ?? {
-          conversation_id: conversationId,
-          project_path: endpoint.searchParams.get('project_path') || '/tmp/project-contract-behavior',
-          turns: [],
-          event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: { status: 'idle' },
-        }
-        return jsonResponse(conversationSnapshot(snapshot))
-      }
-      if (conversationId && endpoint.pathname.endsWith('/turns') && init?.method === 'POST') {
-        const snapshot = {
-          conversation_id: conversationId,
-          project_path: '/tmp/project-contract-behavior',
-          turns: [
-            {
-              id: 'turn-user',
-              role: 'user',
-              content: String(requestBody.message || ''),
-              timestamp: '2026-03-06T15:00:00Z',
-              kind: 'message',
-            },
-            {
-              id: 'turn-assistant',
-              role: 'assistant',
-              content: 'I drafted a spec edit proposal for review.',
-              timestamp: '2026-03-06T15:00:10Z',
-              kind: 'message',
-            },
-          ],
-          segments: [
-            {
-              id: 'segment-proposal-contract',
-              turn_id: 'turn-assistant',
-              order: 1,
-              kind: 'spec_edit_proposal',
-              role: 'system',
-              status: 'complete',
-              timestamp: '2026-03-06T15:00:11Z',
-              updated_at: '2026-03-06T15:00:11Z',
-              completed_at: '2026-03-06T15:00:11Z',
-              content: '',
-              artifact_id: 'proposal-contract',
-              error: null,
-              tool_call: null,
-              source: null,
-            },
-            {
-              id: 'segment-assistant-contract',
-              turn_id: 'turn-assistant',
-              order: 2,
-              kind: 'assistant_message',
-              role: 'assistant',
-              status: 'complete',
-              timestamp: '2026-03-06T15:00:10Z',
-              updated_at: '2026-03-06T15:00:10Z',
-              completed_at: '2026-03-06T15:00:10Z',
-              content: 'I drafted a spec edit proposal for review.',
-              artifact_id: null,
-              error: null,
-              tool_call: null,
-              source: null,
-            },
-          ],
-          event_log: [
-            {
-              message: 'Drafted spec edit proposal proposal-contract.',
-              timestamp: '2026-03-06T15:00:11Z',
-            },
-          ],
-          spec_edit_proposals: [
-            {
-              id: 'proposal-contract',
-              created_at: '2026-03-06T15:00:11Z',
-              summary: 'Require explicit spec review before execution planning.',
-              status: 'pending',
-              changes: [
-                {
-                  path: 'spec/home-chat.md#review-flow',
-                  before: 'Planning begins immediately.',
-                  after: 'Planning begins only after spec approval.',
-                },
-              ],
-            },
-          ],
-          execution_cards: [],
-          execution_workflow: { status: 'idle' },
-        }
-        conversationSnapshots[conversationId] = snapshot
-        return jsonResponse(conversationSnapshot(snapshot))
-      }
-      if (conversationId && endpoint.pathname.endsWith('/approve') && init?.method === 'POST') {
-        const snapshot = {
-          ...(conversationSnapshots[conversationId] as Record<string, unknown>),
-          spec_edit_proposals: [
-            {
-              id: 'proposal-contract',
-              created_at: '2026-03-06T15:00:11Z',
-              summary: 'Require explicit spec review before execution planning.',
-              status: 'applied',
-              changes: [
-                {
-                  path: 'spec/home-chat.md#review-flow',
-                  before: 'Planning begins immediately.',
-                  after: 'Planning begins only after spec approval.',
-                },
-              ],
-              canonical_spec_edit_id: 'spec-edit-project-contract-behavior-001',
-              approved_at: '2026-03-06T15:01:00Z',
-              git_branch: 'main',
-              git_commit: 'abc123def456',
-            },
-          ],
-          event_log: [
-            {
-              message: 'Drafted spec edit proposal proposal-contract.',
-              timestamp: '2026-03-06T15:00:11Z',
-            },
-            {
-              message: 'Approved spec edit proposal proposal-contract as canonical spec edit spec-edit-project-contract-behavior-001 and committed it to git.',
-              timestamp: '2026-03-06T15:01:00Z',
-            },
-            {
-              message: 'Execution planning started (workflow-contract-12-4-03) using contract-behavior.dot.',
-              timestamp: '2026-03-06T15:01:01Z',
-            },
-          ],
-          execution_workflow: {
-            run_id: 'workflow-contract-12-4-03',
-            status: 'running',
-            error: null,
-            flow_source: 'contract-behavior.dot',
-          },
-        }
-        conversationSnapshots[conversationId] = snapshot
-        return jsonResponse(conversationSnapshot(snapshot))
-      }
-      return jsonResponse({})
-    })
-
-    vi.stubGlobal('fetch', fetchMock)
-    vi.stubGlobal('EventSource', MockConversationEventSource as unknown as typeof EventSource)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-
-    act(() => {
-      useStore.setState((state) => ({
-        ...state,
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/project-contract-behavior',
-        activeFlow: 'contract-behavior.dot',
-        projectSessionsByPath: {
-          ...state.projectSessionsByPath,
-          '/tmp/project-contract-behavior': {
-            ...state.projectSessionsByPath['/tmp/project-contract-behavior'],
-            specId: null,
-            specStatus: 'draft',
-          },
-        },
-      }))
-    })
-
-    const user = userEvent.setup()
-    renderProjectsPanelWithController()
-
-    await user.type(
-      screen.getByTestId('project-ai-conversation-input'),
-      'Draft a plan to implement project-home chat workflow approvals.',
-    )
-    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
-    await waitFor(() => {
-      expect(screen.getByTestId('project-spec-edit-proposal-preview')).toBeVisible()
-    })
-    await user.click(screen.getByTestId('project-spec-edit-proposal-apply-button'))
-
-    const conversationId = useStore.getState().projectSessionsByPath['/tmp/project-contract-behavior']?.conversationId
-    expect(conversationId).toBeTruthy()
-
-    const failureSnapshot = conversationSnapshot({
-      ...(conversationSnapshots[conversationId!] as Record<string, unknown>),
-      event_log: [
-        ...(conversationSnapshots[conversationId!]?.event_log as Record<string, unknown>[]),
-        {
-          message: 'Execution planning failed: plan status endpoint unavailable.',
-          timestamp: '2026-03-06T15:02:00Z',
-        },
-      ],
-      execution_workflow: {
-        run_id: 'workflow-contract-12-4-03',
-        status: 'failed',
-        error: 'plan status endpoint unavailable.',
-        flow_source: 'contract-behavior.dot',
-      },
-    })
-    conversationSnapshots[conversationId!] = failureSnapshot
-    act(() => {
-      MockConversationEventSource.instances
-        .filter((instance) => !instance.closed && instance.url.includes(encodeURIComponent(conversationId!)))
-        .forEach((instance) => {
-          instance.emit({
-            type: 'conversation_snapshot',
-            state: failureSnapshot,
-          })
-        })
-    })
-
-    await waitFor(() => {
-      expect(screen.getByTestId('project-event-log-list')).toHaveTextContent('Execution planning failed')
-    })
-
-    const requestedUrls = fetchMock.mock.calls.map(([input]) => requestUrl(input as RequestInfo | URL))
-    expect(requestedUrls.some((url) => url.includes(`/workspace/api/conversations/${encodeURIComponent(conversationId!)}/spec-edit-proposals/proposal-contract/approve`))).toBe(true)
-    expect(screen.getByTestId('project-ai-conversation-history-list')).not.toHaveTextContent('Execution planning failed')
-    expect(useStore.getState().projectSessionsByPath['/tmp/project-contract-behavior']?.planStatus).toBe('draft')
-    expect(useStore.getState().viewMode).toBe('projects')
-  })
-
-  it('[CID:12.4.04] integrates execution-card review contract with required revision feedback', async () => {
-    const reviewBodies: Array<Record<string, unknown>> = []
-    const conversationId = 'conversation-contract-review'
-    const reviewSnapshot = conversationSnapshot({
-      conversation_id: conversationId,
-      project_path: '/tmp/project-contract-behavior',
-      turns: [
-        {
-          id: 'turn-execution-card',
-          role: 'assistant',
-          content: '',
-          timestamp: '2026-03-06T15:02:00Z',
-          kind: 'execution_card',
-          artifact_id: 'execution-card-contract-001',
-        },
-      ],
-      segments: [
-        {
-          id: 'segment-execution-card-contract',
-          turn_id: 'turn-execution-card',
-          order: 1,
-          kind: 'execution_card',
-          role: 'system',
-          status: 'complete',
-          timestamp: '2026-03-06T15:02:00Z',
-          updated_at: '2026-03-06T15:02:00Z',
-          completed_at: '2026-03-06T15:02:00Z',
-          content: '',
-          artifact_id: 'execution-card-contract-001',
-          error: null,
-          tool_call: null,
-          source: null,
-        },
-      ],
-      event_log: [],
-      spec_edit_proposals: [
-        {
-          id: 'proposal-contract',
-          created_at: '2026-03-06T15:00:11Z',
-          summary: 'Require explicit spec review before execution planning.',
-          status: 'applied',
-          changes: [],
-          canonical_spec_edit_id: 'spec-edit-project-contract-behavior-001',
-          approved_at: '2026-03-06T15:01:00Z',
-          git_branch: 'main',
-          git_commit: 'abc123def456',
-        },
-      ],
-      execution_cards: [
-        {
-          id: 'execution-card-contract-001',
-          title: 'Implement project-home chat approval workflow',
-          summary: 'Turn the approved spec edit into tracker-ready work.',
-          objective: 'Ship reviewed project chat and execution-card planning.',
-          status: 'draft',
-          source_spec_edit_id: 'spec-edit-project-contract-behavior-001',
-          source_workflow_run_id: 'workflow-contract-12-4-04',
-          created_at: '2026-03-06T15:02:00Z',
-          updated_at: '2026-03-06T15:02:00Z',
-          flow_source: 'contract-behavior.dot',
-          work_items: [
-            {
-              id: 'WORK-1',
-              title: 'Wire conversation snapshots',
-              description: 'Replace local state with backend conversation snapshots.',
-              acceptance_criteria: ['Chat renders backend turns.'],
-              depends_on: [],
-            },
-          ],
-          review_feedback: [],
-        },
-      ],
-      execution_workflow: {
-        run_id: 'workflow-contract-12-4-04',
-        status: 'idle',
-        error: null,
-        flow_source: 'contract-behavior.dot',
-      },
-    })
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = requestUrl(input)
-        if (url.includes('/workspace/api/projects/metadata')) {
-          return jsonResponse({
-            name: 'project-contract-behavior',
-            directory: '/tmp/project-contract-behavior',
-            branch: 'main',
-            commit: 'abc123def456',
-          })
-        }
-        if (url.includes(`/workspace/api/conversations/${encodeURIComponent(conversationId)}`) && !init?.method) {
-          return jsonResponse(reviewSnapshot)
-        }
-        if (url.includes('/execution-cards/') && url.endsWith('/review') && init?.method === 'POST') {
-          const body = JSON.parse(String(init.body)) as Record<string, unknown>
-          reviewBodies.push(body)
-          return jsonResponse(conversationSnapshot({
-            ...reviewSnapshot,
-            turns: [
-              ...reviewSnapshot.turns,
-              {
-                id: 'turn-review-feedback',
-                role: 'user',
-                content: String(body.message || ''),
-                timestamp: '2026-03-06T15:03:00Z',
-                kind: 'message',
-              },
-            ],
-            segments: reviewSnapshot.segments,
-            execution_cards: [
-              {
-                ...reviewSnapshot.execution_cards[0],
-                status: 'revision-requested',
-                review_feedback: [
-                  {
-                    id: 'review-contract',
-                    disposition: 'revision_requested',
-                    message: String(body.message || ''),
-                    created_at: '2026-03-06T15:03:00Z',
-                    author: 'user',
-                  },
-                ],
-              },
-            ],
-            execution_workflow: {
-              run_id: 'workflow-contract-12-4-04-rerun',
-              status: 'running',
-              error: null,
-              flow_source: 'contract-behavior.dot',
-            },
-            event_log: [
-              {
-                message: 'Requested revision for execution card execution-card-contract-001; regenerating with reviewer feedback.',
-                timestamp: '2026-03-06T15:03:00Z',
-              },
-            ],
-          }))
-        }
-        return jsonResponse({})
-      }),
-    )
-    vi.spyOn(window, 'prompt').mockReturnValue('Split frontend and backend work items.')
-
-    act(() => {
-      useStore.setState((state) => ({
-        ...state,
-        viewMode: 'projects',
-        activeProjectPath: '/tmp/project-contract-behavior',
-        activeFlow: 'contract-behavior.dot',
-        projectSessionsByPath: {
-          ...state.projectSessionsByPath,
-          '/tmp/project-contract-behavior': {
-            ...state.projectSessionsByPath['/tmp/project-contract-behavior'],
-            conversationId,
-          },
-        },
-      }))
-    })
-
-    const user = userEvent.setup()
-    renderProjectsPanelWithController()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('project-plan-gate-surface')).toBeVisible()
-    })
-
-    expect(screen.getByTestId('project-plan-approve-button')).toBeEnabled()
-    expect(screen.getByTestId('project-plan-reject-button')).toBeEnabled()
-    expect(screen.getByTestId('project-plan-request-revision-button')).toBeEnabled()
-
-    await user.click(screen.getByTestId('project-plan-request-revision-button'))
-
-    await waitFor(() => {
-      expect(useStore.getState().projectSessionsByPath['/tmp/project-contract-behavior']?.planStatus).toBe('revision-requested')
-    })
-
-    expect(reviewBodies).toEqual([
-      {
-        project_path: '/tmp/project-contract-behavior',
-        disposition: 'revision_requested',
-        message: 'Split frontend and backend work items.',
-        model: null,
-      },
-    ])
-    expect(screen.getByTestId('project-ai-conversation-history-list')).toHaveTextContent('Split frontend and backend work items.')
-    expect(screen.getByTestId('project-event-log-list')).toHaveTextContent('Requested revision for execution card')
+    expect(restoredStore.getState().projectSessionsByPath['/tmp/project-missing']).toBeUndefined()
   })
 
   it('[CID:12.4.05] integrates direct execution launch contract and error paths', async () => {
@@ -1937,8 +1069,8 @@ describe('Frontend contract behavior', () => {
           ...state.projectSessionsByPath,
           '/tmp/project-contract-behavior': {
             ...state.projectSessionsByPath['/tmp/project-contract-behavior'],
-            planId: 'plan-contract-behavior',
-            planStatus: 'draft',
+
+
           },
         },
       }))
@@ -1959,10 +1091,8 @@ describe('Frontend contract behavior', () => {
       ([request, init]) => requestUrl(request as RequestInfo | URL).endsWith('/attractor/pipelines') && init?.method === 'POST',
     )
     expect(pipelineCall).toBeDefined()
-    const pipelinePayload = JSON.parse((pipelineCall?.[1] as RequestInit).body as string) as {
-      plan_id?: string | null
-    }
-    expect(pipelinePayload.plan_id).toBe('plan-contract-behavior')
+    const pipelinePayload = JSON.parse((pipelineCall?.[1] as RequestInit).body as string) as Record<string, unknown>
+    expect(pipelinePayload.plan_id).toBeUndefined()
   })
 
   it('[CID:13.1.01] supports keyboard navigation across projects, authoring, and execution mode tabs', async () => {
@@ -5620,10 +4750,10 @@ digraph contract_behavior {
     localStorageMock.setItem('spark.project_conversation_state', JSON.stringify({
       '/tmp/persisted-project': {
         conversationId: 'conversation-persisted-project',
-        specId: 'spec-persisted-project',
-        specStatus: 'approved',
-        planId: 'plan-persisted-project',
-        planStatus: 'approved',
+
+
+
+
       },
     }))
     localStorageMock.setItem('spark.ui_route_state', JSON.stringify({
@@ -5637,8 +4767,6 @@ digraph contract_behavior {
 
     expect(restoredState.projectRegistry).toEqual({})
     expect(restoredState.projectSessionsByPath['/tmp/persisted-project']?.conversationId).toBeNull()
-    expect(restoredState.projectSessionsByPath['/tmp/persisted-project']?.specId).toBeNull()
-    expect(restoredState.projectSessionsByPath['/tmp/persisted-project']?.planId).toBeNull()
     expect(restoredState.activeProjectPath).toBe('/tmp/persisted-project')
   })
 

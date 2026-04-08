@@ -62,18 +62,6 @@ REQUIRED_UI_ENDPOINT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"new EventSource\(\s*eventStreamUrl\s*\)|/workspace/api/conversations/\$\{encodeURIComponent\([^)]+\)\}/events\?project_path="),
     ),
     ("/workspace/api/conversations/{id}/turns", re.compile(r"sendConversationTurnValidated\(")),
-    (
-        "/workspace/api/conversations/{id}/spec-edit-proposals/{proposalId}/approve",
-        re.compile(r"approveSpecEditProposalValidated\("),
-    ),
-    (
-        "/workspace/api/conversations/{id}/spec-edit-proposals/{proposalId}/reject",
-        re.compile(r"rejectSpecEditProposalValidated\("),
-    ),
-    (
-        "/workspace/api/conversations/{id}/execution-cards/{executionCardId}/review",
-        re.compile(r"reviewExecutionCardValidated\("),
-    ),
     ("/attractor/preview", re.compile(r"fetch\(\s*['\"]/attractor/preview['\"]|fetchPreviewValidated\(")),
     ("/attractor/pipelines", re.compile(r"fetch\(\s*['\"]/attractor/pipelines['\"]|fetchPipelineStartValidated\(")),
     (

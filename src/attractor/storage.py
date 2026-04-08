@@ -47,9 +47,6 @@ class ProjectPaths:
     root: Path
     project_file: Path
     conversations_dir: Path
-    workflow_dir: Path
-    proposals_dir: Path
-    execution_cards_dir: Path
     runs_dir: Path
 
 
@@ -82,17 +79,11 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
     project_root = home_dir / "projects" / project_id
     project_file = project_root / "project.toml"
     conversations_dir = project_root / "conversations"
-    workflow_dir = project_root / "workflow"
-    proposals_dir = project_root / "proposals"
-    execution_cards_dir = project_root / "execution-cards"
     runs_dir = project_root / "runs"
 
     for directory in (
         project_root,
         conversations_dir,
-        workflow_dir,
-        proposals_dir,
-        execution_cards_dir,
         runs_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
@@ -123,9 +114,6 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
         root=project_root,
         project_file=project_file,
         conversations_dir=conversations_dir,
-        workflow_dir=workflow_dir,
-        proposals_dir=proposals_dir,
-        execution_cards_dir=execution_cards_dir,
         runs_dir=runs_dir,
     )
 
@@ -147,9 +135,6 @@ def read_project_paths_by_id(home_dir: Path, project_id: str) -> ProjectPaths | 
         root=root,
         project_file=project_file,
         conversations_dir=root / "conversations",
-        workflow_dir=root / "workflow",
-        proposals_dir=root / "proposals",
-        execution_cards_dir=root / "execution-cards",
         runs_dir=root / "runs",
     )
 

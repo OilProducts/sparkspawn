@@ -7,12 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
-import workspace.triggers as workspace_triggers
 from tests.support.flow_fixtures import seed_flow_fixture
 
-
 TEST_PLANNING_FLOW = "test-planning.dot"
-TEST_DISPATCH_FLOW = "test-dispatch.dot"
 
 
 def _seed_flow(name: str) -> None:
@@ -119,54 +116,3 @@ def test_webhook_trigger_accepts_valid_secret_and_launches_flow(
         time.sleep(0.1)
     else:
         pytest.fail("Timed out waiting for webhook trigger run.")
-
-
-def test_protected_trigger_only_allows_enable_and_flow_target_changes(
-    product_api_client: TestClient,
-    tmp_path: Path,
-) -> None:
-    project_dir = (tmp_path / "protected-project").resolve()
-    project_dir.mkdir()
-    _seed_flow(TEST_PLANNING_FLOW)
-    _seed_flow(TEST_DISPATCH_FLOW)
-
-    definition, _ = workspace_triggers.create_trigger_definition(
-        server.get_settings().config_dir,
-        name="Protected planning route",
-        enabled=True,
-        source_type="workspace_event",
-        action={
-            "flow_name": TEST_PLANNING_FLOW,
-            "project_path": str(project_dir),
-            "static_context": {},
-        },
-        source={"event_name": "spec_edit_approved"},
-        protected=True,
-    )
-
-    update_response = product_api_client.patch(
-        f"/workspace/api/triggers/{definition.id}",
-        json={
-            "enabled": False,
-            "action": {"flow_name": TEST_DISPATCH_FLOW},
-        },
-    )
-    assert update_response.status_code == 200
-    updated_payload = update_response.json()
-    assert updated_payload["enabled"] is False
-    assert updated_payload["action"]["flow_name"] == TEST_DISPATCH_FLOW
-
-    invalid_project_target_response = product_api_client.patch(
-        f"/workspace/api/triggers/{definition.id}",
-        json={"action": {"project_path": str(tmp_path / 'other-project')}},
-    )
-    assert invalid_project_target_response.status_code == 400
-
-    invalid_source_response = product_api_client.patch(
-        f"/workspace/api/triggers/{definition.id}",
-        json={"source": {"event_name": "execution_card_approved"}},
-    )
-    assert invalid_source_response.status_code == 400
-
-    delete_response = product_api_client.delete(f"/workspace/api/triggers/{definition.id}")
-    assert delete_response.status_code == 400

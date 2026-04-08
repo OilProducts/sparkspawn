@@ -74,8 +74,6 @@ export function RunsPanel() {
     const setExecutionContinuation = useStore((state) => state.setExecutionContinuation)
     const setWorkingDir = useStore((state) => state.setWorkingDir)
     const setModel = useStore((state) => state.setModel)
-    const setSpecId = useStore((state) => state.setSpecId)
-    const setPlanId = useStore((state) => state.setPlanId)
     const {
         error,
         isLoading,
@@ -286,22 +284,6 @@ export function RunsPanel() {
         setViewMode('execution')
     }
 
-    const openRunArtifact = (run: RunRecord, artifactType: 'spec' | 'plan') => {
-        const artifactId = artifactType === 'spec' ? run.spec_id : run.plan_id
-        if (!artifactId) {
-            return
-        }
-        if (run.project_path) {
-            setActiveProjectPath(run.project_path)
-        }
-        if (artifactType === 'spec') {
-            setSpecId(artifactId)
-        } else {
-            setPlanId(artifactId)
-        }
-        setViewMode('home')
-    }
-
     return (
         <section
             data-testid="runs-panel"
@@ -364,7 +346,6 @@ export function RunsPanel() {
                                     patchSelectedRunSession({ isSummaryCollapsed: collapsed })
                                 }}
                                 onContinueFromRun={beginContinuation}
-                                onOpenRunArtifact={openRunArtifact}
                                 onRequestCancel={(runId, currentStatus) => {
                                     void requestCancel(runId, currentStatus)
                                 }}

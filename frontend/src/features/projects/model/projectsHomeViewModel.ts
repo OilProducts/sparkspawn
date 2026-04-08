@@ -11,10 +11,8 @@ import {
 } from './projectsHomeState'
 import type {
     ConversationTimelineEntry,
-    ProjectExecutionCard,
     ProjectFlowLaunch,
     ProjectFlowRunRequest,
-    ProjectSpecEditProposal,
 } from './types'
 
 type BuildProjectsHomeViewModelArgs = {
@@ -29,22 +27,18 @@ type BuildProjectsHomeViewModelArgs = {
 
 export type ProjectsHomeViewModel = {
     activeConversationHistory: ConversationTimelineEntry[]
-    activeExecutionCardsById: Map<string, ProjectExecutionCard>
     activeFlowLaunchesById: Map<string, ProjectFlowLaunch>
     activeFlowRunRequestsById: Map<string, ProjectFlowRunRequest>
     activeProjectConversationSummaries: ConversationSummaryResponse[]
     activeProjectEventLog: ProjectSessionState['projectEventLog']
     activeProjectGitMetadata: ProjectGitMetadata
     activeProjectLabel: string | null
-    activeSpecEditProposalsById: Map<string, ProjectSpecEditProposal>
     chatSendButtonLabel: string
     hasActiveAssistantTurn: boolean
     hasRenderableConversationHistory: boolean
     isChatInputDisabled: boolean
-    latestExecutionCardId: string | null
     latestFlowLaunchId: string | null
     latestFlowRunRequestId: string | null
-    latestSpecEditProposalId: string | null
 }
 
 function buildIdMap<T extends { id: string }>(items: T[]) {
@@ -68,15 +62,11 @@ export function buildProjectsHomeViewModel({
         activeConversationSnapshot,
         optimisticSend && optimisticSend.conversationId === activeConversationId ? optimisticSend : null,
     )
-    const activeSpecEditProposals = activeConversationSnapshot?.spec_edit_proposals || []
     const activeFlowRunRequests = activeConversationSnapshot?.flow_run_requests || []
     const activeFlowLaunches = activeConversationSnapshot?.flow_launches || []
-    const activeExecutionCards = activeConversationSnapshot?.execution_cards || []
     const hasRenderableConversationHistory = activeConversationHistory.some((entry) => (
-        entry.kind === 'spec_edit_proposal'
-        || entry.kind === 'flow_run_request'
+        entry.kind === 'flow_run_request'
         || entry.kind === 'flow_launch'
-        || entry.kind === 'execution_card'
         || entry.kind === 'tool_call'
         || entry.role === 'user'
         || entry.role === 'assistant'
@@ -87,7 +77,6 @@ export function buildProjectsHomeViewModel({
 
     return {
         activeConversationHistory,
-        activeExecutionCardsById: buildIdMap(activeExecutionCards),
         activeFlowLaunchesById: buildIdMap(activeFlowLaunches),
         activeFlowRunRequestsById: buildIdMap(activeFlowRunRequests),
         activeProjectConversationSummaries: activeProjectPath
@@ -98,14 +87,11 @@ export function buildProjectsHomeViewModel({
             ? projectGitMetadata[activeProjectPath] || EMPTY_PROJECT_GIT_METADATA
             : EMPTY_PROJECT_GIT_METADATA,
         activeProjectLabel: activeProjectPath ? formatProjectListLabel(activeProjectPath) : null,
-        activeSpecEditProposalsById: buildIdMap(activeSpecEditProposals),
         chatSendButtonLabel: hasActiveAssistantTurn ? 'Thinking...' : 'Send',
         hasActiveAssistantTurn,
         hasRenderableConversationHistory,
         isChatInputDisabled: hasActiveAssistantTurn,
-        latestExecutionCardId: getLatestArtifactId(activeExecutionCards),
         latestFlowLaunchId: getLatestArtifactId(activeFlowLaunches),
         latestFlowRunRequestId: getLatestArtifactId(activeFlowRunRequests),
-        latestSpecEditProposalId: getLatestArtifactId(activeSpecEditProposals),
     }
 }

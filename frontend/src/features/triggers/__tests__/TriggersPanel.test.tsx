@@ -140,6 +140,7 @@ describe('TriggersPanel', () => {
     renderTriggersPanel()
 
     const createScope = getCreateTriggerScope()
+    expect(within(createScope.getByLabelText('Source Type')).queryByRole('option', { name: 'Workspace Event' })).not.toBeInTheDocument()
     await user.type(createScope.getByLabelText('Name'), 'Created schedule')
     await user.clear(createScope.getByLabelText('Target Flow'))
     await user.type(createScope.getByLabelText('Target Flow'), TEST_TRIGGER_FLOW)
@@ -404,6 +405,7 @@ describe('TriggersPanel', () => {
     const selectedTriggerScope = within(selectedTriggerCard as HTMLElement)
 
     expect(selectedTriggerScope.getByLabelText('Source Type')).toBeDisabled()
+    expect(within(selectedTriggerScope.getByLabelText('Source Type')).queryByRole('option', { name: 'Workspace Event' })).not.toBeInTheDocument()
     expect(selectedTriggerScope.getByLabelText('Execution Target')).toBeDisabled()
     expect(selectedTriggerScope.getByLabelText('Project Path')).toBeDisabled()
     expect(selectedTriggerScope.getByLabelText('Schedule Kind')).toBeDisabled()

@@ -1,6 +1,5 @@
 import type {
     HydratedProjectRecord,
-    PlanStatus,
     ProjectRegistrationResult,
 } from '@/store'
 import { isAbsoluteProjectPath, normalizeProjectPath } from '@/lib/projectPaths'
@@ -10,14 +9,11 @@ import {
     type ConversationSnapshotResponse,
     type ConversationSummaryResponse,
     type ConversationTurnUpsertEventResponse,
-    type ExecutionCardResponse,
 } from '@/lib/workspaceClient'
 import type { ProjectGitMetadata } from './presentation'
 import {
     compareConversationSnapshotFreshness,
     ensureConversationSnapshotShell,
-    getLatestApprovedSpecEditProposal,
-    getLatestExecutionCard,
     sanitizeStreamingTurnUpsert,
     sortConversationSummaries,
     upsertConversationSegment,
@@ -62,13 +58,6 @@ export function buildProjectConversationId(projectPath: string) {
         ? crypto.randomUUID().slice(0, 8)
         : Math.random().toString(36).slice(2, 10)
     return `conversation-${suffix}-${randomSuffix}`
-}
-
-export function derivePlanStatusFromExecutionCard(executionCard: ExecutionCardResponse | null): PlanStatus {
-    if (!executionCard) {
-        return 'draft'
-    }
-    return executionCard.status
 }
 
 export function asProjectGitMetadataField(value: unknown): string | null {
@@ -352,8 +341,6 @@ export function applyConversationSnapshotToCache(
         return {
             applied: false,
             cache: current,
-            latestApprovedProposal: getLatestApprovedSpecEditProposal(existingSnapshot),
-            latestExecutionCard: getLatestExecutionCard(existingSnapshot),
         }
     }
 
@@ -372,8 +359,6 @@ export function applyConversationSnapshotToCache(
                 ),
             },
         },
-        latestApprovedProposal: getLatestApprovedSpecEditProposal(scopedSnapshot),
-        latestExecutionCard: getLatestExecutionCard(scopedSnapshot),
     }
 }
 

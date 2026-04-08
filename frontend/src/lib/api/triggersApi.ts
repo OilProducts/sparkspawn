@@ -7,7 +7,7 @@ import {
 } from './shared'
 import { fetchWorkspaceJsonValidated } from './apiClient'
 
-export type TriggerSourceType = 'schedule' | 'poll' | 'webhook' | 'workspace_event' | 'flow_event'
+export type TriggerSourceType = 'schedule' | 'poll' | 'webhook' | 'flow_event'
 
 export interface TriggerActionResponse {
     flow_name: string
@@ -74,7 +74,6 @@ export function parseTriggerResponse(payload: unknown, endpoint = '/workspace/ap
         sourceType !== 'schedule'
         && sourceType !== 'poll'
         && sourceType !== 'webhook'
-        && sourceType !== 'workspace_event'
         && sourceType !== 'flow_event'
     ) {
         throw new ApiSchemaError(endpoint, `Unsupported trigger source_type "${sourceType}".`)

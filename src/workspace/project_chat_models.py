@@ -285,79 +285,6 @@ class WorkflowEvent:
 
 
 @dataclass
-class SpecEditProposalChange:
-    path: str
-    before: str
-    after: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "path": self.path,
-            "before": self.before,
-            "after": self.after,
-        }
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "SpecEditProposalChange":
-        return cls(
-            path=str(payload.get("path", "")),
-            before=str(payload.get("before", "")),
-            after=str(payload.get("after", "")),
-        )
-
-
-@dataclass
-class SpecEditProposal:
-    id: str
-    created_at: str
-    summary: str
-    changes: list[SpecEditProposalChange]
-    status: str = "pending"
-    canonical_spec_edit_id: Optional[str] = None
-    approved_at: Optional[str] = None
-    git_branch: Optional[str] = None
-    git_commit: Optional[str] = None
-
-    def to_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "id": self.id,
-            "created_at": self.created_at,
-            "summary": self.summary,
-            "status": self.status,
-            "changes": [change.to_dict() for change in self.changes],
-        }
-        if self.canonical_spec_edit_id:
-            payload["canonical_spec_edit_id"] = self.canonical_spec_edit_id
-        if self.approved_at:
-            payload["approved_at"] = self.approved_at
-        if self.git_branch:
-            payload["git_branch"] = self.git_branch
-        if self.git_commit:
-            payload["git_commit"] = self.git_commit
-        return payload
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "SpecEditProposal":
-        raw_changes = payload.get("changes")
-        changes = [
-            SpecEditProposalChange.from_dict(change)
-            for change in raw_changes
-            if isinstance(change, dict)
-        ] if isinstance(raw_changes, list) else []
-        return cls(
-            id=str(payload.get("id", "")),
-            created_at=str(payload.get("created_at", "")),
-            summary=str(payload.get("summary", "")),
-            changes=changes,
-            status=str(payload.get("status", "pending") or "pending"),
-            canonical_spec_edit_id=str(payload.get("canonical_spec_edit_id")) if payload.get("canonical_spec_edit_id") is not None else None,
-            approved_at=str(payload.get("approved_at")) if payload.get("approved_at") is not None else None,
-            git_branch=str(payload.get("git_branch")) if payload.get("git_branch") is not None else None,
-            git_commit=str(payload.get("git_commit")) if payload.get("git_commit") is not None else None,
-        )
-
-
-@dataclass
 class FlowRunRequest:
     id: str
     created_at: str
@@ -492,163 +419,6 @@ class FlowLaunch:
 
 
 @dataclass
-class ExecutionCardReview:
-    id: str
-    disposition: str
-    message: str
-    created_at: str
-    author: str = "user"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "disposition": self.disposition,
-            "message": self.message,
-            "created_at": self.created_at,
-            "author": self.author,
-        }
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ExecutionCardReview":
-        return cls(
-            id=str(payload.get("id", "")),
-            disposition=str(payload.get("disposition", "")),
-            message=str(payload.get("message", "")),
-            created_at=str(payload.get("created_at", "")),
-            author=str(payload.get("author", "user") or "user"),
-        )
-
-
-@dataclass
-class ExecutionCardWorkItem:
-    id: str
-    title: str
-    description: str
-    acceptance_criteria: list[str] = field(default_factory=list)
-    depends_on: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "title": self.title,
-            "description": self.description,
-            "acceptance_criteria": list(self.acceptance_criteria),
-            "depends_on": list(self.depends_on),
-        }
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ExecutionCardWorkItem":
-        raw_acceptance = payload.get("acceptance_criteria")
-        raw_depends_on = payload.get("depends_on")
-        return cls(
-            id=str(payload.get("id", "")),
-            title=str(payload.get("title", "")),
-            description=str(payload.get("description", "")),
-            acceptance_criteria=[str(item) for item in raw_acceptance] if isinstance(raw_acceptance, list) else [],
-            depends_on=[str(item) for item in raw_depends_on] if isinstance(raw_depends_on, list) else [],
-        )
-
-
-@dataclass
-class ExecutionCard:
-    id: str
-    title: str
-    summary: str
-    objective: str
-    source_spec_edit_id: str
-    source_workflow_run_id: str
-    created_at: str
-    updated_at: str
-    status: str = "draft"
-    flow_source: Optional[str] = None
-    work_items: list[ExecutionCardWorkItem] = field(default_factory=list)
-    review_feedback: list[ExecutionCardReview] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "id": self.id,
-            "title": self.title,
-            "summary": self.summary,
-            "objective": self.objective,
-            "source_spec_edit_id": self.source_spec_edit_id,
-            "source_workflow_run_id": self.source_workflow_run_id,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "status": self.status,
-            "work_items": [item.to_dict() for item in self.work_items],
-            "review_feedback": [entry.to_dict() for entry in self.review_feedback],
-        }
-        if self.flow_source:
-            payload["flow_source"] = self.flow_source
-        return payload
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ExecutionCard":
-        raw_items = payload.get("work_items")
-        raw_reviews = payload.get("review_feedback")
-        return cls(
-            id=str(payload.get("id", "")),
-            title=str(payload.get("title", "")),
-            summary=str(payload.get("summary", "")),
-            objective=str(payload.get("objective", "")),
-            source_spec_edit_id=str(payload.get("source_spec_edit_id", "")),
-            source_workflow_run_id=str(payload.get("source_workflow_run_id", "")),
-            created_at=str(payload.get("created_at", "")),
-            updated_at=str(payload.get("updated_at", "")),
-            status=str(payload.get("status", "draft") or "draft"),
-            flow_source=str(payload.get("flow_source")) if payload.get("flow_source") is not None else None,
-            work_items=[
-                ExecutionCardWorkItem.from_dict(item)
-                for item in raw_items
-                if isinstance(item, dict)
-            ] if isinstance(raw_items, list) else [],
-            review_feedback=[
-                ExecutionCardReview.from_dict(item)
-                for item in raw_reviews
-                if isinstance(item, dict)
-            ] if isinstance(raw_reviews, list) else [],
-        )
-
-
-@dataclass
-class ExecutionWorkflowState:
-    run_id: Optional[str] = None
-    status: str = "idle"
-    error: Optional[str] = None
-    flow_source: Optional[str] = None
-
-    def to_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "status": self.status,
-        }
-        if self.run_id:
-            payload["run_id"] = self.run_id
-        if self.error:
-            payload["error"] = self.error
-        if self.flow_source:
-            payload["flow_source"] = self.flow_source
-        return payload
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ExecutionWorkflowState":
-        return cls(
-            run_id=str(payload.get("run_id")) if payload.get("run_id") is not None else None,
-            status=str(payload.get("status", "idle") or "idle"),
-            error=str(payload.get("error")) if payload.get("error") is not None else None,
-            flow_source=str(payload.get("flow_source")) if payload.get("flow_source") is not None else None,
-        )
-
-
-@dataclass(frozen=True)
-class ExecutionWorkflowLaunchSpec:
-    conversation_id: str
-    project_path: str
-    proposal_id: str
-    spec_id: str
-    prompt: str
-
-
-@dataclass
 class ConversationState:
     conversation_id: str
     project_path: str
@@ -660,11 +430,8 @@ class ConversationState:
     turns: list[ConversationTurn] = field(default_factory=list)
     segments: list[ConversationSegment] = field(default_factory=list)
     event_log: list[WorkflowEvent] = field(default_factory=list)
-    spec_edit_proposals: list[SpecEditProposal] = field(default_factory=list)
     flow_run_requests: list[FlowRunRequest] = field(default_factory=list)
     flow_launches: list[FlowLaunch] = field(default_factory=list)
-    execution_cards: list[ExecutionCard] = field(default_factory=list)
-    execution_workflow: ExecutionWorkflowState = field(default_factory=ExecutionWorkflowState)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -678,11 +445,8 @@ class ConversationState:
             "turns": [turn.to_dict() for turn in self.turns],
             "segments": [segment.to_dict() for segment in self.segments],
             "event_log": [entry.to_dict() for entry in self.event_log],
-            "spec_edit_proposals": [proposal.to_dict() for proposal in self.spec_edit_proposals],
             "flow_run_requests": [request.to_dict() for request in self.flow_run_requests],
             "flow_launches": [launch.to_dict() for launch in self.flow_launches],
-            "execution_cards": [card.to_dict() for card in self.execution_cards],
-            "execution_workflow": self.execution_workflow.to_dict(),
         }
 
     @classmethod
@@ -690,10 +454,8 @@ class ConversationState:
         raw_turns = payload.get("turns")
         raw_segments = payload.get("segments")
         raw_events = payload.get("event_log")
-        raw_proposals = payload.get("spec_edit_proposals")
         raw_flow_run_requests = payload.get("flow_run_requests")
         raw_flow_launches = payload.get("flow_launches")
-        raw_cards = payload.get("execution_cards")
         schema_version = payload.get("schema_version")
         if not isinstance(schema_version, int) or schema_version != CONVERSATION_STATE_SCHEMA_VERSION:
             raise ValueError(
@@ -733,11 +495,6 @@ class ConversationState:
                 for entry in raw_events
                 if isinstance(entry, dict)
             ] if isinstance(raw_events, list) else [],
-            spec_edit_proposals=[
-                SpecEditProposal.from_dict(entry)
-                for entry in raw_proposals
-                if isinstance(entry, dict)
-            ] if isinstance(raw_proposals, list) else [],
             flow_run_requests=[
                 FlowRunRequest.from_dict(entry)
                 for entry in raw_flow_run_requests
@@ -748,14 +505,6 @@ class ConversationState:
                 for entry in raw_flow_launches
                 if isinstance(entry, dict)
             ] if isinstance(raw_flow_launches, list) else [],
-            execution_cards=[
-                ExecutionCard.from_dict(entry)
-                for entry in raw_cards
-                if isinstance(raw_cards, list) and isinstance(entry, dict)
-            ] if isinstance(raw_cards, list) else [],
-            execution_workflow=ExecutionWorkflowState.from_dict(payload.get("execution_workflow", {}))
-            if isinstance(payload.get("execution_workflow"), dict)
-            else ExecutionWorkflowState(),
         )
 
 

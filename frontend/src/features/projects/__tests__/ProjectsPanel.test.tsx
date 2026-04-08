@@ -444,14 +444,9 @@ describe('ProjectsPanel', () => {
             },
           ],
           event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: {
-            run_id: null,
-            status: 'idle',
-            error: null,
-            flow_source: null,
-          },
+
+
+
         })),
         {
           status: 200,
@@ -518,14 +513,9 @@ describe('ProjectsPanel', () => {
                 },
               ],
               event_log: [],
-              spec_edit_proposals: [],
-              execution_cards: [],
-              execution_workflow: {
-                run_id: null,
-                status: 'idle',
-                error: null,
-                flow_source: null,
-              },
+
+
+
             })),
             {
               status: 200,
@@ -631,14 +621,9 @@ describe('ProjectsPanel', () => {
               },
             ],
             event_log: [],
-            spec_edit_proposals: [],
-            execution_cards: [],
-            execution_workflow: {
-              run_id: null,
-              status: 'idle',
-              error: null,
-              flow_source: null,
-            },
+
+
+
           })), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -791,14 +776,9 @@ describe('ProjectsPanel', () => {
                 },
               ],
               event_log: [],
-              spec_edit_proposals: [],
-              execution_cards: [],
-              execution_workflow: {
-                run_id: null,
-                status: 'idle',
-                error: null,
-                flow_source: null,
-              },
+
+
+
             })),
             {
               status: 200,
@@ -922,14 +902,9 @@ describe('ProjectsPanel', () => {
                 },
               ],
               event_log: [],
-              spec_edit_proposals: [],
-              execution_cards: [],
-              execution_workflow: {
-                run_id: null,
-                status: 'idle',
-                error: null,
-                flow_source: null,
-              },
+
+
+
             })),
             {
               status: 200,
@@ -1028,14 +1003,9 @@ describe('ProjectsPanel', () => {
                 },
               ],
               event_log: [],
-              spec_edit_proposals: [],
-              execution_cards: [],
-              execution_workflow: {
-                run_id: null,
-                status: 'idle',
-                error: null,
-                flow_source: null,
-              },
+
+
+
             })),
             {
               status: 200,
@@ -1204,14 +1174,9 @@ describe('ProjectsPanel', () => {
             },
           ],
           event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: {
-            run_id: null,
-            status: 'idle',
-            error: null,
-            flow_source: null,
-          },
+
+
+
         })),
         {
           status: 200,
@@ -1403,14 +1368,9 @@ describe('ProjectsPanel', () => {
             },
           ],
           event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: {
-            run_id: null,
-            status: 'idle',
-            error: null,
-            flow_source: null,
-          },
+
+
+
         })),
         {
           status: 200,
@@ -1474,7 +1434,7 @@ describe('ProjectsPanel', () => {
         },
       ],
       event_log: [],
-      spec_edit_proposals: [],
+
       flow_run_requests: [
         {
           id: 'flow-run-request-inline',
@@ -1494,13 +1454,8 @@ describe('ProjectsPanel', () => {
           review_message: null,
         },
       ],
-      execution_cards: [],
-      execution_workflow: {
-        run_id: null,
-        status: 'idle',
-        error: null,
-        flow_source: null,
-      },
+
+
     })
 
     const launchedSnapshot = withSnapshotSchema({
@@ -1812,14 +1767,9 @@ describe('ProjectsPanel', () => {
             },
           ],
           event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: {
-            run_id: null,
-            status: 'idle',
-            error: null,
-            flow_source: null,
-          },
+
+
+
         })),
         {
           status: 200,
@@ -2164,14 +2114,9 @@ describe('ProjectsPanel', () => {
             },
           ],
           event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: {
-            run_id: null,
-            status: 'idle',
-            error: null,
-            flow_source: null,
-          },
+
+
+
         })),
         {
           status: 200,
@@ -2249,7 +2194,7 @@ describe('ProjectsPanel', () => {
 
     renderProjectsPanel()
 
-    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Can you use the spec proposal too?')
+    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Can you use the flow run request too?')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
     const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
@@ -2264,12 +2209,12 @@ describe('ProjectsPanel', () => {
           type: 'turn_upsert',
           conversation_id: conversationId,
           project_path: '/tmp/chat-project',
-          title: 'Can you use the spec proposal too?',
+          title: 'Can you use the flow run request too?',
           updated_at: '2026-03-08T19:28:40Z',
           turn: {
             id: 'turn-assistant-1',
             role: 'assistant',
-            content: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
+            content: 'Once you give me a flow and goal, I can create a pending flow run request.',
             timestamp: '2026-03-08T19:28:40Z',
             status: 'streaming',
             kind: 'message',
@@ -2282,7 +2227,7 @@ describe('ProjectsPanel', () => {
         data: JSON.stringify(asSegmentUpsertEvent({
           conversation_id: conversationId,
           project_path: '/tmp/chat-project',
-          title: 'Can you use the spec proposal too?',
+          title: 'Can you use the flow run request too?',
           updated_at: '2026-03-08T19:28:38Z',
           event: {
             id: 'event-reasoning-1',
@@ -2290,7 +2235,7 @@ describe('ProjectsPanel', () => {
             sequence: 1,
             timestamp: '2026-03-08T19:28:38Z',
             kind: 'reasoning_summary',
-            content_delta: 'Considering the spec proposal.',
+            content_delta: 'Considering the flow run request.',
             segment_id: 'segment-reasoning-1',
             segment: {
               id: 'segment-reasoning-1',
@@ -2302,7 +2247,7 @@ describe('ProjectsPanel', () => {
               timestamp: '2026-03-08T19:28:38Z',
               updated_at: '2026-03-08T19:28:38Z',
               completed_at: null,
-              content: 'Considering the spec proposal.',
+              content: 'Considering the flow run request.',
               artifact_id: null,
               error: null,
               tool_call: null,
@@ -2315,7 +2260,7 @@ describe('ProjectsPanel', () => {
         data: JSON.stringify(asSegmentUpsertEvent({
           conversation_id: conversationId,
           project_path: '/tmp/chat-project',
-          title: 'Can you use the spec proposal too?',
+          title: 'Can you use the flow run request too?',
           updated_at: '2026-03-08T19:28:40Z',
           event: {
             id: 'event-assistant-delta-1',
@@ -2323,7 +2268,7 @@ describe('ProjectsPanel', () => {
             sequence: 1,
             timestamp: '2026-03-08T19:28:40Z',
             kind: 'assistant_delta',
-            content_delta: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
+            content_delta: 'Once you give me a flow and goal, I can create a pending flow run request.',
             segment_id: 'segment-assistant-1',
             segment: {
               id: 'segment-assistant-1',
@@ -2335,7 +2280,7 @@ describe('ProjectsPanel', () => {
               timestamp: '2026-03-08T19:28:40Z',
               updated_at: '2026-03-08T19:28:40Z',
               completed_at: null,
-              content: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
+              content: 'Once you give me a flow and goal, I can create a pending flow run request.',
               artifact_id: null,
               error: null,
               tool_call: null,
@@ -2351,14 +2296,14 @@ describe('ProjectsPanel', () => {
         JSON.stringify(withSnapshotSchema({
           conversation_id: conversationId,
           project_path: '/tmp/chat-project',
-          title: 'Can you use the spec proposal too?',
+          title: 'Can you use the flow run request too?',
           created_at: '2026-03-08T19:28:30Z',
           updated_at: '2026-03-08T19:28:43Z',
           turns: [
             {
               id: 'turn-user-1',
               role: 'user',
-              content: 'Can you use the spec proposal too?',
+              content: 'Can you use the flow run request too?',
               timestamp: '2026-03-08T19:28:30Z',
               status: 'complete',
               kind: 'message',
@@ -2367,7 +2312,7 @@ describe('ProjectsPanel', () => {
             {
               id: 'turn-assistant-1',
               role: 'assistant',
-              content: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
+              content: 'Once you give me a flow and goal, I can create a pending flow run request.',
               timestamp: '2026-03-08T19:28:30Z',
               status: 'complete',
               kind: 'message',
@@ -2386,7 +2331,7 @@ describe('ProjectsPanel', () => {
               timestamp: '2026-03-08T19:28:38Z',
               updated_at: '2026-03-08T19:28:38Z',
               completed_at: null,
-              content: 'Considering the spec proposal.',
+              content: 'Considering the flow run request.',
               artifact_id: null,
               error: null,
               tool_call: null,
@@ -2402,7 +2347,7 @@ describe('ProjectsPanel', () => {
               timestamp: '2026-03-08T19:28:40Z',
               updated_at: '2026-03-08T19:28:43Z',
               completed_at: '2026-03-08T19:28:43Z',
-              content: 'Once you give me a concrete spec change, I can create a pending spec proposal.',
+              content: 'Once you give me a flow and goal, I can create a pending flow run request.',
               artifact_id: null,
               error: null,
               tool_call: null,
@@ -2410,14 +2355,9 @@ describe('ProjectsPanel', () => {
             },
           ],
           event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: {
-            run_id: null,
-            status: 'idle',
-            error: null,
-            flow_source: null,
-          },
+
+
+
         })),
         {
           status: 200,
@@ -2429,14 +2369,14 @@ describe('ProjectsPanel', () => {
     const history = await screen.findByTestId('project-ai-conversation-history-list')
     await waitFor(() => {
       const text = history.textContent ?? ''
-      expect(history).toHaveTextContent(/Considering the spec proposal\./)
-      expect(history).toHaveTextContent(/pending spec proposal\./)
-      const reasoningIndex = text.indexOf('Considering the spec proposal.')
-      const responseIndex = text.indexOf('pending spec proposal.')
+      expect(history).toHaveTextContent(/Considering the flow run request\./)
+      expect(history).toHaveTextContent(/pending flow run request\./)
+      const reasoningIndex = text.indexOf('Considering the flow run request.')
+      const responseIndex = text.indexOf('pending flow run request.')
       expect(reasoningIndex).toBeGreaterThan(-1)
       expect(responseIndex).toBeGreaterThan(-1)
       expect(reasoningIndex).toBeLessThan(responseIndex)
-      expect(text.lastIndexOf('pending spec proposal.')).toBe(responseIndex)
+      expect(text.lastIndexOf('pending flow run request.')).toBe(responseIndex)
     })
   })
 
@@ -2498,7 +2438,7 @@ describe('ProjectsPanel', () => {
 
     renderProjectsPanel()
 
-    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Can you use the spec proposal too?')
+    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Can you use the flow run request too?')
     await user.click(screen.getByTestId('project-ai-conversation-send-button'))
     const conversationId = useStore.getState().projectSessionsByPath['/tmp/chat-project']?.conversationId
     expect(conversationId).toBeTruthy()
@@ -2513,7 +2453,7 @@ describe('ProjectsPanel', () => {
           type: 'turn_upsert',
           conversation_id: conversationId,
           project_path: '/tmp/chat-project',
-          title: 'Can you use the spec proposal too?',
+          title: 'Can you use the flow run request too?',
           updated_at: '2026-03-08T21:18:16Z',
           turn: {
             id: 'turn-assistant-1',
@@ -2531,7 +2471,7 @@ describe('ProjectsPanel', () => {
         data: JSON.stringify(asSegmentUpsertEvent({
           conversation_id: conversationId,
           project_path: '/tmp/chat-project',
-          title: 'Can you use the spec proposal too?',
+          title: 'Can you use the flow run request too?',
           updated_at: '2026-03-08T21:18:16Z',
           event: {
             id: 'event-reasoning-1',
@@ -2567,14 +2507,14 @@ describe('ProjectsPanel', () => {
         JSON.stringify(withSnapshotSchema({
           conversation_id: conversationId,
           project_path: '/tmp/chat-project',
-          title: 'Can you use the spec proposal too?',
+          title: 'Can you use the flow run request too?',
           created_at: '2026-03-08T21:18:13Z',
           updated_at: '2026-03-08T21:18:33Z',
           turns: [
             {
               id: 'turn-user-1',
               role: 'user',
-              content: 'Can you use the spec proposal too?',
+              content: 'Can you use the flow run request too?',
               timestamp: '2026-03-08T21:18:16Z',
               status: 'complete',
               kind: 'message',
@@ -2583,7 +2523,7 @@ describe('ProjectsPanel', () => {
             {
               id: 'turn-assistant-1',
               role: 'assistant',
-              content: 'I can create a pending spec proposal, but there is not yet a concrete project change to draft.',
+              content: 'I can create a pending flow run request, but there is not yet a concrete project change to draft.',
               timestamp: '2026-03-08T21:18:16Z',
               status: 'complete',
               kind: 'message',
@@ -2618,7 +2558,7 @@ describe('ProjectsPanel', () => {
               timestamp: '2026-03-08T21:18:33Z',
               updated_at: '2026-03-08T21:18:33Z',
               completed_at: '2026-03-08T21:18:33Z',
-              content: 'I can create a pending spec proposal, but there is not yet a concrete project change to draft.',
+              content: 'I can create a pending flow run request, but there is not yet a concrete project change to draft.',
               artifact_id: null,
               error: null,
               tool_call: null,
@@ -2626,14 +2566,9 @@ describe('ProjectsPanel', () => {
             },
           ],
           event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: {
-            run_id: null,
-            status: 'idle',
-            error: null,
-            flow_source: null,
-          },
+
+
+
         })),
         {
           status: 200,
@@ -2646,7 +2581,7 @@ describe('ProjectsPanel', () => {
     await waitFor(() => {
       const text = history.textContent ?? ''
       expect(text).toContain('Checking the repo before drafting.')
-      expect(text).toContain('I can create a pending spec proposal, but there is not yet a concrete project change to draft.')
+      expect(text).toContain('I can create a pending flow run request, but there is not yet a concrete project change to draft.')
       expect(text.match(/Checking the repo before drafting\./g)?.length ?? 0).toBe(1)
     })
   })
@@ -2765,7 +2700,7 @@ describe('ProjectsPanel', () => {
           sequence: 2,
           kind: 'assistant_delta',
           timestamp: '2026-03-08T20:10:01Z',
-          content_delta: 'I can use the spec proposal tool ',
+          content_delta: 'I can use the flow run request tool ',
           segment: {
             id: 'segment-assistant-1',
             turn_id: 'turn-assistant-interleaved',
@@ -2776,7 +2711,7 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-08T20:10:01Z',
             updated_at: '2026-03-08T20:10:01Z',
             completed_at: null,
-            content: 'I can use the spec proposal tool ',
+            content: 'I can use the flow run request tool ',
             artifact_id: null,
             error: null,
             tool_call: null,
@@ -2824,7 +2759,7 @@ describe('ProjectsPanel', () => {
             timestamp: '2026-03-08T20:10:01Z',
             updated_at: '2026-03-08T20:10:02Z',
             completed_at: null,
-            content: 'I can use the spec proposal tool once we have a concrete change.',
+            content: 'I can use the flow run request tool once we have a concrete change.',
             artifact_id: null,
             error: null,
             tool_call: null,
@@ -2857,176 +2792,9 @@ describe('ProjectsPanel', () => {
     const history = await screen.findByTestId('project-ai-conversation-history-list')
     await waitFor(() => {
       expect(history).toHaveTextContent('Planning from the project context. and I am checking the repository first.')
-      expect(history).toHaveTextContent('I can use the spec proposal tool once we have a concrete change.')
+      expect(history).toHaveTextContent('I can use the flow run request tool once we have a concrete change.')
     })
     expect(within(history).getAllByText('Planning from the project context. and I am checking the repository first.')).toHaveLength(1)
-  })
-
-  it('renders persisted spec proposals inline from turn events instead of requiring proposal turns', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = resolveRequestUrl(input)
-        if (url.includes('/workspace/api/projects/metadata')) {
-          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/projects/conversations')) {
-          return new Response(JSON.stringify([
-            {
-              conversation_id: 'conversation-inline-proposal',
-              project_path: '/tmp/chat-project',
-              title: 'Inline proposal thread',
-              created_at: '2026-03-09T21:00:00Z',
-              updated_at: '2026-03-09T21:00:03Z',
-              last_message_preview: 'I drafted the proposal for review.',
-            },
-          ]), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (url.includes('/workspace/api/conversations/conversation-inline-proposal') && !url.includes('/turns')) {
-          return new Response(JSON.stringify(withSnapshotSchema({
-            conversation_id: 'conversation-inline-proposal',
-            project_path: '/tmp/chat-project',
-            title: 'Inline proposal thread',
-            created_at: '2026-03-09T21:00:00Z',
-            updated_at: '2026-03-09T21:00:03Z',
-            turns: [
-              {
-                id: 'turn-user-inline',
-                role: 'user',
-                content: 'Draft the proposal.',
-                timestamp: '2026-03-09T21:00:00Z',
-                status: 'complete',
-                kind: 'message',
-                artifact_id: null,
-              },
-            {
-              id: 'turn-assistant-inline',
-              role: 'assistant',
-              content: 'I drafted the proposal for review.',
-              timestamp: '2026-03-09T21:00:01Z',
-                status: 'complete',
-                kind: 'message',
-                artifact_id: null,
-              },
-            ],
-            segments: [
-              {
-                id: 'segment-tool-inline',
-                turn_id: 'turn-assistant-inline',
-                order: 1,
-                kind: 'tool_call',
-                role: 'system',
-                status: 'completed',
-                timestamp: '2026-03-09T21:00:01Z',
-                updated_at: '2026-03-09T21:00:01Z',
-                completed_at: '2026-03-09T21:00:01Z',
-                content: '',
-                artifact_id: null,
-                error: null,
-                tool_call: {
-                  id: 'tool-inline',
-                  kind: 'dynamic_tool',
-                  status: 'completed',
-                  title: 'Draft spec proposal',
-                  output: 'Drafted spec proposal: Add proposal smoke test.',
-                  file_paths: [],
-                },
-                source: null,
-              },
-              {
-                id: 'segment-artifact-proposal-inline',
-                turn_id: 'turn-assistant-inline',
-                order: 2,
-                kind: 'spec_edit_proposal',
-                role: 'system',
-                status: 'complete',
-                timestamp: '2026-03-09T21:00:02Z',
-                updated_at: '2026-03-09T21:00:02Z',
-                completed_at: '2026-03-09T21:00:02Z',
-                content: '',
-                artifact_id: 'proposal-inline',
-                error: null,
-                tool_call: null,
-                source: null,
-              },
-              {
-                id: 'segment-assistant-inline',
-                turn_id: 'turn-assistant-inline',
-                order: 3,
-                kind: 'assistant_message',
-                role: 'assistant',
-                status: 'complete',
-                timestamp: '2026-03-09T21:00:03Z',
-                updated_at: '2026-03-09T21:00:03Z',
-                completed_at: '2026-03-09T21:00:03Z',
-                content: 'I drafted the proposal for review.',
-                artifact_id: null,
-                error: null,
-                tool_call: null,
-                source: null,
-              },
-            ],
-            event_log: [
-              {
-                message: 'Drafted spec edit proposal proposal-inline.',
-                timestamp: '2026-03-09T21:00:02Z',
-              },
-            ],
-            spec_edit_proposals: [
-              {
-                id: 'proposal-inline',
-                created_at: '2026-03-09T21:00:02Z',
-                summary: 'Add proposal smoke test.',
-                status: 'pending',
-                changes: [
-                  {
-                    path: 'docs/spec-proposals/README.md',
-                    before: 'No proposal smoke test guidance exists.',
-                    after: 'Document the placeholder proposal smoke test flow.',
-                  },
-                ],
-                canonical_spec_edit_id: null,
-                approved_at: null,
-                git_branch: null,
-                git_commit: null,
-              },
-            ],
-            execution_cards: [],
-            execution_workflow: {
-              run_id: null,
-              status: 'idle',
-              error: null,
-              flow_source: null,
-            },
-          })), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        return new Response('Not found', { status: 404 })
-      }),
-    )
-
-    useStore.getState().registerProject('/tmp/chat-project')
-    useStore.getState().setActiveProjectPath('/tmp/chat-project')
-
-    renderProjectsPanel()
-
-    const history = await screen.findByTestId('project-ai-conversation-history-list')
-    await waitFor(() => {
-      const text = history.textContent ?? ''
-      const proposalIndex = text.indexOf('Add proposal smoke test.')
-      const replyIndex = text.indexOf('I drafted the proposal for review.')
-      expect(proposalIndex).toBeGreaterThan(-1)
-      expect(replyIndex).toBeGreaterThan(-1)
-      expect(proposalIndex).toBeLessThan(replyIndex)
-    })
   })
 
   it('reconstructs multiple persisted reasoning segments from snapshot state', async () => {
@@ -3149,14 +2917,9 @@ describe('ProjectsPanel', () => {
             ],
             turn_events: [],
             event_log: [],
-            spec_edit_proposals: [],
-            execution_cards: [],
-            execution_workflow: {
-              run_id: null,
-              status: 'idle',
-              error: null,
-              flow_source: null,
-            },
+
+
+
           })), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -3271,14 +3034,9 @@ describe('ProjectsPanel', () => {
             ],
             turn_events: [],
             event_log: [],
-            spec_edit_proposals: [],
-            execution_cards: [],
-            execution_workflow: {
-              run_id: null,
-              status: 'idle',
-              error: null,
-              flow_source: null,
-            },
+
+
+
           })), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -3464,14 +3222,9 @@ describe('ProjectsPanel', () => {
             ],
             turn_events: [],
             event_log: [],
-            spec_edit_proposals: [],
-            execution_cards: [],
-            execution_workflow: {
-              run_id: null,
-              status: 'idle',
-              error: null,
-              flow_source: null,
-            },
+
+
+
           })), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -3629,14 +3382,9 @@ describe('ProjectsPanel', () => {
           },
         ],
         event_log: [],
-        spec_edit_proposals: [],
-        execution_cards: [],
-        execution_workflow: {
-          run_id: null,
-          status: 'idle',
-          error: null,
-          flow_source: null,
-        },
+
+
+
       }),
       'conversation-thread-b': withSnapshotSchema({
         conversation_id: 'conversation-thread-b',
@@ -3655,14 +3403,9 @@ describe('ProjectsPanel', () => {
           },
         ],
         event_log: [],
-        spec_edit_proposals: [],
-        execution_cards: [],
-        execution_workflow: {
-          run_id: null,
-          status: 'idle',
-          error: null,
-          flow_source: null,
-        },
+
+
+
       }),
     }
 
@@ -3763,14 +3506,9 @@ describe('ProjectsPanel', () => {
           },
         ],
         event_log: [],
-        spec_edit_proposals: [],
-        execution_cards: [],
-        execution_workflow: {
-          run_id: null,
-          status: 'idle',
-          error: null,
-          flow_source: null,
-        },
+
+
+
       }),
       'conversation-thread-b': withSnapshotSchema({
         conversation_id: 'conversation-thread-b',
@@ -3789,14 +3527,9 @@ describe('ProjectsPanel', () => {
           },
         ],
         event_log: [],
-        spec_edit_proposals: [],
-        execution_cards: [],
-        execution_workflow: {
-          run_id: null,
-          status: 'idle',
-          error: null,
-          flow_source: null,
-        },
+
+
+
       }),
     }
 
@@ -3908,14 +3641,9 @@ describe('ProjectsPanel', () => {
             },
           ],
           event_log: [],
-          spec_edit_proposals: [],
-          execution_cards: [],
-          execution_workflow: {
-            run_id: null,
-            status: 'idle',
-            error: null,
-            flow_source: null,
-          },
+
+
+
         })),
         {
           status: 200,
@@ -3972,9 +3700,6 @@ describe('ProjectsPanel', () => {
         ],
         turn_events: [],
         event_log: [],
-        spec_edit_proposals: [],
-        execution_cards: [],
-        execution_workflow: { status: 'idle' },
       }),
       'conversation-thread-b': withSnapshotSchema({
         conversation_id: 'conversation-thread-b',
@@ -3994,9 +3719,6 @@ describe('ProjectsPanel', () => {
         ],
         turn_events: [],
         event_log: [],
-        spec_edit_proposals: [],
-        execution_cards: [],
-        execution_workflow: { status: 'idle' },
       }),
     }
 

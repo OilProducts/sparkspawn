@@ -24,7 +24,7 @@ const buildSnapshot = (
     {
       id: 'turn-assistant',
       role: 'assistant',
-      content: 'I drafted a spec edit proposal for review.',
+      content: 'I prepared the run request for review.',
       timestamp: '2026-03-06T15:00:10Z',
       kind: 'message',
       status: 'complete',
@@ -42,7 +42,7 @@ const buildSnapshot = (
       timestamp: '2026-03-06T15:00:10Z',
       updated_at: '2026-03-06T15:00:10Z',
       completed_at: '2026-03-06T15:00:10Z',
-      content: 'I drafted a spec edit proposal for review.',
+      content: 'I prepared the run request for review.',
       artifact_id: null,
       error: null,
       tool_call: null,
@@ -51,37 +51,17 @@ const buildSnapshot = (
   ],
   event_log: [
     {
-      message: 'Execution planning started (workflow-1) using contract-behavior.dot.',
+      message: 'Flow run request request-1 approved for launch.',
       timestamp: '2026-03-06T15:01:00Z',
-    },
-  ],
-  spec_edit_proposals: [
-    {
-      id: 'proposal-1',
-      created_at: '2026-03-06T15:00:11Z',
-      summary: 'Require explicit spec review before execution planning.',
-      status: 'applied',
-      changes: [],
-      canonical_spec_edit_id: 'spec-edit-1',
-      approved_at: '2026-03-06T15:01:00Z',
-      git_branch: 'main',
-      git_commit: 'abc123',
     },
   ],
   flow_run_requests: [],
   flow_launches: [],
-  execution_cards: [],
-  execution_workflow: {
-    run_id: 'workflow-1',
-    status: 'running',
-    error: null,
-    flow_source: 'contract-behavior.dot',
-  },
   ...overrides,
 })
 
 describe('applyConversationSnapshotToCache', () => {
-  it('accepts same-timestamp snapshots when event and workflow state advances', () => {
+  it('accepts same-timestamp snapshots when the event log advances', () => {
     const initialSnapshot = buildSnapshot()
     const cacheWithInitialSnapshot = applyConversationSnapshotToCache(
       EMPTY_PROJECT_CONVERSATION_CACHE_STATE,
@@ -89,30 +69,23 @@ describe('applyConversationSnapshotToCache', () => {
       initialSnapshot,
     ).cache
 
-    const failedSnapshot = buildSnapshot({
+    const updatedSnapshot = buildSnapshot({
       event_log: [
         ...initialSnapshot.event_log,
         {
-          message: 'Execution planning failed: plan status endpoint unavailable.',
+          message: 'Flow launch run-1 completed successfully.',
           timestamp: '2026-03-06T15:02:00Z',
         },
       ],
-      execution_workflow: {
-        run_id: 'workflow-1',
-        status: 'failed',
-        error: 'plan status endpoint unavailable.',
-        flow_source: 'contract-behavior.dot',
-      },
     })
 
     const result = applyConversationSnapshotToCache(
       cacheWithInitialSnapshot,
-      failedSnapshot.project_path,
-      failedSnapshot,
+      updatedSnapshot.project_path,
+      updatedSnapshot,
     )
 
     expect(result.applied).toBe(true)
-    expect(result.cache.snapshotsByConversationId[failedSnapshot.conversation_id]?.event_log).toHaveLength(2)
-    expect(result.cache.snapshotsByConversationId[failedSnapshot.conversation_id]?.execution_workflow.status).toBe('failed')
+    expect(result.cache.snapshotsByConversationId[updatedSnapshot.conversation_id]?.event_log).toHaveLength(2)
   })
 })

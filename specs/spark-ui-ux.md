@@ -53,8 +53,8 @@ It consumes Attractor through API surfaces for:
 The frontend does not durably own:
 - projects
 - conversations
-- proposals
-- execution cards
+- flow-run requests
+- conversation-linked flow launches
 - review decisions
 - provenance links
 
@@ -76,7 +76,7 @@ The frontend consumes workspace data for:
 - project list and active project
 - project conversations
 - inline conversation artifacts
-- proposal and execution-card review state
+- flow-run request review state
 - workspace trigger definitions and runtime summaries
 - provenance references to flows and runs
 
@@ -153,9 +153,8 @@ Workspace-oriented surfaces include:
 - navbar project switcher
 - conversation thread list
 - project chat
-- inline spec proposal cards
 - inline flow-run request cards
-- inline execution cards
+- inline flow-launch cards
 - review controls
 
 ### 8.2 Attractor Surfaces
@@ -232,7 +231,7 @@ The conversation surface should show:
 - assistant turns
 - thinking or reasoning blocks
 - tool activity
-- inline workspace artifacts such as spec proposals, flow-run requests, and execution cards
+- inline workspace artifacts such as flow-run requests and flow launches
 
 Conversation UX commitments include:
 - an assistant row should appear promptly after the user sends a message
@@ -249,7 +248,7 @@ The UI must not reconstruct chat cards from raw protocol notifications.
 
 ## 11. Review and Approval UX
 
-Spec edit proposal approval, flow-run request approval, and execution-card approval are explicit human actions.
+Flow-run request approval is an explicit human action.
 
 The UI must present these as review controls, not as automatic assistant continuations.
 
@@ -470,8 +469,8 @@ Only durable, testable UX expectations belong here.
 
 The current stable story groups are:
 - Home workspace and project selection
-- project-scoped AI conversation and spec editing
-- spec -> plan -> work tracker -> build chain
+- project-scoped AI conversation, flow-run request review, and direct flow launches
+- execution governance, traceability, and auditability
 - governance, safety, and auditability
 - UX and information architecture implications
 

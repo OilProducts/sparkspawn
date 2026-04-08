@@ -13,7 +13,6 @@ import httpx
 from attractor.validation_preview import preview_dot_source
 from workspace.project_chat_common import (
     normalize_flow_run_request_payload,
-    normalize_spec_edit_proposal_payload,
 )
 
 
@@ -33,14 +32,6 @@ def _build_agent_parser() -> argparse.ArgumentParser:
 
     convo = domains.add_parser("convo", help="Conversation-scoped artifact commands")
     convo_commands = convo.add_subparsers(dest="command")
-
-    spec_proposal = convo_commands.add_parser(
-        "spec-proposal",
-        help="Create a pending spec proposal artifact in a conversation",
-    )
-    spec_proposal.add_argument("--conversation", required=True, help="Conversation handle in adjective-noun form.")
-    spec_proposal.add_argument("--json", dest="json_path", required=True, help="JSON payload file path, or '-' for stdin.")
-    spec_proposal.add_argument("--base-url")
 
     run_request = convo_commands.add_parser(
         "run-request",
@@ -147,8 +138,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.domain == "convo":
-        if args.command == "spec-proposal":
-            return _run_spec_proposal(args)
         if args.command == "run-request":
             return _run_run_request(args)
     if args.domain == "run":
@@ -177,44 +166,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser.error("Unknown command")
     return EXIT_USAGE_ERROR
-
-
-def _run_spec_proposal(args: argparse.Namespace) -> int:
-    base_url = _resolve_base_url_or_print_error(args.base_url, command="spark convo spec-proposal")
-    if base_url is None:
-        return EXIT_GENERAL_FAILURE
-    try:
-        payload = _read_required_json_object(str(args.json_path), "Proposal payload")
-    except ValueError as exc:
-        _print_error_payload({"ok": False, "error": str(exc)})
-        return EXIT_GENERAL_FAILURE
-
-    unexpected_keys = sorted(set(payload.keys()) - {"summary", "changes", "rationale"})
-    if unexpected_keys:
-        keys = ", ".join(unexpected_keys)
-        _print_error_payload(
-            {
-                "ok": False,
-                "error": f"Unexpected payload field(s): {keys}. Allowed fields are summary, changes, and optional rationale.",
-            }
-        )
-        return EXIT_GENERAL_FAILURE
-
-    try:
-        normalized = normalize_spec_edit_proposal_payload(payload, source_name="spark convo spec-proposal")
-    except ValueError as exc:
-        _print_error_payload({"ok": False, "error": str(exc)})
-        return EXIT_GENERAL_FAILURE
-
-    request_url = _workspace_url(
-        base_url,
-        f"/workspace/api/conversations/by-handle/{quote(str(args.conversation).strip(), safe='')}/spec-edit-proposals",
-    )
-    response_payload, exit_code = _request_json("POST", request_url, payload=normalized)
-    if response_payload is None:
-        return exit_code
-    _print_success_payload(response_payload)
-    return 0
 
 
 def _run_run_request(args: argparse.Namespace) -> int:

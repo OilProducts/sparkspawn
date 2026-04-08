@@ -63,10 +63,6 @@ def load_flow_content(flows_dir: Path, flow_source: str) -> str:
     return flow_path.read_text(encoding="utf-8")
 
 
-def load_execution_planning_flow_content(flows_dir: Path, flow_source: str, prompt: str) -> str:
-    return inject_pipeline_goal(load_flow_content(flows_dir, flow_source), prompt)
-
-
 def semantic_signature(dot_content: str, build_transform_pipeline: Callable[[], object]) -> str:
     graph = build_transform_pipeline().apply(parse_dot(dot_content))
     normalized = normalize_graph(graph)

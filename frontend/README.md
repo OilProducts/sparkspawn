@@ -5,7 +5,7 @@ This directory contains the React 19 + Vite frontend for Spark.
 The UI is responsible for:
 
 - project registration and project-scoped Home workflows
-- conversation threads, spec-edit review, and execution-card review
+- conversation threads, flow-run request review, and direct flow launches
 - DOT authoring in both structured and raw modes
 - execution controls, live run streaming, and run inspection
 - settings, diagnostics, and responsive shell layout

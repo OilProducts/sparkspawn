@@ -16,10 +16,6 @@ from workspace.attractor_client import AttractorApiClient
 from workspace.api import WorkspaceApiDependencies, create_workspace_router
 from workspace.triggers import TriggerRuntime
 
-
-DEFAULT_EXECUTION_PLANNING_FLOW = "plan-generation.dot"
-DEFAULT_EXECUTION_DISPATCH_FLOW = "spec-implementation/implement-spec.dot"
-
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 TRIGGER_RUNTIME = TriggerRuntime(
     get_settings=attractor_server.get_settings,
@@ -136,8 +132,6 @@ WORKSPACE_ROUTER = create_workspace_router(
         resolve_project_git_commit=lambda runtime_path: pipeline_runs.resolve_project_git_commit(runtime_path),
         pick_project_directory=lambda: _pick_project_directory(),
         get_trigger_runtime=lambda: TRIGGER_RUNTIME,
-        default_execution_planning_flow=DEFAULT_EXECUTION_PLANNING_FLOW,
-        default_execution_dispatch_flow=DEFAULT_EXECUTION_DISPATCH_FLOW,
     )
 )
 

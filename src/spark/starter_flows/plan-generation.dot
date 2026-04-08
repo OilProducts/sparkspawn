@@ -1,8 +1,0 @@
-digraph plan_generation {
-  graph [goal="Generate a tracker-ready execution card JSON.", label="Plan Generation", ui_default_llm_model="gpt-5.3-codex-spark", ui_default_llm_provider="openai"];
-  done [allow_partial=false, auto_status=false, error_policy="continue", goal_gate=false, join_policy="wait_all", label="Done", max_parallel=4, reasoning_effort="high", shape="Msquare"];
-  generate_execution_card [allow_partial=false, auto_status=false, error_policy="continue", goal_gate=false, join_policy="wait_all", label="Generate Execution Card", max_parallel=4, prompt="Generate a tracker-ready execution card JSON.", reasoning_effort="high", shape="box"];
-  start [allow_partial=false, auto_status=false, error_policy="continue", goal_gate=false, join_policy="wait_all", label="Start", max_parallel=4, reasoning_effort="high", shape="Mdiamond"];
-  generate_execution_card -> done [loop_restart=false];
-  start -> generate_execution_card [loop_restart=false];
-}

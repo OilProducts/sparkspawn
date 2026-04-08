@@ -53,7 +53,6 @@ from attractor.api.flow_sources import (
     ensure_flows_dir as _ensure_flows_dir_impl,
     flow_name_from_path as _flow_name_from_path_impl,
     inject_pipeline_goal as _inject_pipeline_goal_impl,
-    load_execution_planning_flow_content as _load_execution_planning_flow_content_impl,
     load_flow_content as _load_flow_content_impl,
     resolve_flow_path as _resolve_flow_path_impl,
     semantic_signature as _semantic_signature_impl,
@@ -728,9 +727,6 @@ DEFAULT_FLOW = """digraph SoftwareFactory {
 
     start -> setup -> build -> done;
 }"""
-
-EXECUTION_PLANNING_STAGE_ID = "generate_execution_card"
-
 
 def _build_codergen_backend(
     backend_name: str,
@@ -1763,12 +1759,6 @@ def _resolve_run_project_git_metadata(working_directory: str) -> tuple[str, Opti
 
 def _load_flow_content(flow_source: str) -> str:
     return _load_flow_content_impl(_flows_dir(), flow_source)
-
-
-def _load_execution_planning_flow_content(flow_source: str, prompt: str) -> str:
-    return _load_execution_planning_flow_content_impl(_flows_dir(), flow_source, prompt)
-
-
 def _record_run_metadata(run_id: str, *, spec_id: Optional[str] = None, plan_id: Optional[str] = None) -> None:
     with RUN_HISTORY_LOCK:
         record = _read_run_meta(_run_meta_path(run_id))

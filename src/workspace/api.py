@@ -64,30 +64,6 @@ class ProjectStateUpdateRequest(BaseModel):
     last_accessed_at: Optional[str] = None
     active_conversation_id: Optional[str] = None
 
-
-class SpecEditApprovalRequest(BaseModel):
-    project_path: str
-    model: Optional[str] = None
-    flow_source: Optional[str] = None
-
-
-class SpecEditProposalChangeRequest(BaseModel):
-    path: str
-    before: str
-    after: str
-
-
-class SpecEditProposalCreateByHandleRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    summary: str
-    changes: list[SpecEditProposalChangeRequest]
-    rationale: Optional[str] = None
-
-
-class SpecEditRejectionRequest(BaseModel):
-    project_path: str
-
-
 class FlowRunRequestCreateByHandleRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     flow_name: str
@@ -118,15 +94,6 @@ class RunLaunchRequest(BaseModel):
 
 class FlowLaunchPolicyUpdateRequest(BaseModel):
     launch_policy: str
-
-
-class ExecutionCardReviewRequest(BaseModel):
-    project_path: str
-    disposition: str
-    message: str
-    model: Optional[str] = None
-    flow_source: Optional[str] = None
-
 
 class TriggerCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -161,8 +128,6 @@ class WorkspaceApiDependencies:
     resolve_project_git_commit: Callable[[Path], Optional[str]]
     pick_project_directory: Callable[[], Optional[Path]]
     get_trigger_runtime: Callable[[], TriggerRuntime]
-    default_execution_planning_flow: str
-    default_execution_dispatch_flow: str
 
 
 def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
@@ -207,20 +172,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             raise HTTPException(status_code=400, detail="Flow surface must be 'human' or 'agent'.")
         return normalized_surface
 
-    def _find_workspace_event_trigger(project_path: str, event_name: str) -> str | None:
-        matching_flow: str | None = None
-        for definition in list_trigger_definitions(deps.get_settings().config_dir):
-            if definition.source_type != "workspace_event" or not definition.enabled:
-                continue
-            if str(definition.source.get("event_name") or "").strip() != event_name:
-                continue
-            configured_project = (definition.action.project_path or "").strip()
-            if configured_project and configured_project != project_path:
-                continue
-            if matching_flow is None or configured_project == project_path:
-                matching_flow = definition.action.flow_name
-        return matching_flow
-
     async def _ensure_flow_exists(flow_name: str) -> None:
         flow_path = resolve_flow_path(deps.get_settings().flows_dir, flow_name)
         if not flow_path.exists():
@@ -260,167 +211,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             if status in terminal_pipeline_statuses:
                 return payload
             await asyncio.sleep(1.0)
-
-    async def _read_stage_response(run_id: str, stage_id: str) -> str:
-        client = deps.get_attractor_client()
-        for artifact_path in (f"logs/{stage_id}/response.md", f"{stage_id}/response.md"):
-            try:
-                text = await client.get_artifact_text(run_id, artifact_path)
-            except AttractorApiError:
-                continue
-            if text.strip():
-                return text
-        raise RuntimeError(f"Run {run_id} completed without a response artifact for stage {stage_id}.")
-
-    async def _launch_execution_planning_pipeline(
-        *,
-        conversation_id: str,
-        proposal_id: str,
-        workflow_run_id: str,
-        flow_source: str,
-        execution_flow_source: str,
-        model: Optional[str],
-        review_feedback: Optional[str],
-    ) -> None:
-        project_chat = deps.get_project_chat()
-        client = deps.get_attractor_client()
-        launch_spec = await asyncio.to_thread(
-            project_chat.prepare_execution_workflow_launch,
-            conversation_id,
-            proposal_id,
-            review_feedback,
-        )
-        try:
-            launch_payload = await client.start_pipeline(
-                run_id=workflow_run_id,
-                flow_name=flow_source,
-                working_directory=launch_spec.project_path,
-                model=model,
-                goal=launch_spec.prompt,
-                spec_id=launch_spec.spec_id,
-            )
-        except AttractorApiError as exc:
-            await asyncio.to_thread(
-                project_chat.fail_execution_workflow,
-                conversation_id,
-                workflow_run_id,
-                flow_source,
-                str(exc),
-            )
-            await project_chat.publish_snapshot(conversation_id)
-            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-
-        if launch_payload.get("status") != "started":
-            error = str(launch_payload.get("error") or "Execution planning flow could not be started.")
-            await asyncio.to_thread(
-                project_chat.fail_execution_workflow,
-                conversation_id,
-                workflow_run_id,
-                flow_source,
-                error,
-            )
-            await project_chat.publish_snapshot(conversation_id)
-            raise HTTPException(status_code=500, detail=error)
-
-        await deps.get_trigger_runtime().observe_run(
-            run_id=workflow_run_id,
-            flow_name=flow_source,
-            project_path=launch_spec.project_path,
-        )
-
-        async def monitor() -> None:
-            try:
-                payload = await _wait_for_pipeline_terminal_status(workflow_run_id)
-                completed_status = str(payload.get("status", "")).strip().lower()
-                completed_outcome = str(payload.get("outcome", "")).strip().lower()
-                if completed_status != "completed" or completed_outcome != "success":
-                    error = str(
-                        payload.get("last_error")
-                        or payload.get("outcome_reason_message")
-                        or f"Execution planning pipeline ended with status '{completed_status}' and outcome '{completed_outcome or '—'}'."
-                    ).strip()
-                    await asyncio.to_thread(
-                        project_chat.fail_execution_workflow,
-                        conversation_id,
-                        workflow_run_id,
-                        flow_source,
-                        error,
-                    )
-                    await project_chat.publish_snapshot(conversation_id)
-                    return
-
-                raw_response = await _read_stage_response(workflow_run_id, "generate_execution_card")
-                execution_card = await asyncio.to_thread(
-                    project_chat.complete_execution_workflow,
-                    conversation_id,
-                    proposal_id,
-                    flow_source,
-                    execution_flow_source,
-                    workflow_run_id,
-                    raw_response,
-                )
-                await client.update_pipeline_metadata(
-                    workflow_run_id,
-                    plan_id=execution_card.id,
-                )
-                await project_chat.publish_snapshot(conversation_id)
-            except Exception as exc:  # noqa: BLE001
-                await asyncio.to_thread(
-                    project_chat.fail_execution_workflow,
-                    conversation_id,
-                    workflow_run_id,
-                    flow_source,
-                    str(exc),
-                )
-                await project_chat.publish_snapshot(conversation_id)
-
-        asyncio.create_task(monitor())
-
-    async def _launch_execution_card_pipeline(
-        *,
-        conversation_id: str,
-        execution_card_id: str,
-        project_path: str,
-        flow_source: str,
-        model: Optional[str],
-        spec_id: str,
-        plan_id: str,
-    ) -> str:
-        project_chat = deps.get_project_chat()
-        try:
-            launch_payload = await deps.get_attractor_client().start_pipeline(
-                run_id=None,
-                flow_name=flow_source,
-                working_directory=project_path,
-                model=model,
-                spec_id=spec_id,
-                plan_id=plan_id,
-            )
-        except AttractorApiError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-
-        if launch_payload.get("status") != "started":
-            error = str(launch_payload.get("error") or "Execution flow could not be started.")
-            raise HTTPException(status_code=500, detail=error)
-
-        run_id = str(launch_payload.get("run_id") or "")
-        if not run_id:
-            raise HTTPException(status_code=500, detail="Execution flow did not return a run id.")
-
-        await deps.get_trigger_runtime().observe_run(
-            run_id=run_id,
-            flow_name=flow_source,
-            project_path=project_path,
-        )
-        await asyncio.to_thread(
-            project_chat.note_execution_card_dispatched,
-            conversation_id,
-            execution_card_id,
-            run_id,
-            flow_source,
-        )
-        await project_chat.publish_snapshot(conversation_id)
-        return run_id
 
     async def _launch_flow_run_request_pipeline(
         *,
@@ -847,35 +637,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return snapshot
 
-    @router.post("/api/conversations/by-handle/{conversation_handle}/spec-edit-proposals")
-    async def create_project_spec_edit_proposal_by_handle(
-        conversation_handle: str,
-        req: SpecEditProposalCreateByHandleRequest,
-    ):
-        try:
-            result = await asyncio.to_thread(
-                deps.get_project_chat().create_spec_edit_proposal_by_handle,
-                conversation_handle,
-                req.model_dump(),
-            )
-        except FileNotFoundError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"Unknown conversation handle: {conversation_handle}. "
-                    "Verify the handle shown in the thread UI and try again."
-                ),
-            ) from exc
-        except ValueError as exc:
-            detail = str(exc)
-            status_code = 409 if "identical proposal already exists" in detail else 400
-            raise HTTPException(status_code=status_code, detail=detail) from exc
-        await deps.get_project_chat().publish_snapshot(str(result["conversation_id"]))
-        return {
-            "ok": True,
-            **result,
-        }
-
     @router.post("/api/conversations/by-handle/{conversation_handle}/flow-run-requests")
     async def create_flow_run_request_by_handle(
         conversation_handle: str,
@@ -1009,67 +770,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             response_payload.update(artifact_result)
         return response_payload
 
-    @router.post("/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/approve")
-    async def approve_project_spec_edit_proposal(
-        conversation_id: str,
-        proposal_id: str,
-        req: SpecEditApprovalRequest,
-    ):
-        normalized_project_path = _normalize_project_path_or_400(req.project_path)
-        effective_flow_source = (
-            (req.flow_source or "").strip()
-            or _find_workspace_event_trigger(normalized_project_path, "spec_edit_approved")
-            or deps.default_execution_planning_flow
-        )
-        await _ensure_flow_exists(effective_flow_source)
-        try:
-            snapshot, proposal = await asyncio.to_thread(
-                deps.get_project_chat().approve_spec_edit,
-                conversation_id,
-                normalized_project_path,
-                proposal_id,
-            )
-            workflow_run_id = f"workflow-{uuid.uuid4().hex[:12]}"
-            snapshot = await asyncio.to_thread(
-                deps.get_project_chat().mark_execution_workflow_started,
-                conversation_id,
-                workflow_run_id,
-                effective_flow_source,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        await _launch_execution_planning_pipeline(
-            conversation_id=conversation_id,
-            proposal_id=proposal.id,
-            workflow_run_id=workflow_run_id,
-            flow_source=effective_flow_source,
-            execution_flow_source=deps.default_execution_dispatch_flow,
-            model=req.model,
-            review_feedback=None,
-        )
-        await deps.get_project_chat().publish_snapshot(conversation_id)
-        return snapshot
-
-    @router.post("/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/reject")
-    async def reject_project_spec_edit_proposal(
-        conversation_id: str,
-        proposal_id: str,
-        req: SpecEditRejectionRequest,
-    ):
-        normalized_project_path = _normalize_project_path_or_400(req.project_path)
-        try:
-            snapshot = await asyncio.to_thread(
-                deps.get_project_chat().reject_spec_edit,
-                conversation_id,
-                normalized_project_path,
-                proposal_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await deps.get_project_chat().publish_snapshot(conversation_id)
-        return snapshot
-
     @router.post("/api/conversations/{conversation_id}/flow-run-requests/{request_id}/review")
     async def review_flow_run_request(
         conversation_id: str,
@@ -1130,71 +830,6 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 deps.get_project_chat().get_snapshot,
                 conversation_id,
                 normalized_project_path,
-            )
-        return snapshot
-
-    @router.post("/api/conversations/{conversation_id}/execution-cards/{execution_card_id}/review")
-    async def review_project_execution_card(
-        conversation_id: str,
-        execution_card_id: str,
-        req: ExecutionCardReviewRequest,
-    ):
-        if req.disposition not in {"approved", "rejected", "revision_requested"}:
-            raise HTTPException(status_code=400, detail="Execution card disposition must be approved, rejected, or revision_requested.")
-        normalized_project_path = _normalize_project_path_or_400(req.project_path)
-        review_flow_source = None
-        if req.disposition != "approved":
-            planning_trigger = (
-                "execution_card_revision_requested"
-                if req.disposition == "revision_requested"
-                else "execution_card_rejected"
-            )
-            review_flow_source = (
-                _find_workspace_event_trigger(normalized_project_path, planning_trigger)
-                or deps.default_execution_planning_flow
-            )
-        try:
-            snapshot, execution_card, proposal_id, workflow_run_id = await asyncio.to_thread(
-                deps.get_project_chat().review_execution_card,
-                conversation_id,
-                normalized_project_path,
-                execution_card_id,
-                req.disposition,
-                req.message,
-                review_flow_source,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await deps.get_project_chat().publish_snapshot(conversation_id)
-        if req.disposition == "approved":
-            persisted_execution_flow = (execution_card.flow_source or "").strip()
-            effective_flow_source = (
-                (req.flow_source or "").strip()
-                or _find_workspace_event_trigger(normalized_project_path, "execution_card_approved")
-                or persisted_execution_flow
-                or deps.default_execution_dispatch_flow
-            )
-            await _ensure_flow_exists(effective_flow_source)
-            await _launch_execution_card_pipeline(
-                conversation_id=conversation_id,
-                execution_card_id=execution_card.id,
-                project_path=normalized_project_path,
-                flow_source=effective_flow_source,
-                model=req.model,
-                spec_id=execution_card.source_spec_edit_id,
-                plan_id=execution_card.id,
-            )
-        elif proposal_id and workflow_run_id:
-            resolved_review_flow = review_flow_source or deps.default_execution_planning_flow
-            await _ensure_flow_exists(resolved_review_flow)
-            await _launch_execution_planning_pipeline(
-                conversation_id=conversation_id,
-                proposal_id=proposal_id,
-                workflow_run_id=workflow_run_id,
-                flow_source=resolved_review_flow,
-                execution_flow_source=deps.default_execution_dispatch_flow,
-                model=req.model,
-                review_feedback=req.message,
             )
         return snapshot
 

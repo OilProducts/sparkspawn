@@ -18,7 +18,6 @@ interface RunSummaryCardProps {
     activeProjectPath: string | null
     now: number
     collapsed: boolean
-    onOpenRunArtifact: (run: RunRecord, artifactType: 'spec' | 'plan') => void
     onRequestCancel: (runId: string, currentStatus: string) => void
     onContinueFromRun: (run: RunRecord) => void
     onCollapsedChange: (collapsed: boolean) => void
@@ -29,7 +28,6 @@ export function RunSummaryCard({
     activeProjectPath,
     now,
     collapsed,
-    onOpenRunArtifact,
     onRequestCancel,
     onContinueFromRun,
     onCollapsedChange,
@@ -58,32 +56,8 @@ export function RunSummaryCard({
                 <PanelContent className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
-                        {run.spec_id ? (
-                            <Button
-                                type="button"
-                                data-testid="run-summary-spec-artifact-link"
-                                onClick={() => onOpenRunArtifact(run, 'spec')}
-                                variant="link"
-                                size="xs"
-                                className="h-auto px-0 py-0 font-mono"
-                                title={run.spec_id}
-                            >
-                                Spec {run.spec_id}
-                            </Button>
-                        ) : null}
-                        {run.plan_id ? (
-                            <Button
-                                type="button"
-                                data-testid="run-summary-plan-artifact-link"
-                                onClick={() => onOpenRunArtifact(run, 'plan')}
-                                variant="link"
-                                size="xs"
-                                className="h-auto px-0 py-0 font-mono"
-                                title={run.plan_id}
-                            >
-                                Plan {run.plan_id}
-                            </Button>
-                        ) : null}
+                        {run.spec_id ? <span className="font-mono text-xs text-muted-foreground" title={run.spec_id}>Spec {run.spec_id}</span> : null}
+                        {run.plan_id ? <span className="font-mono text-xs text-muted-foreground" title={run.plan_id}>Plan {run.plan_id}</span> : null}
                         </div>
                         <div className="flex items-center gap-2">
                             {continueAvailable ? (

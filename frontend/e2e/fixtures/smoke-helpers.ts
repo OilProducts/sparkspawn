@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
 const screenshotDir = path.resolve(testDir, '..', '..', 'artifacts', 'ui-smoke')
@@ -26,6 +26,20 @@ export const ensureScreenshotDir = () => {
 
 export const screenshotPath = (name: string) => path.join(screenshotDir, name)
 
+const buildSmokeProjectRecord = (projectPath: string) => {
+  const displayName = path.basename(projectPath) || projectPath
+  return {
+    project_id: `smoke-${displayName}`,
+    project_path: projectPath,
+    display_name: displayName,
+    created_at: '2026-03-11T09:00:00Z',
+    last_opened_at: '2026-03-11T09:30:00Z',
+    last_accessed_at: '2026-03-11T09:45:00Z',
+    is_favorite: false,
+    active_conversation_id: null,
+  }
+}
+
 export async function stubProjectMetadata(page: Page, metadata?: { branch?: string; commit?: string }) {
   await page.route('**/workspace/api/projects/metadata**', async (route) => {
     const requestUrl = new URL(route.request().url())
@@ -42,6 +56,75 @@ export async function stubProjectMetadata(page: Page, metadata?: { branch?: stri
       }),
     })
   })
+}
+
+export async function stubProjectRegistration(page: Page, projectPath: string) {
+  let registered = false
+  const projectRecord = buildSmokeProjectRecord(projectPath)
+
+  await page.route('**/workspace/api/projects', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    const requestUrl = new URL(route.request().url())
+    if (requestUrl.pathname !== '/workspace/api/projects') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(registered ? [projectRecord] : []),
+    })
+  })
+
+  await page.route('**/workspace/api/projects/conversations**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([]),
+    })
+  })
+
+  await page.route('**/workspace/api/projects/pick-directory', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'selected',
+        directory_path: projectPath,
+      }),
+    })
+  })
+
+  await page.route('**/workspace/api/projects/register', async (route) => {
+    registered = true
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(projectRecord),
+    })
+  })
+
+  await page.route('**/workspace/api/projects/state', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(projectRecord),
+    })
+  })
+}
+
+export async function registerProjectForSmokeTest(page: Page, projectPath: string) {
+  await page.getByTestId('top-nav-project-add-button').click()
+  await expect(page.getByTestId('top-nav-project-switcher')).toContainText(path.basename(projectPath) || projectPath)
+}
+
+export async function gotoWithRegisteredProject(page: Page, projectPath: string) {
+  await stubProjectRegistration(page, projectPath)
+  await page.goto('/')
+  await registerProjectForSmokeTest(page, projectPath)
 }
 
 export async function createFlowForSmokeTest(page: Page, flowPrefix: string): Promise<string> {

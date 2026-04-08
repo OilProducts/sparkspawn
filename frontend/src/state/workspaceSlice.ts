@@ -14,7 +14,6 @@ import {
     resolveProjectSessionState,
     resolveViewModeForProjectScope,
     saveRouteState,
-    selectProjectSessionArtifactState,
 } from './store-helpers'
 import type {
     AppState,
@@ -392,42 +391,4 @@ export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice
                 workingDir: nextScopedWorkspace.workingDir,
             }
         }),
-    setSpecId: (id) =>
-        set((state) => updateArtifactField(state, 'specId', id)),
-    setSpecStatus: (status) =>
-        set((state) => updateArtifactField(state, 'specStatus', status)),
-    setSpecProvenance: (provenance) =>
-        set((state) => updateArtifactField(state, 'specProvenance', provenance)),
-    setPlanId: (id) =>
-        set((state) => updateArtifactField(state, 'planId', id)),
-    setPlanStatus: (status) =>
-        set((state) => updateArtifactField(state, 'planStatus', status)),
-    setPlanProvenance: (provenance) =>
-        set((state) => updateArtifactField(state, 'planProvenance', provenance)),
-    getProjectSessionArtifactState: (projectPath) =>
-        selectProjectSessionArtifactState(get().projectSessionsByPath, projectPath),
 })
-
-const updateArtifactField = <
-    Key extends keyof Pick<
-        ProjectSessionState,
-        'specId' | 'specStatus' | 'specProvenance' | 'planId' | 'planStatus' | 'planProvenance'
-    >,
->(
-    state: AppState,
-    key: Key,
-    value: ProjectSessionState[Key],
-) => {
-    if (!state.activeProjectPath) {
-        return {}
-    }
-    const nextProjectSessionStates = { ...state.projectSessionsByPath }
-    const scoped = resolveProjectSessionState(nextProjectSessionStates[state.activeProjectPath], state.activeProjectPath)
-    nextProjectSessionStates[state.activeProjectPath] = {
-        ...scoped,
-        [key]: value,
-    }
-    return {
-        projectSessionsByPath: nextProjectSessionStates,
-    }
-}

@@ -5,8 +5,6 @@ import type {
     ConversationSummaryResponse,
     ConversationTurnResponse,
     ConversationTurnUpsertEventResponse,
-    ExecutionCardResponse,
-    SpecEditProposalResponse,
 } from '@/lib/workspaceClient'
 
 export type OptimisticSendState = {
@@ -16,26 +14,6 @@ export type OptimisticSendState = {
 }
 
 export type ConversationStreamEvent = ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse
-
-export function getLatestApprovedSpecEditProposal(snapshot: ConversationSnapshotResponse | null): SpecEditProposalResponse | null {
-    if (!snapshot) {
-        return null
-    }
-    for (let index = snapshot.spec_edit_proposals.length - 1; index >= 0; index -= 1) {
-        const proposal = snapshot.spec_edit_proposals[index]
-        if (proposal?.status === 'applied') {
-            return proposal
-        }
-    }
-    return null
-}
-
-export function getLatestExecutionCard(snapshot: ConversationSnapshotResponse | null): ExecutionCardResponse | null {
-    if (!snapshot || snapshot.execution_cards.length === 0) {
-        return null
-    }
-    return snapshot.execution_cards[snapshot.execution_cards.length - 1] || null
-}
 
 export function ensureConversationSnapshotShell(
     conversationId: string,
@@ -53,16 +31,8 @@ export function ensureConversationSnapshotShell(
         turns: [],
         segments: [],
         event_log: [],
-        spec_edit_proposals: [],
         flow_run_requests: [],
         flow_launches: [],
-        execution_cards: [],
-        execution_workflow: {
-            status: 'idle',
-            run_id: null,
-            error: null,
-            flow_source: null,
-        },
     }
 }
 
@@ -134,15 +104,6 @@ export function sanitizeStreamingTurnUpsert(
 }
 
 function scoreConversationSnapshotFreshness(snapshot: ConversationSnapshotResponse): number {
-    const specEditProposalScore = snapshot.spec_edit_proposals.reduce((score, proposal) => {
-        if (proposal.status === 'applied') {
-            return score + 30
-        }
-        if (proposal.status === 'rejected') {
-            return score + 20
-        }
-        return score + 10
-    }, 0)
     const flowRunRequestScore = snapshot.flow_run_requests.reduce((score, request) => {
         if (request.status === 'launched') {
             return score + 50
@@ -167,18 +128,6 @@ function scoreConversationSnapshotFreshness(snapshot: ConversationSnapshotRespon
         }
         return score + 10
     }, 0)
-    const executionCardScore = snapshot.execution_cards.reduce((score, executionCard) => {
-        if (executionCard.status === 'approved') {
-            return score + 40
-        }
-        if (executionCard.status === 'revision-requested') {
-            return score + 30
-        }
-        if (executionCard.status === 'rejected') {
-            return score + 20
-        }
-        return score + 10
-    }, 0)
     const turnStatusScore = snapshot.turns.reduce((score, turn) => {
         if (turn.status === 'failed') {
             return score + 4
@@ -196,23 +145,14 @@ function scoreConversationSnapshotFreshness(snapshot: ConversationSnapshotRespon
         (score, entry) => score + 25 + Math.min(entry.message.length, 200),
         0,
     )
-    const executionWorkflowScore = (
-        (snapshot.execution_workflow.status === 'failed' ? 30 : snapshot.execution_workflow.status === 'running' ? 20 : 10)
-        + (snapshot.execution_workflow.run_id ? 5 : 0)
-        + (snapshot.execution_workflow.flow_source ? 5 : 0)
-        + (snapshot.execution_workflow.error ? Math.min(snapshot.execution_workflow.error.length, 100) : 0)
-    )
     return (
         snapshot.turns.length * 100000
         + snapshot.segments.length * 1000
         + turnStatusScore * 100
         + contentScore
         + eventLogScore
-        + specEditProposalScore
         + flowRunRequestScore
         + flowLaunchScore
-        + executionCardScore
-        + executionWorkflowScore
     )
 }
 

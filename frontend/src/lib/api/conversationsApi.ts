@@ -14,7 +14,7 @@ export interface ConversationTurnResponse {
     content: string
     timestamp: string
     status: 'pending' | 'streaming' | 'complete' | 'failed'
-    kind: 'message' | 'spec_edit_proposal' | 'flow_run_request' | 'flow_launch' | 'execution_card'
+    kind: 'message' | 'flow_run_request' | 'flow_launch'
     artifact_id?: string | null
     parent_turn_id?: string | null
     error?: string | null
@@ -24,7 +24,7 @@ export interface ConversationSegmentResponse {
     id: string
     turn_id: string
     order: number
-    kind: 'assistant_message' | 'reasoning' | 'tool_call' | 'spec_edit_proposal' | 'flow_run_request' | 'flow_launch' | 'execution_card'
+    kind: 'assistant_message' | 'reasoning' | 'tool_call' | 'flow_run_request' | 'flow_launch'
     role: 'assistant' | 'system'
     status: 'pending' | 'streaming' | 'complete' | 'failed' | 'running'
     timestamp: string
@@ -54,49 +54,6 @@ export interface ConversationSegmentResponse {
 export interface WorkflowEventResponse {
     message: string
     timestamp: string
-}
-
-export interface SpecEditProposalResponse {
-    id: string
-    created_at: string
-    summary: string
-    status: 'pending' | 'applied' | 'rejected'
-    changes: Array<{
-        path: string
-        before: string
-        after: string
-    }>
-    canonical_spec_edit_id?: string | null
-    approved_at?: string | null
-    git_branch?: string | null
-    git_commit?: string | null
-}
-
-export interface ExecutionCardResponse {
-    id: string
-    title: string
-    summary: string
-    objective: string
-    status: 'draft' | 'approved' | 'rejected' | 'revision-requested'
-    source_spec_edit_id: string
-    source_workflow_run_id: string
-    created_at: string
-    updated_at: string
-    flow_source?: string | null
-    work_items: Array<{
-        id: string
-        title: string
-        description: string
-        acceptance_criteria: string[]
-        depends_on: string[]
-    }>
-    review_feedback: Array<{
-        id: string
-        disposition: 'approved' | 'rejected' | 'revision_requested'
-        message: string
-        created_at: string
-        author: string
-    }>
 }
 
 export interface FlowRunRequestResponse {
@@ -147,16 +104,8 @@ export interface ConversationSnapshotResponse {
     turns: ConversationTurnResponse[]
     segments: ConversationSegmentResponse[]
     event_log: WorkflowEventResponse[]
-    spec_edit_proposals: SpecEditProposalResponse[]
     flow_run_requests: FlowRunRequestResponse[]
     flow_launches: FlowLaunchResponse[]
-    execution_cards: ExecutionCardResponse[]
-    execution_workflow: {
-        run_id?: string | null
-        status: 'idle' | 'running' | 'failed'
-        error?: string | null
-        flow_source?: string | null
-    }
 }
 
 export interface ConversationSummaryResponse {
@@ -209,7 +158,7 @@ function parseConversationTurnResponse(value: unknown): ConversationTurnResponse
     if (role !== 'user' && role !== 'assistant' && role !== 'system') {
         return null
     }
-    const kind = record.kind === 'spec_edit_proposal' || record.kind === 'flow_run_request' || record.kind === 'flow_launch' || record.kind === 'execution_card' || record.kind === 'message'
+    const kind = record.kind === 'flow_run_request' || record.kind === 'flow_launch' || record.kind === 'message'
         ? record.kind
         : 'message'
     if (typeof record.id !== 'string' || typeof record.content !== 'string' || typeof record.timestamp !== 'string') {
@@ -252,10 +201,8 @@ function parseConversationSegmentResponse(value: unknown): ConversationSegmentRe
     const kind = record.kind === 'assistant_message'
         || record.kind === 'reasoning'
         || record.kind === 'tool_call'
-        || record.kind === 'spec_edit_proposal'
         || record.kind === 'flow_run_request'
         || record.kind === 'flow_launch'
-        || record.kind === 'execution_card'
         ? record.kind
         : null
     if (!kind) {
@@ -318,101 +265,6 @@ function parseWorkflowEventResponse(value: unknown): WorkflowEventResponse | nul
     return {
         message: record.message,
         timestamp: record.timestamp,
-    }
-}
-
-function parseSpecEditProposalResponse(value: unknown): SpecEditProposalResponse | null {
-    const record = asUnknownRecord(value)
-    if (!record || typeof record.id !== 'string' || typeof record.created_at !== 'string' || typeof record.summary !== 'string') {
-        return null
-    }
-    const rawChanges = record.changes
-    const changes = Array.isArray(rawChanges)
-        ? rawChanges
-            .map((change) => asUnknownRecord(change))
-            .filter((change): change is Record<string, unknown> => change !== null)
-            .filter((change) => typeof change.path === 'string' && typeof change.before === 'string' && typeof change.after === 'string')
-            .map((change) => ({
-                path: String(change.path),
-                before: String(change.before),
-                after: String(change.after),
-            }))
-        : []
-    const status = record.status === 'applied' || record.status === 'rejected' ? record.status : 'pending'
-    return {
-        id: record.id,
-        created_at: record.created_at,
-        summary: record.summary,
-        status,
-        changes,
-        canonical_spec_edit_id: asOptionalNullableString(record.canonical_spec_edit_id),
-        approved_at: asOptionalNullableString(record.approved_at),
-        git_branch: asOptionalNullableString(record.git_branch),
-        git_commit: asOptionalNullableString(record.git_commit),
-    }
-}
-
-function parseExecutionCardResponse(value: unknown): ExecutionCardResponse | null {
-    const record = asUnknownRecord(value)
-    if (
-        !record
-        || typeof record.id !== 'string'
-        || typeof record.title !== 'string'
-        || typeof record.summary !== 'string'
-        || typeof record.objective !== 'string'
-        || typeof record.source_spec_edit_id !== 'string'
-        || typeof record.source_workflow_run_id !== 'string'
-        || typeof record.created_at !== 'string'
-        || typeof record.updated_at !== 'string'
-    ) {
-        return null
-    }
-    const status = record.status === 'approved'
-        || record.status === 'rejected'
-        || record.status === 'revision-requested'
-        ? record.status
-        : 'draft'
-    const work_items = Array.isArray(record.work_items)
-        ? record.work_items
-            .map((item) => asUnknownRecord(item))
-            .filter((item): item is Record<string, unknown> => item !== null)
-            .filter((item) => typeof item.id === 'string' && typeof item.title === 'string' && typeof item.description === 'string')
-            .map((item) => ({
-                id: String(item.id),
-                title: String(item.title),
-                description: String(item.description),
-                acceptance_criteria: Array.isArray(item.acceptance_criteria) ? item.acceptance_criteria.map((entry) => String(entry)) : [],
-                depends_on: Array.isArray(item.depends_on) ? item.depends_on.map((entry) => String(entry)) : [],
-            }))
-        : []
-    const review_feedback = Array.isArray(record.review_feedback)
-        ? record.review_feedback
-            .map((entry) => asUnknownRecord(entry))
-            .filter((entry): entry is Record<string, unknown> => entry !== null)
-            .filter((entry) => typeof entry.id === 'string' && typeof entry.disposition === 'string' && typeof entry.message === 'string' && typeof entry.created_at === 'string')
-            .map((entry): ExecutionCardResponse['review_feedback'][number] => ({
-                id: String(entry.id),
-                disposition: entry.disposition === 'approved' || entry.disposition === 'rejected' || entry.disposition === 'revision_requested'
-                    ? entry.disposition
-                    : 'revision_requested',
-                message: String(entry.message),
-                created_at: String(entry.created_at),
-                author: typeof entry.author === 'string' ? entry.author : 'user',
-            }))
-        : []
-    return {
-        id: record.id,
-        title: record.title,
-        summary: record.summary,
-        objective: record.objective,
-        status,
-        source_spec_edit_id: record.source_spec_edit_id,
-        source_workflow_run_id: record.source_workflow_run_id,
-        created_at: record.created_at,
-        updated_at: record.updated_at,
-        flow_source: asOptionalNullableString(record.flow_source),
-        work_items,
-        review_feedback,
     }
 }
 
@@ -567,11 +419,6 @@ export function parseConversationSnapshotResponse(
             .map((entry) => parseConversationSegmentResponse(entry))
             .filter((entry): entry is ConversationSegmentResponse => entry !== null)
         : []
-    const spec_edit_proposals = Array.isArray(record.spec_edit_proposals)
-        ? record.spec_edit_proposals
-            .map((entry) => parseSpecEditProposalResponse(entry))
-            .filter((entry): entry is SpecEditProposalResponse => entry !== null)
-        : []
     const flow_run_requests = Array.isArray(record.flow_run_requests)
         ? record.flow_run_requests
             .map((entry) => parseFlowRunRequestResponse(entry))
@@ -582,12 +429,6 @@ export function parseConversationSnapshotResponse(
             .map((entry) => parseFlowLaunchResponse(entry))
             .filter((entry): entry is FlowLaunchResponse => entry !== null)
         : []
-    const execution_cards = Array.isArray(record.execution_cards)
-        ? record.execution_cards
-            .map((entry) => parseExecutionCardResponse(entry))
-            .filter((entry): entry is ExecutionCardResponse => entry !== null)
-        : []
-    const executionWorkflowRecord = asUnknownRecord(record.execution_workflow) || {}
     return {
         schema_version: schemaVersion,
         conversation_id: expectString(record.conversation_id, endpoint, 'conversation_id'),
@@ -599,18 +440,8 @@ export function parseConversationSnapshotResponse(
         turns,
         segments,
         event_log,
-        spec_edit_proposals,
         flow_run_requests,
         flow_launches,
-        execution_cards,
-        execution_workflow: {
-            run_id: asOptionalNullableString(executionWorkflowRecord.run_id),
-            status: executionWorkflowRecord.status === 'running' || executionWorkflowRecord.status === 'failed'
-                ? executionWorkflowRecord.status
-                : 'idle',
-            error: asOptionalNullableString(executionWorkflowRecord.error),
-            flow_source: asOptionalNullableString(executionWorkflowRecord.flow_source),
-        },
     }
 }
 
@@ -712,63 +543,6 @@ export async function sendConversationTurnValidated(
             body: JSON.stringify(payload),
         },
         '/workspace/api/conversations/{id}/turns',
-        parseConversationSnapshotResponse,
-    )
-}
-
-export async function approveSpecEditProposalValidated(
-    conversationId: string,
-    proposalId: string,
-    payload: { project_path: string; model?: string | null; flow_source?: string | null },
-): Promise<ConversationSnapshotResponse> {
-    return fetchWorkspaceJsonValidated(
-        `/conversations/${encodeURIComponent(conversationId)}/spec-edit-proposals/${encodeURIComponent(proposalId)}/approve`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        },
-        '/workspace/api/conversations/{id}/spec-edit-proposals/{proposalId}/approve',
-        parseConversationSnapshotResponse,
-    )
-}
-
-export async function rejectSpecEditProposalValidated(
-    conversationId: string,
-    proposalId: string,
-    payload: { project_path: string },
-): Promise<ConversationSnapshotResponse> {
-    return fetchWorkspaceJsonValidated(
-        `/conversations/${encodeURIComponent(conversationId)}/spec-edit-proposals/${encodeURIComponent(proposalId)}/reject`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        },
-        '/workspace/api/conversations/{id}/spec-edit-proposals/{proposalId}/reject',
-        parseConversationSnapshotResponse,
-    )
-}
-
-export async function reviewExecutionCardValidated(
-    conversationId: string,
-    executionCardId: string,
-    payload: {
-        project_path: string
-        disposition: 'approved' | 'rejected' | 'revision_requested'
-        message: string
-        model?: string | null
-        flow_source?: string | null
-    },
-): Promise<ConversationSnapshotResponse> {
-    return fetchWorkspaceJsonValidated(
-        `/conversations/${encodeURIComponent(conversationId)}/execution-cards/${encodeURIComponent(executionCardId)}/review`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        },
-        '/workspace/api/conversations/{id}/execution-cards/{executionCardId}/review',
         parseConversationSnapshotResponse,
     )
 }

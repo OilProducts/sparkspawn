@@ -1,9 +1,7 @@
 import type {
     ConversationTimelineToolCall,
-    ProjectExecutionCard,
     ProjectFlowLaunch,
     ProjectFlowRunRequest,
-    ProjectSpecEditProposal,
 } from './types'
 
 export type ProjectGitMetadata = {
@@ -26,29 +24,6 @@ export const PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT = 12
 export const getSurfaceToneClassName = (tone: SurfaceTone) => (
     `rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${SURFACE_TONE_CLASS_MAP[tone]}`
 )
-
-export const getSpecEditStatusPresentation = (status: ProjectSpecEditProposal['status']) => {
-    if (status === 'applied') {
-        return { label: 'Applied', tone: 'success' as const }
-    }
-    if (status === 'rejected') {
-        return { label: 'Rejected', tone: 'danger' as const }
-    }
-    return { label: 'Pending review', tone: 'warning' as const }
-}
-
-export const getExecutionCardStatusPresentation = (status: ProjectExecutionCard['status']) => {
-    if (status === 'approved') {
-        return { label: 'Approved', tone: 'success' as const }
-    }
-    if (status === 'rejected') {
-        return { label: 'Rejected', tone: 'danger' as const }
-    }
-    if (status === 'revision-requested') {
-        return { label: 'Revision requested', tone: 'warning' as const }
-    }
-    return { label: 'Draft', tone: 'info' as const }
-}
 
 export const getFlowRunRequestStatusPresentation = (status: ProjectFlowRunRequest['status']) => {
     if (status === 'launched') {
@@ -112,12 +87,3 @@ export const parseThinkingSummaryContent = (content: string): { heading: string 
     const details = trimmed.slice(headingMatch[0].length).trim()
     return { heading, details }
 }
-
-export const buildProposalDiffLines = (change: ProjectSpecEditProposal['changes'][number]) => ([
-    ...change.before.split('\n').map((line) => ({ type: 'removed' as const, text: line })),
-    ...change.after.split('\n').map((line) => ({ type: 'added' as const, text: line })),
-])
-
-export const buildProposalChangeKey = (proposalId: string, changePath: string, index: number) => (
-    `${proposalId}:${changePath}:${index}`
-)

@@ -22,13 +22,7 @@ from workspace.attractor_client import AttractorApiClient, AttractorApiError
 
 LOGGER = get_spark_logger("workspace.triggers")
 
-TRIGGER_SOURCE_TYPES = {"schedule", "poll", "webhook", "workspace_event", "flow_event"}
-WORKSPACE_TRIGGER_EVENTS = {
-    "spec_edit_approved",
-    "execution_card_approved",
-    "execution_card_rejected",
-    "execution_card_revision_requested",
-}
+TRIGGER_SOURCE_TYPES = {"schedule", "poll", "webhook", "flow_event"}
 TERMINAL_PIPELINE_STATUSES = {
     "completed",
     "failed",
@@ -440,15 +434,6 @@ class TriggerRuntime:
             return None
         return serialize_trigger(definition, self._states.get(trigger_id, TriggerState()))
 
-    async def emit_workspace_event(self, event_name: str, payload: Mapping[str, Any], *, dedupe_key: str | None = None) -> None:
-        await self.reload()
-        for definition in self._definitions.values():
-            if definition.source_type != "workspace_event" or not definition.enabled:
-                continue
-            if str(definition.source.get("event_name") or "").strip() != event_name:
-                continue
-            await self._schedule_trigger_fire(definition, dict(payload), dedupe_key=dedupe_key or event_name)
-
     async def emit_flow_event(self, payload: Mapping[str, Any], *, dedupe_key: str) -> None:
         await self.reload()
         flow_name = str(payload.get("flow_name") or "").strip()
@@ -836,11 +821,6 @@ def _normalize_source(
         if not secret_hash:
             raise TriggerError("Webhook triggers require secret_hash.")
         return {"webhook_key": webhook_key, "secret_hash": secret_hash}
-    if normalized_source_type == "workspace_event":
-        event_name = str(payload.get("event_name") or "").strip()
-        if event_name not in WORKSPACE_TRIGGER_EVENTS:
-            raise TriggerError(f"Unsupported workspace event trigger: {event_name}")
-        return {"event_name": event_name}
     flow_name = str(payload.get("flow_name") or "").strip() or None
     statuses_value = payload.get("statuses")
     statuses = [str(entry).strip().lower() for entry in statuses_value] if isinstance(statuses_value, list) else []

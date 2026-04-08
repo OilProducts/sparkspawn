@@ -195,7 +195,7 @@ describe('Execution controls behavior', () => {
     vi.unstubAllGlobals()
   })
 
-  it('builds start payload with project, flow, backend model, and traceability ids', () => {
+  it('builds start payload with project, flow, and backend model', () => {
     const payload = buildPipelineStartPayload(
       {
         projectPath: '/tmp/project',
@@ -203,8 +203,6 @@ describe('Execution controls behavior', () => {
         workingDirectory: '/tmp/project',
         backend: 'codex-app-server',
         model: 'gpt-5',
-        specArtifactId: 'spec-123',
-        planArtifactId: 'plan-456',
       },
       'digraph G { start -> done }',
     )
@@ -215,8 +213,6 @@ describe('Execution controls behavior', () => {
       backend: 'codex-app-server',
       model: 'gpt-5',
       flow_name: TEST_SPEC_FLOW,
-      spec_id: 'spec-123',
-      plan_id: 'plan-456',
     })
   })
 
@@ -232,8 +228,6 @@ describe('Execution controls behavior', () => {
           'context.request.summary': 'Add a health check endpoint.',
           'context.request.acceptance_criteria': ['GET /healthz returns 200'],
         },
-        specArtifactId: null,
-        planArtifactId: null,
       },
       'digraph G { start -> done }',
     )
@@ -248,8 +242,6 @@ describe('Execution controls behavior', () => {
         'context.request.acceptance_criteria': ['GET /healthz returns 200'],
       },
       flow_name: TEST_REVIEW_FLOW,
-      spec_id: null,
-      plan_id: null,
     })
   })
 
@@ -338,12 +330,12 @@ describe('Execution controls behavior', () => {
           workingDir: '/tmp/project',
           conversationId: null,
           projectEventLog: [],
-          specId: null,
-          specStatus: null,
-          specProvenance: null,
-          planId: 'plan-123',
-          planStatus: 'draft',
-          planProvenance: null,
+
+
+
+
+
+
         },
       },
     }))
@@ -422,12 +414,12 @@ describe('Execution controls behavior', () => {
           workingDir: '/tmp/project',
           conversationId: null,
           projectEventLog: [],
-          specId: null,
-          specStatus: null,
-          specProvenance: null,
-          planId: null,
-          planStatus: 'draft',
-          planProvenance: null,
+
+
+
+
+
+
         },
       },
     }))
@@ -467,12 +459,12 @@ describe('Execution controls behavior', () => {
           workingDir: '/tmp/project',
           conversationId: null,
           projectEventLog: [],
-          specId: null,
-          specStatus: null,
-          specProvenance: null,
-          planId: null,
-          planStatus: 'draft',
-          planProvenance: null,
+
+
+
+
+
+
         },
       },
     }))
@@ -511,12 +503,12 @@ describe('Execution controls behavior', () => {
           workingDir: '/tmp/project',
           conversationId: null,
           projectEventLog: [],
-          specId: null,
-          specStatus: null,
-          specProvenance: null,
-          planId: null,
-          planStatus: 'draft',
-          planProvenance: null,
+
+
+
+
+
+
         },
       },
     }))

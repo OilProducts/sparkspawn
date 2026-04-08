@@ -1,29 +1,19 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import type {
     ConversationTimelineEntry,
-    ProjectExecutionCard,
     ProjectFlowLaunch,
     ProjectFlowRunRequest,
-    ProjectSpecEditProposal,
 } from '../model/types'
 import {
-    ProjectExecutionCardEntry,
     ProjectFlowLaunchEntry,
     ProjectFlowRunRequestEntry,
-    ProjectSpecEditProposalEntry,
 } from './ProjectArtifactEntries'
 import {
-    PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT,
-    buildProposalChangeKey,
-    buildProposalDiffLines,
-    getExecutionCardStatusPresentation,
     getFlowLaunchStatusPresentation,
     getFlowRunRequestStatusPresentation,
-    getSpecEditStatusPresentation,
     getSurfaceToneClassName,
     getToolCallStatusPresentation,
     parseThinkingSummaryContent,
-    type ProjectGitMetadata,
     summarizeToolCallDetail,
 } from '../model/presentation'
 import { Button, InlineNotice } from '@/ui'
@@ -33,36 +23,21 @@ interface ProjectConversationHistoryProps {
     isConversationHistoryLoading: boolean
     hasRenderableConversationHistory: boolean
     activeConversationHistory: ConversationTimelineEntry[]
-    activeSpecEditProposalsById: Map<string, ProjectSpecEditProposal>
     activeFlowRunRequestsById: Map<string, ProjectFlowRunRequest>
     activeFlowLaunchesById: Map<string, ProjectFlowLaunch>
-    activeExecutionCardsById: Map<string, ProjectExecutionCard>
-    latestSpecEditProposalId: string | null
     latestFlowRunRequestId: string | null
     latestFlowLaunchId: string | null
-    latestExecutionCardId: string | null
-    activeProjectGitMetadata: ProjectGitMetadata
     expandedToolCalls: Record<string, boolean>
     expandedThinkingEntries: Record<string, boolean>
-    expandedProposalChanges: Record<string, boolean>
-    pendingSpecProposalId: string | null
     pendingFlowRunRequestId: string | null
-    pendingExecutionCardId: string | null
     formatConversationTimestamp: (value: string) => string
     onToggleToolCallExpanded: (toolCallId: string) => void
     onToggleThinkingEntryExpanded: (entryId: string) => void
-    onToggleProposalChangeExpanded: (changeKey: string) => void
-    onApproveSpecEditProposal: (proposal: ProjectSpecEditProposal) => void | Promise<void>
-    onRejectSpecEditProposal: (proposal: ProjectSpecEditProposal) => void | Promise<void>
     onReviewFlowRunRequest: (
         flowRunRequest: ProjectFlowRunRequest,
         disposition: 'approved' | 'rejected',
     ) => void | Promise<void>
     onOpenFlowRun: (request: { run_id?: string | null; flow_name: string }) => void
-    onReviewExecutionCard: (
-        executionCard: ProjectExecutionCard,
-        disposition: 'approved' | 'rejected' | 'revision_requested',
-    ) => void | Promise<void>
 }
 
 export function ProjectConversationHistory({
@@ -70,30 +45,18 @@ export function ProjectConversationHistory({
     isConversationHistoryLoading,
     hasRenderableConversationHistory,
     activeConversationHistory,
-    activeSpecEditProposalsById,
     activeFlowRunRequestsById,
     activeFlowLaunchesById,
-    activeExecutionCardsById,
-    latestSpecEditProposalId,
     latestFlowRunRequestId,
     latestFlowLaunchId,
-    latestExecutionCardId,
-    activeProjectGitMetadata,
     expandedToolCalls,
     expandedThinkingEntries,
-    expandedProposalChanges,
-    pendingSpecProposalId,
     pendingFlowRunRequestId,
-    pendingExecutionCardId,
     formatConversationTimestamp,
     onToggleToolCallExpanded,
     onToggleThinkingEntryExpanded,
-    onToggleProposalChangeExpanded,
-    onApproveSpecEditProposal,
-    onRejectSpecEditProposal,
     onReviewFlowRunRequest,
     onOpenFlowRun,
-    onReviewExecutionCard,
 }: ProjectConversationHistoryProps) {
     return (
         <div data-testid="project-ai-conversation-history" className="flex min-h-0 flex-col">
@@ -227,57 +190,6 @@ export function ProjectConversationHistory({
                                         ) : null}
                                         <p className="mt-1 text-[10px] opacity-70">{formatConversationTimestamp(entry.timestamp)}</p>
                                     </div>
-                                </li>
-                            )
-                        }
-
-                        if (entry.kind === 'spec_edit_proposal') {
-                            const proposal = activeSpecEditProposalsById.get(entry.artifactId) || null
-                            const isLatestProposal = proposal?.id === latestSpecEditProposalId
-                            return (
-                                <li
-                                    key={key}
-                                    data-testid={isLatestProposal ? 'project-spec-edit-proposal-history-row' : undefined}
-                                    className="flex justify-start"
-                                >
-                                    <ProjectSpecEditProposalEntry
-                                        proposal={proposal}
-                                        activeProjectGitMetadata={activeProjectGitMetadata}
-                                        isLatestProposal={isLatestProposal}
-                                        pendingSpecProposalId={pendingSpecProposalId}
-                                        expandedProposalChanges={expandedProposalChanges}
-                                        onApproveSpecEditProposal={onApproveSpecEditProposal}
-                                        onRejectSpecEditProposal={onRejectSpecEditProposal}
-                                        toggleProposalChangeExpanded={onToggleProposalChangeExpanded}
-                                        formatConversationTimestamp={formatConversationTimestamp}
-                                        getSpecEditStatusPresentation={getSpecEditStatusPresentation}
-                                        getSurfaceToneClassName={getSurfaceToneClassName}
-                                        buildProposalDiffLines={buildProposalDiffLines}
-                                        buildProposalChangeKey={buildProposalChangeKey}
-                                        proposalDiffCollapseLineLimit={PROPOSAL_DIFF_COLLAPSE_LINE_LIMIT}
-                                    />
-                                </li>
-                            )
-                        }
-
-                        if (entry.kind === 'execution_card') {
-                            const executionCard = activeExecutionCardsById.get(entry.artifactId) || null
-                            const isLatestExecutionCard = executionCard?.id === latestExecutionCardId
-                            return (
-                                <li
-                                    key={key}
-                                    data-testid={isLatestExecutionCard ? 'project-plan-generation-history-row' : undefined}
-                                    className="flex justify-start"
-                                >
-                                    <ProjectExecutionCardEntry
-                                        executionCard={executionCard}
-                                        isLatestExecutionCard={isLatestExecutionCard}
-                                        pendingExecutionCardId={pendingExecutionCardId}
-                                        onReviewExecutionCard={onReviewExecutionCard}
-                                        formatConversationTimestamp={formatConversationTimestamp}
-                                        getExecutionCardStatusPresentation={getExecutionCardStatusPresentation}
-                                        getSurfaceToneClassName={getSurfaceToneClassName}
-                                    />
                                 </li>
                             )
                         }

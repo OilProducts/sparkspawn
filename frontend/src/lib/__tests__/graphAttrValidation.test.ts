@@ -7,9 +7,16 @@ import { describe, expect, it } from 'vitest'
 
 describe('graphAttrValidation', () => {
   it('normalizes graph attrs using key-specific rules', () => {
-    expect(normalizeGraphAttrValue('spark.title', '  Execution Planning  ')).toBe('Execution Planning')
-    expect(normalizeGraphAttrValue('spark.description', '  Turn spec edits into plans.  ')).toBe(
-      'Turn spec edits into plans.',
+    expect(normalizeGraphAttrValue('spark.title', '  Implement From Plan File  ')).toBe(
+      'Implement From Plan File',
+    )
+    expect(
+      normalizeGraphAttrValue(
+        'spark.description',
+        '  Snapshot a plan file, implement it, and iterate until complete.  ',
+      ),
+    ).toBe(
+      'Snapshot a plan file, implement it, and iterate until complete.',
     )
     expect(normalizeGraphAttrValue('goal', '  Ship release  ')).toBe('Ship release')
     expect(normalizeGraphAttrValue('default_max_retries', ' 003 ')).toBe('3')

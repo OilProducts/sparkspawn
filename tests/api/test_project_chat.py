@@ -18,7 +18,6 @@ from spark.authoring_assets import (
     flow_extensions_spec_path,
 )
 import workspace.project_chat as project_chat
-import workspace.project_chat_models as project_chat_models
 import workspace.project_chat_session as project_chat_session
 import workspace.attractor_client as attractor_client
 from tests.support.flow_fixtures import seed_flow_fixture
@@ -26,7 +25,6 @@ from workspace.prompt_templates import PROMPTS_FILE_NAME
 from workspace.storage import conversation_handles_path, ensure_project_paths
 
 
-TEST_PLANNING_FLOW = "test-planning.dot"
 TEST_DISPATCH_FLOW = "test-dispatch.dot"
 
 
@@ -140,13 +138,13 @@ def test_parse_chat_response_payload_accepts_plain_text_and_json() -> None:
     assert payload is None
 
     assistant_message, payload = project_chat._parse_chat_response_payload(
-        '{"assistant_message":"Hello.","spec_proposal":null}'
+        '{"assistant_message":"Hello.","flow_run_request":null}'
     )
 
     assert assistant_message == "Hello."
     assert payload == {
         "assistant_message": "Hello.",
-        "spec_proposal": None,
+        "flow_run_request": None,
     }
 
 
@@ -159,7 +157,6 @@ def test_project_chat_service_creates_default_prompt_templates_file(tmp_path: Pa
     prompt_text = prompts_path.read_text(encoding="utf-8")
     assert "[project_chat]" in prompt_text
     assert service._prompt_templates.chat
-    assert service._prompt_templates.execution_planning
 
 
 def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> None:
@@ -170,7 +167,6 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
             [
                 "[project_chat]",
                 "chat = '''CHAT {{project_path}} :: {{latest_user_message}} :: {{recent_conversation}}'''",
-                "execution_planning = '''PLAN {{approved_spec_edit_proposal}} :: {{review_feedback}}'''",
                 "",
             ]
         ),
@@ -192,22 +188,9 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
     )
 
     chat_prompt = service._build_chat_prompt(state, "Latest message")
-    execution_prompt = service._build_execution_planning_prompt(
-        state,
-        project_chat.SpecEditProposal(
-            id="proposal-1",
-            created_at="2026-03-08T12:01:00Z",
-            summary="Summary",
-            changes=[project_chat_models.SpecEditProposalChange(path="specs/spark-ui-ux.md", before="old", after="new")],
-            status="approved",
-        ),
-        "Needs refinement",
-    )
 
     assert "Conversation handle: amber-otter" in chat_prompt
     assert "CHAT /tmp/project :: Latest message :: USER: Older message" in chat_prompt
-    assert '"id": "proposal-1"' in execution_prompt
-    assert execution_prompt.endswith(":: Needs refinement")
 
 
 def test_project_chat_prompt_includes_flow_authoring_boundary(tmp_path: Path) -> None:
@@ -243,7 +226,7 @@ def test_project_chat_service_rejects_prompt_templates_missing_required_keys(tmp
         "\n".join(
             [
                 "[project_chat]",
-                "chat = '''CHAT {{project_path}}'''",
+                "unused = '''CHAT {{project_path}}'''",
                 "",
             ]
         ),
@@ -810,130 +793,6 @@ def test_send_turn_accepts_plain_text_final_response(tmp_path: Path, monkeypatch
     assert snapshot["turns"][-1]["content"] == "This looks like a Collatz implementation project."
 
 
-def test_create_spec_edit_proposal_places_artifact_on_latest_assistant_turn(tmp_path: Path) -> None:
-    service = project_chat.ProjectChatService(tmp_path)
-    conversation_id = "conversation-test"
-    project_path = str(tmp_path.resolve())
-    assistant_turn_older = project_chat.ConversationTurn(
-        id="turn-assistant-older",
-        role="assistant",
-        content="Older assistant reply.",
-        timestamp="2026-03-13T10:00:00Z",
-        status="complete",
-    )
-    assistant_turn_newer = project_chat.ConversationTurn(
-        id="turn-assistant-newer",
-        role="assistant",
-        content="Latest assistant reply.",
-        timestamp="2026-03-13T10:02:00Z",
-        status="complete",
-    )
-    service._write_state(
-        project_chat.ConversationState(
-            conversation_id=conversation_id,
-            project_path=project_path,
-            title="Proposal placement",
-            created_at="2026-03-13T10:00:00Z",
-            updated_at="2026-03-13T10:02:00Z",
-            turns=[
-                project_chat.ConversationTurn(
-                    id="turn-user-1",
-                    role="user",
-                    content="First request",
-                    timestamp="2026-03-13T09:59:00Z",
-                ),
-                assistant_turn_older,
-                project_chat.ConversationTurn(
-                    id="turn-user-2",
-                    role="user",
-                    content="Second request",
-                    timestamp="2026-03-13T10:01:00Z",
-                ),
-                assistant_turn_newer,
-            ],
-        )
-    )
-
-    result = service.create_spec_edit_proposal(
-        conversation_id,
-        project_path,
-        {
-            "summary": "Clarify the approval gate.",
-            "changes": [
-                {
-                    "path": "specs/spark-workspace.md#proposal-review",
-                    "before": "Planning begins immediately.",
-                    "after": "Planning begins only after approval.",
-                }
-            ],
-        },
-    )
-
-    assert result["turn_id"] == "turn-assistant-newer"
-
-    snapshot = service.get_snapshot(conversation_id, project_path)
-    proposal_segment = next(
-        segment for segment in snapshot["segments"] if segment["id"] == result["segment_id"]
-    )
-    assert proposal_segment["turn_id"] == "turn-assistant-newer"
-    assert proposal_segment["artifact_id"] == result["proposal_id"]
-    assert snapshot["spec_edit_proposals"][0]["summary"] == "Clarify the approval gate."
-
-
-def test_create_spec_edit_proposal_by_handle_route_resolves_conversation(
-    product_api_client,
-    tmp_path: Path,
-) -> None:
-    project_dir = tmp_path.resolve()
-    conversation_id = "conversation-by-handle"
-    state = project_chat.ConversationState(
-        conversation_id=conversation_id,
-        project_path=str(project_dir),
-        title="Handle placement",
-        created_at="2026-03-13T10:00:00Z",
-        updated_at="2026-03-13T10:01:00Z",
-        turns=[
-            project_chat.ConversationTurn(
-                id="turn-user-1",
-                role="user",
-                content="Please propose a spec change.",
-                timestamp="2026-03-13T10:00:00Z",
-            ),
-            project_chat.ConversationTurn(
-                id="turn-assistant-1",
-                role="assistant",
-                content="I can capture that proposal.",
-                timestamp="2026-03-13T10:01:00Z",
-                status="complete",
-            ),
-        ],
-    )
-    server.PROJECT_CHAT._write_state(state)
-    snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
-
-    response = product_api_client.post(
-        f"/workspace/api/conversations/by-handle/{snapshot['conversation_handle']}/spec-edit-proposals",
-        json={
-            "summary": "Capture the approved spec gate.",
-            "changes": [
-                {
-                    "path": "specs/spark-workspace.md#proposal-review",
-                    "before": "Planning begins immediately.",
-                    "after": "Planning begins only after the proposal is approved.",
-                }
-            ],
-            "rationale": "Keep the workflow human-approved.",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["ok"] is True
-    assert payload["conversation_id"] == conversation_id
-    assert payload["conversation_handle"] == snapshot["conversation_handle"]
-    assert payload["turn_id"] == "turn-assistant-1"
-
-
 def test_create_flow_run_request_places_artifact_on_latest_assistant_turn(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     conversation_id = "conversation-test"
@@ -1292,186 +1151,6 @@ def test_direct_flow_launch_uses_flow_ui_default_model_when_request_model_missin
 
     assert pipeline_payload["status"] == "completed"
     assert pipeline_payload["model"] == "gpt-flow-default"
-
-
-def test_mark_execution_workflow_started_loads_conversation_without_project_argument(tmp_path: Path) -> None:
-    service = project_chat.ProjectChatService(tmp_path)
-    service._write_state(
-        project_chat.ConversationState(
-            conversation_id="conversation-test",
-            project_path=str(tmp_path),
-            title="Workflow state test",
-            created_at="2026-03-11T02:00:00Z",
-            updated_at="2026-03-11T02:00:00Z",
-        )
-    )
-
-    snapshot = service.mark_execution_workflow_started(
-        "conversation-test",
-        "workflow-123",
-        "spec_edit_approval",
-    )
-
-    assert snapshot["execution_workflow"]["run_id"] == "workflow-123"
-    assert snapshot["execution_workflow"]["status"] == "running"
-    assert snapshot["execution_workflow"]["flow_source"] == "spec_edit_approval"
-
-
-def test_prepare_execution_workflow_launch_builds_prompt_from_approved_proposal(tmp_path: Path) -> None:
-    service = project_chat.ProjectChatService(tmp_path)
-    state = project_chat.ConversationState(
-        conversation_id="conversation-test",
-        project_path=str(tmp_path),
-        title="Workflow run test",
-        created_at="2026-03-11T02:00:00Z",
-        updated_at="2026-03-11T02:00:00Z",
-        spec_edit_proposals=[
-            project_chat.SpecEditProposal(
-                id="proposal-1",
-                created_at="2026-03-11T02:00:00Z",
-                summary="Summary",
-                changes=[project_chat_models.SpecEditProposalChange(path="specs/project.md", before="old", after="new")],
-                status="applied",
-                canonical_spec_edit_id="spec-edit-collatz-001",
-            )
-        ],
-    )
-    service._write_state(state)
-
-    launch_spec = service.prepare_execution_workflow_launch(
-        "conversation-test",
-        "proposal-1",
-        "Focus the first step on validating the CLI contract.",
-    )
-
-    assert launch_spec.conversation_id == "conversation-test"
-    assert launch_spec.project_path == str(tmp_path)
-    assert launch_spec.proposal_id == "proposal-1"
-    assert launch_spec.spec_id == "spec-edit-collatz-001"
-    assert '"id": "proposal-1"' in launch_spec.prompt
-    assert "Focus the first step on validating the CLI contract." in launch_spec.prompt
-
-
-def test_complete_execution_workflow_creates_execution_card_and_clears_matching_run(tmp_path: Path) -> None:
-    service = project_chat.ProjectChatService(tmp_path)
-    state = project_chat.ConversationState(
-        conversation_id="conversation-test",
-        project_path=str(tmp_path),
-        title="Workflow run test",
-        created_at="2026-03-11T02:00:00Z",
-        updated_at="2026-03-11T02:00:00Z",
-        spec_edit_proposals=[
-            project_chat.SpecEditProposal(
-                id="proposal-1",
-                created_at="2026-03-11T02:00:00Z",
-                summary="Summary",
-                changes=[project_chat_models.SpecEditProposalChange(path="specs/project.md", before="old", after="new")],
-                status="applied",
-                canonical_spec_edit_id="spec-edit-collatz-001",
-            )
-        ],
-        execution_workflow=project_chat_models.ExecutionWorkflowState(
-            run_id="workflow-123",
-            status="running",
-            flow_source=TEST_PLANNING_FLOW,
-        ),
-    )
-
-    service._write_state(state)
-
-    execution_card = service.complete_execution_workflow(
-        "conversation-test",
-        "proposal-1",
-        TEST_PLANNING_FLOW,
-        TEST_DISPATCH_FLOW,
-        "workflow-123",
-        json.dumps(
-            {
-                "title": "Execution plan",
-                "summary": "Plan summary",
-                "objective": "Implement the approved spec edit.",
-                "work_items": [
-                    {
-                        "id": "work-1",
-                        "title": "Update spec",
-                        "description": "Apply the approved change.",
-                        "acceptance_criteria": ["Spec updated"],
-                        "depends_on": [],
-                    }
-                ],
-            }
-        ),
-    )
-
-    assert execution_card.source_workflow_run_id == "workflow-123"
-    assert execution_card.flow_source == TEST_DISPATCH_FLOW
-    snapshot = service.get_snapshot("conversation-test", str(tmp_path))
-    assert snapshot["execution_workflow"]["status"] == "idle"
-    assert snapshot["execution_cards"][0]["id"] == execution_card.id
-    assert snapshot["turns"][-1]["artifact_id"] == execution_card.id
-
-
-def test_fail_execution_workflow_marks_matching_run_failed(tmp_path: Path) -> None:
-    service = project_chat.ProjectChatService(tmp_path)
-    state = project_chat.ConversationState(
-        conversation_id="conversation-test",
-        project_path=str(tmp_path),
-        title="Workflow run test",
-        created_at="2026-03-11T02:00:00Z",
-        updated_at="2026-03-11T02:00:00Z",
-        execution_workflow=project_chat_models.ExecutionWorkflowState(
-            run_id="workflow-123",
-            status="running",
-            flow_source=TEST_PLANNING_FLOW,
-        ),
-    )
-    service._write_state(state)
-
-    snapshot = service.fail_execution_workflow(
-        "conversation-test",
-        "workflow-123",
-        TEST_PLANNING_FLOW,
-        "boom",
-    )
-
-    assert snapshot["execution_workflow"]["status"] == "failed"
-    assert snapshot["execution_workflow"]["error"] == "boom"
-
-
-def test_note_execution_card_dispatched_records_event(tmp_path: Path) -> None:
-    service = project_chat.ProjectChatService(tmp_path)
-    state = project_chat.ConversationState(
-        conversation_id="conversation-test",
-        project_path=str(tmp_path),
-        title="Workflow run test",
-        created_at="2026-03-11T02:00:00Z",
-        updated_at="2026-03-11T02:00:00Z",
-        execution_cards=[
-            project_chat.ExecutionCard(
-                id="execution-card-1",
-                title="Execution plan",
-                summary="Plan summary",
-                objective="Do the thing.",
-                source_spec_edit_id="spec-edit-1",
-                source_workflow_run_id="workflow-plan-1",
-                created_at="2026-03-11T02:00:00Z",
-                updated_at="2026-03-11T02:00:00Z",
-                status="approved",
-            )
-        ],
-    )
-    service._write_state(state)
-
-    snapshot = service.note_execution_card_dispatched(
-        "conversation-test",
-        "execution-card-1",
-        "run-123",
-        TEST_DISPATCH_FLOW,
-    )
-
-    assert snapshot["event_log"][-1]["message"] == (
-        f"Dispatched execution card execution-card-1 as run run-123 using {TEST_DISPATCH_FLOW}."
-    )
 
 
 def test_chat_session_emits_assistant_completed_from_item_completed(monkeypatch) -> None:
@@ -1879,7 +1558,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
                 on_event(
                     project_chat.ChatTurnLiveEvent(
                         kind="reasoning_summary",
-                        content_delta="Checking whether a spec proposal makes sense.",
+                        content_delta="Checking whether a flow run request makes sense.",
                     )
                 )
                 on_event(
@@ -1914,7 +1593,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
                     )
                 )
             return project_chat.ChatTurnResult(
-                assistant_message='{"assistant_message":"ACK","spec_proposal":null}',
+                assistant_message='{"assistant_message":"ACK","flow_run_request":null}',
             )
 
     monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: FakeSession())

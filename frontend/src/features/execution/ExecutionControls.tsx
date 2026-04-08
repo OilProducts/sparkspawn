@@ -49,9 +49,6 @@ const logUnexpectedExecutionError = (error: unknown) => {
 export function ExecutionControls() {
     const { confirm } = useDialogController()
     const activeProjectPath = useStore((state) => state.activeProjectPath)
-    const activeProjectScope = useStore((state) =>
-        state.activeProjectPath ? state.projectSessionsByPath[state.activeProjectPath] : null,
-    )
     const executionFlow = useStore((state) => state.executionFlow)
     const executionContinuation = useStore((state) => state.executionContinuation)
     const clearExecutionContinuation = useStore((state) => state.clearExecutionContinuation)
@@ -137,8 +134,6 @@ export function ExecutionControls() {
         backend: 'codex-app-server',
         model: model.trim() || null,
         launchContext: null,
-        specArtifactId: activeProjectScope?.specId || null,
-        planArtifactId: activeProjectScope?.planId || null,
     }
 
     useEffect(() => {

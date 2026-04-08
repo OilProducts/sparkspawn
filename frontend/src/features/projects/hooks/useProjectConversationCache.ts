@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 import { useStore } from '@/store'
 import type {
@@ -7,11 +7,9 @@ import type {
     ConversationTurnUpsertEventResponse,
 } from '@/lib/workspaceClient'
 import { fetchProjectConversationListValidated } from '@/lib/workspaceClient'
-import type { ProjectGitMetadata } from '../model/presentation'
 import {
     applyConversationSnapshotToCache,
     applyConversationStreamEventToCache,
-    derivePlanStatusFromExecutionCard,
     setProjectConversationSummaryList,
     type ConversationStreamEvent,
 } from '../model/projectsHomeState'
@@ -34,14 +32,12 @@ type UpdateProjectSessionState = (
 type UseProjectConversationCacheArgs = {
     persistProjectState: PersistProjectState
     projectSessionsByPath: Record<string, { conversationId: string | null }>
-    setProjectGitMetadata: Dispatch<SetStateAction<Record<string, ProjectGitMetadata>>>
     updateProjectSessionState: UpdateProjectSessionState
 }
 
 export function useProjectConversationCache({
     persistProjectState,
     projectSessionsByPath,
-    setProjectGitMetadata,
     updateProjectSessionState,
 }: UseProjectConversationCacheArgs) {
     const conversationCache = useStore((state) => state.homeConversationCache)
@@ -99,7 +95,7 @@ export function useProjectConversationCache({
         const latestProjectScope = projectSessionsRef.current[projectPath]
         const shouldSyncActiveWorkspace = options?.forceWorkspaceSync === true
             || latestProjectScope?.conversationId === snapshot.conversation_id
-        const { applied, cache, latestApprovedProposal, latestExecutionCard } = applyConversationSnapshotToCache(
+        const { applied, cache } = applyConversationSnapshotToCache(
             conversationCacheRef.current,
             projectPath,
             snapshot,
@@ -131,30 +127,6 @@ export function useProjectConversationCache({
                     message: entry.message,
                     timestamp: entry.timestamp,
                 })),
-                specId: latestApprovedProposal?.canonical_spec_edit_id ?? null,
-                specStatus: latestApprovedProposal ? 'approved' : 'draft',
-                specProvenance: latestApprovedProposal
-                    ? {
-                        source: 'spec-edit-proposal',
-                        referenceId: latestApprovedProposal.id,
-                        capturedAt: latestApprovedProposal.approved_at || latestApprovedProposal.created_at,
-                        runId: null,
-                        gitBranch: latestApprovedProposal.git_branch ?? null,
-                        gitCommit: latestApprovedProposal.git_commit ?? null,
-                    }
-                    : null,
-                planId: latestExecutionCard?.id ?? null,
-                planStatus: derivePlanStatusFromExecutionCard(latestExecutionCard),
-                planProvenance: latestExecutionCard
-                    ? {
-                        source: 'execution-card',
-                        referenceId: latestExecutionCard.id,
-                        capturedAt: latestExecutionCard.updated_at,
-                        runId: latestExecutionCard.source_workflow_run_id,
-                        gitBranch: latestApprovedProposal?.git_branch ?? null,
-                        gitCommit: latestApprovedProposal?.git_commit ?? null,
-                    }
-                    : null,
             })
             if (latestProjectScope?.conversationId !== snapshot.conversation_id) {
                 void persistProjectState(projectPath, {
@@ -163,17 +135,7 @@ export function useProjectConversationCache({
                 })
             }
         }
-
-        if (latestApprovedProposal?.git_branch || latestApprovedProposal?.git_commit) {
-            setProjectGitMetadata((current) => ({
-                ...current,
-                [projectPath]: {
-                    branch: latestApprovedProposal.git_branch ?? current[projectPath]?.branch ?? null,
-                    commit: latestApprovedProposal.git_commit ?? current[projectPath]?.commit ?? null,
-                },
-            }))
-        }
-    }, [commitConversationCache, persistProjectState, setProjectGitMetadata, updateProjectSessionState])
+    }, [commitConversationCache, persistProjectState, updateProjectSessionState])
 
     const applyConversationStreamEvent = useCallback((
         projectPath: string,

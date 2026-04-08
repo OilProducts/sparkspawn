@@ -132,7 +132,7 @@ export function GraphMetadataSection({
                         value={graphAttrs['spark.title'] || ''}
                         onChange={(event) => updateGraphAttr('spark.title', event.target.value)}
                         className="h-8 text-xs"
-                        placeholder="Execution Planning"
+                        placeholder="Implement From Plan File"
                     />
                 </FieldRow>
                 <FieldRow
@@ -146,7 +146,7 @@ export function GraphMetadataSection({
                         onChange={(event) => updateGraphAttr('spark.description', event.target.value)}
                         rows={3}
                         className="min-h-20 px-2 py-1 text-xs"
-                        placeholder="Turn an approved spec edit proposal into an execution plan."
+                        placeholder="Snapshot a plan file, implement it, and iterate until complete."
                     />
                 </FieldRow>
             </div>

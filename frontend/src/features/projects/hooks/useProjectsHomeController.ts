@@ -10,7 +10,6 @@ import { usePersistProjectState } from './usePersistProjectState'
 import { useProjectThreadActions } from './projectThreadActions'
 import { debugProjectChat } from '../model/projectChatDebug'
 import { buildProjectsHomeViewModel } from '../model/projectsHomeViewModel'
-import type { ProjectGitMetadata } from '../model/presentation'
 import type { ConversationTimelineEntry } from '../model/types'
 import {
     buildProjectConversationId,
@@ -46,7 +45,6 @@ export function useProjectsHomeController() {
     const appendProjectEventEntry = useStore((state) => state.appendProjectEventEntry)
     const updateProjectSessionState = useStore((state) => state.updateProjectSessionState)
     const projectGitMetadata = useStore((state) => state.homeProjectGitMetadataByPath)
-    const setHomeProjectGitMetadata = useStore((state) => state.setHomeProjectGitMetadata)
     const model = useStore((state) => state.model)
     const setExecutionFlow = useStore((state) => state.setExecutionFlow)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
@@ -58,13 +56,6 @@ export function useProjectsHomeController() {
     const isNarrowViewport = useNarrowViewport()
     const activeProjectScope = activeProjectPath ? projectSessionsByPath[activeProjectPath] : null
     const activeConversationId = activeProjectScope?.conversationId ?? null
-    const setProjectGitMetadata = useCallback((next: Record<string, ProjectGitMetadata> | ((current: Record<string, ProjectGitMetadata>) => Record<string, ProjectGitMetadata>)) => {
-        const current = useStore.getState().homeProjectGitMetadataByPath
-        const resolved = typeof next === 'function' ? next(current) : next
-        Object.entries(resolved).forEach(([projectPath, metadata]) => {
-            setHomeProjectGitMetadata(projectPath, metadata)
-        })
-    }, [setHomeProjectGitMetadata])
     const {
         applyConversationSnapshot,
         commitConversationCache,
@@ -74,17 +65,14 @@ export function useProjectsHomeController() {
     } = useProjectConversationCache({
         persistProjectState,
         projectSessionsByPath,
-        setProjectGitMetadata,
         updateProjectSessionState,
     })
     const activeConversationSnapshot = activeConversationId
         ? conversationCache.snapshotsByConversationId[activeConversationId] || null
         : null
     const isConversationHistoryLoading = Boolean(activeConversationId) && activeConversationSnapshot === null
-    const latestConversationSpecEditProposalId = activeConversationSnapshot?.spec_edit_proposals.at(-1)?.id || null
     const {
         chatDraft,
-        expandedProposalChanges,
         expandedThinkingEntries,
         expandedToolCalls,
         optimisticSend,
@@ -94,13 +82,11 @@ export function useProjectsHomeController() {
         setOptimisticSend,
         setPanelError,
         setPendingDeleteConversationId,
-        toggleProposalChangeExpanded,
         toggleThinkingEntryExpanded,
         toggleToolCallExpanded,
     } = useProjectsHomeInteractionState({
         activeConversationId,
         activeProjectPath,
-        latestSpecEditProposalId: latestConversationSpecEditProposalId,
     })
     const {
         conversationBodyRef,
@@ -119,21 +105,16 @@ export function useProjectsHomeController() {
         : 'idle'
     const {
         activeConversationHistory,
-        activeExecutionCardsById,
         activeFlowLaunchesById,
         activeFlowRunRequestsById,
         activeProjectConversationSummaries,
         activeProjectEventLog,
-        activeProjectGitMetadata,
         activeProjectLabel,
-        activeSpecEditProposalsById,
         chatSendButtonLabel,
         hasRenderableConversationHistory,
         isChatInputDisabled,
-        latestExecutionCardId,
         latestFlowLaunchId,
         latestFlowRunRequestId,
-        latestSpecEditProposalId,
     } = useMemo(() => buildProjectsHomeViewModel({
         activeConversationId,
         activeConversationSnapshot,
@@ -171,15 +152,7 @@ export function useProjectsHomeController() {
         })
         resetComposerRef.current()
         setConversationId(conversationId)
-        updateProjectSessionState(projectPath, {
-            conversationId,
-            specId: null,
-            specStatus: 'draft',
-            specProvenance: null,
-            planId: null,
-            planStatus: 'draft',
-            planProvenance: null,
-        })
+        updateProjectSessionState(projectPath, { conversationId })
         void persistProjectState(projectPath, {
             active_conversation_id: conversationId,
             last_accessed_at: new Date().toISOString(),
@@ -265,13 +238,8 @@ export function useProjectsHomeController() {
     })
 
     const {
-        onApproveSpecEditProposal,
-        onRejectSpecEditProposal,
-        onReviewExecutionCard,
         onReviewFlowRunRequest,
-        pendingExecutionCardId,
         pendingFlowRunRequestId,
-        pendingSpecProposalId,
     } = useConversationReviews({
         activeConversationId,
         activeProjectPath,
@@ -298,30 +266,18 @@ export function useProjectsHomeController() {
             isConversationHistoryLoading,
             hasRenderableConversationHistory,
             activeConversationHistory,
-            activeSpecEditProposalsById,
             activeFlowRunRequestsById,
             activeFlowLaunchesById,
-            activeExecutionCardsById,
-            latestSpecEditProposalId,
             latestFlowRunRequestId,
             latestFlowLaunchId,
-            latestExecutionCardId,
-            activeProjectGitMetadata,
             expandedToolCalls,
             expandedThinkingEntries,
-            expandedProposalChanges,
-            pendingSpecProposalId,
             pendingFlowRunRequestId,
-            pendingExecutionCardId,
             formatConversationTimestamp,
             onToggleToolCallExpanded: toggleToolCallExpanded,
             onToggleThinkingEntryExpanded: toggleThinkingEntryExpanded,
-            onToggleProposalChangeExpanded: toggleProposalChangeExpanded,
-            onApproveSpecEditProposal,
-            onRejectSpecEditProposal,
             onReviewFlowRunRequest,
             onOpenFlowRun,
-            onReviewExecutionCard,
         },
         sidebarProps: {
             isNarrowViewport,

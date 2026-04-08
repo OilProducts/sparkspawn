@@ -2,7 +2,6 @@ import type {
     DiagnosticEntry,
     GraphAttrErrors,
     GraphAttrs,
-    ProjectSessionArtifactState,
     ProjectSessionState,
     RouteState,
     UiDefaults,
@@ -26,12 +25,6 @@ export const DEFAULT_PROJECT_SESSION_STATE: ProjectSessionState = {
     workingDir: DEFAULT_WORKING_DIRECTORY,
     conversationId: null,
     projectEventLog: [],
-    specId: null,
-    specStatus: 'draft',
-    specProvenance: null,
-    planId: null,
-    planStatus: 'draft',
-    planProvenance: null,
 }
 
 const GRAPH_FIDELITY_OPTION_SET = new Set<string>([
@@ -203,31 +196,6 @@ export const resolveProjectSessionState = (
         ...DEFAULT_PROJECT_SESSION_STATE,
         ...workspace,
         workingDir: workspace?.workingDir || defaultWorkingDir,
-    }
-}
-
-export const selectProjectSessionArtifactState = (
-    projectSessionsByPath: Record<string, ProjectSessionState>,
-    projectPath: string | null,
-): ProjectSessionArtifactState | null => {
-    if (!projectPath) {
-        return null
-    }
-    const normalizedProjectPath = normalizeProjectPath(projectPath)
-    if (!normalizedProjectPath || !isAbsoluteProjectPath(normalizedProjectPath)) {
-        return null
-    }
-    const loadedWorkspace = projectSessionsByPath[normalizedProjectPath]
-    if (!loadedWorkspace) {
-        return null
-    }
-    const workspace = resolveProjectSessionState(loadedWorkspace, normalizedProjectPath)
-    return {
-        conversationId: workspace.conversationId,
-        specId: workspace.specId,
-        specStatus: workspace.specStatus,
-        planId: workspace.planId,
-        planStatus: workspace.planStatus,
     }
 }
 

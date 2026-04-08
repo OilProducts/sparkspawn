@@ -18,7 +18,7 @@ Spark is the workspace and orchestration layer over registered projects. It:
 - manages projects
 - exposes shared flow assets that live under `SPARK_HOME`
 - manages conversations
-- creates and stores review artifacts
+- creates and stores flow-review artifacts
 - records human approval decisions
 - launches Attractor workflows when those decisions require execution
 - maintains provenance between conversation artifacts and Attractor runs
@@ -30,9 +30,8 @@ Spark-owned workflow state lives under `SPARK_HOME`. Project-owned source conten
 Workspace owns:
 - project registration and active project scope
 - project conversations
-- spec edit proposals
 - flow run requests
-- execution cards
+- flow launches recorded from the conversation surface
 - human review decisions for workspace artifacts
 - provenance links from workspace artifacts to Attractor flows and runs
 - flow references for workspace artifacts
@@ -95,27 +94,7 @@ A conversation:
 - may contain inline workspace artifacts
 - is the primary collaborative surface for review and planning actions
 
-### 5.3 Spec Edit Proposal
-
-A spec edit proposal is a Spark review artifact. It contains:
-- stable proposal id
-- summary
-- rationale if present
-- one or more concrete changes
-- review status
-- provenance to the originating conversation turn
-
-### 5.4 Execution Card
-
-An execution card is a planning artifact derived from an approved spec edit proposal. It contains:
-- stable execution-card id
-- title, summary, objective
-- structured work items
-- review status
-- provenance to the source proposal
-- optional references to the intended flow
-
-### 5.5 Flow Run Request
+### 5.3 Flow Run Request
 
 A flow run request is a review artifact for agent-requested Attractor execution. It contains:
 - stable request id
@@ -127,19 +106,28 @@ A flow run request is a review artifact for agent-requested Attractor execution.
 - provenance to the originating conversation turn
 - optional reference to the launched Attractor run
 
-### 5.6 Provenance Record
+### 5.4 Flow Launch
+
+A flow launch is a conversation artifact for an immediately launched Attractor run. It contains:
+- stable launch id
+- flow name
+- summary
+- optional goal text
+- optional model override
+- launch status
+- provenance to the originating conversation turn
+- reference to the launched Attractor run when available
+
+### 5.5 Provenance Record
 
 Spark must retain explicit durable links:
-- conversation -> proposal
 - conversation -> flow run request
-- proposal -> execution card
+- conversation -> flow launch
 - flow run request -> flow reference
 - flow run request -> launched Attractor run
-- execution card -> flow reference
-- execution card -> launched Attractor run
 - Attractor run -> produced artifacts
 
-### 5.7 Flow Association
+### 5.6 Flow Association
 
 Flow documents remain Attractor resources.
 They are shared workspace/global authoring assets rather than per-project copies.
@@ -163,8 +151,7 @@ The canonical path is user-facing. The internal `project-id` is storage-facing.
 
 Project chat is not a generic message stream. It is the collaborative surface for:
 - project-scoped discussion
-- specification review
-- execution planning handoff
+- run-request review
 - durable work history
 
 Conversation rules:
@@ -220,7 +207,7 @@ Spark persists two different conversation authorities:
 - turns
 - segments
 - inline workspace artifacts
-- execution workflow state
+- flow run request and flow launch records
 - event log
 
 It does not need to persist frontend-only view sessions such as:
@@ -236,7 +223,7 @@ Historical shapes that lack the modern schema or segment model may be rejected r
 
 ## 11. Review Artifacts
 
-Spec edit proposals, flow run requests, and execution cards are durable workspace objects, not just render fragments.
+Flow run requests and flow launches are durable workspace objects, not just render fragments.
 
 Each artifact class must preserve:
 - stable identity
@@ -254,26 +241,20 @@ For `flow_run_request` specifically:
 The assistant may create candidate artifacts.
 
 The assistant must not auto-approve:
-- spec edit proposals
-- execution cards
 - flow run requests
 
 Those approvals are reserved for human users even when the assistant believes the artifact is correct.
 
 Approval and rejection are durable state transitions, not implied UI gestures.
 
-## 13. Execution Planning and Dispatch
+## 13. Conversation Launch and Dispatch
 
 Spark conversations interact with Attractor through explicit artifacts rather than by treating Attractor as a chat system.
 
 The main touch points are:
-- create spec edit proposal
-- review spec edit proposal
 - create flow run request
 - review flow run request
-- generate execution card from approved proposal
-- review execution card
-- launch Attractor workflow from approved execution card
+- launch Attractor workflow directly from the conversation surface
 - inspect resulting run and outcomes
 
 ### 13.1 Agent-Created Workspace Artifacts
@@ -281,7 +262,6 @@ The main touch points are:
 Spark may expose a narrow first-party CLI surface for agent-created workspace artifacts:
 
 ```text
-spark convo spec-proposal --conversation <adjective-noun> --json <payload.json>
 spark convo run-request --conversation <adjective-noun> --flow <flow_name> --summary <text> [--goal-file <path>|--goal -] [--model <model>]
 spark run launch --flow <flow_name> --summary <text> [--conversation <adjective-noun>] [--project <path>]
 spark flow list [--text]
@@ -289,7 +269,7 @@ spark flow describe --flow <flow_name> [--text]
 spark flow get --flow <flow_name> [--text]
 ```
 
-The artifact-creation commands create pending review artifacts. They must not approve, reject, or launch downstream execution by themselves.
+`spark convo run-request` creates a pending review artifact. It must not approve or launch downstream execution by itself.
 
 The flow-discovery commands are read-only. They expose only workspace-requestable flows to the agent surface by default, while the workspace retains separate global policy for flows that are trigger-only or disabled.
 
@@ -362,17 +342,10 @@ Persisted runtime state lives under:
 - `SPARK_HOME/workspace/trigger-state/<id>.json`
 
 V1 source types are:
-- `workspace_event`
 - `schedule`
 - `poll`
 - `webhook`
 - `flow_event`
-
-Protected system triggers cover the built-in approval/review hooks:
-- `spec_edit_approved`
-- `execution_card_approved`
-- `execution_card_rejected`
-- `execution_card_revision_requested`
 
 Webhook ingress is shared under:
 - `POST /workspace/api/webhooks`
@@ -389,8 +362,6 @@ Spark-owned durable data includes:
 - conversation threads
 - normalized conversation state and raw transport logs
 - workflow logs
-- spec proposals
-- execution cards
 - flow run requests
 - review decisions
 - run metadata linkage
@@ -423,9 +394,6 @@ SPARK_HOME/
       <project-id>/
         project.toml
         conversations/
-        workflow/
-        proposals/
-        execution-cards/
   attractor/
     runs/
       <project-id>/

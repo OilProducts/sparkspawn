@@ -1,6 +1,6 @@
 # Spark
 
-Spark is a workspace workbench for AI-assisted software delivery. It combines a FastAPI backend and React UI for registering local projects, authoring shared DOT workflows, running them against a selected project context, and reviewing planning artifacts produced inside project conversations.
+Spark is a workspace workbench for AI-assisted software delivery. It combines a FastAPI backend and React UI for registering local projects, authoring shared DOT workflows, running them against a selected project context, and coordinating project conversations, flow requests, and run launches.
 
 ## What Spark Does
 
@@ -9,19 +9,16 @@ Spark is a workspace workbench for AI-assisted software delivery. It combines a 
 - Parse, canonicalize, validate, and save flows through the backend
 - Run project-aware pipelines with built-in handlers such as `codergen`, `tool`, `conditional`, `parallel`, `parallel.fan_in`, `wait.human`, and `stack.manager_loop`
 - Stream live run events, inspect checkpoints and context, browse artifacts, and answer human-gate questions
-- Work inside project-scoped AI conversation threads that can produce spec-edit proposals and execution cards
-- Review and approve or reject spec edits, then review, revise, or approve execution plans for execution
+- Work inside project-scoped AI conversation threads that can request or directly launch project-scoped workflow runs
+- Review and approve flow run requests, or launch a run directly from the conversation surface
 
 ## Main User Workflow
 
 1. Register or select a local project in Home.
 2. Open or resume a project conversation thread.
-3. Ask Spark to help draft or refine a spec.
-4. Review the resulting spec-edit proposal.
-5. Approve the proposal to trigger execution planning.
-6. Review the generated execution card.
-7. Approve the execution card and launch a project-scoped workflow run.
-8. Monitor execution in the Execution and Runs views.
+3. Ask Spark to inspect the project, answer questions, or prepare a flow run request.
+4. Review and approve the flow run request, or launch a flow directly from the conversation.
+5. Monitor execution in the Execution and Runs views.
 
 The UI also supports a direct authoring workflow: Home -> Editor -> Execution -> Runs.
 Flow authoring is workspace-global rather than project-owned: you can open the Editor without selecting a project, while the Execution view keeps run-start actions disabled until a project context is selected. Trigger automation is also workspace-global and lives in its own top-level Triggers tab rather than inside project settings.
@@ -244,7 +241,7 @@ Current API groups include:
 - Workspace project management: `GET /workspace/api/projects`, `POST /workspace/api/projects/register`, `PATCH /workspace/api/projects/state`, `DELETE /workspace/api/projects`
 - Workspace triggers and project metadata: `GET /workspace/api/triggers`, `POST /workspace/api/triggers`, `GET /workspace/api/triggers/{trigger_id}`, `PATCH /workspace/api/triggers/{trigger_id}`, `DELETE /workspace/api/triggers/{trigger_id}`, `POST /workspace/api/webhooks`, `GET /workspace/api/projects/metadata`, `POST /workspace/api/projects/pick-directory`
 - Workspace conversations: `GET /workspace/api/projects/conversations`, `GET /workspace/api/conversations/{conversation_id}`, `GET /workspace/api/conversations/{conversation_id}/events`, `POST /workspace/api/conversations/{conversation_id}/turns`, `DELETE /workspace/api/conversations/{conversation_id}`
-- Workspace review workflows: `POST /workspace/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/approve`, `POST /workspace/api/conversations/{conversation_id}/spec-edit-proposals/{proposal_id}/reject`, `POST /workspace/api/conversations/{conversation_id}/execution-cards/{execution_card_id}/review`
+- Workspace run-launch workflows: `POST /workspace/api/conversations/by-handle/{conversation_handle}/flow-run-requests`, `POST /workspace/api/conversations/{conversation_id}/flow-run-requests/{request_id}/review`, `POST /workspace/api/runs/launch`
 
 ## Repository Commands
 
@@ -308,7 +305,7 @@ pip install dist/*.whl
 - The agent-facing CLI exposes curated flow discovery commands with JSON default output: `spark flow list`, `spark flow describe --flow <name>`, and `spark flow get --flow <name>`.
 - The editor supports both structured editing and raw DOT editing, including semantic-equivalence safety checks during handoff.
 - The Runs view is intended for historical inspection, diagnostics, artifact browsing, and replaying execution context.
-- Starter flow templates live in [src/spark/starter_flows/plan-generation.dot](/Users/chris/projects/spark/src/spark/starter_flows/plan-generation.dot), [src/spark/starter_flows/parallel-review.dot](/Users/chris/projects/spark/src/spark/starter_flows/parallel-review.dot), [src/spark/starter_flows/simple-linear.dot](/Users/chris/projects/spark/src/spark/starter_flows/simple-linear.dot), [src/spark/starter_flows/human-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/human-review-loop.dot), [src/spark/starter_flows/implement-from-plan.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-from-plan.dot), [src/spark/starter_flows/implement-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-review-loop.dot), [src/spark/starter_flows/spec-implementation/implement-spec.dot](/Users/chris/projects/spark/src/spark/starter_flows/spec-implementation/implement-spec.dot), [src/spark/starter_flows/spec-implementation/implement-milestone.dot](/Users/chris/projects/spark/src/spark/starter_flows/spec-implementation/implement-milestone.dot), [src/spark/starter_flows/supervision/implementation-worker.dot](/Users/chris/projects/spark/src/spark/starter_flows/supervision/implementation-worker.dot), and [src/spark/starter_flows/supervision/supervised-implementation.dot](/Users/chris/projects/spark/src/spark/starter_flows/supervision/supervised-implementation.dot).
+- Starter flow templates live in [src/spark/starter_flows/parallel-review.dot](/Users/chris/projects/spark/src/spark/starter_flows/parallel-review.dot), [src/spark/starter_flows/simple-linear.dot](/Users/chris/projects/spark/src/spark/starter_flows/simple-linear.dot), [src/spark/starter_flows/human-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/human-review-loop.dot), [src/spark/starter_flows/implement-from-plan.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-from-plan.dot), [src/spark/starter_flows/implement-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-review-loop.dot), [src/spark/starter_flows/spec-implementation/implement-spec.dot](/Users/chris/projects/spark/src/spark/starter_flows/spec-implementation/implement-spec.dot), [src/spark/starter_flows/spec-implementation/implement-milestone.dot](/Users/chris/projects/spark/src/spark/starter_flows/spec-implementation/implement-milestone.dot), [src/spark/starter_flows/supervision/implementation-worker.dot](/Users/chris/projects/spark/src/spark/starter_flows/supervision/implementation-worker.dot), and [src/spark/starter_flows/supervision/supervised-implementation.dot](/Users/chris/projects/spark/src/spark/starter_flows/supervision/supervised-implementation.dot).
 - Repo-only advanced/test fixtures live under [tests/fixtures/flows/](/Users/chris/projects/spark/tests/fixtures/flows).
 
 ## Project Status

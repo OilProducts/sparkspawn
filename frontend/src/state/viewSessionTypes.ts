@@ -38,7 +38,6 @@ export interface HomeProjectSessionState {
 }
 
 export interface HomeConversationSessionState {
-    expandedProposalChanges: Record<string, boolean>
     expandedToolCalls: Record<string, boolean>
     expandedThinkingEntries: Record<string, boolean>
     isPinnedToBottom: boolean

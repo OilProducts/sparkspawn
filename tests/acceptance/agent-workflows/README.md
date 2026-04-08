@@ -31,7 +31,7 @@ Each workflow file should define:
 - `reviewer-auditor-workflow.md`
   Run inspection and diagnostic reconstruction workflow.
 - `project-owner-workflow.md`
-  Project-scoped conversation, spec-edit review, and execution-card workflow.
+  Project-scoped conversation, flow-run request review, and direct flow launch workflow.
 
 ## Notes
 

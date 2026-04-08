@@ -17,6 +17,5 @@
 - [ ] Decide whether named `retry_policy` presets are part of the Attractor DSL. If yes, specify the node attribute and preset semantics; if not, remove or hide the implementation-specific surface.
 - [ ] Document or remove the parallel-handler DSL additions `join_k` and `join_quorum`, which are implemented but not covered in the current Attractor spec.
 - [ ] Define the flow trigger/automation system, including how users associate flows with triggers, what the first trigger should be, and whether trigger-driven repo mutation is ever allowed by default.
-- [ ] Define the future work tracker/kanban system that approved execution cards feed into, including tracker data model, lifecycle, and agent pickup/assignment mechanics.
 - [ ] Build the harness for agent-driven acceptance workflows under `tests/acceptance/agent-workflows`.
 - [ ] Add first-class structured UI authoring for subgraphs and scoped `node[...]` / `edge[...]` defaults so these no longer require raw DOT editing.

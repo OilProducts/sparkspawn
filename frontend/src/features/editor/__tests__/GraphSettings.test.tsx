@@ -37,10 +37,10 @@ const resetGraphSettingsState = () => {
       '/tmp/project-graph-settings': {
         workingDir: DEFAULT_WORKING_DIRECTORY,
         conversationId: null,
-        specId: null,
-        specStatus: 'draft',
-        planId: null,
-        planStatus: 'draft',
+
+
+
+
       },
     },
     projectRegistrationError: null,
@@ -101,8 +101,8 @@ describe('Graph and settings behavior', () => {
           return new Response(
             JSON.stringify({
               name: TEST_GRAPH_FLOW,
-              title: 'Implement Spec',
-              description: 'Turn approved spec edits into execution plans.',
+              title: 'Implement From Plan File',
+              description: 'Snapshot a plan file, implement it, and iterate until complete.',
               launch_policy: null,
               effective_launch_policy: 'disabled',
             }),
@@ -207,17 +207,17 @@ describe('Graph and settings behavior', () => {
     const user = userEvent.setup()
     act(() => {
       useStore.getState().setGraphAttrs({
-        'spark.title': '  Execution Planning  ',
-        'spark.description': '  Turn approved spec edits into execution plans.  ',
+        'spark.title': '  Implement From Plan File  ',
+        'spark.description': '  Snapshot a plan file, implement it, and iterate until complete.  ',
         custom_attr: 'keep me',
       } as Record<string, string>)
     })
 
     wrapWithFlowProvider(<GraphSettings inline />)
 
-    expect(screen.getByLabelText('Title')).toHaveValue('Execution Planning')
+    expect(screen.getByLabelText('Title')).toHaveValue('Implement From Plan File')
     expect(screen.getByLabelText('Description')).toHaveValue(
-      'Turn approved spec edits into execution plans.',
+      'Snapshot a plan file, implement it, and iterate until complete.',
     )
 
     await user.click(screen.getByTestId('graph-advanced-toggle'))
@@ -228,8 +228,8 @@ describe('Graph and settings behavior', () => {
     expect(screen.queryByText('spark.description')).not.toBeInTheDocument()
 
     const dot = generateDot(TEST_GRAPH_FLOW, [], [], useStore.getState().graphAttrs)
-    expect(dot).toContain('spark.title="Execution Planning"')
-    expect(dot).toContain('spark.description="Turn approved spec edits into execution plans."')
+    expect(dot).toContain('spark.title="Implement From Plan File"')
+    expect(dot).toContain('spark.description="Snapshot a plan file, implement it, and iterate until complete."')
   })
 
   it('persists launch input declarations as DOT-backed Spark metadata', async () => {

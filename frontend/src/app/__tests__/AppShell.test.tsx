@@ -227,16 +227,11 @@ const buildConversationSnapshot = ({
   turns,
   segments,
   event_log: [],
-  spec_edit_proposals: [],
+
   flow_run_requests: [],
   flow_launches: [],
-  execution_cards: [],
-  execution_workflow: {
-    status: 'idle',
-    run_id: null,
-    error: null,
-    flow_source: null,
-  },
+
+
 })
 
 const buildRunRecord = ({

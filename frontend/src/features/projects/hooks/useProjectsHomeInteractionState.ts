@@ -6,7 +6,6 @@ import type { OptimisticSendState } from '../model/conversationState'
 type UseProjectsHomeInteractionStateArgs = {
     activeConversationId: string | null
     activeProjectPath: string | null
-    latestSpecEditProposalId: string | null
 }
 
 const EMPTY_PROJECT_SESSION = {
@@ -18,7 +17,6 @@ const EMPTY_PROJECT_SESSION = {
 }
 
 const EMPTY_CONVERSATION_SESSION = {
-    expandedProposalChanges: {} as Record<string, boolean>,
     expandedToolCalls: {} as Record<string, boolean>,
     expandedThinkingEntries: {} as Record<string, boolean>,
     isPinnedToBottom: true,
@@ -28,7 +26,6 @@ const EMPTY_CONVERSATION_SESSION = {
 export function useProjectsHomeInteractionState({
     activeConversationId,
     activeProjectPath,
-    latestSpecEditProposalId: _latestSpecEditProposalId,
 }: UseProjectsHomeInteractionStateArgs) {
     const homeProjectSessionsByPath = useStore((state) => state.homeProjectSessionsByPath)
     const homeConversationSessionsById = useStore((state) => state.homeConversationSessionsById)
@@ -87,18 +84,6 @@ export function useProjectsHomeInteractionState({
         updateHomeProjectSession(activeProjectPath, { pendingDeleteConversationId: value })
     }, [activeProjectPath, updateHomeProjectSession])
 
-    const toggleProposalChangeExpanded = useCallback((changeKey: string) => {
-        if (!activeConversationId) {
-            return
-        }
-        updateHomeConversationSession(activeConversationId, {
-            expandedProposalChanges: {
-                ...conversationSession.expandedProposalChanges,
-                [changeKey]: !conversationSession.expandedProposalChanges[changeKey],
-            },
-        })
-    }, [activeConversationId, conversationSession.expandedProposalChanges, updateHomeConversationSession])
-
     const toggleToolCallExpanded = useCallback((toolCallId: string) => {
         if (!activeConversationId) {
             return
@@ -125,7 +110,6 @@ export function useProjectsHomeInteractionState({
 
     return {
         chatDraft: projectSession.chatDraft,
-        expandedProposalChanges: conversationSession.expandedProposalChanges,
         expandedThinkingEntries: conversationSession.expandedThinkingEntries,
         expandedToolCalls: conversationSession.expandedToolCalls,
         optimisticSend: projectSession.optimisticSend,
@@ -135,7 +119,6 @@ export function useProjectsHomeInteractionState({
         setOptimisticSend,
         setPanelError,
         setPendingDeleteConversationId,
-        toggleProposalChangeExpanded,
         toggleThinkingEntryExpanded,
         toggleToolCallExpanded,
     }
