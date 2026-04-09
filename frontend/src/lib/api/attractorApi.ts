@@ -61,6 +61,31 @@ export interface PipelineStartResponse {
     error?: string
 }
 
+export interface TokenUsageBucketResponse {
+    input_tokens: number
+    cached_input_tokens: number
+    output_tokens: number
+    total_tokens: number
+}
+
+export interface TokenUsageBreakdownResponse extends TokenUsageBucketResponse {
+    by_model: Record<string, TokenUsageBucketResponse>
+}
+
+export interface ModelEstimatedCostResponse {
+    currency: string
+    amount: number | null
+    status: 'estimated' | 'unpriced'
+}
+
+export interface EstimatedModelCostResponse {
+    currency: string
+    amount: number
+    status: 'estimated' | 'partial_unpriced' | 'unpriced'
+    unpriced_models: string[]
+    by_model?: Record<string, ModelEstimatedCostResponse>
+}
+
 export interface PipelineStatusResponse {
     pipeline_id: string
     run_id: string
@@ -78,6 +103,8 @@ export interface PipelineStatusResponse {
     model?: string
     last_error?: string | null
     token_usage?: number | null
+    token_usage_breakdown?: TokenUsageBreakdownResponse | null
+    estimated_model_cost?: EstimatedModelCostResponse | null
     current_node?: string | null
     completed_nodes?: string[]
     progress?: {
@@ -138,6 +165,8 @@ export interface RunRecordResponse {
     ended_at?: string | null
     last_error?: string
     token_usage?: number | null
+    token_usage_breakdown?: TokenUsageBreakdownResponse | null
+    estimated_model_cost?: EstimatedModelCostResponse | null
     current_node?: string | null
     continued_from_run_id?: string | null
     continued_from_node?: string | null
@@ -332,6 +361,105 @@ export function parsePipelineGraphPreviewResponse(
     return parsePreviewResponse(payload, endpoint)
 }
 
+function parseTokenUsageBucket(value: unknown): TokenUsageBucketResponse | undefined {
+    const record = asUnknownRecord(value)
+    if (!record) {
+        return undefined
+    }
+    const inputTokens = typeof record.input_tokens === 'number'
+        ? record.input_tokens
+        : typeof record.inputTokens === 'number'
+            ? record.inputTokens
+            : 0
+    const cachedInputTokens = typeof record.cached_input_tokens === 'number'
+        ? record.cached_input_tokens
+        : typeof record.cachedInputTokens === 'number'
+            ? record.cachedInputTokens
+            : 0
+    const outputTokens = typeof record.output_tokens === 'number'
+        ? record.output_tokens
+        : typeof record.outputTokens === 'number'
+            ? record.outputTokens
+            : 0
+    const totalTokens = typeof record.total_tokens === 'number'
+        ? record.total_tokens
+        : typeof record.totalTokens === 'number'
+            ? record.totalTokens
+            : inputTokens + outputTokens
+    return {
+        input_tokens: inputTokens,
+        cached_input_tokens: cachedInputTokens,
+        output_tokens: outputTokens,
+        total_tokens: totalTokens,
+    }
+}
+
+function parseTokenUsageBreakdown(value: unknown): TokenUsageBreakdownResponse | null | undefined {
+    if (value === null) {
+        return null
+    }
+    const aggregate = parseTokenUsageBucket(value)
+    const record = asUnknownRecord(value)
+    if (!aggregate || !record) {
+        return undefined
+    }
+    const byModelRecord = asUnknownRecord(record.by_model)
+    const byModel: Record<string, TokenUsageBucketResponse> = {}
+    if (byModelRecord) {
+        Object.entries(byModelRecord).forEach(([modelId, usageValue]) => {
+            const parsedUsage = parseTokenUsageBucket(usageValue)
+            if (parsedUsage) {
+                byModel[modelId] = parsedUsage
+            }
+        })
+    }
+    return {
+        ...aggregate,
+        by_model: byModel,
+    }
+}
+
+function parseEstimatedModelCost(value: unknown): EstimatedModelCostResponse | null | undefined {
+    if (value === null) {
+        return null
+    }
+    const record = asUnknownRecord(value)
+    if (!record) {
+        return undefined
+    }
+    const rawStatus = typeof record.status === 'string' ? record.status : 'unpriced'
+    const status: EstimatedModelCostResponse['status'] =
+        rawStatus === 'estimated' || rawStatus === 'partial_unpriced' || rawStatus === 'unpriced'
+            ? rawStatus
+            : 'unpriced'
+    const byModelRecord = asUnknownRecord(record.by_model)
+    const byModel: Record<string, ModelEstimatedCostResponse> = {}
+    if (byModelRecord) {
+        Object.entries(byModelRecord).forEach(([modelId, modelValue]) => {
+            const parsedModel = asUnknownRecord(modelValue)
+            if (!parsedModel) {
+                return
+            }
+            const modelStatus = parsedModel.status === 'estimated' ? 'estimated' : 'unpriced'
+            const rawAmount = parsedModel.amount
+            byModel[modelId] = {
+                currency: typeof parsedModel.currency === 'string' ? parsedModel.currency : 'USD',
+                amount: typeof rawAmount === 'number' ? rawAmount : rawAmount === null ? null : null,
+                status: modelStatus,
+            }
+        })
+    }
+    return {
+        currency: typeof record.currency === 'string' ? record.currency : 'USD',
+        amount: typeof record.amount === 'number' ? record.amount : 0,
+        status,
+        unpriced_models: Array.isArray(record.unpriced_models)
+            ? record.unpriced_models.filter((modelId): modelId is string => typeof modelId === 'string')
+            : [],
+        by_model: Object.keys(byModel).length > 0 ? byModel : undefined,
+    }
+}
+
 function parseRunRecord(payload: unknown): RunRecordResponse | null {
     const record = asUnknownRecord(payload)
     if (!record) {
@@ -362,6 +490,8 @@ function parseRunRecord(payload: unknown): RunRecordResponse | null {
             : record.token_usage === null
                 ? null
                 : undefined,
+        token_usage_breakdown: parseTokenUsageBreakdown(record.token_usage_breakdown),
+        estimated_model_cost: parseEstimatedModelCost(record.estimated_model_cost),
         current_node: asOptionalNullableString(record.current_node),
         continued_from_run_id: asOptionalNullableString(record.continued_from_run_id),
         continued_from_node: asOptionalNullableString(record.continued_from_node),

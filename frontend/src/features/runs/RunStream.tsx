@@ -73,6 +73,8 @@ function toRunRecord(status: PipelineStatusResponse): RunRecord {
         token_usage: typeof status.token_usage === 'number' || status.token_usage === null
             ? status.token_usage
             : undefined,
+        token_usage_breakdown: status.token_usage_breakdown ?? undefined,
+        estimated_model_cost: status.estimated_model_cost ?? undefined,
         current_node: status.current_node ?? status.progress?.current_node ?? null,
         continued_from_run_id: status.continued_from_run_id ?? null,
         continued_from_node: status.continued_from_node ?? null,
@@ -231,6 +233,14 @@ export function RunStream() {
             updateRunDetailSession(selectedRunId, patch)
         }
 
+        const hasCachedSelectedRunSnapshot = () => {
+            const state = useStore.getState()
+            if (state.selectedRunRecord?.run_id === selectedRunId) {
+                return true
+            }
+            return state.runDetailSessionsByRunId[selectedRunId]?.summaryRecord?.run_id === selectedRunId
+        }
+
         const appendTimelineEvent = (payload: unknown) => {
             const timelineEvent = toTimelineEvent(payload)
             if (!timelineEvent) {
@@ -292,17 +302,29 @@ export function RunStream() {
             })
         }
 
-        const refreshSelectedRunStatus = async (): Promise<PipelineStatusResponse | null> => {
+        const refreshSelectedRunStatus = async (): Promise<{
+            payload: PipelineStatusResponse | null
+            shouldOpenStream: boolean
+        }> => {
             try {
                 const data = await loadSelectedRunStatus(selectedRunId)
                 if (closed) {
-                    return null
+                    return {
+                        payload: null,
+                        shouldOpenStream: false,
+                    }
                 }
                 applyStatusSnapshot(data)
-                return data
+                return {
+                    payload: data,
+                    shouldOpenStream: true,
+                }
             } catch (error) {
                 if (closed) {
-                    return null
+                    return {
+                        payload: null,
+                        shouldOpenStream: false,
+                    }
                 }
                 if (error instanceof ApiHttpError && error.status === 404) {
                     setSelectedRunSnapshot({ record: null, completedNodes: [], fetchedAtMs: null })
@@ -315,14 +337,23 @@ export function RunStream() {
                         timelineError: null,
                     })
                     closeStream()
-                    return null
+                    return {
+                        payload: null,
+                        shouldOpenStream: false,
+                    }
                 }
-                setSelectedRunStatusSync('degraded', SELECTED_RUN_STATUS_DEGRADED_MESSAGE)
+                const shouldOpenStream = hasCachedSelectedRunSnapshot()
+                if (!shouldOpenStream) {
+                    setSelectedRunStatusSync('degraded', SELECTED_RUN_STATUS_DEGRADED_MESSAGE)
+                }
                 patchTimelineSession({
                     isTimelineLive: false,
                     timelineError: null,
                 })
-                return null
+                return {
+                    payload: null,
+                    shouldOpenStream,
+                }
             }
         }
 
@@ -488,8 +519,8 @@ export function RunStream() {
                 isTimelineLive: false,
                 timelineError: null,
             })
-            const data = await refreshSelectedRunStatus()
-            if (closed || !data) {
+            const { shouldOpenStream } = await refreshSelectedRunStatus()
+            if (closed || !shouldOpenStream) {
                 return
             }
 

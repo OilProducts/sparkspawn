@@ -1,3 +1,28 @@
+export interface TokenUsageBucket {
+    input_tokens: number
+    cached_input_tokens: number
+    output_tokens: number
+    total_tokens: number
+}
+
+export interface TokenUsageBreakdown extends TokenUsageBucket {
+    by_model: Record<string, TokenUsageBucket>
+}
+
+export interface ModelEstimatedCost {
+    currency: string
+    amount: number | null
+    status: 'estimated' | 'unpriced'
+}
+
+export interface EstimatedModelCost {
+    currency: string
+    amount: number
+    status: 'estimated' | 'partial_unpriced' | 'unpriced'
+    unpriced_models: string[]
+    by_model?: Record<string, ModelEstimatedCost>
+}
+
 export interface RunRecord {
     run_id: string
     flow_name: string
@@ -16,6 +41,8 @@ export interface RunRecord {
     ended_at?: string | null
     last_error?: string
     token_usage?: number | null
+    token_usage_breakdown?: TokenUsageBreakdown | null
+    estimated_model_cost?: EstimatedModelCost | null
     current_node?: string | null
     continued_from_run_id?: string | null
     continued_from_node?: string | null

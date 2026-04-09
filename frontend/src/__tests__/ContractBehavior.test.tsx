@@ -465,6 +465,33 @@ describe('Frontend contract behavior', () => {
       ended_at: '2026-03-22T00:05:00Z',
       last_error: '',
       token_usage: 1234,
+      token_usage_breakdown: {
+        input_tokens: 900,
+        cached_input_tokens: 120,
+        output_tokens: 334,
+        total_tokens: 1234,
+        by_model: {
+          'gpt-5.4': {
+            input_tokens: 900,
+            cached_input_tokens: 120,
+            output_tokens: 334,
+            total_tokens: 1234,
+          },
+        },
+      },
+      estimated_model_cost: {
+        currency: 'USD',
+        amount: 0.003218,
+        status: 'estimated',
+        unpriced_models: [],
+        by_model: {
+          'gpt-5.4': {
+            currency: 'USD',
+            amount: 0.003218,
+            status: 'estimated',
+          },
+        },
+      },
       completed_nodes: ['start', 'done'],
       continued_from_run_id: 'run-parent',
       continued_from_node: 'Audit Milestone',
@@ -478,6 +505,12 @@ describe('Frontend contract behavior', () => {
       spec_id: 'spec-123',
       plan_id: 'plan-456',
       token_usage: 1234,
+      token_usage_breakdown: {
+        total_tokens: 1234,
+      },
+      estimated_model_cost: {
+        status: 'estimated',
+      },
       completed_nodes: ['start', 'done'],
     })
     expect(() => parsePipelineStatusResponse({ status: 'running' })).toThrow(ApiSchemaError)
@@ -4226,6 +4259,72 @@ describe('Frontend contract behavior', () => {
     }).length
     expect(previewCallsAfterHandoff - previewCallsBeforeHandoff).toBe(1)
     expect(saveResolvers).toHaveLength(0)
+  })
+
+  it('[CID:11.3.04] requests semantic-equivalence save when raw DOT changes before returning to structured mode', async () => {
+    const initialDot = 'digraph contract_behavior { start [label="Start"]; }'
+    const editedDot = `${initialDot}\n// preserve semantic equivalence`
+    const previewPayload = {
+      graph: {
+        graph_attrs: {},
+        defaults: {
+          node: {},
+          edge: {},
+        },
+        subgraphs: [],
+        nodes: [
+          {
+            id: 'start',
+            label: 'Start',
+            shape: 'box',
+          },
+        ],
+        edges: [],
+      },
+      diagnostics: [],
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/attractor/api/flows/contract-behavior.dot')) {
+        return jsonResponse({ content: initialDot })
+      }
+      if (url.endsWith('/attractor/preview')) {
+        return jsonResponse(previewPayload)
+      }
+      if (url.endsWith('/attractor/api/flows') && init?.method === 'POST') {
+        return jsonResponse({ status: 'saved' })
+      }
+      return jsonResponse({}, { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const user = userEvent.setup()
+    renderWithFlowProvider(<Editor />)
+
+    await screen.findByTestId('editor-mode-toggle')
+    await user.click(screen.getByRole('button', { name: 'Raw DOT' }))
+    const rawEditor = await screen.findByTestId('raw-dot-editor')
+    fireEvent.change(rawEditor, { target: { value: editedDot } })
+
+    await user.click(screen.getByRole('button', { name: 'Structured' }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('raw-dot-editor')).not.toBeInTheDocument()
+    })
+
+    const saveCall = fetchMock.mock.calls.find(([input, requestInit]) => {
+      const callUrl = requestUrl(input as RequestInfo | URL)
+      return callUrl.endsWith('/attractor/api/flows') && (requestInit as RequestInit | undefined)?.method === 'POST'
+    })
+    expect(saveCall).toBeTruthy()
+
+    const [, requestInit] = saveCall!
+    const body = JSON.parse(String((requestInit as RequestInit).body))
+    expect(body).toMatchObject({
+      name: 'contract-behavior.dot',
+      content: editedDot,
+      expect_semantic_equivalence: true,
+    })
   })
 
   it('[CID:11.3.02] preserves unsurfaced canonical data through structured and raw edit paths', async () => {

@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Optional
 
 from fastapi import WebSocket
 
+from attractor.api.token_usage import EstimatedModelCost, TokenUsageBreakdown
 from attractor.engine import Context
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, AnswerValue, Question
@@ -271,6 +272,9 @@ class ActiveRun:
     outcome_reason_message: str | None = None
     last_error: str = ""
     completed_nodes: List[str] = field(default_factory=list)
+    token_usage: int | None = None
+    token_usage_breakdown: TokenUsageBreakdown | None = None
+    estimated_model_cost: EstimatedModelCost | None = None
     control: ExecutionControl = field(default_factory=ExecutionControl)
 
 

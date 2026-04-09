@@ -15,6 +15,7 @@ from attractor.api.run_records import (
     extract_token_usage,
     normalize_run_status,
 )
+from attractor.api.token_usage import TokenUsageBreakdown, estimate_model_cost
 from attractor.engine import load_checkpoint
 from attractor.graph_prep import (
     DEFAULT_MAX_RETRIES_KEY,
@@ -350,7 +351,11 @@ def record_run_end(
         record.outcome_reason_message = outcome_reason_message
         record.ended_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         record.last_error = last_error
-        record.token_usage = extract_token_usage(run_root(get_settings, run_id), run_id)
+        if record.token_usage_breakdown is not None:
+            record.token_usage = record.token_usage_breakdown.total_tokens
+            record.estimated_model_cost = estimate_model_cost(record.token_usage_breakdown)
+        elif record.token_usage is None:
+            record.token_usage = extract_token_usage(run_root(get_settings, run_id), run_id)
         write_run_meta(get_settings, record)
 
 
@@ -379,6 +384,23 @@ def record_run_status(
             record.outcome_reason_message = outcome_reason_message
         if last_error:
             record.last_error = last_error
+        write_run_meta(get_settings, record)
+
+
+def record_run_usage(
+    get_settings: Callable[[], Settings],
+    run_history_lock: threading.Lock,
+    *,
+    run_id: str,
+    token_usage_breakdown: TokenUsageBreakdown,
+) -> None:
+    with run_history_lock:
+        record = read_run_meta(run_meta_path(get_settings, run_id))
+        if not record:
+            return
+        record.token_usage_breakdown = token_usage_breakdown.copy()
+        record.token_usage = token_usage_breakdown.total_tokens
+        record.estimated_model_cost = estimate_model_cost(token_usage_breakdown)
         write_run_meta(get_settings, record)
 
 

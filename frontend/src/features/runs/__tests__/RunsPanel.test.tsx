@@ -84,6 +84,13 @@ const makeRun = (overrides: Partial<Record<string, unknown>> = {}) => ({
   ended_at: (overrides.ended_at as string | null | undefined) ?? '2026-03-22T00:05:00Z',
   last_error: (overrides.last_error as string | null | undefined) ?? null,
   token_usage: (overrides.token_usage as number | null | undefined) ?? 1234,
+  token_usage_breakdown: (overrides.token_usage_breakdown as Record<string, unknown> | null | undefined) ?? null,
+  estimated_model_cost: (overrides.estimated_model_cost as Record<string, unknown> | null | undefined) ?? null,
+  current_node: (overrides.current_node as string | null | undefined) ?? null,
+  continued_from_run_id: (overrides.continued_from_run_id as string | null | undefined) ?? null,
+  continued_from_node: (overrides.continued_from_node as string | null | undefined) ?? null,
+  continued_from_flow_mode: (overrides.continued_from_flow_mode as string | null | undefined) ?? null,
+  continued_from_flow_name: (overrides.continued_from_flow_name as string | null | undefined) ?? null,
 })
 
 const installControllableEventSource = () => {
@@ -1183,6 +1190,170 @@ describe('RunsPanel', () => {
 
     expect(openedUrls.filter((url) => url.includes('/attractor/runs/events'))).toHaveLength(1)
     expect(openedUrls.filter((url) => url.includes('/attractor/pipelines/run-stream-count/events'))).toHaveLength(1)
+  })
+
+  it('applies live token telemetry from runs-list upserts to the selected run summary', async () => {
+    const selectedRun = makeRun({
+      run_id: 'run-live-usage',
+      flow_name: 'selected.dot',
+      status: 'running',
+      outcome: null,
+      ended_at: null,
+      token_usage: null,
+      token_usage_breakdown: null,
+      estimated_model_cost: null,
+      project_path: '/tmp/project-one',
+      current_node: 'review',
+    })
+
+    const fetchMock = vi.mocked(global.fetch)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveRequestUrl(input)
+      const method = init?.method ?? 'GET'
+      if (method !== 'GET') {
+        throw new Error(`Unhandled request: ${method} ${url}`)
+      }
+      if (url.includes('/attractor/runs?project_path=%2Ftmp%2Fproject-one')) {
+        return jsonResponse({ runs: [selectedRun] })
+      }
+      if (url.includes('/attractor/pipelines/run-live-usage/checkpoint')) {
+        return jsonResponse({
+          pipeline_id: 'run-live-usage',
+          checkpoint: {
+            completed_nodes: ['start'],
+            current_node: 'review',
+          },
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-live-usage/context')) {
+        return jsonResponse({
+          pipeline_id: 'run-live-usage',
+          context: {},
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-live-usage/artifacts')) {
+        return jsonResponse({
+          pipeline_id: 'run-live-usage',
+          artifacts: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-live-usage/graph-preview')) {
+        return jsonResponse({
+          status: 'ok',
+          graph: {
+            graph_attrs: {},
+            nodes: [
+              { id: 'start', label: 'Start', shape: 'Mdiamond' },
+              { id: 'review', label: 'Review', shape: 'box' },
+              { id: 'done', label: 'Done', shape: 'Msquare' },
+            ],
+            edges: [
+              { from: 'start', to: 'review', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+              { from: 'review', to: 'done', label: null, condition: null, weight: null, fidelity: null, thread_id: null, loop_restart: false },
+            ],
+          },
+          diagnostics: [],
+          errors: [],
+        })
+      }
+      if (url.includes('/attractor/pipelines/run-live-usage/questions')) {
+        return jsonResponse({
+          pipeline_id: 'run-live-usage',
+          questions: [],
+        })
+      }
+      if (url.endsWith('/attractor/pipelines/run-live-usage')) {
+        return jsonResponse({
+          pipeline_id: 'run-live-usage',
+          ...selectedRun,
+          completed_nodes: ['start'],
+          progress: {
+            current_node: 'review',
+            completed_nodes: ['start'],
+          },
+        })
+      }
+      throw new Error(`Unhandled request: ${method} ${url}`)
+    })
+
+    const { latestSourceMatching } = installControllableEventSource()
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/project-one')
+      useStore.getState().setActiveProjectPath('/tmp/project-one')
+    })
+
+    const user = userEvent.setup()
+    renderRunsWorkspace()
+
+    await waitFor(() => {
+      expect(screen.getByText('selected.dot')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('run-history-row'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-summary-estimated-model-cost')).toHaveTextContent('—')
+    })
+
+    act(() => {
+      latestSourceMatching('/attractor/runs/events')?.emit({
+        type: 'run_upsert',
+        run: {
+          ...selectedRun,
+          token_usage: 36,
+          token_usage_breakdown: {
+            input_tokens: 23,
+            cached_input_tokens: 3,
+            output_tokens: 13,
+            total_tokens: 36,
+            by_model: {
+              'gpt-5.4': {
+                input_tokens: 15,
+                cached_input_tokens: 3,
+                output_tokens: 9,
+                total_tokens: 24,
+              },
+              'gpt-5.3-codex-spark': {
+                input_tokens: 8,
+                cached_input_tokens: 0,
+                output_tokens: 4,
+                total_tokens: 12,
+              },
+            },
+          },
+          estimated_model_cost: {
+            currency: 'USD',
+            amount: 0.000166,
+            status: 'partial_unpriced',
+            unpriced_models: ['gpt-5.3-codex-spark'],
+            by_model: {
+              'gpt-5.4': {
+                currency: 'USD',
+                amount: 0.000166,
+                status: 'estimated',
+              },
+              'gpt-5.3-codex-spark': {
+                currency: 'USD',
+                amount: null,
+                status: 'unpriced',
+              },
+            },
+          },
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-summary-estimated-model-cost')).toHaveTextContent('$0.000166')
+    })
+    expect(screen.getByTestId('run-summary-estimated-model-cost-note')).toHaveTextContent(
+      'Unpriced models excluded from the subtotal: gpt-5.3-codex-spark',
+    )
+    expect(screen.getByTestId('run-summary-token-usage')).toHaveTextContent('36')
+    expect(screen.getAllByTestId('run-summary-model-row')).toHaveLength(2)
+    expect(screen.getByTestId('run-summary-model-breakdown')).toHaveTextContent('gpt-5.4')
+    expect(screen.getByTestId('run-summary-model-breakdown')).toHaveTextContent('gpt-5.3-codex-spark')
   })
 
   it('keeps selected-run detail fetches scoped to run id changes instead of same-run stream updates', async () => {

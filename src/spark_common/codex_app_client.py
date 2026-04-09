@@ -34,6 +34,10 @@ class CodexAppServerTurnResult:
     def token_total(self) -> Optional[int]:
         return self.state.last_token_total
 
+    @property
+    def token_usage_payload(self) -> Optional[dict[str, Any]]:
+        return self.state.last_token_usage_payload
+
 
 class CodexAppServerClient:
     def __init__(

@@ -5,6 +5,12 @@ from pathlib import Path
 import re
 from typing import Dict, List, Optional
 
+from attractor.api.token_usage import (
+    EstimatedModelCost,
+    TokenUsageBreakdown,
+    estimate_model_cost,
+)
+
 
 @dataclass
 class RunRecord:
@@ -29,6 +35,8 @@ class RunRecord:
     continued_from_flow_name: Optional[str] = None
     last_error: str = ""
     token_usage: Optional[int] = None
+    token_usage_breakdown: Optional[TokenUsageBreakdown] = None
+    estimated_model_cost: Optional[EstimatedModelCost] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -53,10 +61,28 @@ class RunRecord:
             "continued_from_flow_name": self.continued_from_flow_name,
             "last_error": self.last_error,
             "token_usage": self.token_usage,
+            "token_usage_breakdown": (
+                self.token_usage_breakdown.to_dict()
+                if self.token_usage_breakdown is not None
+                else None
+            ),
+            "estimated_model_cost": (
+                self.estimated_model_cost.to_dict()
+                if self.estimated_model_cost is not None
+                else None
+            ),
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, object]) -> "RunRecord":
+        token_usage_breakdown = TokenUsageBreakdown.from_dict(
+            data.get("token_usage_breakdown") if isinstance(data.get("token_usage_breakdown"), dict) else None
+        )
+        estimated_model_cost = EstimatedModelCost.from_dict(
+            data.get("estimated_model_cost") if isinstance(data.get("estimated_model_cost"), dict) else None
+        )
+        if estimated_model_cost is None and token_usage_breakdown is not None:
+            estimated_model_cost = estimate_model_cost(token_usage_breakdown)
         return cls(
             run_id=str(data.get("run_id", "")),
             flow_name=str(data.get("flow_name", "")),
@@ -90,7 +116,13 @@ class RunRecord:
                 str(data.get("continued_from_flow_name")) if data.get("continued_from_flow_name") is not None else None
             ),
             last_error=str(data.get("last_error", "")),
-            token_usage=int(data["token_usage"]) if data.get("token_usage") is not None else None,
+            token_usage=(
+                int(data["token_usage"])
+                if data.get("token_usage") is not None
+                else token_usage_breakdown.total_tokens if token_usage_breakdown is not None else None
+            ),
+            token_usage_breakdown=token_usage_breakdown,
+            estimated_model_cost=estimated_model_cost,
         )
 
 
@@ -183,7 +215,11 @@ def hydrate_run_record_from_log(record: RunRecord, run_root: Path) -> None:
     run_log_path = run_root / "run.log"
     if not run_log_path.exists():
         return
-    record.token_usage = extract_token_usage(run_root, record.run_id)
+    if record.token_usage_breakdown is not None:
+        record.token_usage = record.token_usage_breakdown.total_tokens
+        record.estimated_model_cost = estimate_model_cost(record.token_usage_breakdown)
+    elif record.token_usage is None:
+        record.token_usage = extract_token_usage(run_root, record.run_id)
     try:
         lines = run_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except Exception:

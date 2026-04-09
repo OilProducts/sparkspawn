@@ -45,7 +45,7 @@ export const initialWorkspaceEditorState = {
     workingDir: restoredProjectScope ? restoredProjectScope.workingDir : DEFAULT_WORKING_DIRECTORY,
 }
 
-export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice> = (set, get) => ({
+export const createWorkspaceSlice: StateCreator<AppState, [], [], WorkspaceSlice> = (set) => ({
     viewMode: restoredRouteState.viewMode,
     setViewMode: (mode) =>
         set((state) => {

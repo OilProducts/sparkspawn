@@ -13,6 +13,50 @@ import {
 import { Panel, PanelContent, PanelHeader, SectionHeader } from '@/ui'
 import { RunSectionToggleButton } from './RunSectionToggleButton'
 
+function formatTokenCount(value: number | null | undefined): string {
+    return typeof value === 'number' ? value.toLocaleString() : '—'
+}
+
+function formatEstimatedCost(amount: number | null | undefined, currency: string): string {
+    if (typeof amount !== 'number') {
+        return 'Unpriced'
+    }
+    const maximumFractionDigits = amount >= 1 ? 2 : 6
+    const minimumFractionDigits = amount >= 1 ? 2 : 4
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency,
+        minimumFractionDigits,
+        maximumFractionDigits,
+    }).format(amount)
+}
+
+function formatEstimatedModelCostLabel(run: RunRecord): string {
+    const estimatedCost = run.estimated_model_cost
+    if (!estimatedCost) {
+        return '—'
+    }
+    if (estimatedCost.status === 'unpriced') {
+        return 'Unpriced model usage'
+    }
+    const prefix = formatEstimatedCost(estimatedCost.amount, estimatedCost.currency)
+    if (estimatedCost.status === 'partial_unpriced') {
+        return `${prefix} (partial)`
+    }
+    return prefix
+}
+
+function formatEstimatedModelCostNote(run: RunRecord): string | null {
+    const estimatedCost = run.estimated_model_cost
+    if (!estimatedCost || estimatedCost.unpriced_models.length === 0) {
+        return null
+    }
+    const label = estimatedCost.status === 'partial_unpriced'
+        ? 'Unpriced models excluded from the subtotal'
+        : 'Unpriced models'
+    return `${label}: ${estimatedCost.unpriced_models.join(', ')}`
+}
+
 interface RunSummaryCardProps {
     run: RunRecord
     activeProjectPath: string | null
@@ -34,6 +78,8 @@ export function RunSummaryCard({
 }: RunSummaryCardProps) {
     const cancelAvailable = canCancelRun(run.status)
     const continueAvailable = canContinueRun(run.status)
+    const usageBreakdown = run.token_usage_breakdown
+    const modelUsageEntries = Object.entries(usageBreakdown?.by_model ?? {})
     return (
         <Panel data-testid="run-summary-panel">
             <PanelHeader>
@@ -56,8 +102,24 @@ export function RunSummaryCard({
                 <PanelContent className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
-                        {run.spec_id ? <span className="font-mono text-xs text-muted-foreground" title={run.spec_id}>Spec {run.spec_id}</span> : null}
-                        {run.plan_id ? <span className="font-mono text-xs text-muted-foreground" title={run.plan_id}>Plan {run.plan_id}</span> : null}
+                        {run.spec_id ? (
+                            <span
+                                data-testid="run-summary-spec-artifact-link"
+                                className="font-mono text-xs text-muted-foreground"
+                                title={run.spec_id}
+                            >
+                                Spec {run.spec_id}
+                            </span>
+                        ) : null}
+                        {run.plan_id ? (
+                            <span
+                                data-testid="run-summary-plan-artifact-link"
+                                className="font-mono text-xs text-muted-foreground"
+                                title={run.plan_id}
+                            >
+                                Plan {run.plan_id}
+                            </span>
+                        ) : null}
                         </div>
                         <div className="flex items-center gap-2">
                             {continueAvailable ? (
@@ -98,8 +160,46 @@ export function RunSummaryCard({
                 <div data-testid="run-summary-git-commit"><span className="font-medium">Git Commit:</span> {run.git_commit || '—'}</div>
                 <div data-testid="run-summary-continued-from"><span className="font-medium">Continued From:</span> {run.continued_from_run_id ? `${run.continued_from_run_id} @ ${run.continued_from_node || '—'}` : '—'}</div>
                 <div data-testid="run-summary-last-error" className="break-all"><span className="font-medium">Last Error:</span> {run.last_error || '—'}</div>
-                <div data-testid="run-summary-token-usage"><span className="font-medium">Tokens:</span> {typeof run.token_usage === 'number' ? run.token_usage.toLocaleString() : '—'}</div>
+                <div data-testid="run-summary-estimated-model-cost"><span className="font-medium">Estimated model cost:</span> {formatEstimatedModelCostLabel(run)}</div>
+                <div data-testid="run-summary-token-usage"><span className="font-medium">Total tokens:</span> {formatTokenCount(usageBreakdown?.total_tokens ?? run.token_usage)}</div>
+                <div data-testid="run-summary-input-tokens"><span className="font-medium">Input tokens:</span> {formatTokenCount(usageBreakdown?.input_tokens)}</div>
+                <div data-testid="run-summary-cached-input-tokens"><span className="font-medium">Cached input tokens:</span> {formatTokenCount(usageBreakdown?.cached_input_tokens)}</div>
+                <div data-testid="run-summary-output-tokens"><span className="font-medium">Output tokens:</span> {formatTokenCount(usageBreakdown?.output_tokens)}</div>
                 </div>
+                {formatEstimatedModelCostNote(run) ? (
+                    <div data-testid="run-summary-estimated-model-cost-note" className="text-xs text-muted-foreground">
+                        {formatEstimatedModelCostNote(run)}
+                    </div>
+                ) : null}
+                {modelUsageEntries.length > 0 ? (
+                    <div data-testid="run-summary-model-breakdown" className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+                        <div className="text-sm font-medium">Per-model breakdown</div>
+                        <div className="space-y-2">
+                            {modelUsageEntries.map(([modelId, usage]) => {
+                                const modelCost = run.estimated_model_cost?.by_model?.[modelId]
+                                const modelCostLabel = modelCost?.status === 'estimated'
+                                    ? formatEstimatedCost(modelCost.amount, modelCost.currency)
+                                    : 'Unpriced'
+                                return (
+                                    <div
+                                        key={modelId}
+                                        data-testid="run-summary-model-row"
+                                        className="rounded-sm border border-border/70 bg-background/70 px-3 py-2 text-sm"
+                                    >
+                                        <div className="font-mono text-xs text-muted-foreground">{modelId}</div>
+                                        <div className="mt-1 grid gap-x-4 gap-y-1 md:grid-cols-5">
+                                            <div><span className="font-medium">Input:</span> {formatTokenCount(usage.input_tokens)}</div>
+                                            <div><span className="font-medium">Cached:</span> {formatTokenCount(usage.cached_input_tokens)}</div>
+                                            <div><span className="font-medium">Output:</span> {formatTokenCount(usage.output_tokens)}</div>
+                                            <div><span className="font-medium">Total:</span> {formatTokenCount(usage.total_tokens)}</div>
+                                            <div><span className="font-medium">Cost:</span> {modelCostLabel}</div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                ) : null}
                 </PanelContent>
             ) : null}
         </Panel>

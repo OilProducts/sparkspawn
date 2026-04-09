@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 import spark_app.app as product_app
+from attractor.api.token_usage import TokenUsageBreakdown, TokenUsageBucket
 from attractor.engine import Checkpoint, save_checkpoint
 from tests.api._support import (
     close_task_immediately as _close_task_immediately,
@@ -58,6 +59,8 @@ def test_get_pipeline_returns_progress_for_active_run(
     assert payload["started_at"]
     assert payload["ended_at"] is None
     assert payload["token_usage"] is None
+    assert payload["token_usage_breakdown"] is None
+    assert payload["estimated_model_cost"] is None
     assert payload["completed_nodes"] == ["start"]
     assert payload["progress"] == {
         "current_node": "plan",
@@ -99,6 +102,8 @@ def test_get_pipeline_uses_checkpoint_progress_for_persisted_run(
     assert payload["started_at"]
     assert payload["ended_at"]
     assert payload["token_usage"] is None
+    assert payload["token_usage_breakdown"] is None
+    assert payload["estimated_model_cost"] is None
     assert payload["completed_nodes"] == ["start", "plan"]
     assert payload["progress"] == {
         "current_node": "done",
@@ -168,6 +173,8 @@ def test_get_pipeline_preserves_persisted_metadata_while_overlaying_active_state
     assert payload["last_error"] == "waiting for graceful shutdown"
     assert payload["completed_nodes"] == ["start", "plan"]
     assert payload["token_usage"] == 321
+    assert payload["token_usage_breakdown"] is None
+    assert payload["estimated_model_cost"] is None
     assert payload["progress"] == {
         "current_node": "review",
         "completed_count": 2,
@@ -233,12 +240,130 @@ def test_get_pipeline_returns_full_persisted_detail_for_completed_run(
     assert payload["continued_from_flow_name"] == "implement-spec.dot"
     assert payload["completed_nodes"] == ["start", "plan", "review"]
     assert payload["token_usage"] == 987
+    assert payload["token_usage_breakdown"] is None
+    assert payload["estimated_model_cost"] is None
     assert payload["started_at"]
     assert payload["ended_at"]
     assert payload["progress"] == {
         "current_node": "done",
         "completed_count": 3,
     }
+
+
+def test_get_pipeline_returns_structured_usage_and_estimated_cost(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    server.configure_runtime_paths(runs_dir=runs_root)
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    run_id = "run-structured-usage"
+    workdir = tmp_path / "work"
+    workdir.mkdir(parents=True, exist_ok=True)
+    server._record_run_start(
+        run_id=run_id,
+        flow_name="detail.dot",
+        working_directory=str(workdir),
+        model="gpt-5.4",
+    )
+    server._record_run_usage(
+        run_id,
+        TokenUsageBreakdown(
+            input_tokens=23,
+            cached_input_tokens=3,
+            output_tokens=13,
+            total_tokens=36,
+            by_model={
+                "gpt-5.4": TokenUsageBucket(
+                    input_tokens=15,
+                    cached_input_tokens=3,
+                    output_tokens=9,
+                    total_tokens=24,
+                ),
+                "gpt-5.3-codex-spark": TokenUsageBucket(
+                    input_tokens=8,
+                    cached_input_tokens=0,
+                    output_tokens=4,
+                    total_tokens=12,
+                ),
+            },
+        ),
+    )
+    server.ACTIVE_RUNS[run_id] = server.ActiveRun(
+        run_id=run_id,
+        flow_name="detail.dot",
+        working_directory=str(workdir),
+        model="gpt-5.4",
+        status="running",
+    )
+    server._set_active_run_usage(
+        run_id,
+        TokenUsageBreakdown(
+            input_tokens=23,
+            cached_input_tokens=3,
+            output_tokens=13,
+            total_tokens=36,
+            by_model={
+                "gpt-5.4": TokenUsageBucket(
+                    input_tokens=15,
+                    cached_input_tokens=3,
+                    output_tokens=9,
+                    total_tokens=24,
+                ),
+                "gpt-5.3-codex-spark": TokenUsageBucket(
+                    input_tokens=8,
+                    cached_input_tokens=0,
+                    output_tokens=4,
+                    total_tokens=12,
+                ),
+            },
+        ),
+    )
+
+    response = attractor_api_client.get(f"/pipelines/{run_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["token_usage"] == 36
+    assert payload["token_usage_breakdown"] == {
+        "input_tokens": 23,
+        "cached_input_tokens": 3,
+        "output_tokens": 13,
+        "total_tokens": 36,
+        "by_model": {
+            "gpt-5.3-codex-spark": {
+                "input_tokens": 8,
+                "cached_input_tokens": 0,
+                "output_tokens": 4,
+                "total_tokens": 12,
+            },
+            "gpt-5.4": {
+                "input_tokens": 15,
+                "cached_input_tokens": 3,
+                "output_tokens": 9,
+                "total_tokens": 24,
+            },
+        },
+    }
+    assert payload["estimated_model_cost"]["currency"] == "USD"
+    assert payload["estimated_model_cost"]["status"] == "partial_unpriced"
+    assert payload["estimated_model_cost"]["amount"] == pytest.approx(0.000166, rel=0, abs=1e-9)
+    assert payload["estimated_model_cost"]["unpriced_models"] == ["gpt-5.3-codex-spark"]
+    assert payload["estimated_model_cost"]["by_model"]["gpt-5.3-codex-spark"] == {
+        "currency": "USD",
+        "amount": None,
+        "status": "unpriced",
+    }
+    assert payload["estimated_model_cost"]["by_model"]["gpt-5.4"]["currency"] == "USD"
+    assert payload["estimated_model_cost"]["by_model"]["gpt-5.4"]["status"] == "estimated"
+    assert payload["estimated_model_cost"]["by_model"]["gpt-5.4"]["amount"] == pytest.approx(
+        0.000166,
+        rel=0,
+        abs=1e-9,
+    )
+    server.ACTIVE_RUNS.pop(run_id, None)
 
 
 def test_attractor_startup_reconciles_orphaned_running_run(tmp_path: Path) -> None:

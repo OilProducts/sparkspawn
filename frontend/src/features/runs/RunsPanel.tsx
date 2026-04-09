@@ -44,13 +44,29 @@ const runRecordsMatch = (left: RunRecord | null, right: RunRecord | null) => {
         'ended_at',
         'last_error',
         'token_usage',
+        'token_usage_breakdown',
+        'estimated_model_cost',
         'current_node',
         'continued_from_run_id',
         'continued_from_node',
         'continued_from_flow_mode',
         'continued_from_flow_name',
-    ].every((key) => left[key as keyof RunRecord] === right[key as keyof RunRecord])
+    ].every((key) => {
+        const leftValue = left[key as keyof RunRecord]
+        const rightValue = right[key as keyof RunRecord]
+        if (key === 'token_usage_breakdown' || key === 'estimated_model_cost') {
+            return JSON.stringify(leftValue ?? null) === JSON.stringify(rightValue ?? null)
+        }
+        return leftValue === rightValue
+    })
 }
+
+const mergeSelectedRunTelemetry = (currentRecord: RunRecord, summaryRecord: RunRecord): RunRecord => ({
+    ...currentRecord,
+    token_usage: summaryRecord.token_usage ?? currentRecord.token_usage,
+    token_usage_breakdown: summaryRecord.token_usage_breakdown ?? currentRecord.token_usage_breakdown,
+    estimated_model_cost: summaryRecord.estimated_model_cost ?? currentRecord.estimated_model_cost,
+})
 
 export function RunsPanel() {
     const isNarrowViewport = useNarrowViewport()
@@ -236,10 +252,27 @@ export function RunsPanel() {
         if (!selectedRunId || !selectedRunSummary) {
             return
         }
-        if (
+        const hasFetchedStatus =
             selectedRunStatusFetchedAtMs !== null
             || (selectedRunSessionState?.statusFetchedAtMs ?? null) !== null
-        ) {
+        if (hasFetchedStatus) {
+            const currentDetailRecord = selectedRunRecord?.run_id === selectedRunId
+                ? selectedRunRecord
+                : selectedRunSessionRecord?.run_id === selectedRunId
+                    ? selectedRunSessionRecord
+                    : null
+            if (!currentDetailRecord) {
+                return
+            }
+            const mergedRecord = mergeSelectedRunTelemetry(currentDetailRecord, selectedRunSummary)
+            if (runRecordsMatch(currentDetailRecord, mergedRecord)) {
+                return
+            }
+            setSelectedRunSnapshot({
+                record: mergedRecord,
+                completedNodes: selectedRunSessionState?.completedNodesSnapshot ?? [],
+                fetchedAtMs: selectedRunSessionState?.statusFetchedAtMs ?? selectedRunStatusFetchedAtMs,
+            })
             return
         }
         if (

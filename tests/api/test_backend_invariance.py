@@ -774,6 +774,128 @@ def test_codex_app_server_backend_logs_token_usage(
     assert {"type": "log", "msg": "[plan] tokens used: 321"} in events
 
 
+def test_codex_app_server_backend_accumulates_live_usage_by_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    usage_snapshots: list[dict[str, object]] = []
+    backend = server.CodexAppServerBackend(
+        str(tmp_path),
+        lambda event: None,
+        model=None,
+        on_usage_update=lambda snapshot: usage_snapshots.append(snapshot.to_dict()),
+    )
+
+    class FakeResult:
+        def __init__(self, token_total: int) -> None:
+            self.assistant_message = "Ack"
+            self.command_text = ""
+            self.token_total = token_total
+            self.token_usage_payload = None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, **kwargs) -> None:
+            return None
+
+        def start_thread(self, **kwargs) -> str:
+            return "thread-123"
+
+        def run_turn(self, **kwargs) -> FakeResult:
+            on_event = kwargs.get("on_event")
+            model = kwargs.get("model")
+            if model == "gpt-5.4":
+                on_event(
+                    codex_backends_module.codex_app_server.CodexAppServerTurnEvent(
+                        kind="token_usage_updated",
+                        token_usage={
+                            "last": {
+                                "inputTokens": 10,
+                                "cachedInputTokens": 2,
+                                "outputTokens": 5,
+                                "reasoningOutputTokens": 1,
+                                "totalTokens": 15,
+                            },
+                            "total": {
+                                "inputTokens": 10,
+                                "cachedInputTokens": 2,
+                                "outputTokens": 5,
+                                "reasoningOutputTokens": 1,
+                                "totalTokens": 15,
+                            },
+                        },
+                    )
+                )
+                on_event(
+                    codex_backends_module.codex_app_server.CodexAppServerTurnEvent(
+                        kind="token_usage_updated",
+                        token_usage={
+                            "total": {
+                                "inputTokens": 15,
+                                "cachedInputTokens": 3,
+                                "outputTokens": 9,
+                                "reasoningOutputTokens": 4,
+                                "totalTokens": 24,
+                            },
+                        },
+                    )
+                )
+                return FakeResult(token_total=24)
+            on_event(
+                codex_backends_module.codex_app_server.CodexAppServerTurnEvent(
+                    kind="token_usage_updated",
+                    token_usage={
+                        "last": {
+                            "inputTokens": 8,
+                            "cachedInputTokens": 0,
+                            "outputTokens": 4,
+                            "reasoningOutputTokens": 2,
+                            "totalTokens": 12,
+                        },
+                        "total": {
+                            "inputTokens": 8,
+                            "cachedInputTokens": 0,
+                            "outputTokens": 4,
+                            "reasoningOutputTokens": 2,
+                            "totalTokens": 12,
+                        },
+                    },
+                )
+            )
+            return FakeResult(token_total=12)
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerClient", FakeClient)
+
+    assert backend.run("plan", "hello", Context(), model="gpt-5.4") == "Ack"
+    assert backend.run("review", "hello", Context(), model="gpt-5.3-codex-spark") == "Ack"
+
+    assert usage_snapshots[-1] == {
+        "input_tokens": 23,
+        "cached_input_tokens": 3,
+        "output_tokens": 13,
+        "total_tokens": 36,
+        "by_model": {
+            "gpt-5.3-codex-spark": {
+                "input_tokens": 8,
+                "cached_input_tokens": 0,
+                "output_tokens": 4,
+                "total_tokens": 12,
+            },
+            "gpt-5.4": {
+                "input_tokens": 15,
+                "cached_input_tokens": 3,
+                "output_tokens": 9,
+                "total_tokens": 24,
+            },
+        },
+    }
+
+
 def test_codex_app_server_backend_parses_structured_outcome_agent_text(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

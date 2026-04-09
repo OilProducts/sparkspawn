@@ -20,7 +20,6 @@ import { recordFlowLoadDebug, summarizeDiagnosticsForFlowLoadDebug } from '@/lib
 import {
     EXPECT_SEMANTIC_EQUIVALENCE_OPTIONS,
     primeFlowSaveBaseline,
-    saveFlowContent,
     saveFlowContentExpectingSemanticEquivalence,
 } from '@/lib/flowPersistence';
 import { CANVAS_INTERACTION_BUDGET_MS } from '@/lib/performanceBudgets';
@@ -681,9 +680,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         try {
             const rawDotChanged = rawDotEntryDraftRef.current !== rawDotDraft;
             if (rawDotChanged) {
-                const expectSemanticEquivalence = rawDotEntryDraftRef.current === rawDotDraft;
-                const save = expectSemanticEquivalence ? saveFlowContentExpectingSemanticEquivalence : saveFlowContent;
-                const saved = await save(flowName, rawDotDraft);
+                const saved = await saveFlowContentExpectingSemanticEquivalence(flowName, rawDotDraft);
                 if (!saved) {
                     const latestSaveErrorMessage = useStore.getState().saveErrorMessage;
                     setRawHandoffError(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -142,6 +143,7 @@ class CodexAppServerTurnEvent:
     phase: Optional[str] = None
     status: Optional[str] = None
     error: Optional[str] = None
+    token_usage: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -150,6 +152,7 @@ class CodexAppServerTurnState:
     command_chunks: list[str] = field(default_factory=list)
     final_agent_message: Optional[str] = None
     last_token_total: Optional[int] = None
+    last_token_usage_payload: Optional[dict[str, Any]] = None
     turn_status: Optional[str] = None
     turn_error: Optional[str] = None
     last_error: Optional[str] = None
@@ -328,9 +331,18 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
 
     if method == "thread/tokenUsage/updated":
         token_usage = params.get("tokenUsage") or {}
+        if isinstance(token_usage, dict):
+            state.last_token_usage_payload = copy.deepcopy(token_usage)
         total_tokens = (token_usage.get("total") or {}).get("totalTokens")
         if isinstance(total_tokens, int):
             state.last_token_total = total_tokens
+        if isinstance(token_usage, dict):
+            events.append(
+                CodexAppServerTurnEvent(
+                    kind="token_usage_updated",
+                    token_usage=copy.deepcopy(token_usage),
+                )
+            )
         return events
 
     if method == "error":

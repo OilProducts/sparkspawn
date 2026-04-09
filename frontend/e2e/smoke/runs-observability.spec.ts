@@ -15,6 +15,29 @@ type SmokeRunRecord = {
   ended_at: string | null
   last_error: string
   token_usage: number
+  token_usage_breakdown?: {
+    input_tokens: number
+    cached_input_tokens: number
+    output_tokens: number
+    total_tokens: number
+    by_model: Record<string, {
+      input_tokens: number
+      cached_input_tokens: number
+      output_tokens: number
+      total_tokens: number
+    }>
+  } | null
+  estimated_model_cost?: {
+    currency: string
+    amount: number
+    status: 'estimated' | 'partial_unpriced' | 'unpriced'
+    unpriced_models: string[]
+    by_model?: Record<string, {
+      currency: string
+      amount: number | null
+      status: 'estimated' | 'unpriced'
+    }>
+  } | null
   current_node?: string | null
 }
 
@@ -41,6 +64,33 @@ function buildSmokeRun(projectPath: string, overrides: Partial<SmokeRunRecord> =
     ended_at: overrides.ended_at ?? '2026-03-03T12:02:00Z',
     last_error: overrides.last_error ?? '',
     token_usage: overrides.token_usage ?? 42,
+    token_usage_breakdown: overrides.token_usage_breakdown ?? {
+      input_tokens: 28,
+      cached_input_tokens: 6,
+      output_tokens: 14,
+      total_tokens: overrides.token_usage ?? 42,
+      by_model: {
+        'gpt-5.4': {
+          input_tokens: 28,
+          cached_input_tokens: 6,
+          output_tokens: 14,
+          total_tokens: overrides.token_usage ?? 42,
+        },
+      },
+    },
+    estimated_model_cost: overrides.estimated_model_cost ?? {
+      currency: 'USD',
+      amount: 0.000257,
+      status: 'estimated',
+      unpriced_models: [],
+      by_model: {
+        'gpt-5.4': {
+          currency: 'USD',
+          amount: 0.000257,
+          status: 'estimated',
+        },
+      },
+    },
     current_node: overrides.current_node ?? null,
   }
 }
@@ -102,7 +152,9 @@ test('run summary panel renders populated metadata for items 9.1-01 and 9.6-02',
   await expect(page.getByTestId('run-summary-project-path')).toContainText(projectPath)
   await expect(page.getByTestId('run-summary-git-branch')).toContainText('feature/traceability')
   await expect(page.getByTestId('run-summary-git-commit')).toContainText('fedcba9876543210')
+  await expect(page.getByTestId('run-summary-estimated-model-cost')).toContainText('$0.000257')
   await expect(page.getByTestId('run-summary-token-usage')).toContainText('42')
+  await expect(page.getByTestId('run-summary-model-breakdown')).toContainText('gpt-5.4')
   await page.screenshot({ path: screenshotPath('08b-runs-panel-populated-summary.png'), fullPage: true })
 })
 
@@ -136,8 +188,8 @@ test('run checkpoint viewer fetches checkpoint payload for item 9.2-01', async (
   await openRunsForSmokeTest(page, projectPath)
 
   await expect(page.getByTestId('run-checkpoint-panel')).toBeVisible()
-  await expect(page.getByTestId('run-checkpoint-payload')).toContainText('"pipeline_id":')
   await expect(page.getByTestId('run-checkpoint-payload')).toContainText('"current_node": "implement"')
+  await expect(page.getByTestId('run-checkpoint-payload')).toContainText('"retry_counts":')
   await expect.poll(() => checkpointFetchCount).toBeGreaterThanOrEqual(1)
 
   await page.getByTestId('run-checkpoint-refresh-button').click()

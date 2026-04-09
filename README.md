@@ -37,7 +37,7 @@ Start with the smallest flow that matches the job:
 
 - [src/spark/starter_flows/simple-linear.dot](/Users/chris/projects/spark/src/spark/starter_flows/simple-linear.dot): one pass through plan -> implement -> summarize
 - [src/spark/starter_flows/implement-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-review-loop.dot): plan -> implement -> review with an actual retry loop
-- [src/spark/starter_flows/implement-from-plan.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-from-plan.dot): snapshot a plan file into `.planflow/`, implement it, evaluate completion, and iterate
+- [src/spark/starter_flows/implement-from-plan.dot](/Users/chris/projects/spark/src/spark/starter_flows/implement-from-plan.dot): snapshot a plan file into `.spark/planflows/<run>/plan-source.md` plus `.spark/planflows/<run>/state.json`, expose that workspace via `context.planflow.*`, implement it, evaluate completion, and iterate
 - [src/spark/starter_flows/spec-implementation/implement-spec.dot](/Users/chris/projects/spark/src/spark/starter_flows/spec-implementation/implement-spec.dot): greenfield spec-implementation program flow that keeps repo-local state under `.specflow/` and dispatches milestone workers
 - [src/spark/starter_flows/human-review-loop.dot](/Users/chris/projects/spark/src/spark/starter_flows/human-review-loop.dot): explicit human approval or requested fixes
 - [src/spark/starter_flows/parallel-review.dot](/Users/chris/projects/spark/src/spark/starter_flows/parallel-review.dot): fan-out / fan-in structure
@@ -272,8 +272,10 @@ npm --prefix frontend run test:unit
 Frontend smoke tests:
 
 ```bash
-npm --prefix frontend run ui:smoke
+just ui-smoke
 ```
+
+`just ui-smoke` launches the product ASGI app from [`app.py`](/Users/chris/projects/spark/src/spark_app/app.py), waits for `GET /attractor/status`, and then runs `npm --prefix frontend run ui:smoke`.
 
 ## Packaging
 

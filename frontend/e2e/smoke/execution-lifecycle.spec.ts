@@ -50,31 +50,38 @@ test("warning-only diagnostics still allow execute with explicit banner for item
       await route.continue()
     })
 
+    await page.route(`**/attractor/api/flows/${encodeURIComponent(flowName)}`, async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue()
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          name: flowName,
+          content: `digraph warning_only {
+  start [label="Start", shape=Mdiamond]
+  extract_declarations [label="Extract Testable Declarations", prompt="${promptToken}", shape=box]
+  done [label="Done", shape=Msquare]
+  start -> extract_declarations
+  extract_declarations -> done
+}`,
+        }),
+      })
+    })
+
     await gotoWithRegisteredProject(page, projectPath)
-    await page.getByTestId("nav-mode-editor").click()
-
-    const flowButton = page.getByRole("button", { name: flowName })
+    await page.getByTestId("nav-mode-execution").click()
+    const flowButton = page.getByTestId("execution-flow-tree").getByRole("button", { name: flowName })
     await expect(flowButton).toBeVisible()
-    await flowButton.click()
-
-    const promptNode = page
-      .locator(".react-flow__node")
-      .filter({ hasText: "Extract Testable Declarations" })
-      .first()
-    await expect(promptNode).toBeVisible()
-    await promptNode.click()
-
-    const promptField = page.getByPlaceholder("Enter system prompt instructions...")
-    await expect(promptField).toBeVisible()
-
     const previewRequest = page.waitForRequest(
       (request) =>
         request.url().includes("/attractor/preview") &&
         request.method() === "POST" &&
         (request.postData() || "").includes(promptToken),
     )
-
-    await promptField.fill(promptToken)
+    await flowButton.click()
     await previewRequest
 
     await expect(page.getByTestId("execute-button")).toBeEnabled()
@@ -91,7 +98,9 @@ test("diagnostics transitions toggle execute blocking and warning state for item
   const errorToken = `diagnostic-error-${Date.now()}`
   const warningToken = `diagnostic-warning-${Date.now()}`
   const cleanToken = `diagnostic-clean-${Date.now()}`
-  const flowName = await createFlowForSmokeTest(page, "ui-smoke-diagnostic-transition")
+  const errorFlowName = await createFlowForSmokeTest(page, "ui-smoke-diagnostic-error")
+  const warningFlowName = await createFlowForSmokeTest(page, "ui-smoke-diagnostic-warning")
+  const cleanFlowName = await createFlowForSmokeTest(page, "ui-smoke-diagnostic-clean")
 
   try {
     await page.route("**/attractor/preview", async (route) => {
@@ -149,22 +158,54 @@ test("diagnostics transitions toggle execute blocking and warning state for item
       await route.continue()
     })
 
+    const flowContentByName: Record<string, string> = {
+      [errorFlowName]: `digraph diagnostic_error {
+  start [label="Start", shape=Mdiamond]
+  extract_declarations [label="Extract Testable Declarations", prompt="${errorToken}", shape=box]
+  done [label="Done", shape=Msquare]
+  start -> extract_declarations
+  extract_declarations -> done
+}`,
+      [warningFlowName]: `digraph diagnostic_warning {
+  start [label="Start", shape=Mdiamond]
+  extract_declarations [label="Extract Testable Declarations", prompt="${warningToken}", shape=box]
+  done [label="Done", shape=Msquare]
+  start -> extract_declarations
+  extract_declarations -> done
+}`,
+      [cleanFlowName]: `digraph diagnostic_clean {
+  start [label="Start", shape=Mdiamond]
+  extract_declarations [label="Extract Testable Declarations", prompt="${cleanToken}", shape=box]
+  done [label="Done", shape=Msquare]
+  start -> extract_declarations
+  extract_declarations -> done
+}`,
+    }
+
+    await page.route('**/attractor/api/flows/*', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue()
+        return
+      }
+      const flowName = decodeURIComponent(route.request().url().split('/attractor/api/flows/')[1] ?? '')
+      const content = flowContentByName[flowName]
+      if (!content) {
+        await route.continue()
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          name: flowName,
+          content,
+        }),
+      })
+    })
+
     await gotoWithRegisteredProject(page, projectPath)
-    await page.getByTestId("nav-mode-editor").click()
-
-    const flowButton = page.getByRole("button", { name: flowName })
-    await expect(flowButton).toBeVisible()
-    await flowButton.click()
-
-    const promptNode = page
-      .locator(".react-flow__node")
-      .filter({ hasText: "Extract Testable Declarations" })
-      .first()
-    await expect(promptNode).toBeVisible()
-    await promptNode.click()
-
-    const promptField = page.getByPlaceholder("Enter system prompt instructions...")
-    await expect(promptField).toBeVisible()
+    await page.getByTestId("nav-mode-execution").click()
+    const executionFlowTree = page.getByTestId("execution-flow-tree")
 
     const waitForPreviewToken = (token: string) =>
       page.waitForRequest(
@@ -175,14 +216,14 @@ test("diagnostics transitions toggle execute blocking and warning state for item
       )
 
     const errorPreviewRequest = waitForPreviewToken(errorToken)
-    await promptField.fill(errorToken)
+    await executionFlowTree.getByRole('button', { name: errorFlowName }).click()
     await errorPreviewRequest
     await expect(page.getByTestId("execute-button")).toBeDisabled()
     await expect(page.getByTestId("execute-button")).toHaveAttribute("title", "Fix validation errors before running.")
     await expect(page.getByTestId("execute-warning-banner")).toHaveCount(0)
 
     const warningPreviewRequest = waitForPreviewToken(warningToken)
-    await promptField.fill(warningToken)
+    await executionFlowTree.getByRole('button', { name: warningFlowName }).click()
     await warningPreviewRequest
     await expect(page.getByTestId("execute-button")).toBeEnabled()
     await expect(page.getByTestId("execute-warning-banner")).toBeVisible()
@@ -190,12 +231,14 @@ test("diagnostics transitions toggle execute blocking and warning state for item
     await page.screenshot({ path: screenshotPath("17-diagnostic-transition-execute-state.png"), fullPage: true })
 
     const cleanPreviewRequest = waitForPreviewToken(cleanToken)
-    await promptField.fill(cleanToken)
+    await executionFlowTree.getByRole('button', { name: cleanFlowName }).click()
     await cleanPreviewRequest
     await expect(page.getByTestId("execute-button")).toBeEnabled()
     await expect(page.getByTestId("execute-warning-banner")).toHaveCount(0)
   } finally {
-    await deleteFlowAfterSmoke(page, flowName)
+    await deleteFlowAfterSmoke(page, errorFlowName)
+    await deleteFlowAfterSmoke(page, warningFlowName)
+    await deleteFlowAfterSmoke(page, cleanFlowName)
   }
 })
 

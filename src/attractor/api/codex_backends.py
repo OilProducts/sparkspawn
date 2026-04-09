@@ -10,6 +10,11 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from attractor.api.token_usage import (
+    TokenUsageBreakdown,
+    TokenUsageBucket,
+    compute_live_usage_delta,
+)
 from attractor.engine.context import Context
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.handlers.base import CodergenBackend
@@ -49,15 +54,24 @@ class _StructuredContractViolation:
 class CodexAppServerBackend(CodergenBackend):
     RUNTIME_THREAD_ID_KEY = "_attractor.runtime.thread_id"
 
-    def __init__(self, working_dir: str, emit, model: Optional[str] = None):
+    def __init__(
+        self,
+        working_dir: str,
+        emit,
+        model: Optional[str] = None,
+        on_usage_update: Optional[Callable[[TokenUsageBreakdown], None]] = None,
+    ):
         self.requested_working_dir = str(Path(working_dir).expanduser().resolve(strict=False))
         self.working_dir = resolve_runtime_workspace_path(working_dir)
         self.emit = emit
         self.model = model
+        self._on_usage_update = on_usage_update
         self._session_threads_by_key: dict[str, str] = {}
         self._session_threads_lock = threading.Lock()
         self._raw_rpc_log_lock = threading.Lock()
         self._raw_rpc_log_state = threading.local()
+        self._token_usage_lock = threading.Lock()
+        self._token_usage_breakdown = TokenUsageBreakdown()
 
     @contextmanager
     def bind_stage_raw_rpc_log(self, node_id: str, logs_root: str | Path | None):
@@ -123,6 +137,16 @@ class CodexAppServerBackend(CodergenBackend):
                 return None
             self._session_threads_by_key[cache_key] = created
             return created
+
+    def _record_token_usage_delta(self, *, model: Optional[str], delta: TokenUsageBucket) -> None:
+        if not delta.has_any_usage():
+            return
+        normalized_model = str(model or "").strip() or "codex default (config/profile)"
+        with self._token_usage_lock:
+            self._token_usage_breakdown.add_for_model(normalized_model, delta)
+            snapshot = self._token_usage_breakdown.copy()
+        if self._on_usage_update is not None:
+            self._on_usage_update(snapshot)
 
     def run(
         self,
@@ -213,14 +237,32 @@ class CodexAppServerBackend(CodergenBackend):
         *,
         model: Optional[str],
     ) -> str | None:
+        previous_total: TokenUsageBucket | None = None
+        saw_usage_update = False
+
+        def handle_turn_event(event: codex_app_server.CodexAppServerTurnEvent) -> None:
+            nonlocal previous_total, saw_usage_update
+            if event.kind != "token_usage_updated" or event.token_usage is None:
+                return
+            delta, previous_total = compute_live_usage_delta(event.token_usage, previous_total)
+            if delta is None or not delta.has_any_usage():
+                return
+            saw_usage_update = True
+            self._record_token_usage_delta(model=model, delta=delta)
+
         result = client.run_turn(
             thread_id=thread_id,
             prompt=prompt,
             model=model,
             cwd=self.working_dir,
+            on_event=handle_turn_event,
             overall_timeout_seconds=timeout,
             now=time.monotonic,
         )
+        if not saw_usage_update:
+            delta, _ = compute_live_usage_delta(getattr(result, "token_usage_payload", None), None)
+            if delta is not None and delta.has_any_usage():
+                self._record_token_usage_delta(model=model, delta=delta)
         agent_text = result.assistant_message
         if agent_text:
             log_line(agent_text)
@@ -290,10 +332,11 @@ def build_codergen_backend(
     emit: Callable[[dict], None],
     *,
     model: Optional[str],
+    on_usage_update: Optional[Callable[[TokenUsageBreakdown], None]] = None,
 ) -> CodergenBackend:
     normalized = backend_name.strip().lower()
     if normalized == "codex-app-server":
-        return CodexAppServerBackend(working_dir, emit, model=model)
+        return CodexAppServerBackend(working_dir, emit, model=model, on_usage_update=on_usage_update)
     raise ValueError(
         "Unsupported backend. Supported backends: codex-app-server."
     )

@@ -77,25 +77,4 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run UI Smoke Suite
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv run uvicorn attractor.api.server:app --host 127.0.0.1 --port 8000 --log-level warning > /tmp/attractor-backend.log 2>&1 &
-          BACKEND_PID=$!
-          cleanup() {
-            if kill -0 "$BACKEND_PID" 2>/dev/null; then
-              kill "$BACKEND_PID" || true
-            fi
-            wait "$BACKEND_PID" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-
-          for _ in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:8000/status >/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:8000/status >/dev/null
-
-          npm --prefix frontend run ui:smoke
+        run: just ui-smoke

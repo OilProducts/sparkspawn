@@ -1763,9 +1763,20 @@ It should return a full run-detail payload for both active and completed runs, i
 - `pipeline_id` and `run_id`
 - lifecycle fields such as `status`, `outcome`, `outcome_reason_code`, `outcome_reason_message`, and `last_error`
 - timing fields such as `started_at` and `ended_at`
-- persisted run metadata such as `flow_name`, `working_directory`, `project_path`, `git_branch`, `git_commit`, `model`, `spec_id`, `plan_id`, and `token_usage`
+- persisted run metadata such as `flow_name`, `working_directory`, `project_path`, `git_branch`, `git_commit`, `model`, `spec_id`, `plan_id`, `token_usage`, `token_usage_breakdown`, and `estimated_model_cost`
 - continuation lineage fields when applicable
 - progress fields including `completed_nodes`
+
+`token_usage_breakdown` should additively expose:
+- aggregate `input_tokens`, `cached_input_tokens`, `output_tokens`, and `total_tokens`
+- `by_model`, keyed by the actual model id used for each accumulated turn, with the same token fields per model
+
+`estimated_model_cost` should additively expose:
+- `currency`
+- `amount`
+- `status` of `estimated`, `partial_unpriced`, or `unpriced`
+- `unpriced_models`
+- optional per-model estimates for UI display without moving pricing logic into the client
 
 For active runs, implementations should read persisted run metadata first and then overlay only the live fields that can legitimately change during execution, such as lifecycle status, outcome, last error, and current completed nodes.
 In run-detail and run-list payloads, the run-level `model` field refers to the launch/default model selected for the run. It does not imply that every LLM-backed node executed with that model.
@@ -1849,6 +1860,7 @@ Forwarded child-flow events from `stack.manager_loop` are part of the parent run
 Run-overview payloads exposed through `/runs/events` should include:
 - `snapshot` events with a `runs` array of full `RunRecord` payloads
 - `run_upsert` events with one full `RunRecord` in `run`
+`RunRecord` remains additive and should preserve the coarse `token_usage` total for compatibility while also exposing the richer structured usage and estimated-cost fields.
 Event payloads exposed through `/pipelines/{id}/events` should include:
 - `run_id`
 - `sequence`

@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   ensureScreenshotDir,
+  gotoWithRegisteredProject,
   screenshotPath,
   stubProjectMetadata,
 } from '../fixtures/smoke-helpers'
@@ -111,22 +112,22 @@ test("semantic-equivalence save blocks mismatch and confirms no-op round-trip fo
     })
   })
 
-  await page.goto("/")
-  await page.getByTestId("project-path-input").fill(projectPath)
-  await page.getByTestId("project-register-button").click()
+  await gotoWithRegisteredProject(page, projectPath)
   await page.getByTestId("nav-mode-editor").click()
 
   const flowButton = page.getByRole("button", { name: "semantic.dot" })
   await expect(flowButton).toBeVisible()
   await flowButton.click()
   await expect(page.getByTestId("canvas-workspace-primary")).toBeVisible()
-  await expect.poll(() => semanticSaveBodies.length).toBeGreaterThanOrEqual(1)
 
   await page.getByRole("button", { name: "Raw DOT" }).click()
   const rawDotEditor = page.getByTestId("raw-dot-editor")
   await expect(rawDotEditor).toBeVisible()
   const rawDotEntry = await rawDotEditor.inputValue()
-  mismatchTargetContent = rawDotEntry
+  const mismatchRoundTripDot = `${rawDotEntry}\n// mismatch round trip`
+  const equivalentRoundTripDot = `${rawDotEntry}\n// equivalent round trip`
+  mismatchTargetContent = mismatchRoundTripDot
+  await rawDotEditor.fill(mismatchRoundTripDot)
   await page.getByRole("button", { name: "Structured" }).click()
   await expect(rawDotEditor).toBeVisible()
   const rawHandoffError = page.getByTestId("raw-dot-handoff-error")
@@ -138,7 +139,7 @@ test("semantic-equivalence save blocks mismatch and confirms no-op round-trip fo
   await page.screenshot({ path: screenshotPath("19a-semantic-equivalence-mismatch-blocked.png"), fullPage: true })
 
   const equivalentSavesBeforeRoundTrip = semanticEquivalentSavedBodies.length
-  await rawDotEditor.fill(rawDotEntry)
+  await rawDotEditor.fill(equivalentRoundTripDot)
   await page.getByRole("button", { name: "Structured" }).click()
   await expect(page.getByRole("button", { name: "Add Node" })).toBeVisible()
   await expect.poll(() => semanticEquivalentSavedBodies.length).toBeGreaterThan(equivalentSavesBeforeRoundTrip)

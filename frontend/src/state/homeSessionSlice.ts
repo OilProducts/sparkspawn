@@ -19,7 +19,6 @@ const DEFAULT_HOME_PROJECT_SESSION_STATE: HomeProjectSessionState = {
 }
 
 const DEFAULT_HOME_CONVERSATION_SESSION_STATE: HomeConversationSessionState = {
-    expandedProposalChanges: {},
     expandedToolCalls: {},
     expandedThinkingEntries: {},
     isPinnedToBottom: true,

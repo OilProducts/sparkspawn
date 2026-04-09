@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 
 import { useStore } from '@/store'
 import type {
+    ConversationSummaryResponse,
     ConversationSegmentUpsertEventResponse,
     ConversationSnapshotResponse,
     ConversationTurnUpsertEventResponse,
@@ -66,7 +67,7 @@ export function useProjectConversationCache({
         commitHomeConversationCache(nextCache)
     }, [commitHomeConversationCache])
 
-    const setConversationSummaryList = useCallback((projectPath: string, summaries: ProjectGitMetadata extends never ? never : import('@/lib/workspaceClient').ConversationSummaryResponse[]) => {
+    const setConversationSummaryList = useCallback((projectPath: string, summaries: ConversationSummaryResponse[]) => {
         const nextCache = setProjectConversationSummaryList(conversationCacheRef.current, projectPath, summaries)
         commitConversationCache(nextCache)
     }, [commitConversationCache])

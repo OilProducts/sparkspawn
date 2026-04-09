@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+from attractor.api.token_usage import TokenUsageBreakdown, TokenUsageBucket, estimate_model_cost
 from tests.api._support import (
     close_task_immediately as _close_task_immediately,
     start_pipeline as _start_pipeline,
@@ -133,6 +134,81 @@ def test_list_runs_includes_project_and_git_metadata_fields(
     assert run_payload["project_path"] == str(tmp_path / "project")
     assert run_payload["git_branch"] == "main"
     assert run_payload["git_commit"] == "abc123"
+
+
+def test_list_runs_includes_structured_usage_and_estimated_cost(
+    product_api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    run_id = "run-with-structured-usage"
+    breakdown = TokenUsageBreakdown(
+        input_tokens=23,
+        cached_input_tokens=3,
+        output_tokens=13,
+        total_tokens=36,
+        by_model={
+            "gpt-5.4": TokenUsageBucket(
+                input_tokens=15,
+                cached_input_tokens=3,
+                output_tokens=9,
+                total_tokens=24,
+            ),
+            "gpt-5.3-codex-spark": TokenUsageBucket(
+                input_tokens=8,
+                cached_input_tokens=0,
+                output_tokens=4,
+                total_tokens=12,
+            ),
+        },
+    )
+
+    server._write_run_meta(
+        server.RunRecord(
+            run_id=run_id,
+            flow_name="Flow",
+            status="completed",
+            outcome="success",
+            outcome_reason_code=None,
+            outcome_reason_message=None,
+            working_directory=str(tmp_path / "work"),
+            model="gpt-5.4",
+            started_at="2026-01-01T00:00:00Z",
+            ended_at="2026-01-01T00:01:00Z",
+            project_path=str(tmp_path / "project"),
+            token_usage=36,
+            token_usage_breakdown=breakdown,
+            estimated_model_cost=estimate_model_cost(breakdown),
+        )
+    )
+
+    response = product_api_client.get("/attractor/runs")
+
+    assert response.status_code == 200
+    payload = response.json()["runs"][0]
+    assert payload["token_usage"] == 36
+    assert payload["token_usage_breakdown"] == {
+        "input_tokens": 23,
+        "cached_input_tokens": 3,
+        "output_tokens": 13,
+        "total_tokens": 36,
+        "by_model": {
+            "gpt-5.3-codex-spark": {
+                "input_tokens": 8,
+                "cached_input_tokens": 0,
+                "output_tokens": 4,
+                "total_tokens": 12,
+            },
+            "gpt-5.4": {
+                "input_tokens": 15,
+                "cached_input_tokens": 3,
+                "output_tokens": 9,
+                "total_tokens": 24,
+            },
+        },
+    }
+    assert payload["estimated_model_cost"]["status"] == "partial_unpriced"
+    assert payload["estimated_model_cost"]["unpriced_models"] == ["gpt-5.3-codex-spark"]
+    assert payload["estimated_model_cost"]["amount"] == pytest.approx(0.000166, rel=0, abs=1e-9)
 
 
 def test_list_runs_includes_spec_and_plan_artifact_links_when_available_item_9_6_03(
@@ -416,6 +492,8 @@ def test_runs_events_snapshot_filters_durable_history_by_project_and_returns_run
                     "continued_from_flow_name": None,
                     "last_error": "",
                     "token_usage": None,
+                    "token_usage_breakdown": None,
+                    "estimated_model_cost": None,
                 },
                 {
                     "run_id": "run-in-project-root",
@@ -439,6 +517,8 @@ def test_runs_events_snapshot_filters_durable_history_by_project_and_returns_run
                     "continued_from_flow_name": None,
                     "last_error": "",
                     "token_usage": None,
+                    "token_usage_breakdown": None,
+                    "estimated_model_cost": None,
                 },
             ],
         }
@@ -580,6 +660,63 @@ def test_run_list_upsert_publishes_on_pipeline_terminal_completion(
     assert completion_event["run"]["status"] == "completed"
     assert completion_event["run"]["outcome"] == "success"
     assert completion_event["run"]["ended_at"] is not None
+
+
+def test_run_list_upsert_includes_structured_usage_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    breakdown = TokenUsageBreakdown(
+        input_tokens=23,
+        cached_input_tokens=3,
+        output_tokens=13,
+        total_tokens=36,
+        by_model={
+            "gpt-5.4": TokenUsageBucket(
+                input_tokens=15,
+                cached_input_tokens=3,
+                output_tokens=9,
+                total_tokens=24,
+            ),
+            "gpt-5.3-codex-spark": TokenUsageBucket(
+                input_tokens=8,
+                cached_input_tokens=0,
+                output_tokens=4,
+                total_tokens=12,
+            ),
+        },
+    )
+    run_id = "run-upsert-structured-usage"
+    server._write_run_meta(
+        server.RunRecord(
+            run_id=run_id,
+            flow_name="alpha.dot",
+            status="running",
+            outcome=None,
+            outcome_reason_code=None,
+            outcome_reason_message=None,
+            working_directory=str(tmp_path / "work"),
+            model="gpt-5.4",
+            started_at="2026-01-01T00:00:00Z",
+            project_path=str(tmp_path / "project"),
+            token_usage=36,
+            token_usage_breakdown=breakdown,
+            estimated_model_cost=estimate_model_cost(breakdown),
+        )
+    )
+    hub = server.RunListEventHub()
+    monkeypatch.setattr(server, "RUNS_EVENT_HUB", hub)
+    queue = hub.subscribe()
+
+    asyncio.run(server._publish_run_list_upsert(run_id))
+
+    event = asyncio.run(_next_run_list_event(queue))
+    assert event["type"] == "run_upsert"
+    assert event["run"]["token_usage"] == 36
+    assert event["run"]["token_usage_breakdown"]["by_model"]["gpt-5.4"]["total_tokens"] == 24
+    assert event["run"]["estimated_model_cost"]["status"] == "partial_unpriced"
+    assert event["run"]["estimated_model_cost"]["unpriced_models"] == ["gpt-5.3-codex-spark"]
 
 
 def test_run_list_upsert_publishes_when_startup_reconciles_orphaned_active_run(

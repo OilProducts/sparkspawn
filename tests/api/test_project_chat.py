@@ -284,6 +284,42 @@ def test_process_turn_message_normalizes_item_reasoning_delta_by_item_and_summar
     assert events[0].summary_index == 0
 
 
+def test_process_turn_message_retains_full_token_usage_payload() -> None:
+    state = codex_app_server.CodexAppServerTurnState()
+    payload = {
+        "last": {
+            "inputTokens": 120,
+            "cachedInputTokens": 20,
+            "outputTokens": 18,
+            "reasoningOutputTokens": 5,
+            "totalTokens": 138,
+        },
+        "total": {
+            "inputTokens": 200,
+            "cachedInputTokens": 30,
+            "outputTokens": 44,
+            "reasoningOutputTokens": 12,
+            "totalTokens": 244,
+        },
+    }
+
+    events = codex_app_server.process_turn_message(
+        {
+            "method": "thread/tokenUsage/updated",
+            "params": {
+                "tokenUsage": payload,
+            },
+        },
+        state,
+    )
+
+    assert len(events) == 1
+    assert events[0].kind == "token_usage_updated"
+    assert events[0].token_usage == payload
+    assert state.last_token_total == 244
+    assert state.last_token_usage_payload == payload
+
+
 def test_tool_call_from_command_execution_item_uses_completed_payload() -> None:
     tool_call = project_chat_session._tool_call_from_item(
         {

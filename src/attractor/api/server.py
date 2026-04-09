@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import copy
+import inspect
 import json
 import logging
 import threading
@@ -59,7 +60,6 @@ from attractor.api.flow_sources import (
 )
 from attractor.api.run_records import (
     RunRecord,
-    extract_token_usage,
     hydrate_run_record_from_log,
     normalize_run_status,
     run_matches_project_scope,
@@ -76,6 +76,7 @@ from attractor.api.pipeline_runtime import (
     RuntimeState,
     WebInterviewer,
 )
+from attractor.api.token_usage import TokenUsageBreakdown, estimate_model_cost
 from attractor.handlers import HandlerRunner, build_default_registry
 from attractor.handlers.base import CodergenBackend
 from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
@@ -468,6 +469,18 @@ def _record_run_status(
     )
 
 
+def _record_run_usage(
+    run_id: str,
+    token_usage_breakdown: TokenUsageBreakdown,
+) -> None:
+    pipeline_runs.record_run_usage(
+        get_settings,
+        RUN_HISTORY_LOCK,
+        run_id=run_id,
+        token_usage_breakdown=token_usage_breakdown,
+    )
+
+
 def _append_run_log(run_id: str, message: str) -> None:
     pipeline_runs.append_run_log(get_settings, run_id, message)
 
@@ -550,6 +563,16 @@ def _set_active_run_completed_nodes(run_id: str, completed_nodes: List[str]) -> 
         run.completed_nodes = list(completed_nodes)
 
 
+def _set_active_run_usage(run_id: str, token_usage_breakdown: TokenUsageBreakdown) -> None:
+    with ACTIVE_RUNS_LOCK:
+        run = ACTIVE_RUNS.get(run_id)
+        if not run:
+            return
+        run.token_usage_breakdown = token_usage_breakdown.copy()
+        run.token_usage = token_usage_breakdown.total_tokens
+        run.estimated_model_cost = estimate_model_cost(token_usage_breakdown)
+
+
 def _get_active_run(run_id: str) -> Optional[ActiveRun]:
     with ACTIVE_RUNS_LOCK:
         return ACTIVE_RUNS.get(run_id)
@@ -600,6 +623,8 @@ def _pipeline_status_payload(run_id: str) -> Dict[str, object]:
             "ended_at": None,
             "last_error": active.last_error if active else "",
             "token_usage": None,
+            "token_usage_breakdown": None,
+            "estimated_model_cost": None,
             "continued_from_run_id": None,
             "continued_from_node": None,
             "continued_from_flow_mode": None,
@@ -613,6 +638,12 @@ def _pipeline_status_payload(run_id: str) -> Dict[str, object]:
         payload["outcome_reason_code"] = active.outcome_reason_code
         payload["outcome_reason_message"] = active.outcome_reason_message
         payload["last_error"] = active.last_error
+        if active.token_usage is not None:
+            payload["token_usage"] = active.token_usage
+        if active.token_usage_breakdown is not None:
+            payload["token_usage_breakdown"] = active.token_usage_breakdown.to_dict()
+        if active.estimated_model_cost is not None:
+            payload["estimated_model_cost"] = active.estimated_model_cost.to_dict()
 
     payload["pipeline_id"] = run_id
     payload["run_id"] = str(payload.get("run_id") or run_id)
@@ -734,12 +765,14 @@ def _build_codergen_backend(
     emit: Callable[[dict], None],
     *,
     model: Optional[str],
+    on_usage_update: Optional[Callable[[TokenUsageBreakdown], None]] = None,
 ) -> CodergenBackend:
     return _build_codergen_backend_impl(
         backend_name,
         working_dir,
         emit,
         model=model,
+        on_usage_update=on_usage_update,
     )
 
 
@@ -1139,12 +1172,24 @@ async def _launch_pipeline_run(
     def emit(message: dict):
         asyncio.run_coroutine_threadsafe(_publish_run_event(resolved_run_id, message), loop)
 
+    def handle_usage_update(token_usage_breakdown: TokenUsageBreakdown) -> None:
+        _record_run_usage(resolved_run_id, token_usage_breakdown)
+        _set_active_run_usage(resolved_run_id, token_usage_breakdown)
+        asyncio.run_coroutine_threadsafe(_publish_run_list_upsert(resolved_run_id), loop)
+
     try:
+        backend_kwargs: dict[str, object] = {"model": selected_model}
+        try:
+            backend_signature = inspect.signature(_build_codergen_backend)
+        except (TypeError, ValueError):
+            backend_signature = None
+        if backend_signature is None or "on_usage_update" in backend_signature.parameters:
+            backend_kwargs["on_usage_update"] = handle_usage_update
         backend = _build_codergen_backend(
             backend_name,
             working_dir,
             emit,
-            model=selected_model,
+            **backend_kwargs,
         )
     except ValueError as exc:
         return {

@@ -182,6 +182,57 @@ def test_shared_client_run_turn_requires_turn_completed_after_final_answer() -> 
         )
 
 
+def test_shared_client_run_turn_exposes_structured_token_usage_payload() -> None:
+    client = CodexAppServerClient("/tmp/project")
+    lines = iter(
+        [
+            '{"jsonrpc":"2.0","id":1,"result":{"turn":{"id":"turn-123","status":"inProgress","items":[]}}}',
+            '{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"turnId":"turn-123","tokenUsage":{"last":{"inputTokens":12,"cachedInputTokens":2,"outputTokens":4,"reasoningOutputTokens":1,"totalTokens":16},"total":{"inputTokens":12,"cachedInputTokens":2,"outputTokens":4,"reasoningOutputTokens":1,"totalTokens":16}}}}',
+            '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-123","status":"completed"}}}',
+        ]
+    )
+
+    class DummyStdin:
+        def write(self, text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class DummyProc:
+        stdin = DummyStdin()
+
+        def poll(self) -> int | None:
+            return None
+
+    client.proc = DummyProc()  # type: ignore[assignment]
+    client.read_line = lambda wait: next(lines, None)  # type: ignore[method-assign]
+
+    result = client.run_turn(
+        thread_id="thread-123",
+        prompt="hello",
+        model=None,
+    )
+
+    assert result.token_total == 16
+    assert result.token_usage_payload == {
+        "last": {
+            "inputTokens": 12,
+            "cachedInputTokens": 2,
+            "outputTokens": 4,
+            "reasoningOutputTokens": 1,
+            "totalTokens": 16,
+        },
+        "total": {
+            "inputTokens": 12,
+            "cachedInputTokens": 2,
+            "outputTokens": 4,
+            "reasoningOutputTokens": 1,
+            "totalTokens": 16,
+        },
+    }
+
+
 def test_shared_client_run_turn_counts_unparsed_lines_as_activity() -> None:
     client = CodexAppServerClient("/tmp/project")
     lines = iter(
