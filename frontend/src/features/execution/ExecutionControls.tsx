@@ -76,6 +76,7 @@ export function ExecutionControls() {
     const collapsedLaunchInputsByFlow = useStore((state) => state.executionCollapsedLaunchInputsByFlow)
     const openRunsAfterLaunch = useStore((state) => state.executionOpenRunsAfterLaunch)
     const launchSuccessRunId = useStore((state) => state.executionLaunchSuccessRunId)
+    const expandChildFlows = useStore((state) => state.executionExpandChildFlows)
     const updateExecutionSession = useStore((state) => state.updateExecutionSession)
     const isNarrowViewport = useNarrowViewport()
 
@@ -84,6 +85,7 @@ export function ExecutionControls() {
     const { isLoadingPreview, previewLoadError, hydratedGraph } = useExecutionLaunchPreview(
         executionFlowName,
         executionContinuation,
+        expandChildFlows,
     )
     const parsedLaunchInputs = useMemo(
         () => parseLaunchInputDefinitions(graphAttrs['spark.launch_inputs']),
@@ -585,6 +587,7 @@ export function ExecutionControls() {
                                     isLoading={isLoadingPreview}
                                     loadError={previewLoadError}
                                     isContinuationMode={isContinuationMode}
+                                    expandChildFlows={expandChildFlows}
                                     sourceMode={executionContinuation?.flowSourceMode ?? null}
                                     selectedStartNodeId={executionContinuation?.startNodeId ?? null}
                                     onSelectStartNode={(nodeId) => {

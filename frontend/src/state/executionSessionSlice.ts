@@ -9,6 +9,7 @@ export const createExecutionSessionSlice: StateCreator<AppState, [], [], Executi
     executionRunStartGitPolicyWarning: null,
     executionCollapsedLaunchInputsByFlow: {},
     executionGraphCollapsed: false,
+    executionExpandChildFlows: false,
     executionOpenRunsAfterLaunch: false,
     executionLaunchSuccessRunId: null,
     updateExecutionSession: (patch) => set(() => patch),

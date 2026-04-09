@@ -1,5 +1,7 @@
 export * from './TaskNode'
 export * from './ValidationEdge'
+export * from './ChildFlowExpansionToggle'
 export * from './flowCanvasShared'
 export * from './canvasSessionContext'
+export * from './derivedPreview'
 export * from './workflowNodeFrames'

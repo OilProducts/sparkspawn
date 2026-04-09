@@ -74,7 +74,11 @@ describe('RunGraphCard', () => {
             expect(screen.getByTestId('run-graph-loading')).toBeVisible()
         })
         expect(screen.queryByText('No run graph preview is available for this run.')).not.toBeInTheDocument()
-        expect(loadRunGraphPreviewMock).toHaveBeenCalledWith(run.run_id, expect.any(Object))
+        expect(loadRunGraphPreviewMock).toHaveBeenCalledWith(
+            run.run_id,
+            expect.any(Object),
+            { expandChildren: false },
+        )
 
         await act(async () => {
             resolvePreview({
@@ -92,5 +96,46 @@ describe('RunGraphCard', () => {
         await waitFor(() => {
             expect(screen.getByText('No run graph preview is available for this run.')).toBeVisible()
         })
+    })
+
+    it('reloads the run graph with expanded child previews when the toggle is enabled', async () => {
+        const run = makeRun('run-expanded')
+        loadRunGraphPreviewMock.mockResolvedValue({
+            status: 'ok',
+            graph: {
+                graph_attrs: {},
+                nodes: [
+                    { id: 'start', label: 'Start', shape: 'Mdiamond' },
+                    { id: 'manager', label: 'Manager', shape: 'house' },
+                ],
+                edges: [
+                    { from: 'start', to: 'manager' },
+                ],
+            },
+            diagnostics: [],
+            errors: [],
+        })
+
+        act(() => {
+            useStore.getState().updateRunDetailSession(run.run_id, {
+                isGraphCollapsed: false,
+            })
+        })
+
+        render(<RunGraphCard run={run} />)
+
+        await screen.findByTestId('run-graph-panel')
+        await act(async () => {
+            screen.getByRole('button', { name: 'Expanded Child Flow' }).click()
+        })
+
+        await waitFor(() => {
+            expect(loadRunGraphPreviewMock).toHaveBeenLastCalledWith(
+                run.run_id,
+                expect.any(Object),
+                { expandChildren: true },
+            )
+        })
+        expect(useStore.getState().runDetailSessionsByRunId[run.run_id]?.expandChildFlows).toBe(true)
     })
 })

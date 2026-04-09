@@ -60,6 +60,7 @@ export interface RunDetailSessionState {
     statusFetchedAtMs: number | null
     graphStatus: ResourceStatus
     graphError: string | null
+    expandChildFlows: boolean
     graphNodes: Node[]
     graphEdges: Edge[]
     graphLastLayoutMs: number
@@ -187,6 +188,7 @@ export interface ExecutionSessionSlice {
     executionRunStartGitPolicyWarning: string | null
     executionCollapsedLaunchInputsByFlow: Record<string, boolean>
     executionGraphCollapsed: boolean
+    executionExpandChildFlows: boolean
     executionOpenRunsAfterLaunch: boolean
     executionLaunchSuccessRunId: string | null
     updateExecutionSession: (patch: {
@@ -196,6 +198,7 @@ export interface ExecutionSessionSlice {
         executionRunStartGitPolicyWarning?: string | null
         executionCollapsedLaunchInputsByFlow?: Record<string, boolean>
         executionGraphCollapsed?: boolean
+        executionExpandChildFlows?: boolean
         executionOpenRunsAfterLaunch?: boolean
         executionLaunchSuccessRunId?: string | null
     }) => void

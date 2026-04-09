@@ -19,6 +19,8 @@ export type EdgeRouteEndpointSides = {
     targetSide: RouteSide
 }
 
+export type ReciprocalDetourSide = RouteSide
+
 export type ElkEdgeSectionLike = {
     id?: string
     startPoint: EdgeRoutePoint
@@ -289,6 +291,19 @@ function buildLoopbackRoute(start: EdgeRoutePoint, end: EdgeRoutePoint, side: Ex
     ])
 }
 
+function buildVerticalLoopbackRoute(start: EdgeRoutePoint, end: EdgeRoutePoint, side: Extract<RouteSide, 'top' | 'bottom'>): EdgeRoute {
+    const routeY = side === 'top'
+        ? Math.min(start.y, end.y) - LOOPBACK_CLEARANCE
+        : Math.max(start.y, end.y) + LOOPBACK_CLEARANCE
+
+    return normalizeRoute([
+        start,
+        { x: start.x, y: routeY },
+        { x: end.x, y: routeY },
+        end,
+    ])
+}
+
 export function buildFallbackOrthogonalRoute(sourceRect: NodeRect, targetRect: NodeRect): EdgeRoute {
     const sourceCenter = getRectCenter(sourceRect)
     const targetCenter = getRectCenter(targetRect)
@@ -329,6 +344,21 @@ export function buildFallbackOrthogonalRoute(sourceRect: NodeRect, targetRect: N
         getAnchorPoint(targetRect, targetSide),
         false,
     )
+}
+
+export function buildReciprocalDetourRoute(
+    sourceRect: NodeRect,
+    targetRect: NodeRect,
+    detourSide: ReciprocalDetourSide,
+): EdgeRoute {
+    const sourceAnchor = getAnchorPoint(sourceRect, detourSide)
+    const targetAnchor = getAnchorPoint(targetRect, detourSide)
+
+    if (detourSide === 'left' || detourSide === 'right') {
+        return buildLoopbackRoute(sourceAnchor, targetAnchor, detourSide)
+    }
+
+    return buildVerticalLoopbackRoute(sourceAnchor, targetAnchor, detourSide)
 }
 
 function moveTowards(from: EdgeRoutePoint, to: EdgeRoutePoint, distance: number): EdgeRoutePoint {

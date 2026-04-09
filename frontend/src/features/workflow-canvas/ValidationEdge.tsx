@@ -13,6 +13,7 @@ import {
 import { useStore as useAppStore } from '@/store'
 
 import { useCanvasSessionMode } from './canvasSessionContext'
+import { getDerivedPreviewMeta } from './derivedPreview'
 
 const WARNING_STROKE = 'hsl(38 92% 50%)'
 
@@ -103,6 +104,9 @@ export function ValidationEdge({
     const route = layoutRoute ?? liveHintedRoute ?? fallbackRoute
     const edgePath = buildPolylinePath(route)
     const labelPoint = getRouteMidpoint(route)
+    const derivedPreviewMeta = getDerivedPreviewMeta(data)
+    const isDerivedChildEdge = derivedPreviewMeta?.kind === 'child-edge'
+    const isDerivedLinkEdge = derivedPreviewMeta?.kind === 'child-link'
 
     const edgeStyle: CSSProperties = {
         strokeLinecap: 'round',
@@ -117,6 +121,15 @@ export function ValidationEdge({
         edgeStyle.stroke = WARNING_STROKE
         edgeStyle.strokeWidth = selected ? 4 : 3
         edgeStyle.opacity = 0.95
+    } else if (isDerivedLinkEdge) {
+        edgeStyle.stroke = 'hsl(var(--muted-foreground) / 0.6)'
+        edgeStyle.strokeDasharray = '6 6'
+        edgeStyle.strokeWidth = 2
+        edgeStyle.opacity = 0.8
+    } else if (isDerivedChildEdge) {
+        edgeStyle.stroke = 'hsl(var(--muted-foreground) / 0.45)'
+        edgeStyle.strokeWidth = 2
+        edgeStyle.opacity = 0.62
     } else if (selected) {
         edgeStyle.stroke = 'hsl(var(--primary))'
         edgeStyle.strokeWidth = 4

@@ -111,6 +111,14 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
                 [flowName]: isOpen,
             },
         })),
+    editorExpandChildFlowsByFlow: {},
+    setEditorExpandChildFlows: (flowName, expandChildren) =>
+        set((state) => ({
+            editorExpandChildFlowsByFlow: {
+                ...state.editorExpandChildFlowsByFlow,
+                [flowName]: expandChildren,
+            },
+        })),
     editorShowAdvancedGraphAttrsByFlow: {},
     setEditorShowAdvancedGraphAttrs: (flowName, showAdvanced) =>
         set((state) => ({

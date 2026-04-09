@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
     Background,
     Controls,
+    MarkerType,
     MiniMap,
     ReactFlow,
     ReactFlowProvider,
@@ -19,6 +20,7 @@ import '@xyflow/react/dist/style.css'
 
 import {
     CanvasSessionModeProvider,
+    ChildFlowExpansionToggle,
     edgeTypes,
     layoutWithElk,
     nodeTypes,
@@ -122,6 +124,11 @@ function ExecutionGraphCanvas({
                 elementsSelectable={isContinuationMode}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
+                defaultEdgeOptions={{
+                    markerEnd: {
+                        type: MarkerType.ArrowClosed,
+                    },
+                }}
                 deleteKeyCode={null}
                 multiSelectionKeyCode={null}
                 proOptions={{ hideAttribution: true }}
@@ -142,6 +149,7 @@ interface ExecutionGraphCardProps {
     isLoading: boolean
     loadError: string | null
     isContinuationMode: boolean
+    expandChildFlows: boolean
     sourceMode: 'snapshot' | 'flow_name' | null
     selectedStartNodeId: string | null
     onSelectStartNode: (nodeId: string) => void
@@ -152,6 +160,7 @@ export function ExecutionGraphCard({
     isLoading,
     loadError,
     isContinuationMode,
+    expandChildFlows,
     sourceMode,
     selectedStartNodeId,
     onSelectStartNode,
@@ -180,6 +189,11 @@ export function ExecutionGraphCard({
                                     Start: {selectedStartNodeId}
                                 </span>
                             ) : null}
+                            <ChildFlowExpansionToggle
+                                expanded={expandChildFlows}
+                                onChange={(nextExpanded) => updateExecutionSession({ executionExpandChildFlows: nextExpanded })}
+                                testId="execution-child-flow-toggle"
+                            />
                             <RunSectionToggleButton
                                 collapsed={collapsed}
                                 onToggle={() => updateExecutionSession({ executionGraphCollapsed: !collapsed })}

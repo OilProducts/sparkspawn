@@ -2,6 +2,7 @@ import { Editor } from '@/features/editor/Editor'
 import { useStore } from '@/store'
 import { ReactFlowProvider } from '@xyflow/react'
 import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { EditorPreviewResponse } from '@/features/editor/services/editorPreview'
@@ -51,6 +52,50 @@ const buildPreview = (nodeCount: number): EditorPreviewResponse => ({
   errors: [],
 })
 
+const buildManagerPreview = (options?: {
+  expanded?: boolean
+  managerLabel?: string
+}): EditorPreviewResponse => ({
+  status: 'ok',
+  graph: {
+    nodes: [
+      { id: 'start', label: 'Start', shape: 'Mdiamond' },
+      {
+        id: 'manager',
+        label: options?.managerLabel ?? 'Manager',
+        shape: 'house',
+        type: 'stack.manager_loop',
+      },
+    ],
+    edges: [
+      { from: 'start', to: 'manager' },
+    ],
+    graph_attrs: {},
+    ...(options?.expanded
+      ? {
+          child_previews: {
+            manager: {
+              flow_name: 'child-worker.dot',
+              flow_path: '/tmp/child-worker.dot',
+              flow_label: 'Child Worker',
+              read_only: true,
+              provenance: 'derived_child_preview',
+              graph: {
+                graph_attrs: {},
+                nodes: [
+                  { id: 'child_start', label: 'Child Start', shape: 'Mdiamond' },
+                ],
+                edges: [],
+              },
+            },
+          },
+        }
+      : {}),
+  },
+  diagnostics: [],
+  errors: [],
+})
+
 const resetEditorState = (activeFlow: string | null) => {
   useStore.setState((state) => ({
     ...state,
@@ -59,6 +104,7 @@ const resetEditorState = (activeFlow: string | null) => {
     executionFlow: null,
     suppressPreview: true,
     graphAttrs: {},
+    editorExpandChildFlowsByFlow: {},
     diagnostics: [],
     nodeDiagnostics: {},
     edgeDiagnostics: {},
@@ -165,5 +211,76 @@ describe('Editor flow loading behavior', () => {
       previewDeferreds.get('flow-b.dot')?.resolve(buildPreview(2))
     })
     await waitFor(() => expect(profile).toHaveAttribute('data-node-count', '3'))
+  })
+
+  it('persists the child-flow expansion toggle per active flow and keeps expanded editor previews read-only', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadEditorPreview).mockImplementation(async (_dot: string, _init, options) => {
+      const flowName = options?.flowName ?? 'unknown.dot'
+      if (flowName === 'flow-a.dot') {
+        return buildManagerPreview({ expanded: options?.expandChildren === true })
+      }
+      if (flowName === 'flow-b.dot') {
+        return buildManagerPreview({ managerLabel: 'Secondary Manager' })
+      }
+      throw new Error(`Unexpected preview request for ${flowName}`)
+    })
+
+    renderEditor()
+
+    await screen.findByTestId('editor-child-flow-toggle')
+    await waitFor(() => {
+      expect(
+        vi.mocked(loadEditorPreview).mock.calls.some(([, , options]) =>
+          options?.flowName === 'flow-a.dot' && options?.expandChildren !== true),
+      ).toBe(true)
+    })
+
+    expect(screen.getByRole('button', { name: 'Add Node' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Expanded Child Flow' }))
+
+    await waitFor(() => {
+      expect(
+        vi.mocked(loadEditorPreview).mock.calls.some(([, , options]) =>
+          options?.flowName === 'flow-a.dot' && options?.expandChildren === true),
+      ).toBe(true)
+    })
+    await screen.findByText('Expanded child-flow mode is a read-only canvas preview. Switch to Parent Only to edit.')
+    expect(screen.getAllByText('Read-only Preview').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Add Node' })).not.toBeInTheDocument()
+    expect(useStore.getState().editorExpandChildFlowsByFlow['flow-a.dot']).toBe(true)
+
+    act(() => {
+      useStore.setState((state) => ({ ...state, activeFlow: 'flow-b.dot' }))
+    })
+
+    await waitFor(() => {
+      expect(
+        vi.mocked(loadEditorPreview).mock.calls.some(([, , options]) =>
+          options?.flowName === 'flow-b.dot' && options?.expandChildren !== true),
+      ).toBe(true)
+    })
+    await waitFor(() => {
+      expect(
+        screen.queryByText('Expanded child-flow mode is a read-only canvas preview. Switch to Parent Only to edit.'),
+      ).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: 'Add Node' })).toBeInTheDocument()
+    expect(useStore.getState().editorExpandChildFlowsByFlow['flow-a.dot']).toBe(true)
+    expect(useStore.getState().editorExpandChildFlowsByFlow['flow-b.dot']).toBeUndefined()
+
+    act(() => {
+      useStore.setState((state) => ({ ...state, activeFlow: 'flow-a.dot' }))
+    })
+
+    await waitFor(() => {
+      expect(
+        vi.mocked(loadEditorPreview).mock.calls.some(([, , options]) =>
+          options?.flowName === 'flow-a.dot' && options?.expandChildren === true),
+      ).toBe(true)
+    })
+    await screen.findByText('Expanded child-flow mode is a read-only canvas preview. Switch to Parent Only to edit.')
+    expect(screen.queryByRole('button', { name: 'Add Node' })).not.toBeInTheDocument()
   })
 })

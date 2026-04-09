@@ -302,6 +302,8 @@ export interface EditorSlice {
     saveErrorKind: SaveErrorKind | null
     editorGraphSettingsPanelOpenByFlow: Record<string, boolean>
     setEditorGraphSettingsPanelOpen: (flowName: string, isOpen: boolean) => void
+    editorExpandChildFlowsByFlow: Record<string, boolean>
+    setEditorExpandChildFlows: (flowName: string, expandChildren: boolean) => void
     editorShowAdvancedGraphAttrsByFlow: Record<string, boolean>
     setEditorShowAdvancedGraphAttrs: (flowName: string, showAdvanced: boolean) => void
     editorLaunchInputDraftsByFlow: Record<string, LaunchInputDefinition[]>

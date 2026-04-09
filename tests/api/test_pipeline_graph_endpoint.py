@@ -145,6 +145,64 @@ def test_get_pipeline_graph_preview_returns_parse_error_payload_for_invalid_snap
     assert payload["errors"]
 
 
+def test_get_pipeline_graph_preview_expand_children_uses_run_flow_source_context(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    flows_root = tmp_path / "installed-flows"
+    source_root = tmp_path / "flow-source"
+    server.configure_runtime_paths(runs_dir=runs_root, flows_dir=flows_root)
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    start_payload = _start_pipeline(attractor_api_client, tmp_path / "work")
+    run_id = str(start_payload["pipeline_id"])
+    source_path = server._run_root(run_id) / "artifacts" / "graphviz" / "pipeline-source.dot"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text(
+        """
+        digraph ParentFlow {
+            graph [stack.child_dotfile="child.dot"]
+            manager [shape=house, type="stack.manager_loop"]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    source_root.mkdir(parents=True, exist_ok=True)
+    (source_root / "child.dot").write_text(
+        """
+        digraph ChildFlow {
+            start [shape=Mdiamond]
+            review [shape=box, label="Review"]
+            done [shape=Msquare]
+            start -> review -> done
+        }
+        """,
+        encoding="utf-8",
+    )
+    server.save_checkpoint(
+        server._run_root(run_id) / "state.json",
+        server.Checkpoint(
+            current_node="manager",
+            context={
+                "internal.flow_source_dir": str(source_root),
+                "internal.run_workdir": str(tmp_path / "work"),
+            },
+        ),
+    )
+
+    response = attractor_api_client.get(f"/pipelines/{run_id}/graph-preview?expand_children=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    child_previews = payload["graph"]["child_previews"]
+    assert set(child_previews.keys()) == {"manager"}
+    assert child_previews["manager"]["flow_path"] == str((source_root / "child.dot").resolve())
+    assert child_previews["manager"]["graph"]["nodes"][1]["id"] == "review"
+
+
 def test_get_pipeline_graph_preview_returns_404_for_unknown_pipeline(
     attractor_api_client: TestClient,
     tmp_path: Path,

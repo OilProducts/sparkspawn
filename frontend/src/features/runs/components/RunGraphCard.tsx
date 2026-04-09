@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
     Background,
     Controls,
+    MarkerType,
     MiniMap,
     ReactFlow,
     ReactFlowProvider,
@@ -13,6 +14,7 @@ import { useStore } from '@/store'
 import {
     buildHydratedFlowGraph,
     CanvasSessionModeProvider,
+    ChildFlowExpansionToggle,
     edgeTypes,
     layoutWithElk,
     nodeTypes,
@@ -62,7 +64,11 @@ function RunGraphCanvasInner({
 
         const startLoad = async () => {
             try {
-                const preview = await loadRunGraphPreview(run.run_id, { signal: controller.signal })
+                const preview = await loadRunGraphPreview(
+                    run.run_id,
+                    { signal: controller.signal },
+                    { expandChildren: runDetailSession?.expandChildFlows ?? false },
+                )
                 if (!isCurrentLoad()) {
                     return
                 }
@@ -81,6 +87,8 @@ function RunGraphCanvasInner({
                         llm_provider: '',
                         reasoning_effort: '',
                     },
+                    undefined,
+                    { expandChildren: runDetailSession?.expandChildFlows ?? false },
                 )
                 if (!hydratedGraph) {
                     updateRunDetailSession(run.run_id, {
@@ -134,6 +142,7 @@ function RunGraphCanvasInner({
         replaceRunGraphAttrs,
         run.flow_name,
         run.run_id,
+        runDetailSession?.expandChildFlows,
         setRunDiagnostics,
         updateRunDetailSession,
     ])
@@ -149,6 +158,11 @@ function RunGraphCanvasInner({
                 elementsSelectable={true}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
+                defaultEdgeOptions={{
+                    markerEnd: {
+                        type: MarkerType.ArrowClosed,
+                    },
+                }}
                 deleteKeyCode={null}
                 multiSelectionKeyCode={null}
                 proOptions={{ hideAttribution: true }}
@@ -172,6 +186,7 @@ export function RunGraphCard({ run }: { run: RunRecord }) {
     const collapsed = runDetailSession?.isGraphCollapsed ?? true
     const graphStatus = runDetailSession?.graphStatus ?? 'idle'
     const graphError = runDetailSession?.graphError ?? null
+    const expandChildFlows = runDetailSession?.expandChildFlows ?? false
     const hasRenderableGraph = (runDetailSession?.graphNodes.length ?? 0) > 0 || (runDetailSession?.graphEdges.length ?? 0) > 0
 
     return (
@@ -190,6 +205,11 @@ export function RunGraphCard({ run }: { run: RunRecord }) {
                             >
                                 {graphStatus === 'loading' ? 'Refreshing…' : 'Refresh'}
                             </Button>
+                            <ChildFlowExpansionToggle
+                                expanded={expandChildFlows}
+                                onChange={(nextExpanded) => updateRunDetailSession(run.run_id, { expandChildFlows: nextExpanded })}
+                                testId="run-child-flow-toggle"
+                            />
                             <RunSectionToggleButton
                                 collapsed={collapsed}
                                 onToggle={() => updateRunDetailSession(run.run_id, { isGraphCollapsed: !collapsed })}

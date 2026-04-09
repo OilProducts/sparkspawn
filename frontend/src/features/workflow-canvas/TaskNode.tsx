@@ -25,6 +25,7 @@ import {
     getWorkflowNodeOverlayOffsetClassName,
 } from './workflowNodeFrames'
 import { useCanvasSessionMode } from './canvasSessionContext'
+import { getDerivedPreviewMeta } from './derivedPreview'
 import { submitPipelineAnswer } from './services/pipelineAnswers'
 
 const BUILTIN_HANDLER_OPTIONS = [
@@ -61,6 +62,11 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
     const isEditorCanvas = canvasMode === 'editor'
     const isRunCanvas = canvasMode === 'execution' || canvasMode === 'runs'
     const flowName = useStore((state) => (isEditorCanvas ? state.activeFlow : state.executionFlow))
+    const isExpandedChildPreview = useStore((state) => (
+        isEditorCanvas && state.activeFlow
+            ? (state.editorExpandChildFlowsByFlow[state.activeFlow] ?? false)
+            : false
+    ))
     const executionHumanGate = useStore((state) => state.humanGate)
     const selectedRunId = useStore((state) => (isRunCanvas ? state.selectedRunId : null))
     const graphAttrs = useStore((state) => {
@@ -145,6 +151,9 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
     )
 
     const status = (data.status as string) || 'idle'
+    const derivedPreviewMeta = getDerivedPreviewMeta(data)
+    const isReadOnlyPreviewNode = derivedPreviewMeta?.kind === 'child-cluster' || derivedPreviewMeta?.kind === 'child-node'
+    const isReadOnlyEditorCanvas = isEditorCanvas && isExpandedChildPreview
     const renderedShape = isEditingDetails ? normalizeWorkflowNodeShape(draftShape) : currentShape
     const handlerType = getHandlerType(renderedShape, draftType)
     const visibility = getNodeFieldVisibility(handlerType)
@@ -161,10 +170,10 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
     const containerStyle = getWorkflowNodeContainerStyle(renderedShape)
     const handleClassName = cn(
         'h-2.5 w-2.5 transition-opacity',
-        isEditorCanvas
+        isEditorCanvas && !isReadOnlyEditorCanvas
             ? 'border-border/70 bg-background/90 opacity-0 group-hover:opacity-100'
             : 'pointer-events-none border-transparent bg-transparent opacity-0',
-        selected && isEditorCanvas ? 'opacity-100' : null,
+        selected && isEditorCanvas && !isReadOnlyEditorCanvas ? 'opacity-100' : null,
     )
 
     useEffect(() => {
@@ -175,7 +184,7 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
     }, [isEditingLabel])
 
     const persistNodeData = (nextData: Record<string, unknown>) => {
-        if (!isEditorCanvas || !flowName) {
+        if (!isEditorCanvas || !flowName || isReadOnlyEditorCanvas) {
             return
         }
 
@@ -204,7 +213,7 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
     }
 
     const startEditLabel = (event: React.MouseEvent<HTMLDivElement>) => {
-        if (!isEditorCanvas) {
+        if (!isEditorCanvas || isReadOnlyEditorCanvas) {
             return
         }
         event.stopPropagation()
@@ -236,6 +245,9 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
     }
 
     const openDetailsEditor = (event: React.MouseEvent<HTMLButtonElement>) => {
+        if (isReadOnlyEditorCanvas) {
+            return
+        }
         event.stopPropagation()
         setDraftShape((data.shape as string) || defaultShape)
         setDraftPrompt((data.prompt as string) || '')
@@ -314,7 +326,10 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
         <div
             data-testid={`workflow-node-${renderedShape}`}
             data-workflow-shape={renderedShape}
-            className="group relative select-none"
+            className={cn(
+                'group relative select-none',
+                isReadOnlyPreviewNode ? 'opacity-90' : null,
+            )}
             style={containerStyle}
         >
             <WorkflowNodeFrame shape={renderedShape} palette={framePalette} />
@@ -332,9 +347,14 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
                             Needs Input
                         </div>
                     )}
+                    {isReadOnlyPreviewNode && (
+                        <div className="mt-1 rounded-full bg-slate-500/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+                            Read-only Preview
+                        </div>
+                    )}
                 </div>
                 <div className="flex min-w-0 flex-col items-end gap-1">
-                    {selected && isEditorCanvas && (
+                    {selected && isEditorCanvas && !isReadOnlyEditorCanvas && (
                         <button
                             onClick={openDetailsEditor}
                             className="rounded border border-border bg-background/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
@@ -380,7 +400,13 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
                             className="nodrag nopan h-7 w-full max-w-[152px] rounded border border-input bg-background px-2 text-center text-sm font-semibold outline-none ring-0 focus-visible:ring-1 focus-visible:ring-ring"
                         />
                     ) : (
-                        <span className="line-clamp-3 text-sm font-semibold text-foreground">{displayLabel}</span>
+                        <span className={cn(
+                            'line-clamp-3 text-sm font-semibold',
+                            isReadOnlyPreviewNode ? 'text-muted-foreground' : 'text-foreground',
+                        )}
+                        >
+                            {displayLabel}
+                        </span>
                     )}
                     {status !== 'idle' && (
                         <span

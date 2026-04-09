@@ -1757,6 +1757,7 @@ Implementations may expose the pipeline engine as an HTTP service for web-based 
 
 Human gates must be operable via web controls in addition to CLI. The server maintains SSE connections for real-time event streaming.
 Implementations that expose both `/graph` and `/graph-preview` should preserve the original run DOT source as a stable artifact so run inspection can render a snapshot-accurate graph even if the named flow changes later.
+Preview endpoints may additively accept an `expand_children` flag for derived canvas rendering. When enabled, the response `graph` payload may include a `child_previews` object keyed by manager-loop node id. Each entry should include the resolved child flow identity/path, a read-only provenance marker, and a nested preview graph payload for one-level inline expansion. Omitting or failing to resolve a child preview must not invalidate the parent graph payload.
 
 `GET /pipelines/{id}` is the authoritative selected-run inspection endpoint.
 It should return a full run-detail payload for both active and completed runs, including:

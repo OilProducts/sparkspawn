@@ -729,6 +729,8 @@ class PipelineContinueRequest(BaseModel):
 
 class PreviewRequest(BaseModel):
     flow_content: str
+    flow_name: Optional[str] = None
+    expand_children: bool = False
 
 
 class SaveFlowRequest(BaseModel):
@@ -848,7 +850,132 @@ async def runs_events(request: Request, project_path: Optional[str] = None):
     )
 
 
-def _graph_payload(graph) -> dict:
+def _preview_attr_string(attr: object | None) -> str:
+    if attr is None:
+        return ""
+    value = getattr(attr, "value", "")
+    if hasattr(value, "raw"):
+        value = value.raw
+    return str(value).strip()
+
+
+def _preview_authored_attr_string(attr: object | None) -> str:
+    if attr is None or getattr(attr, "line", 0) == 0:
+        return ""
+    return _preview_attr_string(attr)
+
+
+def _resolve_preview_path(raw_path: str | None) -> Path | None:
+    if not raw_path:
+        return None
+    try:
+        return Path(raw_path).expanduser().resolve()
+    except OSError:
+        return None
+
+
+def _resolve_preview_path_from_base(raw_path: str | Path, base_dir: Path) -> Path:
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (base_dir / candidate).resolve()
+
+
+def _resolve_preview_child_workdir(
+    *,
+    authored_child_workdir: str,
+    preview_base_dir: Path | None,
+    run_workdir: Path | None,
+) -> Path:
+    base_dir = run_workdir or preview_base_dir or Path.cwd().resolve()
+    if authored_child_workdir:
+        return _resolve_preview_path_from_base(authored_child_workdir, base_dir)
+    return run_workdir or preview_base_dir or Path.cwd().resolve()
+
+
+def _resolve_preview_child_dot_path(
+    child_dotfile: str,
+    *,
+    child_workdir_path: Path,
+    flow_source_dir: Path | None,
+    run_workdir: Path | None,
+    child_workdir_is_authored: bool,
+) -> Path:
+    child_dot_path = Path(child_dotfile)
+    if child_dot_path.is_absolute():
+        return child_dot_path.resolve()
+    if child_workdir_is_authored:
+        base_dir = child_workdir_path
+    else:
+        base_dir = flow_source_dir or run_workdir or child_workdir_path
+    return _resolve_preview_path_from_base(child_dot_path, base_dir)
+
+
+def _is_manager_loop_node(node) -> bool:
+    node_type = str(_dot_attr_value(node.attrs, "type", "") or "").strip()
+    node_shape = str(_dot_attr_value(node.attrs, "shape", "") or "").strip()
+    return node_type == "stack.manager_loop" or node_shape == "house"
+
+
+def _build_child_preview_payload(
+    graph,
+    *,
+    flow_source_dir: Path | None,
+    run_workdir: Path | None,
+) -> dict[str, dict]:
+    child_dotfile = _preview_attr_string(graph.graph_attrs.get("stack.child_dotfile"))
+    if not child_dotfile:
+        return {}
+
+    authored_child_workdir = _preview_authored_attr_string(graph.graph_attrs.get("stack.child_workdir"))
+    child_workdir_path = _resolve_preview_child_workdir(
+        authored_child_workdir=authored_child_workdir,
+        preview_base_dir=flow_source_dir,
+        run_workdir=run_workdir,
+    )
+    child_dot_path = _resolve_preview_child_dot_path(
+        child_dotfile,
+        child_workdir_path=child_workdir_path,
+        flow_source_dir=flow_source_dir,
+        run_workdir=run_workdir,
+        child_workdir_is_authored=bool(authored_child_workdir),
+    )
+    if not child_dot_path.exists():
+        return {}
+
+    try:
+        child_graph = parse_dot(child_dot_path.read_text(encoding="utf-8"))
+    except (DotParseError, OSError):
+        return {}
+
+    child_graph, child_diagnostics = _prepare_graph_for_server(child_graph)
+    if any(diag.severity == DiagnosticSeverity.ERROR for diag in child_diagnostics):
+        return {}
+
+    child_graph_payload = _graph_payload(child_graph)
+    child_graph_attrs = child_graph_payload.get("graph_attrs", {})
+    child_flow_label = ""
+    if isinstance(child_graph_attrs, dict):
+        raw_label = child_graph_attrs.get("label")
+        if isinstance(raw_label, str):
+            child_flow_label = raw_label
+
+    return {
+        node.node_id: {
+            "flow_name": child_dot_path.name,
+            "flow_path": str(child_dot_path),
+            "flow_label": child_flow_label or child_dot_path.stem,
+            "parent_node_id": node.node_id,
+            "read_only": True,
+            "provenance": "derived_child_preview",
+            "graph": child_graph_payload,
+        }
+        for node in graph.nodes.values()
+        if _is_manager_loop_node(node)
+    }
+
+
+def _graph_payload(graph, *, child_previews: dict[str, dict] | None = None) -> dict:
     canonical_graph = copy.deepcopy(graph)
     _normalize_graph_attr_aliases(canonical_graph)
     canonical_graph_attrs = canonical_graph.graph_attrs
@@ -878,7 +1005,7 @@ def _graph_payload(graph) -> dict:
             "subgraphs": [_subgraph_payload(child) for child in scope.subgraphs],
         }
 
-    return {
+    payload = {
         "nodes": [
             _merge_extension_attrs({
                 "id": n.node_id,
@@ -952,6 +1079,9 @@ def _graph_payload(graph) -> dict:
         "defaults": _defaults_payload(graph.defaults),
         "subgraphs": [_subgraph_payload(subgraph) for subgraph in graph.subgraphs],
     }
+    if child_previews:
+        payload["child_previews"] = child_previews
+    return payload
 
 
 def _diagnostic_payload(diagnostic: Diagnostic) -> dict:
@@ -969,7 +1099,13 @@ def _prepare_graph_for_server(graph):
     )
 
 
-def _preview_payload_from_dot_source(dot_source: str) -> dict:
+def _preview_payload_from_dot_source(
+    dot_source: str,
+    *,
+    expand_children: bool = False,
+    flow_source_dir: Path | None = None,
+    run_workdir: Path | None = None,
+) -> dict:
     try:
         graph = parse_dot(dot_source)
     except DotParseError as exc:
@@ -991,9 +1127,14 @@ def _preview_payload_from_dot_source(dot_source: str) -> dict:
 
     graph, diagnostics = _prepare_graph_for_server(graph)
     errors = [d for d in diagnostics if d.severity == DiagnosticSeverity.ERROR]
+    child_previews = _build_child_preview_payload(
+        graph,
+        flow_source_dir=flow_source_dir,
+        run_workdir=run_workdir,
+    ) if expand_children else None
     return {
         "status": "ok" if not errors else "validation_error",
-        "graph": _graph_payload(graph),
+        "graph": _graph_payload(graph, child_previews=child_previews),
         "diagnostics": [_diagnostic_payload(d) for d in diagnostics],
         "errors": [_diagnostic_payload(d) for d in errors],
     }
@@ -1001,7 +1142,40 @@ def _preview_payload_from_dot_source(dot_source: str) -> dict:
 
 @attractor_router.post("/preview")
 async def preview_pipeline(req: PreviewRequest):
-    return _preview_payload_from_dot_source(req.flow_content)
+    flow_source_dir: Path | None = None
+    flow_name = (req.flow_name or "").strip()
+    if flow_name:
+        try:
+            flow_path = _resolve_flow_path(flow_name)
+        except HTTPException:
+            flow_path = None
+        if flow_path is not None:
+            flow_source_dir = flow_path.parent.resolve()
+
+    return _preview_payload_from_dot_source(
+        req.flow_content,
+        expand_children=req.expand_children,
+        flow_source_dir=flow_source_dir,
+    )
+
+
+def _resolve_run_preview_source_context(pipeline_id: str) -> tuple[Path | None, Path | None]:
+    checkpoint = load_checkpoint(_run_root(pipeline_id) / "state.json")
+    context = checkpoint.context if checkpoint is not None else {}
+    flow_source_dir = _resolve_preview_path(str(context.get("internal.flow_source_dir", "")).strip())
+    run_workdir = _resolve_preview_path(str(context.get("internal.run_workdir", "")).strip())
+    if run_workdir is not None:
+        return flow_source_dir, run_workdir
+
+    record = _read_run_meta(_run_meta_path(pipeline_id))
+    if record and record.working_directory:
+        return flow_source_dir, _resolve_preview_path(record.working_directory)
+
+    active = _get_active_run(pipeline_id)
+    if active and active.working_directory:
+        return flow_source_dir, _resolve_preview_path(active.working_directory)
+
+    return flow_source_dir, None
 
 
 def _resolve_run_graph_source_path(pipeline_id: str) -> Path:
@@ -1750,13 +1924,19 @@ async def get_pipeline_graph(pipeline_id: str):
 
 
 @attractor_router.get("/pipelines/{pipeline_id}/graph-preview")
-async def get_pipeline_graph_preview(pipeline_id: str):
+async def get_pipeline_graph_preview(pipeline_id: str, expand_children: bool = False):
     active = _get_active_run(pipeline_id)
     if not active and not _read_run_meta(_run_meta_path(pipeline_id)):
         raise HTTPException(status_code=404, detail="Unknown pipeline")
 
     graph_source_path = _resolve_run_graph_source_path(pipeline_id)
-    return _preview_payload_from_dot_source(graph_source_path.read_text(encoding="utf-8"))
+    flow_source_dir, run_workdir = _resolve_run_preview_source_context(pipeline_id)
+    return _preview_payload_from_dot_source(
+        graph_source_path.read_text(encoding="utf-8"),
+        expand_children=expand_children,
+        flow_source_dir=flow_source_dir,
+        run_workdir=run_workdir,
+    )
 
 
 @attractor_router.get("/pipelines/{pipeline_id}/questions")

@@ -16,6 +16,7 @@ const unexpectedPreviewLoadMessage = 'Unable to load flow preview for launch inp
 export function useExecutionLaunchPreview(
     executionFlow: string | null,
     executionContinuation: ExecutionContinuationDraft | null,
+    expandChildFlows: boolean,
 ) {
     const uiDefaults = useStore((state) => state.uiDefaults)
     const replaceExecutionGraphAttrs = useStore((state) => state.replaceExecutionGraphAttrs)
@@ -50,7 +51,11 @@ export function useExecutionLaunchPreview(
                 let hydrated: HydratedFlowGraph | null = null
 
                 if (useRunSnapshot && executionContinuation) {
-                    preview = await loadExecutionRunGraphPreview(executionContinuation.sourceRunId, { signal: loadAbort.signal })
+                    preview = await loadExecutionRunGraphPreview(
+                        executionContinuation.sourceRunId,
+                        { signal: loadAbort.signal },
+                        { expandChildren: expandChildFlows },
+                    )
                     if (cancelled) {
                         return
                     }
@@ -58,6 +63,8 @@ export function useExecutionLaunchPreview(
                         executionContinuation.sourceFlowName || executionContinuation.sourceRunId,
                         preview,
                         uiDefaults,
+                        undefined,
+                        { expandChildren: expandChildFlows },
                     )
                 } else if (executionFlow) {
                     const payload = await loadExecutionFlowPayload(executionFlow, { signal: loadAbort.signal })
@@ -66,7 +73,14 @@ export function useExecutionLaunchPreview(
                     }
 
                     const normalizedContent = normalizeLegacyDot(payload.content)
-                    preview = await loadExecutionFlowPreview(normalizedContent, { signal: loadAbort.signal })
+                    preview = await loadExecutionFlowPreview(
+                        normalizedContent,
+                        { signal: loadAbort.signal },
+                        {
+                            flowName: executionFlow,
+                            expandChildren: expandChildFlows,
+                        },
+                    )
                     if (cancelled) {
                         return
                     }
@@ -76,6 +90,7 @@ export function useExecutionLaunchPreview(
                         preview,
                         uiDefaults,
                         normalizedContent,
+                        { expandChildren: expandChildFlows },
                     )
                 } else {
                     preview = null
@@ -116,6 +131,7 @@ export function useExecutionLaunchPreview(
         }
     }, [
         clearExecutionDiagnostics,
+        expandChildFlows,
         executionContinuation,
         executionFlow,
         replaceExecutionGraphAttrs,

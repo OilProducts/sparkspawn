@@ -58,6 +58,7 @@ const resetTaskNodeState = () => {
         selectedRunStatusSync: 'idle',
         selectedRunStatusError: null,
         selectedRunStatusFetchedAtMs: null,
+        editorExpandChildFlowsByFlow: {},
     })
 }
 
@@ -205,6 +206,39 @@ describe('TaskNode', () => {
             'Shape box normally maps to codergen',
         )
         expect(screen.getByTestId('workflow-node-frame-box')).toBeInTheDocument()
+    })
+
+    it('hides editor affordances while expanded child-flow preview mode is active', () => {
+        useStore.setState((state) => ({
+            ...state,
+            editorExpandChildFlowsByFlow: {
+                ...state.editorExpandChildFlowsByFlow,
+                'shape-test.dot': true,
+            },
+        }))
+
+        renderWithFlowProvider(
+            <SingleNodeHarness
+                node={{
+                    id: 'task',
+                    type: 'task',
+                    position: { x: 0, y: 0 },
+                    selected: true,
+                    data: {
+                        label: 'Task',
+                        shape: 'box',
+                        type: 'codergen',
+                        prompt: 'Implement the feature',
+                    },
+                }}
+            />,
+        )
+
+        expect(screen.queryByText('Edit', { selector: 'button' })).not.toBeInTheDocument()
+
+        fireEvent.doubleClick(screen.getByText('Task'))
+
+        expect(screen.queryByDisplayValue('Task')).not.toBeInTheDocument()
     })
 
     it('renders execution waiting and diagnostics overlays on non-rectangular nodes', () => {

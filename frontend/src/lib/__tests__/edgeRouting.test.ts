@@ -2,6 +2,7 @@ import type { Edge } from '@xyflow/react'
 import {
     buildAnchoredOrthogonalRoute,
     buildFallbackOrthogonalRoute,
+    buildReciprocalDetourRoute,
     buildPolylinePath,
     extractRouteEndpointSides,
     flattenElkSectionToRoute,
@@ -94,6 +95,19 @@ describe('edgeRouting', () => {
         expect(route[0]).toEqual({ x: 220, y: 55 })
         expect(route[route.length - 1]).toEqual({ x: 40, y: 275 })
         expect(route[1].x).toBeGreaterThan(route[0].x)
+    })
+
+    it('builds a reciprocal detour route on a shared side corridor', () => {
+        const route = buildReciprocalDetourRoute(
+            { x: 0, y: 220, width: 220, height: 110 },
+            { x: 0, y: 0, width: 220, height: 110 },
+            'left',
+        )
+
+        expect(route[0]).toEqual({ x: 0, y: 275 })
+        expect(route[route.length - 1]).toEqual({ x: 0, y: 55 })
+        expect(route[1]?.x).toBeLessThan(route[0].x)
+        expect(route[1]?.x).toBe(route[2]?.x)
     })
 
     it('computes the midpoint along a multi-segment route by length', () => {

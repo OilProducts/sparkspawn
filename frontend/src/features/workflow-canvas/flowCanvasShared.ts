@@ -2,17 +2,29 @@ import type { Edge, Node } from '@xyflow/react'
 import ELK from 'elkjs/lib/elk.bundled.js'
 
 import type { GraphAttrs, UiDefaults } from '@/store'
-import { buildCanonicalFlowModelFromPreviewGraph } from '@/lib/canonicalFlowModel'
+import {
+    buildCanonicalFlowModelFromPreviewGraph,
+    type CanonicalFlowEdge,
+    type CanonicalFlowNode,
+    type CanonicalPreviewGraphPayload,
+} from '@/lib/canonicalFlowModel'
 import {
     getNodeStyleDimension,
     getReactFlowNodeTypeForShape,
     getShapeNodeStyle,
 } from '@/lib/workflowNodeShape'
 import {
+    buildReciprocalDetourRoute,
     extractRouteEndpointSides,
     flattenElkSectionToRoute,
     type ElkEdgeSectionLike,
+    type NodeRect,
+    type ReciprocalDetourSide,
 } from '@/lib/edgeRouting'
+import {
+    attachDerivedPreviewMeta,
+    type DerivedPreviewMeta,
+} from '@/features/workflow-canvas/derivedPreview'
 
 import {
     ConditionalNode,
@@ -77,13 +89,416 @@ export type LaidOutFlowGraph = {
     edges: Edge[]
 }
 
+export type BuildHydratedFlowGraphOptions = {
+    expandChildren?: boolean
+}
+
 type ElkEdgeLayoutMeta = {
     route: ReturnType<typeof flattenElkSectionToRoute>
     endpointSides: ReturnType<typeof extractRouteEndpointSides>
 }
 
+type ParsedChildPreview = {
+    flowName: string
+    flowPath: string
+    flowLabel: string
+    graph: CanonicalPreviewGraphPayload
+}
+
+const DERIVED_CHILD_EDGE_STYLE: Edge['style'] = {
+    opacity: 0.62,
+    stroke: 'hsl(var(--muted-foreground) / 0.45)',
+}
+
+const DERIVED_CHILD_LINK_EDGE_STYLE: Edge['style'] = {
+    opacity: 0.8,
+    stroke: 'hsl(var(--muted-foreground) / 0.6)',
+    strokeDasharray: '6 6',
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object') {
+        return null
+    }
+    return value as Record<string, unknown>
+}
+
+function readNodeRect(node: Node): NodeRect {
+    return {
+        x: node.position.x,
+        y: node.position.y,
+        width: node.width ?? getNodeStyleDimension(node.style?.width) ?? DEFAULT_NODE_WIDTH,
+        height: node.height ?? getNodeStyleDimension(node.style?.height) ?? DEFAULT_NODE_HEIGHT,
+    }
+}
+
+function getNodeCenter(rect: NodeRect) {
+    return {
+        x: rect.x + rect.width / 2,
+        y: rect.y + rect.height / 2,
+    }
+}
+
+function chooseReciprocalDetourSide(sourceRect: NodeRect, targetRect: NodeRect): ReciprocalDetourSide {
+    const sourceCenter = getNodeCenter(sourceRect)
+    const targetCenter = getNodeCenter(targetRect)
+    const dx = targetCenter.x - sourceCenter.x
+    const dy = targetCenter.y - sourceCenter.y
+
+    if (Math.abs(dy) >= Math.abs(dx)) {
+        return sourceCenter.x <= targetCenter.x ? 'left' : 'right'
+    }
+    return sourceCenter.y <= targetCenter.y ? 'top' : 'bottom'
+}
+
+function shouldDetourReciprocalEdge(edge: Edge, nodeRects: Map<string, NodeRect>): boolean {
+    const sourceRect = nodeRects.get(edge.source)
+    const targetRect = nodeRects.get(edge.target)
+    if (!sourceRect || !targetRect) {
+        return false
+    }
+
+    const sourceCenter = getNodeCenter(sourceRect)
+    const targetCenter = getNodeCenter(targetRect)
+    const dy = sourceCenter.y - targetCenter.y
+    const dx = sourceCenter.x - targetCenter.x
+
+    if (Math.abs(dy) > 1) {
+        return dy > 0
+    }
+    if (Math.abs(dx) > 1) {
+        return dx > 0
+    }
+    return `${edge.source}->${edge.target}` > `${edge.target}->${edge.source}`
+}
+
 export function normalizeLegacyDot(content: string): string {
     return content.replace(/\blabel=label=/g, 'label=')
+}
+
+function buildHydratedNode(
+    node: CanonicalFlowNode,
+    index: number,
+    derivedPreviewMeta?: DerivedPreviewMeta,
+): Node {
+    const shape = typeof node.attrs.shape === 'string' ? node.attrs.shape : 'box'
+    const nodeData: Record<string, unknown> = {
+        ...node.attrs,
+        label: typeof node.attrs.label === 'string' ? node.attrs.label : node.id,
+        shape,
+        prompt: typeof node.attrs.prompt === 'string' ? node.attrs.prompt : '',
+        'tool.command': typeof node.attrs['tool.command'] === 'string' ? node.attrs['tool.command'] : '',
+        'tool.hooks.pre': typeof node.attrs['tool.hooks.pre'] === 'string' ? node.attrs['tool.hooks.pre'] : '',
+        'tool.hooks.post': typeof node.attrs['tool.hooks.post'] === 'string' ? node.attrs['tool.hooks.post'] : '',
+        'tool.artifacts.paths': typeof node.attrs['tool.artifacts.paths'] === 'string'
+            ? node.attrs['tool.artifacts.paths']
+            : '',
+        'tool.artifacts.stdout': typeof node.attrs['tool.artifacts.stdout'] === 'string'
+            ? node.attrs['tool.artifacts.stdout']
+            : '',
+        'tool.artifacts.stderr': typeof node.attrs['tool.artifacts.stderr'] === 'string'
+            ? node.attrs['tool.artifacts.stderr']
+            : '',
+        type: typeof node.attrs.type === 'string' ? node.attrs.type : '',
+        max_retries: typeof node.attrs.max_retries === 'number' || typeof node.attrs.max_retries === 'string'
+            ? node.attrs.max_retries
+            : '',
+        retry_target: typeof node.attrs.retry_target === 'string' ? node.attrs.retry_target : '',
+        fallback_retry_target: typeof node.attrs.fallback_retry_target === 'string' ? node.attrs.fallback_retry_target : '',
+        fidelity: typeof node.attrs.fidelity === 'string' ? node.attrs.fidelity : '',
+        thread_id: typeof node.attrs.thread_id === 'string' ? node.attrs.thread_id : '',
+        class: typeof node.attrs.class === 'string' ? node.attrs.class : '',
+        timeout: typeof node.attrs.timeout === 'string' ? node.attrs.timeout : '',
+        llm_model: typeof node.attrs.llm_model === 'string' ? node.attrs.llm_model : '',
+        llm_provider: typeof node.attrs.llm_provider === 'string' ? node.attrs.llm_provider : '',
+        reasoning_effort: typeof node.attrs.reasoning_effort === 'string' ? node.attrs.reasoning_effort : '',
+        'manager.poll_interval': typeof node.attrs['manager.poll_interval'] === 'string'
+            ? node.attrs['manager.poll_interval']
+            : '',
+        'manager.max_cycles': typeof node.attrs['manager.max_cycles'] === 'number'
+            || typeof node.attrs['manager.max_cycles'] === 'string'
+            ? node.attrs['manager.max_cycles']
+            : '',
+        'manager.stop_condition': typeof node.attrs['manager.stop_condition'] === 'string'
+            ? node.attrs['manager.stop_condition']
+            : '',
+        'manager.actions': typeof node.attrs['manager.actions'] === 'string' ? node.attrs['manager.actions'] : '',
+        'human.default_choice': typeof node.attrs['human.default_choice'] === 'string'
+            ? node.attrs['human.default_choice']
+            : '',
+        status: 'idle',
+    }
+
+    const nextNode: Node = {
+        id: node.id,
+        type: getReactFlowNodeTypeForShape(shape),
+        position: { x: 250, y: index * 150 },
+        style: getShapeNodeStyle(shape),
+        data: derivedPreviewMeta ? attachDerivedPreviewMeta(nodeData, derivedPreviewMeta) : nodeData,
+    }
+    if (derivedPreviewMeta) {
+        nextNode.draggable = false
+        nextNode.selectable = false
+        nextNode.connectable = false
+        nextNode.focusable = false
+        nextNode.deletable = false
+    }
+    return nextNode
+}
+
+function buildHydratedEdge(
+    edge: CanonicalFlowEdge,
+    index: number,
+    options?: {
+        id?: string
+        source?: string
+        target?: string
+        derivedPreviewMeta?: DerivedPreviewMeta
+        style?: Edge['style']
+        hidden?: boolean
+    },
+): Edge {
+    const edgeData: Record<string, unknown> = {
+        ...edge.attrs,
+        label: typeof edge.attrs.label === 'string' ? edge.attrs.label : '',
+        condition: typeof edge.attrs.condition === 'string' ? edge.attrs.condition : '',
+        weight: typeof edge.attrs.weight === 'number' || typeof edge.attrs.weight === 'string' ? edge.attrs.weight : '',
+        fidelity: typeof edge.attrs.fidelity === 'string' ? edge.attrs.fidelity : '',
+        thread_id: typeof edge.attrs.thread_id === 'string' ? edge.attrs.thread_id : '',
+        loop_restart: edge.attrs.loop_restart === true || edge.attrs.loop_restart === 'true',
+    }
+    const nextEdge: Edge = {
+        id: options?.id ?? `e-${edge.source}-${edge.target}-${index}`,
+        source: options?.source ?? edge.source,
+        target: options?.target ?? edge.target,
+        type: EDGE_TYPE,
+        className: EDGE_CLASS,
+        interactionWidth: EDGE_INTERACTION_WIDTH,
+        label: typeof edge.attrs.label === 'string' ? edge.attrs.label : undefined,
+        data: options?.derivedPreviewMeta ? attachDerivedPreviewMeta(edgeData, options.derivedPreviewMeta) : edgeData,
+        style: options?.style,
+        hidden: options?.hidden,
+    }
+    if (options?.derivedPreviewMeta) {
+        nextEdge.selectable = false
+        nextEdge.focusable = false
+        nextEdge.deletable = false
+    }
+    return nextEdge
+}
+
+function parseChildPreviewMap(value: unknown): Record<string, ParsedChildPreview> {
+    const record = asRecord(value)
+    if (!record) {
+        return {}
+    }
+
+    return Object.fromEntries(
+        Object.entries(record).flatMap(([managerNodeId, entryValue]) => {
+            const entryRecord = asRecord(entryValue)
+            const graphRecord = asRecord(entryRecord?.graph)
+            if (!graphRecord) {
+                return []
+            }
+            const nodes = Array.isArray(graphRecord.nodes) ? graphRecord.nodes : null
+            const edges = Array.isArray(graphRecord.edges) ? graphRecord.edges : null
+            if (!nodes || !edges) {
+                return []
+            }
+
+            const childGraph: CanonicalPreviewGraphPayload = {
+                nodes: nodes
+                    .map((node) => asRecord(node))
+                    .filter((node): node is Record<string, unknown> => node !== null),
+                edges: edges
+                    .map((edge) => asRecord(edge))
+                    .filter((edge): edge is Record<string, unknown> => edge !== null),
+                graph_attrs: asRecord(graphRecord.graph_attrs),
+                defaults: asRecord(graphRecord.defaults),
+                subgraphs: Array.isArray(graphRecord.subgraphs) ? graphRecord.subgraphs : undefined,
+            }
+
+            return [[managerNodeId, {
+                flowName: typeof entryRecord?.flow_name === 'string' ? entryRecord.flow_name : 'child.dot',
+                flowPath: typeof entryRecord?.flow_path === 'string' ? entryRecord.flow_path : '',
+                flowLabel: typeof entryRecord?.flow_label === 'string'
+                    ? entryRecord.flow_label
+                    : typeof entryRecord?.flow_name === 'string'
+                        ? entryRecord.flow_name
+                        : 'Child Flow',
+                graph: childGraph,
+            } satisfies ParsedChildPreview]]
+        }),
+    )
+}
+
+function getChildClusterNodeId(managerNodeId: string): string {
+    return `__child_preview_cluster__${managerNodeId}`
+}
+
+function getNamespacedChildNodeId(managerNodeId: string, childNodeId: string): string {
+    return `__child_preview__${managerNodeId}__${childNodeId}`
+}
+
+function selectChildEntryNodeId(
+    childNodes: CanonicalFlowNode[],
+    childInDegree: Map<string, number>,
+): string | null {
+    const rootNodes = childNodes.filter((node) => (childInDegree.get(node.id) ?? 0) === 0)
+    if (rootNodes.length === 0) {
+        return childNodes[0]?.id ?? null
+    }
+
+    const explicitStartNode = rootNodes.find((node) => node.attrs.shape === 'Mdiamond')
+    if (explicitStartNode) {
+        return explicitStartNode.id
+    }
+
+    return rootNodes[0]?.id ?? null
+}
+
+function buildExpandedChildPreviewElements(
+    flowName: string,
+    parentNodes: Node[],
+    childPreviews: Record<string, ParsedChildPreview>,
+): { nodes: Node[]; edges: Edge[] } {
+    const parentNodeIds = new Set(parentNodes.map((node) => node.id))
+    const derivedNodes: Node[] = []
+    const derivedEdges: Edge[] = []
+
+    Object.entries(childPreviews).forEach(([managerNodeId, childPreview]) => {
+        if (!parentNodeIds.has(managerNodeId)) {
+            return
+        }
+
+        const childModel = buildCanonicalFlowModelFromPreviewGraph(
+            `${flowName}:${managerNodeId}:${childPreview.flowName}`,
+            childPreview.graph,
+        )
+        if (childModel.nodes.length === 0) {
+            return
+        }
+
+        const clusterNodeId = getChildClusterNodeId(managerNodeId)
+        const clusterNodeData = attachDerivedPreviewMeta(
+            {
+                label: `Child Flow Preview: ${childPreview.flowLabel}`,
+                shape: 'box',
+                prompt: childPreview.flowPath ? `Resolved from ${childPreview.flowPath}` : '',
+                status: 'idle',
+            },
+            {
+                kind: 'child-cluster',
+                managerNodeId,
+                readOnly: true,
+            },
+        )
+        derivedNodes.push({
+            id: clusterNodeId,
+            type: getReactFlowNodeTypeForShape('box'),
+            position: { x: 250, y: 0 },
+            style: { ...getShapeNodeStyle('box'), width: 264, height: 76 },
+            data: clusterNodeData,
+            draggable: false,
+            selectable: false,
+            connectable: false,
+            focusable: false,
+            deletable: false,
+        })
+
+        const namespacedNodeIds = new Map<string, string>()
+        childModel.nodes.forEach((childNode, index) => {
+            const namespacedId = getNamespacedChildNodeId(managerNodeId, childNode.id)
+            namespacedNodeIds.set(childNode.id, namespacedId)
+            derivedNodes.push(buildHydratedNode(
+                {
+                    ...childNode,
+                    id: namespacedId,
+                },
+                parentNodes.length + derivedNodes.length + index,
+                {
+                    kind: 'child-node',
+                    managerNodeId,
+                    originalNodeId: childNode.id,
+                    readOnly: true,
+                },
+            ))
+        })
+
+        const childInDegree = new Map(childModel.nodes.map((node) => [node.id, 0]))
+        childModel.edges.forEach((childEdge) => {
+            childInDegree.set(childEdge.target, (childInDegree.get(childEdge.target) ?? 0) + 1)
+            derivedEdges.push(buildHydratedEdge(
+                childEdge,
+                derivedEdges.length,
+                {
+                    id: `e-${managerNodeId}-${childEdge.source}-${childEdge.target}-${derivedEdges.length}`,
+                    source: namespacedNodeIds.get(childEdge.source) ?? childEdge.source,
+                    target: namespacedNodeIds.get(childEdge.target) ?? childEdge.target,
+                    derivedPreviewMeta: {
+                        kind: 'child-edge',
+                        managerNodeId,
+                        readOnly: true,
+                    },
+                    style: DERIVED_CHILD_EDGE_STYLE,
+                },
+            ))
+        })
+
+        const entryNodeId = selectChildEntryNodeId(childModel.nodes, childInDegree)
+        const entryTargetId = entryNodeId ? namespacedNodeIds.get(entryNodeId) : null
+
+        derivedEdges.push({
+            id: `e-${managerNodeId}-child-preview-link`,
+            source: managerNodeId,
+            target: entryTargetId ?? clusterNodeId,
+            type: EDGE_TYPE,
+            className: EDGE_CLASS,
+            interactionWidth: EDGE_INTERACTION_WIDTH,
+            data: attachDerivedPreviewMeta({}, {
+                kind: 'child-link',
+                managerNodeId,
+                readOnly: true,
+            }),
+            style: DERIVED_CHILD_LINK_EDGE_STYLE,
+            selectable: false,
+            focusable: false,
+            deletable: false,
+        })
+
+        const rootNodeIds = childModel.nodes
+            .filter((node) => (childInDegree.get(node.id) ?? 0) === 0)
+            .map((node) => node.id)
+        const anchorTargets = rootNodeIds.length > 0 ? rootNodeIds : [childModel.nodes[0].id]
+        anchorTargets.forEach((rootNodeId, index) => {
+            const targetId = namespacedNodeIds.get(rootNodeId)
+            if (!targetId) {
+                return
+            }
+            derivedEdges.push({
+                id: `e-${managerNodeId}-child-preview-anchor-${index}`,
+                source: clusterNodeId,
+                target: targetId,
+                type: EDGE_TYPE,
+                className: EDGE_CLASS,
+                interactionWidth: 0,
+                data: attachDerivedPreviewMeta({}, {
+                    kind: 'layout-anchor',
+                    managerNodeId,
+                    readOnly: true,
+                }),
+                hidden: true,
+                selectable: false,
+                focusable: false,
+                deletable: false,
+            })
+        })
+    })
+
+    return {
+        nodes: derivedNodes,
+        edges: derivedEdges,
+    }
 }
 
 function buildElkLayoutGraph(nodes: Node[], edges: Edge[]) {
@@ -173,7 +588,44 @@ export async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<LaidO
         }
     })
 
-    const laidOutEdges = edges.map((edge) => mergeElkEdgeLayoutMeta(edge, layoutEdgeMap.get(edge.id)))
+    const nodeRects = new Map(laidOutNodes.map((node) => [node.id, readNodeRect(node)]))
+    const edgeKeys = new Set(edges.map((edge) => `${edge.source}->${edge.target}`))
+    const reciprocalBackEdgeIds = new Set(
+        edges
+            .filter((edge) => edgeKeys.has(`${edge.target}->${edge.source}`))
+            .filter((edge) => shouldDetourReciprocalEdge(edge, nodeRects))
+            .map((edge) => edge.id),
+    )
+
+    const laidOutEdges = edges.map((edge) => {
+        const withElkMeta = mergeElkEdgeLayoutMeta(edge, layoutEdgeMap.get(edge.id))
+        if (!reciprocalBackEdgeIds.has(edge.id)) {
+            return withElkMeta
+        }
+
+        const sourceRect = nodeRects.get(edge.source)
+        const targetRect = nodeRects.get(edge.target)
+        if (!sourceRect || !targetRect) {
+            return withElkMeta
+        }
+
+        const route = buildReciprocalDetourRoute(
+            sourceRect,
+            targetRect,
+            chooseReciprocalDetourSide(sourceRect, targetRect),
+        )
+        const endpointSides = extractRouteEndpointSides(route)
+
+        return {
+            ...withElkMeta,
+            data: {
+                ...(withElkMeta.data ?? {}),
+                layoutRoute: route,
+                layoutSourceSide: endpointSides?.sourceSide,
+                layoutTargetSide: endpointSides?.targetSide,
+            },
+        }
+    })
 
     return {
         nodes: laidOutNodes,
@@ -198,6 +650,7 @@ export function buildHydratedFlowGraph(
     preview: PreviewResponse,
     _uiDefaults: UiDefaults,
     sourceDot?: string,
+    options?: BuildHydratedFlowGraphOptions,
 ): HydratedFlowGraph | null {
     if (!preview.graph) {
         return null
@@ -210,84 +663,19 @@ export function buildHydratedFlowGraph(
     )
     const nextGraphAttrs: GraphAttrs = preview.graph.graph_attrs ? { ...canonicalModel.graphAttrs } : {}
 
-    const nodes: Node[] = canonicalModel.nodes.map((n, i: number) => {
-        const shape = typeof n.attrs.shape === 'string' ? n.attrs.shape : 'box'
-        return {
-            id: n.id,
-            type: getReactFlowNodeTypeForShape(shape),
-            position: { x: 250, y: i * 150 },
-            style: getShapeNodeStyle(shape),
-            data: {
-                ...n.attrs,
-                label: typeof n.attrs.label === 'string' ? n.attrs.label : n.id,
-                shape,
-                prompt: typeof n.attrs.prompt === 'string' ? n.attrs.prompt : '',
-                'tool.command': typeof n.attrs['tool.command'] === 'string' ? n.attrs['tool.command'] : '',
-                'tool.hooks.pre': typeof n.attrs['tool.hooks.pre'] === 'string' ? n.attrs['tool.hooks.pre'] : '',
-                'tool.hooks.post': typeof n.attrs['tool.hooks.post'] === 'string' ? n.attrs['tool.hooks.post'] : '',
-                'tool.artifacts.paths': typeof n.attrs['tool.artifacts.paths'] === 'string'
-                    ? n.attrs['tool.artifacts.paths']
-                    : '',
-                'tool.artifacts.stdout': typeof n.attrs['tool.artifacts.stdout'] === 'string'
-                    ? n.attrs['tool.artifacts.stdout']
-                    : '',
-                'tool.artifacts.stderr': typeof n.attrs['tool.artifacts.stderr'] === 'string'
-                    ? n.attrs['tool.artifacts.stderr']
-                    : '',
-                type: typeof n.attrs.type === 'string' ? n.attrs.type : '',
-                max_retries: typeof n.attrs.max_retries === 'number' || typeof n.attrs.max_retries === 'string'
-                    ? n.attrs.max_retries
-                    : '',
-                retry_target: typeof n.attrs.retry_target === 'string' ? n.attrs.retry_target : '',
-                fallback_retry_target: typeof n.attrs.fallback_retry_target === 'string' ? n.attrs.fallback_retry_target : '',
-                fidelity: typeof n.attrs.fidelity === 'string' ? n.attrs.fidelity : '',
-                thread_id: typeof n.attrs.thread_id === 'string' ? n.attrs.thread_id : '',
-                class: typeof n.attrs.class === 'string' ? n.attrs.class : '',
-                timeout: typeof n.attrs.timeout === 'string' ? n.attrs.timeout : '',
-                llm_model: typeof n.attrs.llm_model === 'string' ? n.attrs.llm_model : '',
-                llm_provider: typeof n.attrs.llm_provider === 'string' ? n.attrs.llm_provider : '',
-                reasoning_effort: typeof n.attrs.reasoning_effort === 'string' ? n.attrs.reasoning_effort : '',
-                'manager.poll_interval': typeof n.attrs['manager.poll_interval'] === 'string'
-                    ? n.attrs['manager.poll_interval']
-                    : '',
-                'manager.max_cycles': typeof n.attrs['manager.max_cycles'] === 'number'
-                    || typeof n.attrs['manager.max_cycles'] === 'string'
-                    ? n.attrs['manager.max_cycles']
-                    : '',
-                'manager.stop_condition': typeof n.attrs['manager.stop_condition'] === 'string'
-                    ? n.attrs['manager.stop_condition']
-                    : '',
-                'manager.actions': typeof n.attrs['manager.actions'] === 'string' ? n.attrs['manager.actions'] : '',
-                'human.default_choice': typeof n.attrs['human.default_choice'] === 'string'
-                    ? n.attrs['human.default_choice']
-                    : '',
-                status: 'idle',
-            },
-        }
-    })
-
-    const edges: Edge[] = canonicalModel.edges.map((e, i: number) => ({
-        id: `e-${e.source}-${e.target}-${i}`,
-        source: e.source,
-        target: e.target,
-        type: EDGE_TYPE,
-        className: EDGE_CLASS,
-        interactionWidth: EDGE_INTERACTION_WIDTH,
-        label: typeof e.attrs.label === 'string' ? e.attrs.label : undefined,
-        data: {
-            ...e.attrs,
-            label: typeof e.attrs.label === 'string' ? e.attrs.label : '',
-            condition: typeof e.attrs.condition === 'string' ? e.attrs.condition : '',
-            weight: typeof e.attrs.weight === 'number' || typeof e.attrs.weight === 'string' ? e.attrs.weight : '',
-            fidelity: typeof e.attrs.fidelity === 'string' ? e.attrs.fidelity : '',
-            thread_id: typeof e.attrs.thread_id === 'string' ? e.attrs.thread_id : '',
-            loop_restart: e.attrs.loop_restart === true || e.attrs.loop_restart === 'true',
-        },
-    }))
+    const parentNodes = canonicalModel.nodes.map((node, index) => buildHydratedNode(node, index))
+    const parentEdges = canonicalModel.edges.map((edge, index) => buildHydratedEdge(edge, index))
+    const childPreviewElements = options?.expandChildren
+        ? buildExpandedChildPreviewElements(
+            flowName,
+            parentNodes,
+            parseChildPreviewMap(preview.graph.child_previews),
+        )
+        : { nodes: [], edges: [] }
 
     return {
-        nodes,
-        edges,
+        nodes: [...parentNodes, ...childPreviewElements.nodes],
+        edges: [...parentEdges, ...childPreviewElements.edges],
         graphAttrs: nextGraphAttrs,
         defaults: canonicalModel.defaults,
         subgraphs: canonicalModel.subgraphs,

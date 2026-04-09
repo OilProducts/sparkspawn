@@ -22,6 +22,7 @@ const DEFAULT_RUN_DETAIL_SESSION_STATE: RunDetailSessionState = {
     statusFetchedAtMs: null,
     graphStatus: 'idle',
     graphError: null,
+    expandChildFlows: false,
     graphNodes: [],
     graphEdges: [],
     graphLastLayoutMs: 0,

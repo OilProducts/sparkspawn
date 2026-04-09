@@ -174,6 +174,11 @@ export interface RunRecordResponse {
     continued_from_flow_name?: string | null
 }
 
+export interface PreviewRequestOptions {
+    flowName?: string | null
+    expandChildren?: boolean
+}
+
 export interface RunsListResponse {
     runs: RunRecordResponse[]
 }
@@ -231,6 +236,7 @@ export function parsePreviewResponse(payload: unknown, endpoint = '/attractor/pr
             graph_attrs: asUnknownRecord(graphRecord.graph_attrs),
             defaults: asUnknownRecord(graphRecord.defaults),
             subgraphs: Array.isArray(graphRecord.subgraphs) ? graphRecord.subgraphs : undefined,
+            child_previews: asUnknownRecord(graphRecord.child_previews),
         }
     }
     return {
@@ -568,20 +574,33 @@ export async function deleteFlowValidated(flowName: string): Promise<void> {
     await fetchJsonWithValidation(url, { method: 'DELETE' }, '/attractor/api/flows/{name}', () => undefined)
 }
 
-export async function fetchPreviewValidated(flowContent: string, init?: RequestInit): Promise<PreviewResponsePayload> {
+export async function fetchPreviewValidated(
+    flowContent: string,
+    init?: RequestInit,
+    options?: PreviewRequestOptions,
+): Promise<PreviewResponsePayload> {
     const headers = init?.headers
         ? {
             ...Object.fromEntries(new Headers(init.headers).entries()),
             'Content-Type': 'application/json',
         }
         : { 'Content-Type': 'application/json' }
+    const payload: Record<string, unknown> = {
+        flow_content: flowContent,
+    }
+    if (typeof options?.flowName === 'string' && options.flowName.trim()) {
+        payload.flow_name = options.flowName
+    }
+    if (options?.expandChildren) {
+        payload.expand_children = true
+    }
     return fetchJsonWithValidation(
         attractorUrl('/preview'),
         {
             ...init,
             method: 'POST',
             headers,
-            body: JSON.stringify({ flow_content: flowContent }),
+            body: JSON.stringify(payload),
         },
         '/attractor/preview',
         parsePreviewResponse,
@@ -677,8 +696,14 @@ export async function fetchPipelineGraphValidated(pipelineId: string): Promise<P
 export async function fetchPipelineGraphPreviewValidated(
     pipelineId: string,
     init?: RequestInit,
+    options?: PreviewRequestOptions,
 ): Promise<PipelineGraphPreviewResponse> {
-    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/graph-preview`)
+    const params = new URLSearchParams()
+    if (options?.expandChildren) {
+        params.set('expand_children', 'true')
+    }
+    const query = params.toString()
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/graph-preview${query ? `?${query}` : ''}`)
     return fetchJsonWithValidation(
         url,
         init,

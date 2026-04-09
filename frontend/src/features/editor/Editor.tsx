@@ -4,6 +4,7 @@ import {
     MiniMap,
     Controls,
     Background,
+    MarkerType,
     useNodesState,
     useEdgesState,
     addEdge,
@@ -13,7 +14,7 @@ import {
 import type { Connection, Edge, EdgeChange, Node, NodeChange, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useStore } from '@/store';
+import { useStore, type GraphAttrs } from '@/store';
 import { ValidationPanel } from './components/ValidationPanel';
 import { clearDotSerializationContext, generateDot, setDotSerializationContext } from '@/lib/dotUtils';
 import { recordFlowLoadDebug, summarizeDiagnosticsForFlowLoadDebug } from '@/lib/flowLoadDebug';
@@ -26,11 +27,15 @@ import { CANVAS_INTERACTION_BUDGET_MS } from '@/lib/performanceBudgets';
 import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler';
 import {
     buildHydratedFlowGraph,
+    ChildFlowExpansionToggle,
+    type BuildHydratedFlowGraphOptions,
     deriveElkEdgeRoutingHints,
     edgeTypes,
     EDGE_CLASS,
     EDGE_INTERACTION_WIDTH,
     EDGE_TYPE,
+    filterAuthoredEdges,
+    filterAuthoredNodes,
     layoutWithElk,
     nodeTypes,
     normalizeLegacyDot,
@@ -74,6 +79,20 @@ type PreparedHydratedPreview = {
     edges: Edge[]
     serializedNodes: Node[]
     layoutDurationMs: number
+}
+
+function buildAuthoredDot(
+    flowName: string,
+    nodes: Node[],
+    edges: Edge[],
+    graphAttrs: GraphAttrs,
+) {
+    return generateDot(
+        flowName,
+        filterAuthoredNodes(nodes),
+        filterAuthoredEdges(edges),
+        graphAttrs,
+    )
 }
 
 function mergeEdgeRoutingHints(currentEdges: Edge[], hintedEdges: Edge[]): Edge[] {
@@ -141,6 +160,10 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     const setDiagnostics = useStore((state) => state.setDiagnostics);
     const clearDiagnostics = useStore((state) => state.clearDiagnostics);
     const suppressPreview = useStore((state) => state.suppressPreview);
+    const expandChildFlows = useStore((state) => (
+        state.activeFlow ? (state.editorExpandChildFlowsByFlow[state.activeFlow] ?? false) : false
+    ));
+    const setEditorExpandChildFlows = useStore((state) => state.setEditorExpandChildFlows);
     const [nodes, setNodes] = useNodesState<Node>([]);
     const [edges, setEdges] = useEdgesState<Edge>([]);
     const hydratedRef = useRef(false);
@@ -150,6 +173,12 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     const routingHintRefreshIdRef = useRef(0);
     const rawDotEntryDraftRef = useRef<string>('');
     const rawHandoffInFlightRef = useRef(false);
+    const expandChildFlowsRef = useRef(expandChildFlows);
+    const canvasGraphRef = useRef({
+        nodes: [] as Node[],
+        edges: [] as Edge[],
+        graphAttrs: {} as GraphAttrs,
+    });
     const [isDragging, setIsDragging] = useState(false);
     const [isRawHandoffInFlight, setIsRawHandoffInFlight] = useState(false);
     const [lastLayoutMs, setLastLayoutMs] = useState(0);
@@ -166,6 +195,19 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     ];
     const optimizationLabel = activeOptimizations.length ? activeOptimizations.join(', ') : 'none';
     const flowName = activeFlow;
+    const isExpandedReadOnlyPreview = editorMode === 'structured' && expandChildFlows;
+
+    useEffect(() => {
+        expandChildFlowsRef.current = expandChildFlows;
+    }, [expandChildFlows]);
+
+    useEffect(() => {
+        canvasGraphRef.current = {
+            nodes,
+            edges,
+            graphAttrs,
+        }
+    }, [edges, graphAttrs, nodes]);
 
     const enforceSingleSelectedNode = useCallback((nextNodes: Node[], selectedNodeId: string) => {
         setEdges((currentEdges) =>
@@ -196,8 +238,8 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         debounceMs: 250,
         buildContent: (snapshot, currentFlowName) => generateDot(
             currentFlowName,
-            snapshot?.nodes || [],
-            snapshot?.edges || [],
+            filterAuthoredNodes(snapshot?.nodes || []),
+            filterAuthoredEdges(snapshot?.edges || []),
             graphAttrs,
         ),
     })
@@ -226,6 +268,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         preview: PreviewResponse,
         sourceDot?: string,
         debugContext?: { loadId: number | null; source: PreviewDebugContext['source'] },
+        options?: BuildHydratedFlowGraphOptions,
     ): Promise<PreparedHydratedPreview | null> => {
         if (!preview.graph) {
             recordFlowLoadDebug('hydrate:skipped', flowName, {
@@ -240,6 +283,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             preview,
             resolvedUiDefaults,
             sourceDot,
+            options,
         )
         if (!hydratedGraph) {
             return null
@@ -287,6 +331,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         dot: string,
         debugContext?: PreviewDebugContext,
         signal?: AbortSignal,
+        options?: { expandChildren?: boolean },
     ): Promise<{ preview: PreviewResponse; elapsedMs: number }> => {
         recordFlowLoadDebug('preview:request', flowName, {
             loadId: debugContext?.loadId ?? null,
@@ -298,7 +343,14 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             debounceMs: debugContext?.debounceMs ?? null,
         });
         const previewStart = nowMs();
-        const preview = await loadEditorPreview(dot, signal ? { signal } : undefined)
+        const preview = await loadEditorPreview(
+            dot,
+            signal ? { signal } : undefined,
+            {
+                flowName,
+                expandChildren: options?.expandChildren ?? expandChildFlowsRef.current,
+            },
+        )
         const elapsedMs = Math.max(0, nowMs() - previewStart);
         recordFlowLoadDebug('preview:response', flowName, {
             loadId: debugContext?.loadId ?? null,
@@ -402,6 +454,9 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                         source: 'flow-load-source-dot',
                     },
                     loadAbort.signal,
+                    {
+                        expandChildren: expandChildFlowsRef.current,
+                    },
                 );
                 if (!isCurrentLoad()) {
                     return;
@@ -423,6 +478,8 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 const hydrated = await hydrateFromPreview(preview, normalizedContent, {
                     loadId,
                     source: 'flow-load-source-dot',
+                }, {
+                    expandChildren: expandChildFlowsRef.current,
                 });
                 if (!isCurrentLoad() || !hydrated) {
                     return;
@@ -438,7 +495,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 setEdges(hydrated.edges);
                 primeFlowSaveBaseline(
                     flowName,
-                    generateDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
+                    buildAuthoredDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
                 );
                 hydratedRef.current = true;
                 hydratedFlowNameRef.current = flowName;
@@ -485,7 +542,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             || isDragging
             || editorMode === 'raw'
         ) return;
-        const dot = generateDot(flowName, nodes, edges, graphAttrs);
+        const dot = buildAuthoredDot(flowName, nodes, edges, graphAttrs);
         if (previewTimer.current) {
             window.clearTimeout(previewTimer.current);
         }
@@ -544,6 +601,9 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
 
     // Handle new connections via UI
     const onNodesChange = useCallback((changes: NodeChange<Node>[]) => {
+        if (expandChildFlows) {
+            return
+        }
         const shouldClearEdgeRoutes = changes.some((change) => change.type !== 'select');
         if (shouldClearEdgeRoutes) {
             setEdges((currentEdges) => stripEdgeLayoutRoutes(currentEdges));
@@ -594,9 +654,12 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             }
             return nextNodes;
         });
-    }, [setEdges, setNodes, scheduleSave, edges, enforceSingleSelectedNode]);
+    }, [expandChildFlows, setEdges, setNodes, scheduleSave, edges, enforceSingleSelectedNode]);
 
     const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
+        if (expandChildFlows) {
+            return
+        }
         setEdges((currentEdges) => {
             const updatedEdges = applyEdgeChanges(changes, currentEdges);
             const latestSelectedEdgeChange = [...changes].reverse().find(
@@ -613,10 +676,13 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             }
             return nextEdges;
         });
-    }, [setEdges, scheduleSave, nodes, enforceSingleSelectedEdge, refreshEdgeRoutingHints]);
+    }, [expandChildFlows, setEdges, scheduleSave, nodes, enforceSingleSelectedEdge, refreshEdgeRoutingHints]);
 
     const onConnect = useCallback(
         (params: Connection | Edge) => {
+            if (expandChildFlows) {
+                return
+            }
             setEdges((currentEdges) => {
                 const newEdges = addEdge(
                     { ...params, type: EDGE_TYPE, interactionWidth: EDGE_INTERACTION_WIDTH },
@@ -627,11 +693,11 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 return newEdges;
             });
         },
-        [setEdges, scheduleSave, nodes, refreshEdgeRoutingHints],
+        [expandChildFlows, setEdges, scheduleSave, nodes, refreshEdgeRoutingHints],
     );
 
     const onAddNode = useCallback(() => {
-        if (!flowName) return;
+        if (!flowName || expandChildFlows) return;
         const defaultModel = graphAttrs.ui_default_llm_model || uiDefaults.llm_model || '';
         const defaultProvider = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || '';
         const defaultReasoning = graphAttrs.ui_default_reasoning_effort || uiDefaults.reasoning_effort || '';
@@ -657,13 +723,13 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             scheduleSave({ nodes: newNodes, edges });
             return newNodes;
         });
-    }, [flowName, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
+    }, [expandChildFlows, flowName, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
 
     const enterRawDotMode = useCallback(() => {
         if (!flowName) return;
         if (editorMode === 'raw') return;
         flushPendingSave();
-        const dot = generateDot(flowName, nodes, edges, graphAttrs);
+        const dot = buildAuthoredDot(flowName, nodes, edges, graphAttrs);
         rawDotEntryDraftRef.current = dot;
         setRawDotDraft(dot);
         setRawHandoffError(null);
@@ -694,6 +760,8 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 const { preview, elapsedMs } = await requestPreview(rawDotDraft, {
                     loadId: activeFlowLoadIdRef.current,
                     source: 'raw-dot-handoff',
+                }, undefined, {
+                    expandChildren: expandChildFlowsRef.current,
                 });
                 setLastPreviewMs(elapsedMs);
                 if (preview.diagnostics) {
@@ -715,6 +783,8 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 const hydrated = await hydrateFromPreview(preview, rawDotDraft, {
                     loadId: activeFlowLoadIdRef.current,
                     source: 'raw-dot-handoff',
+                }, {
+                    expandChildren: expandChildFlowsRef.current,
                 });
                 if (!hydrated) {
                     setRawHandoffError('Safe handoff requires valid DOT. Preview response did not include a graph.');
@@ -730,7 +800,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 setEdges(hydrated.edges);
                 primeFlowSaveBaseline(
                     flowName,
-                    generateDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
+                    buildAuthoredDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
                 );
                 hydratedRef.current = true;
                 recordFlowLoadDebug('hydrate:complete', flowName, {
@@ -793,6 +863,80 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         }
     }, [edges, nodes, selectedEdgeId, selectedNodeId, setSelectedEdgeId, setSelectedNodeId]);
 
+    useEffect(() => {
+        if (!isActive || !flowName || !hydratedRef.current || editorMode !== 'structured') {
+            return
+        }
+
+        const controller = new AbortController()
+        const authoredGraph = canvasGraphRef.current
+        const dot = buildAuthoredDot(
+            flowName,
+            authoredGraph.nodes,
+            authoredGraph.edges,
+            authoredGraph.graphAttrs,
+        )
+
+        void requestPreview(
+            dot,
+            {
+                loadId: activeFlowLoadIdRef.current,
+                source: 'structured-sync-preview',
+            },
+            controller.signal,
+            {
+                expandChildren: expandChildFlows,
+            },
+        )
+            .then(async ({ preview, elapsedMs }) => {
+                if (controller.signal.aborted) {
+                    return
+                }
+                setLastPreviewMs(elapsedMs)
+                const hydrated = await hydrateFromPreview(
+                    preview,
+                    dot,
+                    {
+                        loadId: activeFlowLoadIdRef.current,
+                        source: 'structured-sync-preview',
+                    },
+                    {
+                        expandChildren: expandChildFlows,
+                    },
+                )
+                if (controller.signal.aborted || !hydrated) {
+                    return
+                }
+                setDotSerializationContext({
+                    defaults: hydrated.defaults,
+                    subgraphs: hydrated.subgraphs,
+                })
+                replaceGraphAttrs(hydrated.graphAttrs)
+                setLastLayoutMs(hydrated.layoutDurationMs)
+                setNodes(hydrated.nodes)
+                setEdges(hydrated.edges)
+            })
+            .catch((error) => {
+                if (controller.signal.aborted || isAbortError(error)) {
+                    return
+                }
+                console.error(error)
+            })
+
+        return () => {
+            controller.abort()
+        }
+    }, [
+        expandChildFlows,
+        flowName,
+        hydrateFromPreview,
+        isActive,
+        replaceGraphAttrs,
+        requestPreview,
+        setEdges,
+        setNodes,
+    ]);
+
     return (
         <div className="flow-surface w-full h-full relative">
             {editorMode === 'raw' ? (
@@ -828,10 +972,16 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                         onSelectionChange={onSelectionChange}
                         nodeTypes={nodeTypes}
                         edgeTypes={edgeTypes}
+                        nodesDraggable={!isExpandedReadOnlyPreview}
+                        nodesConnectable={!isExpandedReadOnlyPreview}
+                        elementsSelectable={!isExpandedReadOnlyPreview}
                         defaultEdgeOptions={{
                             type: EDGE_TYPE,
                             className: EDGE_CLASS,
                             interactionWidth: EDGE_INTERACTION_WIDTH,
+                            markerEnd: {
+                                type: MarkerType.ArrowClosed,
+                            },
                         }}
                         elevateEdgesOnSelect
                         fitView
@@ -900,6 +1050,18 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                         </Button>
                     </div>
                     {editorMode === 'structured' && (
+                        <ChildFlowExpansionToggle
+                            expanded={expandChildFlows}
+                            onChange={(nextExpanded) => {
+                                if (!flowName) {
+                                    return
+                                }
+                                setEditorExpandChildFlows(flowName, nextExpanded)
+                            }}
+                            testId="editor-child-flow-toggle"
+                        />
+                    )}
+                    {editorMode === 'structured' && !expandChildFlows && (
                         <Button
                             onClick={onAddNode}
                             className="shadow-sm"
@@ -928,6 +1090,11 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                         Canvas profile: {performanceProfile} ({nodeCount} nodes). Preview debounce: {previewDebounceMs}ms.
                         {' '}Optimizations: {optimizationLabel}.
                     </div>
+                    {isExpandedReadOnlyPreview ? (
+                        <div className="inline-flex items-center rounded-md border border-border/70 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm">
+                            Expanded child-flow mode is a read-only canvas preview. Switch to Parent Only to edit.
+                        </div>
+                    ) : null}
                 </div>
             )}
 

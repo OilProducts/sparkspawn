@@ -72,6 +72,119 @@ def test_preview_preserves_warning_and_info_diagnostics(
     assert payload["diagnostics"][0]["node_id"] == "start"
 
 
+def test_preview_default_payload_omits_child_previews(
+    attractor_api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    flows_dir = tmp_path / "flows"
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    server.configure_runtime_paths(flows_dir=flows_dir)
+    (flows_dir / "child.dot").write_text(
+        """
+        digraph ChildFlow {
+            start [shape=Mdiamond]
+            done [shape=Msquare]
+            start -> done
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    response = attractor_api_client.post(
+        "/preview",
+        json={
+            "flow_content": """
+            digraph ParentFlow {
+                graph [stack.child_dotfile="child.dot"]
+                manager [shape=house, type="stack.manager_loop"]
+            }
+            """,
+            "flow_name": "parent.dot",
+        },
+    )
+
+    assert response.status_code == 200
+    graph_payload = response.json()["graph"]
+    assert "child_previews" not in graph_payload
+
+
+def test_preview_expand_children_resolves_relative_child_flows_from_parent_flow_path(
+    attractor_api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    flows_dir = tmp_path / "flows"
+    parent_dir = flows_dir / "programs"
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    server.configure_runtime_paths(flows_dir=flows_dir)
+    (parent_dir / "child-worker.dot").write_text(
+        """
+        digraph ChildWorker {
+            start [shape=Mdiamond]
+            implement [shape=box, label="Implement"]
+            done [shape=Msquare]
+            start -> implement -> done
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    response = attractor_api_client.post(
+        "/preview",
+        json={
+            "flow_content": """
+            digraph ParentFlow {
+                graph [stack.child_dotfile="child-worker.dot"]
+                manager [shape=house, type="stack.manager_loop", label="Manager"]
+            }
+            """,
+            "flow_name": "programs/parent.dot",
+            "expand_children": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    child_previews = payload["graph"]["child_previews"]
+    assert set(child_previews.keys()) == {"manager"}
+    manager_preview = child_previews["manager"]
+    assert manager_preview["flow_name"] == "child-worker.dot"
+    assert manager_preview["read_only"] is True
+    assert manager_preview["provenance"] == "derived_child_preview"
+    assert manager_preview["graph"]["nodes"][1]["id"] == "implement"
+
+
+def test_preview_expand_children_omits_unresolvable_child_flow_without_breaking_parent_preview(
+    attractor_api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    flows_dir = tmp_path / "flows"
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    server.configure_runtime_paths(flows_dir=flows_dir)
+
+    response = attractor_api_client.post(
+        "/preview",
+        json={
+            "flow_content": """
+            digraph ParentFlow {
+                graph [stack.child_dotfile="missing-child.dot"]
+                start [shape=Mdiamond]
+                manager [shape=house, type="stack.manager_loop"]
+                done [shape=Msquare]
+                start -> manager -> done
+            }
+            """,
+            "flow_name": "parent.dot",
+            "expand_children": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert isinstance(payload["graph"]["nodes"], list)
+    assert "child_previews" not in payload["graph"]
+
+
 def test_preview_validation_error_payload_shape(
     attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

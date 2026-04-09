@@ -45,6 +45,7 @@ export interface CanonicalPreviewGraphPayload {
     graph_attrs?: Record<string, unknown> | null
     defaults?: Record<string, unknown> | null
     subgraphs?: unknown[] | null
+    child_previews?: Record<string, unknown> | null
 }
 
 export interface CanonicalModelBuildOptions {

@@ -119,11 +119,15 @@ const installExecutionFetchMock = (options?: {
       })
     }
     if (url.endsWith('/attractor/preview') && init?.method === 'POST') {
-      const previewRequest = init?.body ? JSON.parse(String(init.body)) as { flow_content?: string } : {}
+      const previewRequest = init?.body ? JSON.parse(String(init.body)) as {
+        flow_content?: string
+        flow_name?: string
+        expand_children?: boolean
+      } : {}
       const requestedFlowContent = typeof previewRequest.flow_content === 'string' ? previewRequest.flow_content : ''
       return jsonResponse(previewPayloadsByContent[requestedFlowContent] ?? buildPreviewPayload({ graphAttrs }))
     }
-    if (url.endsWith(`/attractor/pipelines/${continueSourceRunId}/graph-preview`) && (!init?.method || init.method === 'GET')) {
+    if (url.includes(`/attractor/pipelines/${continueSourceRunId}/graph-preview`) && (!init?.method || init.method === 'GET')) {
       return jsonResponse({
         status: 'ok',
         graph: {
@@ -172,6 +176,7 @@ const resetExecutionState = () => {
     runtimeOutcome: null,
     runtimeOutcomeReasonCode: null,
     runtimeOutcomeReasonMessage: null,
+    executionExpandChildFlows: false,
     humanGate: null,
     projectRegistry: {},
     projectSessionsByPath: {},
@@ -285,6 +290,39 @@ describe('Execution controls behavior', () => {
       )
     })
     expect(screen.queryByTestId('execution-continuation-warning')).not.toBeInTheDocument()
+  })
+
+  it('requests expanded child preview payloads when the execution graph toggle is enabled', async () => {
+    const user = userEvent.setup()
+    const fetchMock = installExecutionFetchMock({
+      flowName: TEST_LINEAR_FLOW,
+    })
+
+    useStore.setState((state) => ({
+      ...state,
+      viewMode: 'execution',
+      activeProjectPath: '/tmp/project',
+      executionFlow: TEST_LINEAR_FLOW,
+    }))
+
+    renderExecutionControls()
+
+    await screen.findByTestId('execution-graph-panel')
+    await user.click(screen.getByRole('button', { name: 'Expanded Child Flow' }))
+
+    await waitFor(() => {
+      const expandedPreviewCall = fetchMock.mock.calls.find(([input, init]) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+        if (!url.endsWith('/attractor/preview') || init?.method !== 'POST' || !init.body) {
+          return false
+        }
+        const payload = JSON.parse(String(init.body)) as { expand_children?: boolean; flow_name?: string }
+        return payload.expand_children === true && payload.flow_name === TEST_LINEAR_FLOW
+      })
+      expect(expandedPreviewCall).toBeDefined()
+    })
+
+    expect(useStore.getState().executionExpandChildFlows).toBe(true)
   })
 
   it('renders declared launch inputs and submits them as launch_context', async () => {
