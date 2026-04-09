@@ -13,14 +13,8 @@ import {
     getReactFlowNodeTypeForShape,
     getShapeNodeStyle,
 } from '@/lib/workflowNodeShape'
-import {
-    buildReciprocalDetourRoute,
-    extractRouteEndpointSides,
-    flattenElkSectionToRoute,
-    type ElkEdgeSectionLike,
-    type NodeRect,
-    type ReciprocalDetourSide,
-} from '@/lib/edgeRouting'
+import { buildFlowLayoutFromNodesAndEdges } from '@/lib/flowLayout'
+import type { SavedFlowLayoutV1 } from '@/lib/flowLayoutPersistence'
 import {
     attachDerivedPreviewMeta,
     type DerivedPreviewMeta,
@@ -87,15 +81,12 @@ export type HydratedFlowGraph = {
 export type LaidOutFlowGraph = {
     nodes: Node[]
     edges: Edge[]
+    layout: SavedFlowLayoutV1
+    edgeIdToLayoutKey: Map<string, string>
 }
 
 export type BuildHydratedFlowGraphOptions = {
     expandChildren?: boolean
-}
-
-type ElkEdgeLayoutMeta = {
-    route: ReturnType<typeof flattenElkSectionToRoute>
-    endpointSides: ReturnType<typeof extractRouteEndpointSides>
 }
 
 type ParsedChildPreview = {
@@ -121,55 +112,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
         return null
     }
     return value as Record<string, unknown>
-}
-
-function readNodeRect(node: Node): NodeRect {
-    return {
-        x: node.position.x,
-        y: node.position.y,
-        width: node.width ?? getNodeStyleDimension(node.style?.width) ?? DEFAULT_NODE_WIDTH,
-        height: node.height ?? getNodeStyleDimension(node.style?.height) ?? DEFAULT_NODE_HEIGHT,
-    }
-}
-
-function getNodeCenter(rect: NodeRect) {
-    return {
-        x: rect.x + rect.width / 2,
-        y: rect.y + rect.height / 2,
-    }
-}
-
-function chooseReciprocalDetourSide(sourceRect: NodeRect, targetRect: NodeRect): ReciprocalDetourSide {
-    const sourceCenter = getNodeCenter(sourceRect)
-    const targetCenter = getNodeCenter(targetRect)
-    const dx = targetCenter.x - sourceCenter.x
-    const dy = targetCenter.y - sourceCenter.y
-
-    if (Math.abs(dy) >= Math.abs(dx)) {
-        return sourceCenter.x <= targetCenter.x ? 'left' : 'right'
-    }
-    return sourceCenter.y <= targetCenter.y ? 'top' : 'bottom'
-}
-
-function shouldDetourReciprocalEdge(edge: Edge, nodeRects: Map<string, NodeRect>): boolean {
-    const sourceRect = nodeRects.get(edge.source)
-    const targetRect = nodeRects.get(edge.target)
-    if (!sourceRect || !targetRect) {
-        return false
-    }
-
-    const sourceCenter = getNodeCenter(sourceRect)
-    const targetCenter = getNodeCenter(targetRect)
-    const dy = sourceCenter.y - targetCenter.y
-    const dx = sourceCenter.x - targetCenter.x
-
-    if (Math.abs(dy) > 1) {
-        return dy > 0
-    }
-    if (Math.abs(dx) > 1) {
-        return dx > 0
-    }
-    return `${edge.source}->${edge.target}` > `${edge.target}->${edge.source}`
 }
 
 export function normalizeLegacyDot(content: string): string {
@@ -518,67 +460,38 @@ function buildElkLayoutGraph(nodes: Node[], edges: Edge[]) {
     }
 }
 
+type ElkLayoutNodeLike = {
+    x?: number
+    y?: number
+}
+
 async function computeElkLayout(nodes: Node[], edges: Edge[]) {
     const layout = await elk.layout(buildElkLayoutGraph(nodes, edges))
-    const layoutMap = new Map((layout.children ?? []).map((child) => [child.id, child]))
-    const layoutEdgeMap = new Map(
-        (
-            (layout as { edges?: Array<{ id?: string; sections?: readonly ElkEdgeSectionLike[] }> }).edges
-            ?? []
-        )
-            .filter((edge): edge is { id: string; sections?: readonly ElkEdgeSectionLike[] } => typeof edge.id === 'string')
-            .map((edge) => {
-                const route = flattenElkSectionToRoute(edge.sections)
-                return [
-                    edge.id,
-                    {
-                        route,
-                        endpointSides: extractRouteEndpointSides(route),
-                    } satisfies ElkEdgeLayoutMeta,
-                ] as const
-            }),
+    const layoutMap = new Map(
+        ((layout.children ?? []) as Array<ElkLayoutNodeLike & { id?: string }>)
+            .filter((child): child is ElkLayoutNodeLike & { id: string } => typeof child.id === 'string')
+            .map((child) => [child.id, child]),
     )
 
     return {
         layoutMap,
-        layoutEdgeMap,
     }
 }
 
-function mergeElkEdgeLayoutMeta(
-    edge: Edge,
-    meta: ElkEdgeLayoutMeta | undefined,
-    options?: { includeRoute?: boolean },
-): Edge {
-    if (!meta) {
-        return edge
-    }
-
-    const includeRoute = options?.includeRoute ?? true
-    const nextData: Record<string, unknown> = {
-        ...(edge.data ?? {}),
-    }
-
-    let mutated = false
-    if (includeRoute && meta.route) {
-        nextData.layoutRoute = meta.route
-        mutated = true
-    }
-    if (meta.endpointSides) {
-        nextData.layoutSourceSide = meta.endpointSides.sourceSide
-        nextData.layoutTargetSide = meta.endpointSides.targetSide
-        mutated = true
-    }
-
-    return mutated ? { ...edge, data: nextData } : edge
-}
-
-export async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<LaidOutFlowGraph> {
-    const { layoutMap, layoutEdgeMap } = await computeElkLayout(nodes, edges)
-
-    const laidOutNodes = nodes.map((node) => {
+export async function layoutWithElk(
+    nodes: Node[],
+    edges: Edge[],
+    options?: {
+        savedLayout?: SavedFlowLayoutV1 | null
+        forceFreshLayout?: boolean
+    },
+): Promise<LaidOutFlowGraph> {
+    const { layoutMap } = await computeElkLayout(nodes, edges)
+    const positionedNodes = nodes.map((node) => {
         const layoutNode = layoutMap.get(node.id)
-        if (!layoutNode) return node
+        if (!layoutNode) {
+            return node
+        }
         return {
             ...node,
             position: {
@@ -588,54 +501,7 @@ export async function layoutWithElk(nodes: Node[], edges: Edge[]): Promise<LaidO
         }
     })
 
-    const nodeRects = new Map(laidOutNodes.map((node) => [node.id, readNodeRect(node)]))
-    const edgeKeys = new Set(edges.map((edge) => `${edge.source}->${edge.target}`))
-    const reciprocalBackEdgeIds = new Set(
-        edges
-            .filter((edge) => edgeKeys.has(`${edge.target}->${edge.source}`))
-            .filter((edge) => shouldDetourReciprocalEdge(edge, nodeRects))
-            .map((edge) => edge.id),
-    )
-
-    const laidOutEdges = edges.map((edge) => {
-        const withElkMeta = mergeElkEdgeLayoutMeta(edge, layoutEdgeMap.get(edge.id))
-        if (!reciprocalBackEdgeIds.has(edge.id)) {
-            return withElkMeta
-        }
-
-        const sourceRect = nodeRects.get(edge.source)
-        const targetRect = nodeRects.get(edge.target)
-        if (!sourceRect || !targetRect) {
-            return withElkMeta
-        }
-
-        const route = buildReciprocalDetourRoute(
-            sourceRect,
-            targetRect,
-            chooseReciprocalDetourSide(sourceRect, targetRect),
-        )
-        const endpointSides = extractRouteEndpointSides(route)
-
-        return {
-            ...withElkMeta,
-            data: {
-                ...(withElkMeta.data ?? {}),
-                layoutRoute: route,
-                layoutSourceSide: endpointSides?.sourceSide,
-                layoutTargetSide: endpointSides?.targetSide,
-            },
-        }
-    })
-
-    return {
-        nodes: laidOutNodes,
-        edges: laidOutEdges,
-    }
-}
-
-export async function deriveElkEdgeRoutingHints(nodes: Node[], edges: Edge[]): Promise<Edge[]> {
-    const { layoutEdgeMap } = await computeElkLayout(nodes, edges)
-    return edges.map((edge) => mergeElkEdgeLayoutMeta(edge, layoutEdgeMap.get(edge.id), { includeRoute: false }))
+    return buildFlowLayoutFromNodesAndEdges(positionedNodes, edges, options)
 }
 
 export function nowMs(): number {

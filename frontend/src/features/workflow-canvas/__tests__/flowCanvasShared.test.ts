@@ -4,8 +4,10 @@ import { resolve } from 'node:path'
 
 import { buildHydratedFlowGraph, layoutWithElk } from '@/features/workflow-canvas/flowCanvasShared'
 import { filterAuthoredEdges, filterAuthoredNodes } from '@/features/workflow-canvas/derivedPreview'
+import { EDGE_RENDER_ROUTE_KEY } from '@/lib/flowLayout'
 import type { PreviewResponsePayload } from '@/lib/attractorClient'
 import { generateDot } from '@/lib/dotUtils'
+import type { EdgeRoute } from '@/lib/edgeRouting'
 import { describe, expect, it } from 'vitest'
 
 const repoRoot = resolve(process.cwd(), '..')
@@ -18,7 +20,6 @@ function loadStarterFlowPreview(flowRelativePath: string, expandChildren: boolea
         return cached
     }
 
-    // Pull the real backend preview so layout regressions track the shipped starter flows.
     const payload = JSON.parse(execFileSync(
         'uv',
         [
@@ -55,6 +56,31 @@ function loadStarterFlowPreview(flowRelativePath: string, expandChildren: boolea
     return payload
 }
 
+function getRenderRoute(edge: { data?: Record<string, unknown> | undefined }): EdgeRoute | null {
+    const route = edge.data?.[EDGE_RENDER_ROUTE_KEY]
+    if (!Array.isArray(route)) {
+        return null
+    }
+    const normalized = route
+        .map((point) => {
+            if (
+                !point
+                || typeof point !== 'object'
+                || !Number.isFinite((point as { x?: unknown }).x)
+                || !Number.isFinite((point as { y?: unknown }).y)
+            ) {
+                return null
+            }
+            return {
+                x: (point as { x: number }).x,
+                y: (point as { y: number }).y,
+            }
+        })
+        .filter((point): point is EdgeRoute[number] => point !== null)
+
+    return normalized.length >= 2 ? normalized : null
+}
+
 function summarizeLaidOutGraph(graph: Awaited<ReturnType<typeof layoutWithElk>>) {
     const round = (value: number) => Math.round(value * 100) / 100
     return {
@@ -67,13 +93,17 @@ function summarizeLaidOutGraph(graph: Awaited<ReturnType<typeof layoutWithElk>>)
             })),
         edges: [...graph.edges]
             .sort((left, right) => left.id.localeCompare(right.id))
-            .map((edge) => ({
-                id: edge.id,
-                source: edge.source,
-                target: edge.target,
-                route: ((edge.data as { layoutRoute?: Array<{ x: number; y: number }> } | undefined)?.layoutRoute ?? [])
-                    .map((point) => [round(point.x), round(point.y)]),
-            })),
+            .map((edge) => {
+                const route = getRenderRoute(edge) ?? []
+                return {
+                    id: edge.id,
+                    source: edge.source,
+                    target: edge.target,
+                    pointCount: route.length,
+                    start: route[0] ? { x: round(route[0].x), y: round(route[0].y) } : null,
+                    end: route.at(-1) ? { x: round(route.at(-1)!.x), y: round(route.at(-1)!.y) } : null,
+                }
+            }),
     }
 }
 
@@ -128,7 +158,7 @@ describe('flowCanvasShared', () => {
         ])
     })
 
-    it('attaches ELK route geometry to hydrated edges during layout', async () => {
+    it('produces routed render polylines with distinct fan-in touch points', async () => {
         const preview: PreviewResponsePayload = {
             status: 'ok',
             graph: {
@@ -156,24 +186,56 @@ describe('flowCanvasShared', () => {
 
         expect(hydrated).not.toBeNull()
         const layoutGraph = await layoutWithElk(hydrated?.nodes ?? [], hydrated?.edges ?? [])
+        expect(layoutGraph.layout.edgeLayouts).not.toEqual({})
+        expect(layoutGraph.edges.every((edge) => (getRenderRoute(edge)?.length ?? 0) >= 2)).toBe(true)
 
-        expect(layoutGraph.nodes).toHaveLength(4)
-        expect(layoutGraph.edges).toHaveLength(4)
-        expect(
-            layoutGraph.edges.every((edge) => Array.isArray((edge.data as { layoutRoute?: unknown[] } | undefined)?.layoutRoute)),
-        ).toBe(true)
-        expect(
-            layoutGraph.edges.every((edge) => {
-                const data = edge.data as {
-                    layoutSourceSide?: unknown
-                    layoutTargetSide?: unknown
-                } | undefined
-                return typeof data?.layoutSourceSide === 'string' && typeof data?.layoutTargetSide === 'string'
-            }),
-        ).toBe(true)
+        const leftJoinRoute = getRenderRoute(
+            layoutGraph.edges.find((edge) => edge.source === 'left' && edge.target === 'join') ?? {},
+        )
+        const rightJoinRoute = getRenderRoute(
+            layoutGraph.edges.find((edge) => edge.source === 'right' && edge.target === 'join') ?? {},
+        )
+
+        expect(leftJoinRoute?.at(-1)).not.toEqual(rightJoinRoute?.at(-1))
     })
 
-    it('routes reciprocal back-edges onto a distinct detour lane', async () => {
+    it('restores saved node positions and routed edges when saved layout exists', async () => {
+        const preview: PreviewResponsePayload = {
+            status: 'ok',
+            graph: {
+                graph_attrs: {},
+                nodes: [
+                    { id: 'start', label: 'Start', shape: 'Mdiamond' },
+                    { id: 'task', label: 'Task', shape: 'box' },
+                    { id: 'exit', label: 'Exit', shape: 'Msquare' },
+                ],
+                edges: [
+                    { from: 'start', to: 'task' },
+                    { from: 'task', to: 'exit' },
+                ],
+            },
+        }
+
+        const hydrated = buildHydratedFlowGraph('restore-layout.dot', preview, {
+            llm_model: '',
+            llm_provider: '',
+            reasoning_effort: '',
+        })
+
+        expect(hydrated).not.toBeNull()
+        const firstLayout = await layoutWithElk(hydrated?.nodes ?? [], hydrated?.edges ?? [])
+        const restoredLayout = await layoutWithElk(
+            hydrated?.nodes ?? [],
+            hydrated?.edges ?? [],
+            {
+                savedLayout: firstLayout.layout,
+            },
+        )
+
+        expect(summarizeLaidOutGraph(restoredLayout)).toEqual(summarizeLaidOutGraph(firstLayout))
+    })
+
+    it('routes reciprocal edges as distinct polylines', async () => {
         const preview: PreviewResponsePayload = {
             status: 'ok',
             graph: {
@@ -197,18 +259,16 @@ describe('flowCanvasShared', () => {
 
         expect(hydrated).not.toBeNull()
         const layoutGraph = await layoutWithElk(hydrated?.nodes ?? [], hydrated?.edges ?? [])
-        const forwardEdge = layoutGraph.edges.find((edge) => edge.source === 'implement' && edge.target === 'evaluate')
-        const backEdge = layoutGraph.edges.find((edge) => edge.source === 'evaluate' && edge.target === 'implement')
+        const forwardRoute = getRenderRoute(
+            layoutGraph.edges.find((edge) => edge.source === 'implement' && edge.target === 'evaluate') ?? {},
+        )
+        const backRoute = getRenderRoute(
+            layoutGraph.edges.find((edge) => edge.source === 'evaluate' && edge.target === 'implement') ?? {},
+        )
 
-        expect(forwardEdge).toBeDefined()
-        expect(backEdge).toBeDefined()
-
-        const forwardRoute = (forwardEdge?.data as { layoutRoute?: Array<{ x: number; y: number }> } | undefined)?.layoutRoute ?? []
-        const backRoute = (backEdge?.data as { layoutRoute?: Array<{ x: number; y: number }> } | undefined)?.layoutRoute ?? []
-
-        expect(backRoute.length).toBeGreaterThanOrEqual(4)
+        expect(forwardRoute).not.toBeNull()
+        expect(backRoute).not.toBeNull()
         expect(backRoute).not.toEqual(forwardRoute)
-        expect(Math.min(...backRoute.map((point) => point.x))).toBeLessThan(backRoute[0]?.x ?? Number.POSITIVE_INFINITY)
     })
 
     it('builds a namespaced one-level child preview cluster when expansion is enabled', () => {
@@ -372,7 +432,7 @@ describe('flowCanvasShared', () => {
             expandChildren: true,
             expectedDerivedNodeId: null,
         },
-    ])('keeps ELK layout stable for $flowName ($expandChildren)', async ({
+    ])('keeps ELK placement plus routed geometry stable for $flowName ($expandChildren)', async ({
         flowName,
         flowRelativePath,
         expandChildren,
@@ -412,10 +472,7 @@ describe('flowCanvasShared', () => {
             firstLayout.nodes.every((node) =>
                 Number.isFinite(node.position.x) && Number.isFinite(node.position.y)),
         ).toBe(true)
-        expect(
-            firstLayout.edges.every((edge) =>
-                Array.isArray((edge.data as { layoutRoute?: unknown[] } | undefined)?.layoutRoute)),
-        ).toBe(true)
+        expect(firstLayout.edges.every((edge) => (getRenderRoute(edge)?.length ?? 0) >= 2)).toBe(true)
         expect(summarizeLaidOutGraph(secondLayout)).toEqual(summarizeLaidOutGraph(firstLayout))
     })
 

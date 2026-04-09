@@ -14,26 +14,57 @@ export type NodeRect = {
 
 export type RouteSide = 'top' | 'right' | 'bottom' | 'left'
 
-export type EdgeRouteEndpointSides = {
-    sourceSide: RouteSide
-    targetSide: RouteSide
+export type RoutedPort = {
+    side: RouteSide
+    slot: number
+    slotCount: number
 }
 
-export type ReciprocalDetourSide = RouteSide
-
-export type ElkEdgeSectionLike = {
-    id?: string
-    startPoint: EdgeRoutePoint
-    endPoint: EdgeRoutePoint
-    bendPoints?: EdgeRoutePoint[]
-    incomingSections?: string[]
-    outgoingSections?: string[]
+export type FixedNodeRouterNode = {
+    id: string
+    rect: NodeRect
 }
 
-const SAME_ROW_THRESHOLD = 72
-const LOOPBACK_CLEARANCE = 40
-const ANCHOR_STUB_DISTANCE = 28
+export type FixedNodeRouterEdge = {
+    id: string
+    source: string
+    target: string
+    sourcePort: RoutedPort
+    targetPort: RoutedPort
+    previousRoute?: EdgeRoute | null
+}
+
+export type FixedNodeRouterRequest = {
+    nodes: FixedNodeRouterNode[]
+    edges: FixedNodeRouterEdge[]
+}
+
+export type FixedNodeRouterResult = {
+    routes: Record<string, EdgeRoute>
+}
+
+const DEFAULT_SLOT_OFFSET = 0.5
+const PORT_LEAD_DISTANCE = 24
+const OBSTACLE_PADDING = 18
 const EDGE_CORNER_RADIUS = 12
+const BEND_PENALTY = 18
+const PREVIOUS_ROUTE_PENALTY = 1
+const EPSILON = 0.001
+
+type ExpandedRect = NodeRect
+
+type Axis = 'horizontal' | 'vertical'
+
+type GraphNode = {
+    id: string
+    point: EdgeRoutePoint
+}
+
+type SearchState = {
+    cost: number
+    nodeId: string
+    axis: Axis | null
+}
 
 function isFinitePoint(point: EdgeRoutePoint | null | undefined): point is EdgeRoutePoint {
     return Boolean(
@@ -51,8 +82,8 @@ function isCollinear(a: EdgeRoutePoint, b: EdgeRoutePoint, c: EdgeRoutePoint): b
     return (a.x === b.x && b.x === c.x) || (a.y === b.y && b.y === c.y)
 }
 
-function normalizeRoute(route: EdgeRoute): EdgeRoute {
-    const deduped = route.filter(isFinitePoint).reduce<EdgeRoute>((points, point) => {
+export function normalizeRoute(route: EdgeRoute | null | undefined): EdgeRoute {
+    const deduped = (route ?? []).filter(isFinitePoint).reduce<EdgeRoute>((points, point) => {
         if (points.length === 0 || !arePointsEqual(points[points.length - 1], point)) {
             points.push(point)
         }
@@ -74,291 +105,6 @@ function normalizeRoute(route: EdgeRoute): EdgeRoute {
     }
     compacted.push(deduped[deduped.length - 1])
     return compacted
-}
-
-function orderElkSections(sections: readonly ElkEdgeSectionLike[]): ElkEdgeSectionLike[] {
-    if (sections.length <= 1) {
-        return [...sections]
-    }
-
-    const sectionById = new Map(
-        sections
-            .filter((section): section is ElkEdgeSectionLike & { id: string } => typeof section.id === 'string')
-            .map((section) => [section.id, section]),
-    )
-    const startSection = sections.find((section) => !section.incomingSections?.length) ?? sections[0]
-    const ordered: ElkEdgeSectionLike[] = []
-    const visited = new Set<string>()
-    let current: ElkEdgeSectionLike | undefined = startSection
-
-    while (current) {
-        if (current.id) {
-            if (visited.has(current.id)) {
-                break
-            }
-            visited.add(current.id)
-        }
-        ordered.push(current)
-        const nextSectionId: string | undefined = current.outgoingSections?.find((sectionId) => sectionById.has(sectionId))
-        current = nextSectionId ? sectionById.get(nextSectionId) : undefined
-    }
-
-    sections.forEach((section) => {
-        if (!section.id || !visited.has(section.id)) {
-            ordered.push(section)
-        }
-    })
-
-    return ordered
-}
-
-export function flattenElkSectionToRoute(
-    sections?: readonly ElkEdgeSectionLike[] | null,
-): EdgeRoute | null {
-    if (!sections?.length) {
-        return null
-    }
-
-    const orderedSections = orderElkSections(sections)
-    const route = orderedSections.flatMap((section) => [
-        section.startPoint,
-        ...(section.bendPoints ?? []),
-        section.endPoint,
-    ])
-    const normalizedRoute = normalizeRoute(route)
-    return normalizedRoute.length >= 2 ? normalizedRoute : null
-}
-
-function getRectCenter(rect: NodeRect): EdgeRoutePoint {
-    return {
-        x: rect.x + rect.width / 2,
-        y: rect.y + rect.height / 2,
-    }
-}
-
-function getAnchorPoint(rect: NodeRect, side: RouteSide): EdgeRoutePoint {
-    if (side === 'top') {
-        return { x: rect.x + rect.width / 2, y: rect.y }
-    }
-    if (side === 'right') {
-        return { x: rect.x + rect.width, y: rect.y + rect.height / 2 }
-    }
-    if (side === 'bottom') {
-        return { x: rect.x + rect.width / 2, y: rect.y + rect.height }
-    }
-    return { x: rect.x, y: rect.y + rect.height / 2 }
-}
-
-function offsetPoint(point: EdgeRoutePoint, side: RouteSide, distance: number): EdgeRoutePoint {
-    if (side === 'top') {
-        return { x: point.x, y: point.y - distance }
-    }
-    if (side === 'right') {
-        return { x: point.x + distance, y: point.y }
-    }
-    if (side === 'bottom') {
-        return { x: point.x, y: point.y + distance }
-    }
-    return { x: point.x - distance, y: point.y }
-}
-
-function deriveSourceSide(start: EdgeRoutePoint, next: EdgeRoutePoint): RouteSide {
-    if (start.x !== next.x) {
-        return next.x > start.x ? 'right' : 'left'
-    }
-    return next.y > start.y ? 'bottom' : 'top'
-}
-
-function deriveTargetSide(previous: EdgeRoutePoint, end: EdgeRoutePoint): RouteSide {
-    if (previous.x !== end.x) {
-        return end.x > previous.x ? 'left' : 'right'
-    }
-    return end.y > previous.y ? 'top' : 'bottom'
-}
-
-export function extractRouteEndpointSides(route: EdgeRoute | null | undefined): EdgeRouteEndpointSides | null {
-    const normalizedRoute = normalizeRoute(route ?? [])
-    if (normalizedRoute.length < 2) {
-        return null
-    }
-
-    const sourcePoint = normalizedRoute[0]
-    const nextPoint = normalizedRoute[1]
-    const previousPoint = normalizedRoute[normalizedRoute.length - 2]
-    const targetPoint = normalizedRoute[normalizedRoute.length - 1]
-
-    return {
-        sourceSide: deriveSourceSide(sourcePoint, nextPoint),
-        targetSide: deriveTargetSide(previousPoint, targetPoint),
-    }
-}
-
-export function buildAnchoredOrthogonalRoute(
-    sourceRect: NodeRect,
-    targetRect: NodeRect,
-    sourceSide: RouteSide,
-    targetSide: RouteSide,
-): EdgeRoute {
-    const sourceAnchor = getAnchorPoint(sourceRect, sourceSide)
-    const targetAnchor = getAnchorPoint(targetRect, targetSide)
-
-    if (sourceSide === targetSide) {
-        if (sourceSide === 'left' || sourceSide === 'right') {
-            const corridorX = sourceSide === 'left'
-                ? Math.min(sourceRect.x, targetRect.x) - ANCHOR_STUB_DISTANCE
-                : Math.max(sourceRect.x + sourceRect.width, targetRect.x + targetRect.width) + ANCHOR_STUB_DISTANCE
-            return normalizeRoute([
-                sourceAnchor,
-                { x: corridorX, y: sourceAnchor.y },
-                { x: corridorX, y: targetAnchor.y },
-                targetAnchor,
-            ])
-        }
-
-        const corridorY = sourceSide === 'top'
-            ? Math.min(sourceRect.y, targetRect.y) - ANCHOR_STUB_DISTANCE
-            : Math.max(sourceRect.y + sourceRect.height, targetRect.y + targetRect.height) + ANCHOR_STUB_DISTANCE
-        return normalizeRoute([
-            sourceAnchor,
-            { x: sourceAnchor.x, y: corridorY },
-            { x: targetAnchor.x, y: corridorY },
-            targetAnchor,
-        ])
-    }
-
-    const sourceStub = offsetPoint(sourceAnchor, sourceSide, ANCHOR_STUB_DISTANCE)
-    const targetStub = offsetPoint(targetAnchor, targetSide, ANCHOR_STUB_DISTANCE)
-
-    if (targetSide === 'left' || targetSide === 'right') {
-        let corridorY = (sourceStub.y + targetStub.y) / 2
-        if (corridorY === sourceStub.y && corridorY === targetStub.y) {
-            corridorY += ANCHOR_STUB_DISTANCE
-        }
-        return normalizeRoute([
-            sourceAnchor,
-            sourceStub,
-            { x: sourceStub.x, y: corridorY },
-            { x: targetStub.x, y: corridorY },
-            targetStub,
-            targetAnchor,
-        ])
-    }
-
-    let corridorX = (sourceStub.x + targetStub.x) / 2
-    if (corridorX === sourceStub.x && corridorX === targetStub.x) {
-        corridorX += ANCHOR_STUB_DISTANCE
-    }
-    return normalizeRoute([
-        sourceAnchor,
-        sourceStub,
-        { x: corridorX, y: sourceStub.y },
-        { x: corridorX, y: targetStub.y },
-        targetStub,
-        targetAnchor,
-    ])
-}
-
-function buildMidpointRoute(start: EdgeRoutePoint, end: EdgeRoutePoint, verticalFirst: boolean): EdgeRoute {
-    if (verticalFirst) {
-        const midpointY = (start.y + end.y) / 2
-        return normalizeRoute([
-            start,
-            { x: start.x, y: midpointY },
-            { x: end.x, y: midpointY },
-            end,
-        ])
-    }
-
-    const midpointX = (start.x + end.x) / 2
-    return normalizeRoute([
-        start,
-        { x: midpointX, y: start.y },
-        { x: midpointX, y: end.y },
-        end,
-    ])
-}
-
-function buildLoopbackRoute(start: EdgeRoutePoint, end: EdgeRoutePoint, side: Extract<RouteSide, 'left' | 'right'>): EdgeRoute {
-    const routeX = side === 'left'
-        ? Math.min(start.x, end.x) - LOOPBACK_CLEARANCE
-        : Math.max(start.x, end.x) + LOOPBACK_CLEARANCE
-
-    return normalizeRoute([
-        start,
-        { x: routeX, y: start.y },
-        { x: routeX, y: end.y },
-        end,
-    ])
-}
-
-function buildVerticalLoopbackRoute(start: EdgeRoutePoint, end: EdgeRoutePoint, side: Extract<RouteSide, 'top' | 'bottom'>): EdgeRoute {
-    const routeY = side === 'top'
-        ? Math.min(start.y, end.y) - LOOPBACK_CLEARANCE
-        : Math.max(start.y, end.y) + LOOPBACK_CLEARANCE
-
-    return normalizeRoute([
-        start,
-        { x: start.x, y: routeY },
-        { x: end.x, y: routeY },
-        end,
-    ])
-}
-
-export function buildFallbackOrthogonalRoute(sourceRect: NodeRect, targetRect: NodeRect): EdgeRoute {
-    const sourceCenter = getRectCenter(sourceRect)
-    const targetCenter = getRectCenter(targetRect)
-    const dx = targetCenter.x - sourceCenter.x
-    const dy = targetCenter.y - sourceCenter.y
-
-    if (Math.abs(dy) <= SAME_ROW_THRESHOLD) {
-        const sourceSide: RouteSide = dx >= 0 ? 'right' : 'left'
-        const targetSide: RouteSide = dx >= 0 ? 'left' : 'right'
-        return buildMidpointRoute(
-            getAnchorPoint(sourceRect, sourceSide),
-            getAnchorPoint(targetRect, targetSide),
-            false,
-        )
-    }
-
-    if (dy > 0) {
-        return buildMidpointRoute(
-            getAnchorPoint(sourceRect, 'bottom'),
-            getAnchorPoint(targetRect, 'top'),
-            true,
-        )
-    }
-
-    if (Math.abs(dx) < Math.max(sourceRect.width, targetRect.width)) {
-        const side: Extract<RouteSide, 'left' | 'right'> = dx <= 0 ? 'left' : 'right'
-        return buildLoopbackRoute(
-            getAnchorPoint(sourceRect, side),
-            getAnchorPoint(targetRect, side),
-            side,
-        )
-    }
-
-    const sourceSide: RouteSide = dx >= 0 ? 'right' : 'left'
-    const targetSide: RouteSide = dx >= 0 ? 'left' : 'right'
-    return buildMidpointRoute(
-        getAnchorPoint(sourceRect, sourceSide),
-        getAnchorPoint(targetRect, targetSide),
-        false,
-    )
-}
-
-export function buildReciprocalDetourRoute(
-    sourceRect: NodeRect,
-    targetRect: NodeRect,
-    detourSide: ReciprocalDetourSide,
-): EdgeRoute {
-    const sourceAnchor = getAnchorPoint(sourceRect, detourSide)
-    const targetAnchor = getAnchorPoint(targetRect, detourSide)
-
-    if (detourSide === 'left' || detourSide === 'right') {
-        return buildLoopbackRoute(sourceAnchor, targetAnchor, detourSide)
-    }
-
-    return buildVerticalLoopbackRoute(sourceAnchor, targetAnchor, detourSide)
 }
 
 function moveTowards(from: EdgeRoutePoint, to: EdgeRoutePoint, distance: number): EdgeRoutePoint {
@@ -384,9 +130,9 @@ function isOrthogonalTurn(previous: EdgeRoutePoint, current: EdgeRoutePoint, nex
     return (incomingVertical && outgoingHorizontal) || (incomingHorizontal && outgoingVertical)
 }
 
-export function buildPolylinePath(route: EdgeRoute | null | undefined): string {
-    const normalizedRoute = normalizeRoute(route ?? [])
-    if (!normalizedRoute.length) {
+export function buildRoundedPolylinePath(route: EdgeRoute | null | undefined): string {
+    const normalizedRoute = normalizeRoute(route)
+    if (normalizedRoute.length === 0) {
         return ''
     }
 
@@ -436,7 +182,7 @@ export function buildPolylinePath(route: EdgeRoute | null | undefined): string {
 }
 
 export function getRouteMidpoint(route: EdgeRoute | null | undefined): EdgeRoutePoint {
-    const normalizedRoute = normalizeRoute(route ?? [])
+    const normalizedRoute = normalizeRoute(route)
     if (normalizedRoute.length === 0) {
         return { x: 0, y: 0 }
     }
@@ -474,25 +220,611 @@ export function getRouteMidpoint(route: EdgeRoute | null | undefined): EdgeRoute
     return normalizedRoute[normalizedRoute.length - 1]
 }
 
-export function stripEdgeLayoutRoutes<EdgeType extends { data?: Record<string, unknown> | undefined }>(
-    edges: EdgeType[],
-): EdgeType[] {
-    let mutated = false
+export function getSlotOffset(slot: number | null | undefined, slotCount: number | null | undefined): number {
+    if (!Number.isFinite(slot) || !Number.isFinite(slotCount) || (slotCount as number) <= 0) {
+        return DEFAULT_SLOT_OFFSET
+    }
+    return Math.min(1, Math.max(0, ((slot as number) + 1) / ((slotCount as number) + 1)))
+}
 
-    const nextEdges = edges.map((edge) => {
-        const edgeData = edge.data
-        if (!edgeData || !('layoutRoute' in edgeData)) {
-            return edge
-        }
+export function getPortAnchorPoint(rect: NodeRect, port: RoutedPort): EdgeRoutePoint {
+    const offset = getSlotOffset(port.slot, port.slotCount)
+    if (port.side === 'top') {
+        return { x: rect.x + rect.width * offset, y: rect.y }
+    }
+    if (port.side === 'right') {
+        return { x: rect.x + rect.width, y: rect.y + rect.height * offset }
+    }
+    if (port.side === 'bottom') {
+        return { x: rect.x + rect.width * offset, y: rect.y + rect.height }
+    }
+    return { x: rect.x, y: rect.y + rect.height * offset }
+}
 
-        mutated = true
-        const rest = { ...edgeData }
-        delete rest.layoutRoute
-        if (Object.keys(rest).length === 0) {
-            return { ...edge, data: undefined }
+function getPortLeadPoint(anchor: EdgeRoutePoint, side: RouteSide): EdgeRoutePoint {
+    if (side === 'top') {
+        return { x: anchor.x, y: anchor.y - PORT_LEAD_DISTANCE }
+    }
+    if (side === 'right') {
+        return { x: anchor.x + PORT_LEAD_DISTANCE, y: anchor.y }
+    }
+    if (side === 'bottom') {
+        return { x: anchor.x, y: anchor.y + PORT_LEAD_DISTANCE }
+    }
+    return { x: anchor.x - PORT_LEAD_DISTANCE, y: anchor.y }
+}
+
+function getPortEscapePoint(
+    anchor: EdgeRoutePoint,
+    side: RouteSide,
+    obstacles: ExpandedRect[],
+): EdgeRoutePoint {
+    const baseLeadPoint = getPortLeadPoint(anchor, side)
+
+    if (side === 'right') {
+        let x = baseLeadPoint.x
+        let advanced = true
+        while (advanced) {
+            advanced = false
+            obstacles.forEach((obstacle) => {
+                if (
+                    anchor.y > obstacle.y + EPSILON
+                    && anchor.y < obstacle.y + obstacle.height - EPSILON
+                    && x > obstacle.x + EPSILON
+                    && x < obstacle.x + obstacle.width - EPSILON
+                ) {
+                    x = obstacle.x + obstacle.width
+                    advanced = true
+                }
+            })
         }
-        return { ...edge, data: rest }
+        return { x, y: anchor.y }
+    }
+
+    if (side === 'left') {
+        let x = baseLeadPoint.x
+        let advanced = true
+        while (advanced) {
+            advanced = false
+            obstacles.forEach((obstacle) => {
+                if (
+                    anchor.y > obstacle.y + EPSILON
+                    && anchor.y < obstacle.y + obstacle.height - EPSILON
+                    && x > obstacle.x + EPSILON
+                    && x < obstacle.x + obstacle.width - EPSILON
+                ) {
+                    x = obstacle.x
+                    advanced = true
+                }
+            })
+        }
+        return { x, y: anchor.y }
+    }
+
+    if (side === 'bottom') {
+        let y = baseLeadPoint.y
+        let advanced = true
+        while (advanced) {
+            advanced = false
+            obstacles.forEach((obstacle) => {
+                if (
+                    anchor.x > obstacle.x + EPSILON
+                    && anchor.x < obstacle.x + obstacle.width - EPSILON
+                    && y > obstacle.y + EPSILON
+                    && y < obstacle.y + obstacle.height - EPSILON
+                ) {
+                    y = obstacle.y + obstacle.height
+                    advanced = true
+                }
+            })
+        }
+        return { x: anchor.x, y }
+    }
+
+    let y = baseLeadPoint.y
+    let advanced = true
+    while (advanced) {
+        advanced = false
+        obstacles.forEach((obstacle) => {
+            if (
+                anchor.x > obstacle.x + EPSILON
+                && anchor.x < obstacle.x + obstacle.width - EPSILON
+                && y > obstacle.y + EPSILON
+                && y < obstacle.y + obstacle.height - EPSILON
+            ) {
+                y = obstacle.y
+                advanced = true
+            }
+        })
+    }
+    return { x: anchor.x, y }
+}
+
+function expandRect(rect: NodeRect, padding: number): ExpandedRect {
+    return {
+        x: rect.x - padding,
+        y: rect.y - padding,
+        width: rect.width + padding * 2,
+        height: rect.height + padding * 2,
+    }
+}
+
+function isStrictlyInsideRect(point: EdgeRoutePoint, rect: NodeRect): boolean {
+    return (
+        point.x > rect.x + EPSILON
+        && point.x < rect.x + rect.width - EPSILON
+        && point.y > rect.y + EPSILON
+        && point.y < rect.y + rect.height - EPSILON
+    )
+}
+
+function hasOverlap(minA: number, maxA: number, minB: number, maxB: number): boolean {
+    return minA < maxB - EPSILON && maxA > minB + EPSILON
+}
+
+function segmentCrossesRect(a: EdgeRoutePoint, b: EdgeRoutePoint, rect: NodeRect): boolean {
+    if (a.x === b.x) {
+        if (a.x <= rect.x + EPSILON || a.x >= rect.x + rect.width - EPSILON) {
+            return false
+        }
+        const minY = Math.min(a.y, b.y)
+        const maxY = Math.max(a.y, b.y)
+        return hasOverlap(minY, maxY, rect.y, rect.y + rect.height)
+    }
+
+    if (a.y === b.y) {
+        if (a.y <= rect.y + EPSILON || a.y >= rect.y + rect.height - EPSILON) {
+            return false
+        }
+        const minX = Math.min(a.x, b.x)
+        const maxX = Math.max(a.x, b.x)
+        return hasOverlap(minX, maxX, rect.x, rect.x + rect.width)
+    }
+
+    return false
+}
+
+function segmentIsClear(a: EdgeRoutePoint, b: EdgeRoutePoint, obstacles: ExpandedRect[]): boolean {
+    if ((a.x !== b.x && a.y !== b.y) || !isFinitePoint(a) || !isFinitePoint(b)) {
+        return false
+    }
+
+    return obstacles.every((obstacle) => !segmentCrossesRect(a, b, obstacle))
+}
+
+export function routeIntersectsRect(
+    route: EdgeRoute | null | undefined,
+    rect: NodeRect,
+    padding = 0,
+): boolean {
+    const normalizedRoute = normalizeRoute(route)
+    if (normalizedRoute.length === 0) {
+        return false
+    }
+
+    const expandedRect = padding > 0 ? expandRect(rect, padding) : rect
+    if (normalizedRoute.some((point) => isStrictlyInsideRect(point, expandedRect))) {
+        return true
+    }
+
+    for (let index = 1; index < normalizedRoute.length; index += 1) {
+        if (segmentCrossesRect(normalizedRoute[index - 1], normalizedRoute[index], expandedRect)) {
+            return true
+        }
+    }
+
+    return false
+}
+
+function createPointId(point: EdgeRoutePoint): string {
+    return `${point.x}:${point.y}`
+}
+
+function compareNumber(left: number, right: number): number {
+    return left - right
+}
+
+function buildGraphNodes(
+    xs: number[],
+    ys: number[],
+    obstacles: ExpandedRect[],
+    requiredPoints: EdgeRoutePoint[],
+): Map<string, GraphNode> {
+    const graphNodes = new Map<string, GraphNode>()
+
+    requiredPoints.forEach((point) => {
+        graphNodes.set(createPointId(point), {
+            id: createPointId(point),
+            point,
+        })
     })
 
-    return mutated ? nextEdges : edges
+    xs.forEach((x) => {
+        ys.forEach((y) => {
+            const point = { x, y }
+            if (obstacles.some((obstacle) => isStrictlyInsideRect(point, obstacle))) {
+                return
+            }
+            graphNodes.set(createPointId(point), {
+                id: createPointId(point),
+                point,
+            })
+        })
+    })
+
+    return graphNodes
+}
+
+type PreviousRouteSegment = {
+    axis: Axis
+    min: number
+    max: number
+    coordinate: number
+}
+
+function buildPreviousRouteSegments(route: EdgeRoute | null | undefined): PreviousRouteSegment[] {
+    const normalizedRoute = normalizeRoute(route)
+    const segments: PreviousRouteSegment[] = []
+
+    for (let index = 1; index < normalizedRoute.length; index += 1) {
+        const previous = normalizedRoute[index - 1]
+        const current = normalizedRoute[index]
+        if (previous.x === current.x) {
+            segments.push({
+                axis: 'vertical',
+                coordinate: previous.x,
+                min: Math.min(previous.y, current.y),
+                max: Math.max(previous.y, current.y),
+            })
+            continue
+        }
+        if (previous.y === current.y) {
+            segments.push({
+                axis: 'horizontal',
+                coordinate: previous.y,
+                min: Math.min(previous.x, current.x),
+                max: Math.max(previous.x, current.x),
+            })
+        }
+    }
+
+    return segments
+}
+
+function segmentMatchesPreviousRoute(
+    from: EdgeRoutePoint,
+    to: EdgeRoutePoint,
+    previousSegments: PreviousRouteSegment[],
+): boolean {
+    if (from.x === to.x) {
+        return previousSegments.some((segment) =>
+            segment.axis === 'vertical'
+            && segment.coordinate === from.x
+            && hasOverlap(
+                Math.min(from.y, to.y),
+                Math.max(from.y, to.y),
+                segment.min,
+                segment.max,
+            ),
+        )
+    }
+
+    if (from.y === to.y) {
+        return previousSegments.some((segment) =>
+            segment.axis === 'horizontal'
+            && segment.coordinate === from.y
+            && hasOverlap(
+                Math.min(from.x, to.x),
+                Math.max(from.x, to.x),
+                segment.min,
+                segment.max,
+            ),
+        )
+    }
+
+    return false
+}
+
+function buildAdjacency(
+    graphNodes: Map<string, GraphNode>,
+    xs: number[],
+    ys: number[],
+    obstacles: ExpandedRect[],
+): Map<string, GraphNode[]> {
+    const adjacency = new Map<string, GraphNode[]>()
+    const getPoint = (x: number, y: number) => graphNodes.get(createPointId({ x, y })) ?? null
+
+    ys.forEach((y) => {
+        let previousNode: GraphNode | null = null
+        xs.forEach((x) => {
+            const node = getPoint(x, y)
+            if (!node) {
+                previousNode = null
+                return
+            }
+            if (previousNode && segmentIsClear(previousNode.point, node.point, obstacles)) {
+                const previousNeighbors = adjacency.get(previousNode.id) ?? []
+                previousNeighbors.push(node)
+                adjacency.set(previousNode.id, previousNeighbors)
+
+                const nodeNeighbors = adjacency.get(node.id) ?? []
+                nodeNeighbors.push(previousNode)
+                adjacency.set(node.id, nodeNeighbors)
+            } else if (previousNode && !segmentIsClear(previousNode.point, node.point, obstacles)) {
+                previousNode = null
+            }
+
+            if (!previousNode || segmentIsClear(previousNode.point, node.point, obstacles)) {
+                previousNode = node
+            }
+        })
+    })
+
+    xs.forEach((x) => {
+        let previousNode: GraphNode | null = null
+        ys.forEach((y) => {
+            const node = getPoint(x, y)
+            if (!node) {
+                previousNode = null
+                return
+            }
+            if (previousNode && segmentIsClear(previousNode.point, node.point, obstacles)) {
+                const previousNeighbors = adjacency.get(previousNode.id) ?? []
+                previousNeighbors.push(node)
+                adjacency.set(previousNode.id, previousNeighbors)
+
+                const nodeNeighbors = adjacency.get(node.id) ?? []
+                nodeNeighbors.push(previousNode)
+                adjacency.set(node.id, nodeNeighbors)
+            } else if (previousNode && !segmentIsClear(previousNode.point, node.point, obstacles)) {
+                previousNode = null
+            }
+
+            if (!previousNode || segmentIsClear(previousNode.point, node.point, obstacles)) {
+                previousNode = node
+            }
+        })
+    })
+
+    adjacency.forEach((neighbors, key) => {
+        adjacency.set(
+            key,
+            neighbors.sort((left, right) => {
+                if (left.point.x !== right.point.x) {
+                    return compareNumber(left.point.x, right.point.x)
+                }
+                return compareNumber(left.point.y, right.point.y)
+            }),
+        )
+    })
+
+    return adjacency
+}
+
+function buildSearchKey(nodeId: string, axis: Axis | null): string {
+    return `${nodeId}|${axis ?? 'start'}`
+}
+
+function findShortestOrthogonalPath(
+    graphNodes: Map<string, GraphNode>,
+    adjacency: Map<string, GraphNode[]>,
+    startNodeId: string,
+    endNodeId: string,
+    previousRoute?: EdgeRoute | null,
+): EdgeRoute | null {
+    const previousSegments = buildPreviousRouteSegments(previousRoute)
+    const distances = new Map<string, number>([[buildSearchKey(startNodeId, null), 0]])
+    const previousByState = new Map<string, { nodeId: string; axis: Axis | null } | null>([
+        [buildSearchKey(startNodeId, null), null],
+    ])
+    const queue: SearchState[] = [{
+        cost: 0,
+        nodeId: startNodeId,
+        axis: null,
+    }]
+
+    while (queue.length > 0) {
+        queue.sort((left, right) => left.cost - right.cost)
+        const current = queue.shift()
+        if (!current) {
+            break
+        }
+        const currentKey = buildSearchKey(current.nodeId, current.axis)
+        if (current.cost > (distances.get(currentKey) ?? Number.POSITIVE_INFINITY)) {
+            continue
+        }
+        if (current.nodeId === endNodeId) {
+            const points: EdgeRoutePoint[] = []
+            let stateKey: string | null = currentKey
+            while (stateKey) {
+                const [nodeId, axisLabel] = stateKey.split('|')
+                points.push(graphNodes.get(nodeId)?.point ?? { x: 0, y: 0 })
+                const previousState: { nodeId: string; axis: Axis | null } | null =
+                    previousByState.get(stateKey) ?? null
+                stateKey = previousState ? buildSearchKey(previousState.nodeId, previousState.axis) : null
+                if (axisLabel === 'start' && !previousState) {
+                    break
+                }
+            }
+            return normalizeRoute(points.reverse())
+        }
+
+        const currentNode = graphNodes.get(current.nodeId)
+        if (!currentNode) {
+            continue
+        }
+
+        const neighbors = adjacency.get(current.nodeId) ?? []
+        neighbors.forEach((neighbor) => {
+            const axis: Axis = currentNode.point.x === neighbor.point.x ? 'vertical' : 'horizontal'
+            const segmentLength = Math.abs(currentNode.point.x - neighbor.point.x) + Math.abs(currentNode.point.y - neighbor.point.y)
+            const bendPenalty = current.axis && current.axis !== axis ? BEND_PENALTY : 0
+            const previousRoutePenalty = previousSegments.length > 0
+                && !segmentMatchesPreviousRoute(currentNode.point, neighbor.point, previousSegments)
+                ? PREVIOUS_ROUTE_PENALTY
+                : 0
+            const nextCost = current.cost + segmentLength + bendPenalty + previousRoutePenalty
+            const nextKey = buildSearchKey(neighbor.id, axis)
+            if (nextCost >= (distances.get(nextKey) ?? Number.POSITIVE_INFINITY)) {
+                return
+            }
+
+            distances.set(nextKey, nextCost)
+            previousByState.set(nextKey, {
+                nodeId: current.nodeId,
+                axis: current.axis,
+            })
+            queue.push({
+                cost: nextCost,
+                nodeId: neighbor.id,
+                axis,
+            })
+        })
+    }
+
+    return null
+}
+
+function buildFallbackRoute(
+    sourceAnchor: EdgeRoutePoint,
+    sourceLead: EdgeRoutePoint,
+    targetLead: EdgeRoutePoint,
+    targetAnchor: EdgeRoutePoint,
+): EdgeRoute {
+    const midpointX = (sourceLead.x + targetLead.x) / 2
+    const midpointY = (sourceLead.y + targetLead.y) / 2
+
+    if (sourceLead.x === targetLead.x || sourceLead.y === targetLead.y) {
+        return normalizeRoute([
+            sourceAnchor,
+            sourceLead,
+            targetLead,
+            targetAnchor,
+        ])
+    }
+
+    if (Math.abs(sourceLead.x - targetLead.x) >= Math.abs(sourceLead.y - targetLead.y)) {
+        return normalizeRoute([
+            sourceAnchor,
+            sourceLead,
+            { x: midpointX, y: sourceLead.y },
+            { x: midpointX, y: targetLead.y },
+            targetLead,
+            targetAnchor,
+        ])
+    }
+
+    return normalizeRoute([
+        sourceAnchor,
+        sourceLead,
+        { x: sourceLead.x, y: midpointY },
+        { x: targetLead.x, y: midpointY },
+        targetLead,
+        targetAnchor,
+    ])
+}
+
+function buildSelfLoopRoute(anchor: EdgeRoutePoint, side: RouteSide): EdgeRoute {
+    const horizontalOffset = side === 'left' ? -PORT_LEAD_DISTANCE * 2 : PORT_LEAD_DISTANCE * 2
+    const verticalOffset = side === 'top' ? -PORT_LEAD_DISTANCE * 2 : PORT_LEAD_DISTANCE * 2
+
+    if (side === 'left' || side === 'right') {
+        return normalizeRoute([
+            anchor,
+            { x: anchor.x + horizontalOffset, y: anchor.y },
+            { x: anchor.x + horizontalOffset, y: anchor.y - PORT_LEAD_DISTANCE * 2 },
+            { x: anchor.x, y: anchor.y - PORT_LEAD_DISTANCE * 2 },
+            anchor,
+        ])
+    }
+
+    return normalizeRoute([
+        anchor,
+        { x: anchor.x, y: anchor.y + verticalOffset },
+        { x: anchor.x - PORT_LEAD_DISTANCE * 2, y: anchor.y + verticalOffset },
+        { x: anchor.x - PORT_LEAD_DISTANCE * 2, y: anchor.y },
+        anchor,
+    ])
+}
+
+function routeSingleEdge(
+    edge: FixedNodeRouterEdge,
+    nodeMap: Map<string, NodeRect>,
+    expandedObstacles: ExpandedRect[],
+): EdgeRoute {
+    const sourceRect = nodeMap.get(edge.source)
+    const targetRect = nodeMap.get(edge.target)
+    if (!sourceRect || !targetRect) {
+        return normalizeRoute(edge.previousRoute ?? [])
+    }
+
+    const sourceAnchor = getPortAnchorPoint(sourceRect, edge.sourcePort)
+    const targetAnchor = getPortAnchorPoint(targetRect, edge.targetPort)
+
+    if (edge.source === edge.target) {
+        return buildSelfLoopRoute(sourceAnchor, edge.sourcePort.side)
+    }
+
+    const sourceLead = getPortEscapePoint(sourceAnchor, edge.sourcePort.side, expandedObstacles)
+    const targetLead = getPortEscapePoint(targetAnchor, edge.targetPort.side, expandedObstacles)
+
+    const xCoordinates = new Set<number>([
+        sourceAnchor.x,
+        sourceLead.x,
+        targetLead.x,
+        targetAnchor.x,
+    ])
+    const yCoordinates = new Set<number>([
+        sourceAnchor.y,
+        sourceLead.y,
+        targetLead.y,
+        targetAnchor.y,
+    ])
+
+    edge.previousRoute?.forEach((point) => {
+        xCoordinates.add(point.x)
+        yCoordinates.add(point.y)
+    })
+    expandedObstacles.forEach((obstacle) => {
+        xCoordinates.add(obstacle.x)
+        xCoordinates.add(obstacle.x + obstacle.width)
+        yCoordinates.add(obstacle.y)
+        yCoordinates.add(obstacle.y + obstacle.height)
+    })
+
+    const xs = [...xCoordinates].sort(compareNumber)
+    const ys = [...yCoordinates].sort(compareNumber)
+    const graphNodes = buildGraphNodes(xs, ys, expandedObstacles, [sourceLead, targetLead])
+    const adjacency = buildAdjacency(graphNodes, xs, ys, expandedObstacles)
+    const pathBetweenLeads = findShortestOrthogonalPath(
+        graphNodes,
+        adjacency,
+        createPointId(sourceLead),
+        createPointId(targetLead),
+        edge.previousRoute,
+    )
+
+    if (!pathBetweenLeads) {
+        return buildFallbackRoute(sourceAnchor, sourceLead, targetLead, targetAnchor)
+    }
+
+    return normalizeRoute([
+        sourceAnchor,
+        ...pathBetweenLeads,
+        targetAnchor,
+    ])
+}
+
+export function routeFixedNodeGraph(request: FixedNodeRouterRequest): FixedNodeRouterResult {
+    const nodeMap = new Map(
+        request.nodes.map((node) => [node.id, node.rect]),
+    )
+    const expandedObstacles = request.nodes.map((node) => expandRect(node.rect, OBSTACLE_PADDING))
+    const routes = Object.fromEntries(
+        request.edges.map((edge) => [
+            edge.id,
+            routeSingleEdge(edge, nodeMap, expandedObstacles),
+        ]),
+    )
+    return { routes }
 }

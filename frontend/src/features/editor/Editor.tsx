@@ -7,7 +7,6 @@ import {
     MarkerType,
     useNodesState,
     useEdgesState,
-    addEdge,
     applyNodeChanges,
     applyEdgeChanges,
 } from '@xyflow/react';
@@ -26,10 +25,28 @@ import {
 import { CANVAS_INTERACTION_BUDGET_MS } from '@/lib/performanceBudgets';
 import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler';
 import {
+    attachRenderRoutesToEdges,
+    buildEdgeLayoutAssignments,
+    buildFixedNodeRouterRequest,
+    buildSavedFlowLayout,
+    buildEdgeLayoutKeyMap,
+    computeFlowTopologyStamp,
+    edgeLayoutAssignmentsDiffer,
+    readNodeRect,
+    type LaidOutFlowGraph,
+} from '@/lib/flowLayout';
+import {
+    clearSavedFlowLayout,
+    loadSavedFlowLayout,
+    saveSavedFlowLayout,
+    type FlowCanvasKind,
+    type SavedFlowLayoutV1,
+} from '@/lib/flowLayoutPersistence';
+import { routeFixedNodeGraphInWorker } from '@/lib/flowLayoutRouterClient';
+import { routeIntersectsRect, type NodeRect, type RouteSide } from '@/lib/edgeRouting';
+import {
     buildHydratedFlowGraph,
     ChildFlowExpansionToggle,
-    type BuildHydratedFlowGraphOptions,
-    deriveElkEdgeRoutingHints,
     edgeTypes,
     EDGE_CLASS,
     EDGE_INTERACTION_WIDTH,
@@ -41,7 +58,6 @@ import {
     normalizeLegacyDot,
     nowMs,
 } from '@/features/workflow-canvas';
-import { stripEdgeLayoutRoutes } from '@/lib/edgeRouting';
 import { getReactFlowNodeTypeForShape, getShapeNodeStyle } from '@/lib/workflowNodeShape';
 import { Button, Textarea } from '@/ui';
 import { isAbortError } from '@/lib/api/shared';
@@ -54,6 +70,8 @@ import {
 const DEFAULT_PREVIEW_DEBOUNCE_MS = 300;
 const MEDIUM_GRAPH_PREVIEW_DEBOUNCE_MS = 600;
 const MEDIUM_GRAPH_NODE_THRESHOLD = 25;
+const LIVE_ROUTE_THROTTLE_MS = 80;
+const EDITOR_LAYOUT_CANVAS_KIND: FlowCanvasKind = 'editor-parent-only';
 
 type PreviewResponse = EditorPreviewResponse
 
@@ -79,6 +97,64 @@ type PreparedHydratedPreview = {
     edges: Edge[]
     serializedNodes: Node[]
     layoutDurationMs: number
+    layout: SavedFlowLayoutV1
+    edgeIdToLayoutKey: Map<string, string>
+}
+
+export function shouldPersistNodeChanges(changes: NodeChange<Node>[]): boolean {
+    return changes.some((change) => {
+        return change.type !== 'select' && change.type !== 'position' && change.type !== 'dimensions'
+    })
+}
+
+function readHandleSide(handleId: string | null | undefined): RouteSide | null {
+    if (!handleId) {
+        return null
+    }
+    if (handleId.endsWith('top')) {
+        return 'top'
+    }
+    if (handleId.endsWith('right')) {
+        return 'right'
+    }
+    if (handleId.endsWith('bottom')) {
+        return 'bottom'
+    }
+    if (handleId.endsWith('left')) {
+        return 'left'
+    }
+    return null
+}
+
+function buildEdgeIdForConnection(params: Connection | Edge, currentEdges: Edge[]): string {
+    if ('id' in params && typeof params.id === 'string' && params.id.trim().length > 0) {
+        return params.id
+    }
+    return `e-${params.source}-${params.target}-${currentEdges.length}`
+}
+
+function buildDirtyRect(previousRect: NodeRect | null, nextRect: NodeRect | null): NodeRect | null {
+    if (!previousRect && !nextRect) {
+        return null
+    }
+    if (!previousRect) {
+        return nextRect
+    }
+    if (!nextRect) {
+        return previousRect
+    }
+
+    const left = Math.min(previousRect.x, nextRect.x)
+    const top = Math.min(previousRect.y, nextRect.y)
+    const right = Math.max(previousRect.x + previousRect.width, nextRect.x + nextRect.width)
+    const bottom = Math.max(previousRect.y + previousRect.height, nextRect.y + nextRect.height)
+
+    return {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    }
 }
 
 function buildAuthoredDot(
@@ -95,45 +171,6 @@ function buildAuthoredDot(
     )
 }
 
-function mergeEdgeRoutingHints(currentEdges: Edge[], hintedEdges: Edge[]): Edge[] {
-    const hintedById = new Map(
-        hintedEdges.map((edge) => [
-            edge.id,
-            {
-                layoutSourceSide: edge.data?.layoutSourceSide,
-                layoutTargetSide: edge.data?.layoutTargetSide,
-            },
-        ]),
-    )
-
-    let mutated = false
-    const nextEdges = currentEdges.map((edge) => {
-        const hinted = hintedById.get(edge.id)
-        if (!hinted || typeof hinted.layoutSourceSide !== 'string' || typeof hinted.layoutTargetSide !== 'string') {
-            return edge
-        }
-
-        if (
-            edge.data?.layoutSourceSide === hinted.layoutSourceSide
-            && edge.data?.layoutTargetSide === hinted.layoutTargetSide
-        ) {
-            return edge
-        }
-
-        mutated = true
-        return {
-            ...edge,
-            data: {
-                ...(edge.data ?? {}),
-                layoutSourceSide: hinted.layoutSourceSide,
-                layoutTargetSide: hinted.layoutTargetSide,
-            },
-        }
-    })
-
-    return mutated ? nextEdges : currentEdges
-}
-
 export function Editor({ isActive = true }: { isActive?: boolean }) {
     const selectedNodeId = useStore((state) => state.selectedNodeId);
     const selectedEdgeId = useStore((state) => state.selectedEdgeId);
@@ -145,6 +182,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     const setRawDotDraft = useStore((state) => state.setRawDotDraft);
     const rawHandoffError = useStore((state) => state.rawHandoffError);
     const setRawHandoffError = useStore((state) => state.setRawHandoffError);
+    const activeProjectPath = useStore((state) => state.activeProjectPath);
     const activeFlow = useStore((state) => state.activeFlow);
     const graphAttrs = useStore((state) => state.graphAttrs);
     const uiDefaults = useStore((state) => state.uiDefaults);
@@ -170,7 +208,19 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     const hydratedFlowNameRef = useRef<string | null>(null);
     const previewTimer = useRef<number | null>(null);
     const activeFlowLoadIdRef = useRef(0);
-    const routingHintRefreshIdRef = useRef(0);
+    const liveRouteTimerRef = useRef<number | null>(null);
+    const lastLiveRouteDispatchAtRef = useRef(0);
+    const queuedRouteJobRef = useRef<{
+        nodes: Node[]
+        edges: Edge[]
+        persistAfter: boolean
+        dirtyNodeIds: Set<string>
+        dirtyRects: NodeRect[]
+    } | null>(null);
+    const layoutStateRef = useRef<SavedFlowLayoutV1 | null>(null);
+    const edgeIdToLayoutKeyRef = useRef<Map<string, string>>(new Map());
+    const edgeSideIntentRef = useRef<Record<string, { sourceSide?: RouteSide; targetSide?: RouteSide }>>({});
+    const routeRevisionRef = useRef(0);
     const rawDotEntryDraftRef = useRef<string>('');
     const rawHandoffInFlightRef = useRef(false);
     const expandChildFlowsRef = useRef(expandChildFlows);
@@ -244,31 +294,198 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         ),
     })
 
-    const refreshEdgeRoutingHints = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
-        const refreshId = routingHintRefreshIdRef.current + 1
-        routingHintRefreshIdRef.current = refreshId
+    const persistLayoutState = useCallback((layout?: SavedFlowLayoutV1 | null) => {
+        if (!flowName || expandChildFlowsRef.current) {
+            return
+        }
+        const nextLayout = layout ?? layoutStateRef.current
+        if (!nextLayout) {
+            return
+        }
+        saveSavedFlowLayout(
+            activeProjectPath,
+            flowName,
+            EDITOR_LAYOUT_CANVAS_KIND,
+            nextLayout,
+        )
+    }, [activeProjectPath, flowName])
 
-        if (nextEdges.length === 0) {
+    const runEdgeRouting = useCallback(async (
+        nextNodes: Node[],
+        nextEdges: Edge[],
+        options?: {
+            persistAfter?: boolean
+            dirtyNodeIds?: Set<string>
+            dirtyRects?: NodeRect[]
+        },
+    ) => {
+        const currentFlowName = flowName
+        if (!currentFlowName || expandChildFlowsRef.current) {
             return
         }
 
-        void deriveElkEdgeRoutingHints(nextNodes, nextEdges)
-            .then((hintedEdges) => {
-                if (routingHintRefreshIdRef.current !== refreshId) {
+        const previousLayout = layoutStateRef.current
+        const topologyStamp = computeFlowTopologyStamp(nextNodes, nextEdges)
+        const { assignments, edgeIdToLayoutKey } = buildEdgeLayoutAssignments(
+            nextNodes,
+            nextEdges,
+            previousLayout,
+            edgeSideIntentRef.current,
+        )
+        const dirtyLayoutKeys = new Set<string>()
+
+        if (!previousLayout || previousLayout.topologyStamp !== topologyStamp) {
+            Object.keys(assignments).forEach((layoutKey) => dirtyLayoutKeys.add(layoutKey))
+        } else {
+            Object.values(assignments).forEach((assignment) => {
+                if (edgeLayoutAssignmentsDiffer(previousLayout.edgeLayouts[assignment.layoutKey], assignment)) {
+                    dirtyLayoutKeys.add(assignment.layoutKey)
+                }
+            })
+        }
+
+        if (options?.dirtyNodeIds && options.dirtyNodeIds.size > 0) {
+            Object.values(assignments).forEach((assignment) => {
+                if (
+                    options.dirtyNodeIds?.has(assignment.source)
+                    || options.dirtyNodeIds?.has(assignment.target)
+                ) {
+                    dirtyLayoutKeys.add(assignment.layoutKey)
+                }
+            })
+        }
+
+        if (options?.dirtyRects && previousLayout) {
+            Object.entries(previousLayout.edgeLayouts).forEach(([layoutKey, savedEdgeLayout]) => {
+                if (options.dirtyRects?.some((dirtyRect) => routeIntersectsRect(savedEdgeLayout.route, dirtyRect, 12))) {
+                    dirtyLayoutKeys.add(layoutKey)
+                }
+            })
+        }
+
+        if (dirtyLayoutKeys.size > 0) {
+            const affectedSourceGroups = new Set<string>()
+            const affectedTargetGroups = new Set<string>()
+            dirtyLayoutKeys.forEach((layoutKey) => {
+                const assignment = assignments[layoutKey]
+                if (!assignment) {
                     return
                 }
-                setEdges((currentEdges) => mergeEdgeRoutingHints(currentEdges, hintedEdges))
+                affectedSourceGroups.add(`${assignment.source}:${assignment.sourceSide}`)
+                affectedTargetGroups.add(`${assignment.target}:${assignment.targetSide}`)
             })
-            .catch((error) => {
-                console.error('ELK routing hint refresh failed, keeping existing edge hints.', error)
+            Object.values(assignments).forEach((assignment) => {
+                if (
+                    affectedSourceGroups.has(`${assignment.source}:${assignment.sourceSide}`)
+                    || affectedTargetGroups.has(`${assignment.target}:${assignment.targetSide}`)
+                ) {
+                    dirtyLayoutKeys.add(assignment.layoutKey)
+                }
             })
-    }, [setEdges]);
+        }
+
+        routeRevisionRef.current += 1
+        const revision = routeRevisionRef.current
+
+        const routedEdges = dirtyLayoutKeys.size > 0
+            ? await routeFixedNodeGraphInWorker(
+                buildFixedNodeRouterRequest(nextNodes, assignments, previousLayout, dirtyLayoutKeys),
+            )
+            : {}
+
+        if (routeRevisionRef.current !== revision) {
+            return
+        }
+
+        const nextLayout = buildSavedFlowLayout(
+            nextNodes,
+            assignments,
+            routedEdges,
+            topologyStamp,
+            previousLayout,
+        )
+        layoutStateRef.current = nextLayout
+        edgeIdToLayoutKeyRef.current = edgeIdToLayoutKey
+        edgeSideIntentRef.current = Object.fromEntries(
+            Object.entries(edgeSideIntentRef.current)
+                .filter(([layoutKey]) => Boolean(assignments[layoutKey])),
+        )
+        setEdges((currentEdges) => attachRenderRoutesToEdges(currentEdges, edgeIdToLayoutKey, nextLayout))
+        if (options?.persistAfter) {
+            persistLayoutState(nextLayout)
+        }
+    }, [flowName, persistLayoutState, setEdges])
+
+    const scheduleEdgeRouting = useCallback((
+        nextNodes: Node[],
+        nextEdges: Edge[],
+        options?: {
+            persistAfter?: boolean
+            dirtyNodeIds?: Set<string>
+            dirtyRects?: NodeRect[]
+            throttleMs?: number
+        },
+    ) => {
+        const dispatch = (job: NonNullable<typeof queuedRouteJobRef.current>) => {
+            lastLiveRouteDispatchAtRef.current = Date.now()
+            void runEdgeRouting(job.nodes, job.edges, {
+                persistAfter: job.persistAfter,
+                dirtyNodeIds: job.dirtyNodeIds,
+                dirtyRects: job.dirtyRects,
+            })
+        }
+
+        const nextJob = {
+            nodes: nextNodes,
+            edges: nextEdges,
+            persistAfter: options?.persistAfter ?? false,
+            dirtyNodeIds: options?.dirtyNodeIds ?? new Set<string>(),
+            dirtyRects: options?.dirtyRects ?? [],
+        }
+
+        if (!options?.throttleMs || options.throttleMs <= 0) {
+            if (liveRouteTimerRef.current) {
+                window.clearTimeout(liveRouteTimerRef.current)
+                liveRouteTimerRef.current = null
+            }
+            queuedRouteJobRef.current = null
+            dispatch(nextJob)
+            return
+        }
+
+        queuedRouteJobRef.current = nextJob
+        const elapsedMs = Date.now() - lastLiveRouteDispatchAtRef.current
+        const remainingMs = Math.max(0, options.throttleMs - elapsedMs)
+
+        if (remainingMs === 0 && !liveRouteTimerRef.current) {
+            const readyJob = queuedRouteJobRef.current
+            queuedRouteJobRef.current = null
+            if (readyJob) {
+                dispatch(readyJob)
+            }
+            return
+        }
+
+        if (!liveRouteTimerRef.current) {
+            liveRouteTimerRef.current = window.setTimeout(() => {
+                liveRouteTimerRef.current = null
+                const readyJob = queuedRouteJobRef.current
+                queuedRouteJobRef.current = null
+                if (readyJob) {
+                    dispatch(readyJob)
+                }
+            }, remainingMs)
+        }
+    }, [runEdgeRouting])
 
     const hydrateFromPreview = useCallback(async (
         preview: PreviewResponse,
         sourceDot?: string,
         debugContext?: { loadId: number | null; source: PreviewDebugContext['source'] },
-        options?: BuildHydratedFlowGraphOptions,
+        options?: {
+            expandChildren?: boolean
+            forceFreshLayout?: boolean
+        },
     ): Promise<PreparedHydratedPreview | null> => {
         if (!preview.graph) {
             recordFlowLoadDebug('hydrate:skipped', flowName, {
@@ -302,11 +519,21 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         let serializedNodes = hydratedGraph.nodes;
         let laidOutEdges = hydratedGraph.edges;
         let laidOutNodes = hydratedGraph.nodes;
+        let nextLayout: SavedFlowLayoutV1 | null = null;
+        let edgeIdToLayoutKey = new Map<string, string>();
         try {
-            const layoutGraph = await layoutWithElk(hydratedGraph.nodes, hydratedGraph.edges);
+            const savedLayout = options?.expandChildren || !flowName
+                ? null
+                : loadSavedFlowLayout(activeProjectPath, flowName, EDITOR_LAYOUT_CANVAS_KIND);
+            const layoutGraph = await layoutWithElk(hydratedGraph.nodes, hydratedGraph.edges, {
+                savedLayout,
+                forceFreshLayout: options?.forceFreshLayout,
+            });
             laidOutNodes = layoutGraph.nodes;
             laidOutEdges = layoutGraph.edges;
             serializedNodes = layoutGraph.nodes;
+            nextLayout = layoutGraph.layout;
+            edgeIdToLayoutKey = layoutGraph.edgeIdToLayoutKey;
         } catch (error) {
             console.error('ELK layout failed, using fallback positions.', error);
             serializedNodes = hydratedGraph.nodes;
@@ -321,8 +548,18 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             edges: laidOutEdges,
             serializedNodes,
             layoutDurationMs,
+            layout: nextLayout ?? {
+                version: 1,
+                topologyStamp: computeFlowTopologyStamp(laidOutNodes, laidOutEdges),
+                nodePositions: Object.fromEntries(
+                    laidOutNodes.map((node) => [node.id, { x: node.position.x, y: node.position.y }] as const),
+                ),
+                edgeLayouts: {},
+            },
+            edgeIdToLayoutKey,
         };
     }, [
+        activeProjectPath,
         flowName,
         resolvedUiDefaults,
     ]);
@@ -372,7 +609,15 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         if (!flowName) {
             hydratedRef.current = false;
             activeFlowLoadIdRef.current += 1;
-            routingHintRefreshIdRef.current += 1;
+            routeRevisionRef.current += 1;
+            layoutStateRef.current = null;
+            edgeIdToLayoutKeyRef.current = new Map();
+            edgeSideIntentRef.current = {};
+            queuedRouteJobRef.current = null;
+            if (liveRouteTimerRef.current) {
+                window.clearTimeout(liveRouteTimerRef.current);
+                liveRouteTimerRef.current = null;
+            }
             recordFlowLoadDebug('flow-load:cleared', null, {
                 loadId: activeFlowLoadIdRef.current,
                 reason: 'no active flow',
@@ -403,7 +648,15 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
 
         const loadId = activeFlowLoadIdRef.current + 1;
         activeFlowLoadIdRef.current = loadId;
-        routingHintRefreshIdRef.current += 1;
+        routeRevisionRef.current += 1;
+        layoutStateRef.current = null;
+        edgeIdToLayoutKeyRef.current = new Map();
+        edgeSideIntentRef.current = {};
+        queuedRouteJobRef.current = null;
+        if (liveRouteTimerRef.current) {
+            window.clearTimeout(liveRouteTimerRef.current);
+            liveRouteTimerRef.current = null;
+        }
         const loadAbort = new AbortController();
         let cancelled = false;
         const isCurrentLoad = () => !cancelled && activeFlowLoadIdRef.current === loadId;
@@ -491,8 +744,13 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 });
                 replaceGraphAttrs(hydrated.graphAttrs);
                 setLastLayoutMs(hydrated.layoutDurationMs);
+                layoutStateRef.current = hydrated.layout;
+                edgeIdToLayoutKeyRef.current = hydrated.edgeIdToLayoutKey;
                 setNodes(hydrated.nodes);
                 setEdges(hydrated.edges);
+                if (!expandChildFlowsRef.current) {
+                    persistLayoutState(hydrated.layout);
+                }
                 primeFlowSaveBaseline(
                     flowName,
                     buildAuthoredDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
@@ -527,6 +785,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         hydrateFromPreview,
         requestPreview,
         replaceGraphAttrs,
+        persistLayoutState,
         setEdges,
         setNodes,
         setSelectedEdgeId,
@@ -604,11 +863,8 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         if (expandChildFlows) {
             return
         }
-        const shouldClearEdgeRoutes = changes.some((change) => change.type !== 'select');
-        if (shouldClearEdgeRoutes) {
-            setEdges((currentEdges) => stripEdgeLayoutRoutes(currentEdges));
-        }
         setNodes((currentNodes) => {
+            const previousNodeRects = new Map(currentNodes.map((node) => [node.id, readNodeRect(node)]))
             const updatedNodes = applyNodeChanges(changes, currentNodes);
             const latestSelectedNodeChange = [...changes].reverse().find(
                 (change): change is NodeChange<Node> & { type: 'select'; id: string; selected: boolean } =>
@@ -617,6 +873,22 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             const nextNodes = latestSelectedNodeChange
                 ? enforceSingleSelectedNode(updatedNodes, latestSelectedNodeChange.id)
                 : updatedNodes;
+            const dirtyNodeIds = new Set<string>()
+            const dirtyRects: NodeRect[] = []
+            changes.forEach((change) => {
+                if (change.type !== 'position' && change.type !== 'dimensions') {
+                    return
+                }
+                dirtyNodeIds.add(change.id)
+                const nextNode = nextNodes.find((node) => node.id === change.id)
+                const dirtyRect = buildDirtyRect(
+                    previousNodeRects.get(change.id) ?? null,
+                    nextNode ? readNodeRect(nextNode) : null,
+                )
+                if (dirtyRect) {
+                    dirtyRects.push(dirtyRect)
+                }
+            })
             const draggingNow = changes.some(
                 (change) => change.type === 'position' && (change as { dragging?: boolean }).dragging
             );
@@ -629,16 +901,10 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 setIsDragging(false);
             }
 
-            const shouldSave = changes.some((change) => {
-                if (change.type === 'select') return false;
-                if (change.type === 'position') {
-                    return !(change as { dragging?: boolean }).dragging;
-                }
-                if (change.type === 'dimensions') {
-                    return !(change as { resizing?: boolean }).resizing;
-                }
-                return true;
-            });
+            const shouldSave = shouldPersistNodeChanges(changes);
+            const hasGeometryChange = changes.some(
+                (change) => change.type === 'position' || change.type === 'dimensions',
+            )
 
             if (shouldSave) {
                 const nonSelectChanges = changes.filter((change) => change.type !== 'select');
@@ -652,9 +918,18 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                     scheduleSave({ nodes: nextNodes, edges });
                 }
             }
+
+            if (hasGeometryChange) {
+                scheduleEdgeRouting(nextNodes, edges, {
+                    dirtyNodeIds,
+                    dirtyRects,
+                    persistAfter: draggingStopped || !draggingNow,
+                    throttleMs: draggingNow ? LIVE_ROUTE_THROTTLE_MS : 0,
+                })
+            }
             return nextNodes;
         });
-    }, [expandChildFlows, setEdges, setNodes, scheduleSave, edges, enforceSingleSelectedNode]);
+    }, [edges, enforceSingleSelectedNode, expandChildFlows, scheduleEdgeRouting, scheduleSave, setNodes]);
 
     const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
         if (expandChildFlows) {
@@ -672,11 +947,13 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             const shouldSave = changes.some((change) => change.type !== 'select');
             if (shouldSave) {
                 scheduleSave({ nodes, edges: nextEdges });
-                refreshEdgeRoutingHints(nodes, nextEdges);
+                scheduleEdgeRouting(nodes, nextEdges, {
+                    persistAfter: true,
+                })
             }
             return nextEdges;
         });
-    }, [expandChildFlows, setEdges, scheduleSave, nodes, enforceSingleSelectedEdge, refreshEdgeRoutingHints]);
+    }, [enforceSingleSelectedEdge, expandChildFlows, nodes, scheduleEdgeRouting, scheduleSave, setEdges]);
 
     const onConnect = useCallback(
         (params: Connection | Edge) => {
@@ -684,16 +961,35 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 return
             }
             setEdges((currentEdges) => {
-                const newEdges = addEdge(
-                    { ...params, type: EDGE_TYPE, interactionWidth: EDGE_INTERACTION_WIDTH },
-                    currentEdges
-                );
+                const nextEdge: Edge = {
+                    ...params,
+                    id: buildEdgeIdForConnection(params, currentEdges),
+                    type: EDGE_TYPE,
+                    className: EDGE_CLASS,
+                    interactionWidth: EDGE_INTERACTION_WIDTH,
+                }
+                const newEdges = [...currentEdges, nextEdge]
+                const edgeIdToLayoutKey = buildEdgeLayoutKeyMap(newEdges)
+                const layoutKey = edgeIdToLayoutKey.get(nextEdge.id)
+                if (layoutKey) {
+                    const sourceSide = readHandleSide(params.sourceHandle)
+                    const targetSide = readHandleSide(params.targetHandle)
+                    edgeSideIntentRef.current = {
+                        ...edgeSideIntentRef.current,
+                        [layoutKey]: {
+                            ...(sourceSide ? { sourceSide } : {}),
+                            ...(targetSide ? { targetSide } : {}),
+                        },
+                    }
+                }
                 scheduleSave({ nodes, edges: newEdges });
-                refreshEdgeRoutingHints(nodes, newEdges);
+                scheduleEdgeRouting(nodes, newEdges, {
+                    persistAfter: true,
+                })
                 return newEdges;
             });
         },
-        [expandChildFlows, setEdges, scheduleSave, nodes, refreshEdgeRoutingHints],
+        [expandChildFlows, nodes, scheduleEdgeRouting, scheduleSave, setEdges],
     );
 
     const onAddNode = useCallback(() => {
@@ -721,9 +1017,61 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         setNodes(nds => {
             const newNodes = [...nds, newNode];
             scheduleSave({ nodes: newNodes, edges });
+            scheduleEdgeRouting(newNodes, edges, {
+                persistAfter: true,
+            })
             return newNodes;
         });
-    }, [expandChildFlows, flowName, edges, graphAttrs, uiDefaults, setNodes, scheduleSave]);
+    }, [edges, expandChildFlows, flowName, graphAttrs, scheduleEdgeRouting, scheduleSave, setNodes, uiDefaults]);
+
+    const applyLaidOutGraph = useCallback((layoutGraph: LaidOutFlowGraph) => {
+        layoutStateRef.current = layoutGraph.layout
+        edgeIdToLayoutKeyRef.current = layoutGraph.edgeIdToLayoutKey
+        setNodes(layoutGraph.nodes)
+        setEdges(layoutGraph.edges)
+        persistLayoutState(layoutGraph.layout)
+    }, [persistLayoutState, setEdges, setNodes])
+
+    const onAutoArrange = useCallback(async () => {
+        if (!flowName || expandChildFlows) {
+            return
+        }
+
+        routeRevisionRef.current += 1
+        if (liveRouteTimerRef.current) {
+            window.clearTimeout(liveRouteTimerRef.current)
+            liveRouteTimerRef.current = null
+        }
+        queuedRouteJobRef.current = null
+        edgeSideIntentRef.current = {}
+        const layoutStart = nowMs()
+        const layoutGraph = await layoutWithElk(nodes, edges, {
+            forceFreshLayout: true,
+        })
+        setLastLayoutMs(Math.max(0, nowMs() - layoutStart))
+        applyLaidOutGraph(layoutGraph)
+    }, [applyLaidOutGraph, edges, expandChildFlows, flowName, nodes])
+
+    const onResetSavedLayout = useCallback(async () => {
+        if (!flowName || expandChildFlows) {
+            return
+        }
+
+        clearSavedFlowLayout(activeProjectPath, flowName, EDITOR_LAYOUT_CANVAS_KIND)
+        edgeSideIntentRef.current = {}
+        routeRevisionRef.current += 1
+        if (liveRouteTimerRef.current) {
+            window.clearTimeout(liveRouteTimerRef.current)
+            liveRouteTimerRef.current = null
+        }
+        queuedRouteJobRef.current = null
+        const layoutStart = nowMs()
+        const layoutGraph = await layoutWithElk(nodes, edges, {
+            forceFreshLayout: true,
+        })
+        setLastLayoutMs(Math.max(0, nowMs() - layoutStart))
+        applyLaidOutGraph(layoutGraph)
+    }, [activeProjectPath, applyLaidOutGraph, edges, expandChildFlows, flowName, nodes])
 
     const enterRawDotMode = useCallback(() => {
         if (!flowName) return;
@@ -796,8 +1144,13 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 });
                 replaceGraphAttrs(hydrated.graphAttrs);
                 setLastLayoutMs(hydrated.layoutDurationMs);
+                layoutStateRef.current = hydrated.layout;
+                edgeIdToLayoutKeyRef.current = hydrated.edgeIdToLayoutKey;
                 setNodes(hydrated.nodes);
                 setEdges(hydrated.edges);
+                if (!expandChildFlowsRef.current) {
+                    persistLayoutState(hydrated.layout);
+                }
                 primeFlowSaveBaseline(
                     flowName,
                     buildAuthoredDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
@@ -824,6 +1177,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         clearDiagnostics,
         flowName,
         hydrateFromPreview,
+        persistLayoutState,
         rawDotDraft,
         replaceGraphAttrs,
         requestPreview,
@@ -913,8 +1267,13 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                 })
                 replaceGraphAttrs(hydrated.graphAttrs)
                 setLastLayoutMs(hydrated.layoutDurationMs)
+                layoutStateRef.current = hydrated.layout
+                edgeIdToLayoutKeyRef.current = hydrated.edgeIdToLayoutKey
                 setNodes(hydrated.nodes)
                 setEdges(hydrated.edges)
+                if (!expandChildFlowsRef.current) {
+                    persistLayoutState(hydrated.layout)
+                }
             })
             .catch((error) => {
                 if (controller.signal.aborted || isAbortError(error)) {
@@ -931,6 +1290,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         flowName,
         hydrateFromPreview,
         isActive,
+        persistLayoutState,
         replaceGraphAttrs,
         requestPreview,
         setEdges,
@@ -1060,6 +1420,28 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                             }}
                             testId="editor-child-flow-toggle"
                         />
+                    )}
+                    {editorMode === 'structured' && !expandChildFlows && (
+                        <Button
+                            onClick={() => {
+                                void onAutoArrange()
+                            }}
+                            className="shadow-sm"
+                            variant="outline"
+                        >
+                            Auto Arrange
+                        </Button>
+                    )}
+                    {editorMode === 'structured' && !expandChildFlows && (
+                        <Button
+                            onClick={() => {
+                                void onResetSavedLayout()
+                            }}
+                            className="shadow-sm"
+                            variant="outline"
+                        >
+                            Reset Saved Layout
+                        </Button>
                     )}
                     {editorMode === 'structured' && !expandChildFlows && (
                         <Button

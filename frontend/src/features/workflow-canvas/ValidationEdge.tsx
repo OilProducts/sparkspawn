@@ -1,15 +1,13 @@
 import type { CSSProperties } from 'react'
-import { BaseEdge, EdgeLabelRenderer, type EdgeProps, type InternalNode, useStore as useFlowStore } from '@xyflow/react'
+import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 
 import {
-    buildAnchoredOrthogonalRoute,
-    buildFallbackOrthogonalRoute,
-    buildPolylinePath,
+    buildRoundedPolylinePath,
     getRouteMidpoint,
+    normalizeRoute,
     type EdgeRoute,
-    type NodeRect,
-    type RouteSide,
 } from '@/lib/edgeRouting'
+import { EDGE_RENDER_ROUTE_KEY } from '@/lib/flowLayout'
 import { useStore as useAppStore } from '@/store'
 
 import { useCanvasSessionMode } from './canvasSessionContext'
@@ -17,52 +15,45 @@ import { getDerivedPreviewMeta } from './derivedPreview'
 
 const WARNING_STROKE = 'hsl(38 92% 50%)'
 
-function readNodeRect(node?: InternalNode): NodeRect | null {
-    if (!node) {
-        return null
-    }
-
-    const position = node.internals.positionAbsolute
-    const width = node.measured.width ?? node.width ?? node.initialWidth ?? 0
-    const height = node.measured.height ?? node.height ?? node.initialHeight ?? 0
-
-    if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || width <= 0 || height <= 0) {
-        return null
-    }
-
-    return {
-        x: position.x,
-        y: position.y,
-        width,
-        height,
-    }
-}
-
-function readLayoutRoute(value: unknown): EdgeRoute | null {
+function readRenderRoute(value: unknown): EdgeRoute | null {
     if (!Array.isArray(value)) {
         return null
     }
 
-    const route = value.filter(
-        (point): point is { x: number; y: number } =>
-            Boolean(point)
-            && typeof point === 'object'
-            && Number.isFinite((point as { x?: unknown }).x)
-            && Number.isFinite((point as { y?: unknown }).y),
-    )
+    const route = value
+        .map((point) => {
+            if (
+                !point
+                || typeof point !== 'object'
+                || !Number.isFinite((point as { x?: unknown }).x)
+                || !Number.isFinite((point as { y?: unknown }).y)
+            ) {
+                return null
+            }
+
+            return {
+                x: (point as { x: number }).x,
+                y: (point as { y: number }).y,
+            }
+        })
+        .filter((point): point is EdgeRoute[number] => point !== null)
+
     return route.length >= 2 ? route : null
 }
 
-function readRouteSide(value: unknown): RouteSide | null {
-    return value === 'top' || value === 'right' || value === 'bottom' || value === 'left'
-        ? value
-        : null
+function buildFallbackRoute(sourceX: number, sourceY: number, targetX: number, targetY: number): EdgeRoute {
+    return normalizeRoute([
+        { x: sourceX, y: sourceY },
+        { x: targetX, y: targetY },
+    ])
 }
 
 export function ValidationEdge({
+    id,
     source,
     target,
     data,
+    markerStart,
     markerEnd,
     style,
     selected,
@@ -79,31 +70,14 @@ export function ValidationEdge({
                 ? state.runEdgeDiagnostics
                 : state.executionEdgeDiagnostics,
     )
-    const sourceNode = useFlowStore((state) => state.nodeLookup.get(source))
-    const targetNode = useFlowStore((state) => state.nodeLookup.get(target))
     const diagnosticsForEdge = edgeDiagnostics[`${source}->${target}`] || []
     const hasError = diagnosticsForEdge.some((diag) => diag.severity === 'error')
     const hasWarning = diagnosticsForEdge.some((diag) => diag.severity === 'warning')
     const hasInfo = diagnosticsForEdge.some((diag) => diag.severity === 'info')
-    const sourceRect = readNodeRect(sourceNode)
-    const targetRect = readNodeRect(targetNode)
-    const layoutRoute = readLayoutRoute((data as { layoutRoute?: unknown } | undefined)?.layoutRoute)
-    const layoutSourceSide = readRouteSide((data as { layoutSourceSide?: unknown } | undefined)?.layoutSourceSide)
-    const layoutTargetSide = readRouteSide((data as { layoutTargetSide?: unknown } | undefined)?.layoutTargetSide)
-    const liveHintedRoute = sourceRect && targetRect && layoutSourceSide && layoutTargetSide
-        ? buildAnchoredOrthogonalRoute(sourceRect, targetRect, layoutSourceSide, layoutTargetSide)
-        : null
-    const fallbackRoute = sourceRect && targetRect
-        ? buildFallbackOrthogonalRoute(sourceRect, targetRect)
-        : [
-            { x: sourceX, y: sourceY },
-            { x: sourceX, y: (sourceY + targetY) / 2 },
-            { x: targetX, y: (sourceY + targetY) / 2 },
-            { x: targetX, y: targetY },
-        ]
-    const route = layoutRoute ?? liveHintedRoute ?? fallbackRoute
-    const edgePath = buildPolylinePath(route)
-    const labelPoint = getRouteMidpoint(route)
+    const renderRoute = readRenderRoute((data as Record<string, unknown> | undefined)?.[EDGE_RENDER_ROUTE_KEY])
+        ?? buildFallbackRoute(sourceX, sourceY, targetX, targetY)
+    const edgePath = buildRoundedPolylinePath(renderRoute)
+    const labelPoint = getRouteMidpoint(renderRoute)
     const derivedPreviewMeta = getDerivedPreviewMeta(data)
     const isDerivedChildEdge = derivedPreviewMeta?.kind === 'child-edge'
     const isDerivedLinkEdge = derivedPreviewMeta?.kind === 'child-link'
@@ -111,8 +85,10 @@ export function ValidationEdge({
     const edgeStyle: CSSProperties = {
         strokeLinecap: 'round',
         strokeLinejoin: 'round',
+        strokeWidth: 2,
         ...style,
     }
+
     if (hasError) {
         edgeStyle.stroke = 'hsl(var(--destructive))'
         edgeStyle.strokeWidth = selected ? 4 : 3
@@ -154,11 +130,12 @@ export function ValidationEdge({
     return (
         <>
             <BaseEdge
+                id={id}
                 path={edgePath}
+                markerStart={markerStart}
                 markerEnd={markerEnd}
                 style={edgeStyle}
                 interactionWidth={16}
-                data-testid="validation-edge-path"
             />
             {diagnosticsForEdge.length > 0 && (
                 <EdgeLabelRenderer>

@@ -1,5 +1,6 @@
 import { CanvasSessionModeProvider } from '@/features/workflow-canvas/canvasSessionContext'
 import { ValidationEdge } from '@/features/workflow-canvas/ValidationEdge'
+import { EDGE_RENDER_ROUTE_KEY } from '@/lib/flowLayout'
 import { useStore } from '@/store'
 import { ReactFlowProvider, type EdgeProps, type InternalNode, type Node, useStoreApi } from '@xyflow/react'
 import { cleanup, render, waitFor } from '@testing-library/react'
@@ -38,6 +39,19 @@ const resetState = () => {
         edgeDiagnostics: {},
         executionEdgeDiagnostics: {},
     })
+}
+
+function readPathEndpoints(path: SVGPathElement | null) {
+    const d = path?.getAttribute('d') ?? ''
+    const numbers = Array.from(d.matchAll(/-?\d+(?:\.\d+)?/g), (match) => Number.parseFloat(match[0]))
+    if (numbers.length < 4) {
+        return null
+    }
+
+    return {
+        start: { x: numbers[0], y: numbers[1] },
+        end: { x: numbers[numbers.length - 2], y: numbers[numbers.length - 1] },
+    }
 }
 
 function buildInternalNode(node: Node): InternalNode {
@@ -98,59 +112,7 @@ describe('ValidationEdge', () => {
         cleanup()
     })
 
-    it('renders exact ELK route geometry when layoutRoute is present', async () => {
-        renderWithFlowProvider(
-            <EdgeHarness
-                sourceNode={{
-                    id: 'a',
-                    type: 'taskNode',
-                    position: { x: 0, y: 0 },
-                    width: 220,
-                    height: 110,
-                    data: { label: 'A', shape: 'box' },
-                }}
-                targetNode={{
-                    id: 'b',
-                    type: 'taskNode',
-                    position: { x: 300, y: 200 },
-                    width: 220,
-                    height: 110,
-                    data: { label: 'B', shape: 'box' },
-                }}
-                edgeProps={{
-                    id: 'e1',
-                    source: 'a',
-                    target: 'b',
-                    sourceX: 110,
-                    sourceY: 110,
-                    targetX: 410,
-                    targetY: 200,
-                    sourcePosition: 'bottom',
-                    targetPosition: 'top',
-                    markerEnd: undefined,
-                    style: {},
-                    selected: false,
-                    data: {
-                        layoutRoute: [
-                            { x: 110, y: 110 },
-                            { x: 110, y: 160 },
-                            { x: 410, y: 160 },
-                            { x: 410, y: 200 },
-                        ],
-                    },
-                } as EdgeProps}
-            />,
-        )
-
-        await waitFor(() => {
-            const path = document.querySelector('path.react-flow__edge-path')
-            expect(path?.getAttribute('d')).toBe(
-                'M 110 110 L 110 148 Q 110 160 122 160 L 398 160 Q 410 160 410 172 L 410 200',
-            )
-        })
-    })
-
-    it('falls back to a live orthogonal route when ELK geometry is absent', async () => {
+    it('uses live node geometry when routing hints are absent', async () => {
         renderWithFlowProvider(
             <EdgeHarness
                 sourceNode={{
@@ -188,11 +150,67 @@ describe('ValidationEdge', () => {
 
         await waitFor(() => {
             const path = document.querySelector('path.react-flow__edge-path')
-            expect(path?.getAttribute('d')).toBe('M 220 55 L 265 55 Q 270 55 270 60 Q 270 65 275 65 L 320 65')
+            expect(readPathEndpoints(path as SVGPathElement | null)).toEqual({
+                start: { x: 110, y: 110 },
+                end: { x: 430, y: 10 },
+            })
         })
     })
 
-    it('uses ELK side hints for live rerouting when absolute ELK geometry is absent', async () => {
+    it('renders the routed polyline geometry carried by edge render state', async () => {
+        renderWithFlowProvider(
+            <EdgeHarness
+                sourceNode={{
+                    id: 'a',
+                    type: 'taskNode',
+                    position: { x: 0, y: 0 },
+                    width: 220,
+                    height: 110,
+                    data: { label: 'A', shape: 'box' },
+                }}
+                targetNode={{
+                    id: 'b',
+                    type: 'taskNode',
+                    position: { x: 320, y: 10 },
+                    width: 220,
+                    height: 110,
+                    data: { label: 'B', shape: 'box' },
+                }}
+                edgeProps={{
+                    id: 'e1',
+                    source: 'a',
+                    target: 'b',
+                    sourceX: 110,
+                    sourceY: 110,
+                    targetX: 430,
+                    targetY: 10,
+                    sourcePosition: 'bottom',
+                    targetPosition: 'top',
+                    markerEnd: undefined,
+                    style: {},
+                    selected: false,
+                    data: {
+                        [EDGE_RENDER_ROUTE_KEY]: [
+                            { x: 220, y: 55 },
+                            { x: 260, y: 55 },
+                            { x: 260, y: 65 },
+                            { x: 320, y: 65 },
+                        ],
+                    },
+                } as EdgeProps}
+            />,
+        )
+
+        await waitFor(() => {
+            const path = document.querySelector('path.react-flow__edge-path')
+            expect(readPathEndpoints(path as SVGPathElement | null)).toEqual({
+                start: { x: 220, y: 55 },
+                end: { x: 320, y: 65 },
+            })
+        })
+    })
+
+    it('preserves separated touch points when the routed polyline uses distinct endpoints', async () => {
         renderWithFlowProvider(
             <EdgeHarness
                 sourceNode={{
@@ -225,8 +243,12 @@ describe('ValidationEdge', () => {
                     style: {},
                     selected: false,
                     data: {
-                        layoutSourceSide: 'right',
-                        layoutTargetSide: 'left',
+                        [EDGE_RENDER_ROUTE_KEY]: [
+                            { x: 220, y: 20 },
+                            { x: 260, y: 20 },
+                            { x: 260, y: 310 },
+                            { x: 40, y: 310 },
+                        ],
                     },
                 } as EdgeProps}
             />,
@@ -234,9 +256,53 @@ describe('ValidationEdge', () => {
 
         await waitFor(() => {
             const path = document.querySelector('path.react-flow__edge-path')
-            expect(path?.getAttribute('d')).toBe(
-                'M 220 55 L 236 55 Q 248 55 248 67 L 248 153 Q 248 165 236 165 L 24 165 Q 12 165 12 177 L 12 263 Q 12 275 24 275 L 40 275',
-            )
+            expect(readPathEndpoints(path as SVGPathElement | null)).toEqual({
+                start: { x: 220, y: 20 },
+                end: { x: 40, y: 310 },
+            })
+        })
+    })
+
+    it('uses the same base stroke width for normal edges as derived child edges', async () => {
+        renderWithFlowProvider(
+            <EdgeHarness
+                sourceNode={{
+                    id: 'a',
+                    type: 'taskNode',
+                    position: { x: 0, y: 0 },
+                    width: 220,
+                    height: 110,
+                    data: { label: 'A', shape: 'box' },
+                }}
+                targetNode={{
+                    id: 'b',
+                    type: 'taskNode',
+                    position: { x: 300, y: 0 },
+                    width: 220,
+                    height: 110,
+                    data: { label: 'B', shape: 'box' },
+                }}
+                edgeProps={{
+                    id: 'e1',
+                    source: 'a',
+                    target: 'b',
+                    sourceX: 220,
+                    sourceY: 55,
+                    targetX: 300,
+                    targetY: 55,
+                    sourcePosition: 'right',
+                    targetPosition: 'left',
+                    markerEnd: undefined,
+                    style: {},
+                    selected: false,
+                } as EdgeProps}
+            />,
+        )
+
+        await waitFor(() => {
+            const path = document.querySelector('path.react-flow__edge-path') as SVGPathElement | null
+            expect(path).not.toBeNull()
+            expect(path?.style.strokeWidth).toBe('2')
         })
     })
 })

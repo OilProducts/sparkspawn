@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react'
 
 import type { GraphAttrs } from '@/store'
+import { EDGE_RENDER_ROUTE_KEY } from './flowLayoutConstants.js'
 
 export type CanonicalAttrValue = string | number | boolean | null
 export type CanonicalAttrMap = Record<string, CanonicalAttrValue>
@@ -63,6 +64,7 @@ export interface CanonicalEditorStateInput extends CanonicalModelBuildOptions {
 const PREVIEW_NODE_META_KEYS = new Set<string>(['id'])
 const PREVIEW_EDGE_META_KEYS = new Set<string>(['from', 'to', 'source', 'target'])
 const EPHEMERAL_NODE_ATTR_KEYS = new Set<string>(['status'])
+const EPHEMERAL_EDGE_ATTR_KEYS = new Set<string>([EDGE_RENDER_ROUTE_KEY])
 
 function isCanonicalAttrValue(value: unknown): value is CanonicalAttrValue {
     return value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
@@ -270,7 +272,7 @@ export function buildCanonicalFlowModelFromEditorState(
         return {
             source: edge.source,
             target: edge.target,
-            attrs: cloneCanonicalAttrMap(asRecord(edge.data)),
+            attrs: cloneCanonicalAttrMap(asRecord(edge.data), EPHEMERAL_EDGE_ATTR_KEYS),
         }
     })
 

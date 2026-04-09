@@ -40,6 +40,41 @@ const BUILTIN_HANDLER_OPTIONS = [
     'stack.manager_loop',
 ] as const
 
+const FLOW_PORT_HANDLES = [
+    {
+        side: 'top',
+        position: Position.Top,
+        sourceId: 'source-top',
+        targetId: 'target-top',
+        sourceStyle: { left: '58%', top: 0, transform: 'translate(-50%, -50%)' },
+        targetStyle: { left: '42%', top: 0, transform: 'translate(-50%, -50%)' },
+    },
+    {
+        side: 'right',
+        position: Position.Right,
+        sourceId: 'source-right',
+        targetId: 'target-right',
+        sourceStyle: { left: '100%', top: '58%', transform: 'translate(50%, -50%)' },
+        targetStyle: { left: '100%', top: '42%', transform: 'translate(50%, -50%)' },
+    },
+    {
+        side: 'bottom',
+        position: Position.Bottom,
+        sourceId: 'source-bottom',
+        targetId: 'target-bottom',
+        sourceStyle: { left: '58%', top: '100%', transform: 'translate(-50%, 50%)' },
+        targetStyle: { left: '42%', top: '100%', transform: 'translate(-50%, 50%)' },
+    },
+    {
+        side: 'left',
+        position: Position.Left,
+        sourceId: 'source-left',
+        targetId: 'target-left',
+        sourceStyle: { left: 0, top: '58%', transform: 'translate(-50%, -50%)' },
+        targetStyle: { left: 0, top: '42%', transform: 'translate(-50%, -50%)' },
+    },
+] as const
+
 type BaseWorkflowNodeProps = NodeProps & {
     defaultShape: WorkflowNodeShape
 }
@@ -334,11 +369,17 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
         >
             <WorkflowNodeFrame shape={renderedShape} palette={framePalette} />
 
-            <Handle
-                type="target"
-                position={Position.Top}
-                className={handleClassName}
-            />
+            {FLOW_PORT_HANDLES.map((handle) => (
+                <Handle
+                    key={handle.targetId}
+                    id={handle.targetId}
+                    type="target"
+                    position={handle.position}
+                    className={handleClassName}
+                    style={handle.targetStyle}
+                    aria-label={`${handle.side} target port`}
+                />
+            ))}
 
             <div className={cn('absolute left-2 right-2 z-20 flex items-start justify-between', overlayOffsetClassName)}>
                 <div className="min-w-0">
@@ -421,11 +462,17 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
                 </div>
             </div>
 
-            <Handle
-                type="source"
-                position={Position.Bottom}
-                className={handleClassName}
-            />
+            {FLOW_PORT_HANDLES.map((handle) => (
+                <Handle
+                    key={handle.sourceId}
+                    id={handle.sourceId}
+                    type="source"
+                    position={handle.position}
+                    className={handleClassName}
+                    style={handle.sourceStyle}
+                    aria-label={`${handle.side} source port`}
+                />
+            ))}
 
             <NodeToolbar isVisible={isEditingDetails} position={Position.Bottom} className="nodrag nopan">
                 <div className="mt-2 w-64 rounded-md border border-border bg-card p-3 shadow-lg">
