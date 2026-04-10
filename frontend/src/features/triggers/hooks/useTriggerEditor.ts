@@ -13,8 +13,7 @@ import {
     type TriggerFormState,
     triggerToFormState,
 } from '../model/triggerForm'
-import { useDialogController } from '@/ui'
-
+import { useDialogController } from '@/components/app/dialog-controller'
 type UseTriggerEditorArgs = {
     activeProjectPath: string | null
     refreshTriggers: () => Promise<void>

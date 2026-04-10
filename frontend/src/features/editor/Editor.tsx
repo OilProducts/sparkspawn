@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
     ReactFlow,
     MiniMap,
@@ -59,13 +59,15 @@ import {
     nowMs,
 } from '@/features/workflow-canvas';
 import { getReactFlowNodeTypeForShape, getShapeNodeStyle } from '@/lib/workflowNodeShape';
-import { Button, Textarea } from '@/ui';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { isAbortError } from '@/lib/api/shared';
 import {
     loadEditorFlowPayload,
     loadEditorPreview,
     type EditorPreviewResponse,
 } from './services/editorPreview';
+import { useRegisterEditorGraphBridge } from './EditorGraphBridgeContext';
 
 const DEFAULT_PREVIEW_DEBOUNCE_MS = 300;
 const MEDIUM_GRAPH_PREVIEW_DEBOUNCE_MS = 600;
@@ -231,6 +233,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     });
     const [isDragging, setIsDragging] = useState(false);
     const [isRawHandoffInFlight, setIsRawHandoffInFlight] = useState(false);
+    const [isHydrated, setIsHydrated] = useState(false);
     const [lastLayoutMs, setLastLayoutMs] = useState(0);
     const [lastPreviewMs, setLastPreviewMs] = useState(0);
 
@@ -246,6 +249,14 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     const optimizationLabel = activeOptimizations.length ? activeOptimizations.join(', ') : 'none';
     const flowName = activeFlow;
     const isExpandedReadOnlyPreview = editorMode === 'structured' && expandChildFlows;
+    const editorGraphBridge = useMemo(() => ({
+        getNodes: () => canvasGraphRef.current.nodes,
+        setNodes,
+        getEdges: () => canvasGraphRef.current.edges,
+        setEdges,
+    }), [setEdges, setNodes]);
+
+    useRegisterEditorGraphBridge(editorGraphBridge);
 
     useEffect(() => {
         expandChildFlowsRef.current = expandChildFlows;
@@ -608,6 +619,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         }
         if (!flowName) {
             hydratedRef.current = false;
+            setIsHydrated(false);
             activeFlowLoadIdRef.current += 1;
             routeRevisionRef.current += 1;
             layoutStateRef.current = null;
@@ -645,6 +657,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
             return;
         }
         hydratedRef.current = false;
+        setIsHydrated(false);
 
         const loadId = activeFlowLoadIdRef.current + 1;
         activeFlowLoadIdRef.current = loadId;
@@ -756,6 +769,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                     buildAuthoredDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
                 );
                 hydratedRef.current = true;
+                setIsHydrated(true);
                 hydratedFlowNameRef.current = flowName;
                 recordFlowLoadDebug('hydrate:complete', flowName, {
                     loadId,
@@ -796,12 +810,17 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     useEffect(() => {
         if (
             !flowName
-            || !hydratedRef.current
+            || !isHydrated
             || suppressPreview
             || isDragging
             || editorMode === 'raw'
         ) return;
-        const dot = buildAuthoredDot(flowName, nodes, edges, graphAttrs);
+        const dot = buildAuthoredDot(
+            flowName,
+            nodes,
+            edges,
+            graphAttrs,
+        );
         if (previewTimer.current) {
             window.clearTimeout(previewTimer.current);
         }
@@ -847,14 +866,15 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     }, [
         clearDiagnostics,
         flowName,
-        nodes,
-        edges,
         graphAttrs,
         requestPreview,
         setDiagnostics,
         suppressPreview,
         isDragging,
+        isHydrated,
         editorMode,
+        edges,
+        nodes,
         previewDebounceMs,
     ]);
 
@@ -1156,6 +1176,7 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                     buildAuthoredDot(flowName, hydrated.serializedNodes, hydrated.edges, hydrated.graphAttrs),
                 );
                 hydratedRef.current = true;
+                setIsHydrated(true);
                 recordFlowLoadDebug('hydrate:complete', flowName, {
                     loadId: activeFlowLoadIdRef.current,
                     source: 'raw-dot-handoff',
@@ -1189,9 +1210,30 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     const onSelectionChange = useCallback(({ nodes, edges }: OnSelectionChangeParams) => {
         const selectedNode = nodes.find(n => n.selected);
         const selectedEdge = edges.find(e => e.selected);
-        setSelectedNodeId(selectedNode ? selectedNode.id : null);
-        setSelectedEdgeId(selectedEdge ? selectedEdge.id : null);
+        if (selectedNode) {
+            setSelectedNodeId(selectedNode.id);
+            setSelectedEdgeId(null);
+            return
+        }
+        if (selectedEdge) {
+            setSelectedNodeId(null);
+            setSelectedEdgeId(selectedEdge.id);
+        }
     }, [setSelectedEdgeId, setSelectedNodeId]);
+
+    const onNodeClick = useCallback((_event: ReactMouseEvent, node: Node) => {
+        if (isExpandedReadOnlyPreview || node.selectable === false) {
+            return
+        }
+        setNodes((currentNodes) => enforceSingleSelectedNode(currentNodes, node.id));
+    }, [enforceSingleSelectedNode, isExpandedReadOnlyPreview, setNodes]);
+
+    const onEdgeClick = useCallback((_event: ReactMouseEvent, edge: Edge) => {
+        if (isExpandedReadOnlyPreview || edge.selectable === false) {
+            return
+        }
+        setEdges((currentEdges) => enforceSingleSelectedEdge(currentEdges, edge.id));
+    }, [enforceSingleSelectedEdge, isExpandedReadOnlyPreview, setEdges]);
 
     useEffect(() => {
         setNodes((currentNodes) =>
@@ -1218,7 +1260,13 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
     }, [edges, nodes, selectedEdgeId, selectedNodeId, setSelectedEdgeId, setSelectedNodeId]);
 
     useEffect(() => {
-        if (!isActive || !flowName || !hydratedRef.current || editorMode !== 'structured') {
+        if (
+            !isActive
+            || !flowName
+            || !isHydrated
+            || editorMode !== 'structured'
+            || (suppressPreview && !expandChildFlows)
+        ) {
             return
         }
 
@@ -1289,10 +1337,12 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
         expandChildFlows,
         flowName,
         hydrateFromPreview,
+        isHydrated,
         isActive,
         persistLayoutState,
         replaceGraphAttrs,
         requestPreview,
+        suppressPreview,
         setEdges,
         setNodes,
     ]);
@@ -1329,6 +1379,8 @@ export function Editor({ isActive = true }: { isActive?: boolean }) {
                         onNodesChange={onNodesChange}
                         onEdgesChange={onEdgesChange}
                         onConnect={onConnect}
+                        onNodeClick={onNodeClick}
+                        onEdgeClick={onEdgeClick}
                         onSelectionChange={onSelectionChange}
                         nodeTypes={nodeTypes}
                         edgeTypes={edgeTypes}

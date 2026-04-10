@@ -1,13 +1,9 @@
 import type { ContextErrorState, RunContextRow } from '../model/shared'
-import {
-    Button,
-    InlineNotice,
-    Input,
-    Panel,
-    PanelContent,
-    PanelHeader,
-    SectionHeader,
-} from '@/ui'
+import { Button } from '@/components/ui/button'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { Input } from '@/components/ui/input'
+import { Panel, PanelContent, PanelHeader } from '@/components/app/panel'
+import { SectionHeader } from '@/components/app/section-header'
 import { RunSectionToggleButton } from './RunSectionToggleButton'
 
 interface RunContextCardProps {

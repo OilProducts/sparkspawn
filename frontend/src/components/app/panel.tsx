@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
 function Panel({

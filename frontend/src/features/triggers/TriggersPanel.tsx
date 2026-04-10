@@ -12,8 +12,13 @@ import { useTriggersList } from "./hooks/useTriggersList"
 import { useTriggerEditor } from "./hooks/useTriggerEditor"
 import { useWebhookSecretRegeneration } from "./hooks/useWebhookSecretRegeneration"
 import { useStore } from "@/store"
-import { Badge, Button, EmptyState, InlineNotice, Panel, PanelContent, PanelHeader, PanelTitle, ProjectContextChip, SectionHeader } from "@/ui"
-
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/app/empty-state"
+import { InlineNotice } from "@/components/app/inline-notice"
+import { Panel, PanelContent, PanelHeader, PanelTitle } from "@/components/app/panel"
+import { ProjectContextChip } from "@/components/app/project-context-chip"
+import { SectionHeader } from "@/components/app/section-header"
 export function TriggersPanel() {
   const activeProjectPath = useStore((state) => state.activeProjectPath)
   const triggersSession = useStore((state) => state.triggersSession)

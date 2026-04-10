@@ -5,6 +5,7 @@ import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 
 import { Editor } from './Editor'
+import { EditorGraphBridgeProvider } from './EditorGraphBridgeContext'
 import { Sidebar } from './Sidebar'
 import { CanvasSessionModeProvider } from '@/features/workflow-canvas'
 
@@ -161,26 +162,28 @@ export function EditorWorkspace({ isActive }: { isActive: boolean }) {
             >
                 <ReactFlowProvider>
                     <CanvasSessionModeProvider mode="editor">
-                        <Sidebar desktopWidthPx={editorSidebarWidth} />
-                        {!isNarrowViewport ? (
-                            <div
-                                data-testid="editor-sidebar-resize-handle"
-                                role="separator"
-                                aria-label="Resize editor sidebar"
-                                aria-orientation="vertical"
-                                tabIndex={0}
-                                onPointerDown={onEditorSidebarResizePointerDown}
-                                onKeyDown={onEditorSidebarResizeKeyDown}
-                                className={`group flex w-3 shrink-0 cursor-col-resize items-center justify-center focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-                                    effectiveIsEditorSidebarResizing ? 'bg-muted' : 'hover:bg-muted/60'
-                                }`}
-                            >
-                                <span className="h-16 w-1 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/70" />
+                        <EditorGraphBridgeProvider>
+                            <Sidebar desktopWidthPx={editorSidebarWidth} />
+                            {!isNarrowViewport ? (
+                                <div
+                                    data-testid="editor-sidebar-resize-handle"
+                                    role="separator"
+                                    aria-label="Resize editor sidebar"
+                                    aria-orientation="vertical"
+                                    tabIndex={0}
+                                    onPointerDown={onEditorSidebarResizePointerDown}
+                                    onKeyDown={onEditorSidebarResizeKeyDown}
+                                    className={`group flex w-3 shrink-0 cursor-col-resize items-center justify-center focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+                                        effectiveIsEditorSidebarResizing ? 'bg-muted' : 'hover:bg-muted/60'
+                                    }`}
+                                >
+                                    <span className="h-16 w-1 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/70" />
+                                </div>
+                            ) : null}
+                            <div data-testid="editor-panel" className="flex-1 min-w-0 w-full h-full bg-background/50">
+                                <Editor isActive={isActive} />
                             </div>
-                        ) : null}
-                        <div data-testid="editor-panel" className="flex-1 min-w-0 w-full h-full bg-background/50">
-                            <Editor isActive={isActive} />
-                        </div>
+                        </EditorGraphBridgeProvider>
                     </CanvasSessionModeProvider>
                 </ReactFlowProvider>
             </div>

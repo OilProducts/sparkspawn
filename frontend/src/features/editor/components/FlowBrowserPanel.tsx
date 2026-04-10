@@ -2,8 +2,8 @@ import type { MouseEvent, ReactNode } from 'react'
 import { FilePlus } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { Button } from '@/ui'
-import { FlowTree } from '@/ui/flow-tree'
+import { Button } from '@/components/ui/button'
+import { FlowTree } from '@/components/app/flow-tree'
 
 interface FlowBrowserPanelProps {
     activeFlow: string | null

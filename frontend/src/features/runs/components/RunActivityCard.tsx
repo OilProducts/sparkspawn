@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react'
 
 import { useStore } from '@/store'
-import { Button, EmptyState, Panel, PanelContent, PanelHeader, SectionHeader } from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/app/empty-state'
+import { Panel, PanelContent, PanelHeader } from '@/components/app/panel'
+import { SectionHeader } from '@/components/app/section-header'
 import type { GroupedTimelineEntry, RunRecord } from '../model/shared'
 import { formatTimestamp, STATUS_LABELS } from '../model/shared'
 import { RunSectionToggleButton } from './RunSectionToggleButton'

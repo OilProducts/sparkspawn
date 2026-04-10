@@ -8,7 +8,7 @@ import { resolveGraphFieldDiagnostics } from '@/lib/inspectorFieldDiagnostics'
 import { resolveModelStylesheetPreview } from '@/lib/modelStylesheetPreview'
 import { toExtensionAttrEntries } from '@/lib/extensionAttrs'
 import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler'
-import { Button } from '@/ui'
+import { Button } from '@/components/ui/button'
 import { InspectorScaffold } from './components/InspectorScaffold'
 import {
     parseLaunchInputDefinitions,
@@ -32,6 +32,7 @@ import {
     saveGraphLaunchPolicy,
     type FlowLaunchPolicy,
 } from './services/graphLaunchPolicy'
+import { useEditorGraphBridgeRef } from './EditorGraphBridgeContext'
 
 interface GraphSettingsProps {
     inline?: boolean
@@ -58,7 +59,12 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
     const editorLaunchInputDraftsByFlow = useStore((state) => state.editorLaunchInputDraftsByFlow)
     const editorLaunchInputDraftErrorByFlow = useStore((state) => state.editorLaunchInputDraftErrorByFlow)
     const setEditorLaunchInputDraftState = useStore((state) => state.setEditorLaunchInputDraftState)
+    const editorGraphBridgeRef = useEditorGraphBridgeRef()
     const { getNodes, getEdges, setNodes } = useReactFlow()
+    const readNodes = () => editorGraphBridgeRef?.current?.getNodes() ?? getNodes()
+    const readEdges = () => editorGraphBridgeRef?.current?.getEdges() ?? getEdges()
+    const updateNodes = (nextNodes: Parameters<typeof setNodes>[0]) =>
+        (editorGraphBridgeRef?.current?.setNodes ?? setNodes)(nextNodes)
     const flowNodes = useNodes()
     const autosaveScopeRef = useRef<string | null>(null)
     const lastHandledGraphAttrsVersionRef = useRef(graphAttrsUserEditVersion)
@@ -169,8 +175,8 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
         debounceMs: 200,
         buildContent: (nextNodes, currentFlowName) => generateDot(
             currentFlowName,
-            nextNodes ?? getNodes(),
-            getEdges(),
+            nextNodes ?? readNodes(),
+            readEdges(),
             graphAttrs,
         ),
     })
@@ -181,7 +187,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
         const defaultProvider = graphAttrs.ui_default_llm_provider || uiDefaults.llm_provider || ''
         const defaultReasoning = graphAttrs.ui_default_reasoning_effort || uiDefaults.reasoning_effort || ''
 
-        const currentNodes = getNodes()
+        const currentNodes = readNodes()
         if (currentNodes.length === 0) return
 
         const updatedNodes = currentNodes.map((node) => ({
@@ -194,7 +200,7 @@ export function GraphSettings({ inline = false }: GraphSettingsProps) {
             },
         }))
 
-        setNodes(updatedNodes)
+        updateNodes(updatedNodes)
         saveNow(updatedNodes)
     }
 

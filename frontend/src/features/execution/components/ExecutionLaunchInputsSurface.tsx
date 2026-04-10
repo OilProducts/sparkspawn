@@ -1,8 +1,12 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
 import type { LaunchInputDefinition, LaunchInputFormValues, ParsedLaunchInputDefinitions } from '@/lib/flowContracts'
-import { Button, InlineNotice, Input, Label, NativeSelect, Textarea } from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Textarea } from '@/components/ui/textarea'
 const launchInputTypeLabel = (type: string) => {
     switch (type) {
         case 'string':

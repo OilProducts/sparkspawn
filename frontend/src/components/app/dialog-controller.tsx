@@ -14,11 +14,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/ui/dialog'
-import { Button } from '@/ui/button'
-import { FieldRow } from '@/ui/field-row'
-import { Input } from '@/ui/input'
-import { Textarea } from '@/ui/textarea'
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { FieldRow } from '@/components/app/field-row'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 
 type ButtonVariant = ComponentProps<typeof Button>['variant']
 

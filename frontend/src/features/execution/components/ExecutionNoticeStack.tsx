@@ -1,5 +1,5 @@
-import { Button, InlineNotice } from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { InlineNotice } from '@/components/app/inline-notice'
 type LaunchFailureDiagnostics = {
     message: string
     failedAt: string

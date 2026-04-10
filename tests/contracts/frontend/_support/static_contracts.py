@@ -12,6 +12,10 @@ def _frontend_src_root() -> Path:
     return _repo_root() / "frontend" / "src"
 
 
+def iter_runtime_source_files() -> list[Path]:
+    return _collect_runtime_source_files(_frontend_src_root())
+
+
 def _collect_runtime_source_files(directory_path: Path) -> list[Path]:
     files: list[Path] = []
     for entry_path in sorted(directory_path.iterdir()):
@@ -26,13 +30,26 @@ def _collect_runtime_source_files(directory_path: Path) -> list[Path]:
 
 
 def read_runtime_ui_source() -> str:
-    src_root = _frontend_src_root()
-    files: list[Path] = []
-    for relative_dir in ("app", "features", "lib", "ui", "components"):
-        directory_path = src_root / relative_dir
-        if directory_path.exists():
-            files.extend(_collect_runtime_source_files(directory_path))
-    return "\n".join(path.read_text(encoding="utf-8") for path in files)
+    return "\n".join(path.read_text(encoding="utf-8") for path in iter_runtime_source_files())
+
+
+def legacy_ui_boundary_violations() -> list[str]:
+    repo_root = _repo_root()
+    violations: list[str] = []
+
+    legacy_ui_directory = _frontend_src_root() / "ui"
+    if legacy_ui_directory.exists():
+        violations.append(f"{legacy_ui_directory.relative_to(repo_root)}: legacy src/ui directory still exists")
+
+    for path in iter_runtime_source_files():
+        source = path.read_text(encoding="utf-8")
+        relative_path = path.relative_to(repo_root)
+        if "@/ui" in source:
+            violations.append(f"{relative_path}: contains legacy @/ui reference")
+        if "frontend/src/ui" in source:
+            violations.append(f"{relative_path}: contains legacy frontend/src/ui reference")
+
+    return violations
 
 
 REQUIRED_UI_ENDPOINT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (

@@ -1,6 +1,5 @@
 import { useMemo, useRef, type UIEvent } from 'react'
-import { Textarea } from '@/ui'
-
+import { Textarea } from '@/components/ui/textarea'
 type TokenType = 'selector' | 'property' | 'value' | 'punctuation' | 'text'
 
 interface TokenSegment {

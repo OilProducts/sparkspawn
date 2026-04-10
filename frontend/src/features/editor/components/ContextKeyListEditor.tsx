@@ -1,5 +1,5 @@
-import { FieldRow, Textarea } from '@/ui'
-
+import { FieldRow } from '@/components/app/field-row'
+import { Textarea } from '@/components/ui/textarea'
 interface ContextKeyListEditorProps {
     title: string
     description: string

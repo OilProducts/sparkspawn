@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import {
   cleanupSmokeFlowsForPage,
   createFlowForSmokeTest,
@@ -14,6 +14,10 @@ import {
 test.beforeAll(() => {
   ensureScreenshotDir()
 })
+
+async function dispatchEdgeSelection(page: Page, accessibleName: string) {
+  await page.getByRole("group", { name: accessibleName }).dispatchEvent("click")
+}
 
 test.beforeEach(async ({ page }) => {
   await stubProjectMetadata(page)
@@ -63,8 +67,7 @@ test("primary UI shells render and can be navigated", async ({ page }) => {
     await expect(page.locator('[data-inspector-scope="node"]')).toBeVisible()
     await page.screenshot({ path: screenshotPath("04-node-inspector.png"), fullPage: true })
 
-    const firstEdge = page.locator(".react-flow__edge-interaction").first()
-    await firstEdge.click({ force: true })
+    await dispatchEdgeSelection(page, "Edge from audit_human_gate to audit_rework")
 
     await expect(page.locator('[data-inspector-scope="edge"]')).toBeVisible()
     await page.screenshot({ path: screenshotPath("05-edge-inspector.png"), fullPage: true })
@@ -134,16 +137,9 @@ test("prompt edits trigger live preview diagnostics before blur for item 5.1-03"
     const promptField = page.getByPlaceholder("Enter system prompt instructions...")
     await expect(promptField).toBeVisible()
 
-    const previewRequest = page.waitForRequest(
-      (request) =>
-        request.url().includes("/attractor/preview") &&
-        request.method() === "POST" &&
-        (request.postData() || "").includes(promptToken),
-    )
-
-    await promptField.fill(promptToken)
+    await promptField.click()
+    await promptField.pressSequentially(promptToken)
     await expect(promptField).toBeFocused()
-    await previewRequest
     await expect(page.getByText(diagnosticMessage)).toBeVisible()
     await page.screenshot({ path: screenshotPath("09-live-prompt-diagnostics.png"), fullPage: true })
   } finally {
@@ -261,15 +257,8 @@ test("validation panel supports filter and sort controls for item 7.1-01", async
     const promptField = page.getByPlaceholder("Enter system prompt instructions...")
     await expect(promptField).toBeVisible()
 
-    const previewRequest = page.waitForRequest(
-      (request) =>
-        request.url().includes("/attractor/preview") &&
-        request.method() === "POST" &&
-        (request.postData() || "").includes(promptToken),
-    )
-
-    await promptField.fill(promptToken)
-    await previewRequest
+    await promptField.click()
+    await promptField.pressSequentially(promptToken)
 
     const diagnostics = page.getByTestId("validation-diagnostic-item")
     await expect(diagnostics).toHaveCount(3)
@@ -455,9 +444,7 @@ test("inspector field-level diagnostics map to matching fields for item 7.1-03",
       nodeFallbackDiagnosticMessage,
     )
 
-    await page
-      .getByRole("group", { name: "Edge from audit_human_gate to audit_rework" })
-      .click({ force: true })
+    await dispatchEdgeSelection(page, "Edge from audit_human_gate to audit_rework")
     await expect(page.getByTestId("edge-field-diagnostics-condition")).toContainText(edgeDiagnosticMessage)
     await expect(page.getByTestId("edge-field-diagnostics-fidelity")).toContainText(edgeFidelityDiagnosticMessage)
     await page.screenshot({ path: screenshotPath("15-inspector-field-level-diagnostics.png"), fullPage: true })

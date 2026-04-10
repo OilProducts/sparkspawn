@@ -2,8 +2,9 @@ import type { ReactNode } from 'react'
 import type { Edge } from '@xyflow/react'
 
 import type { DiagnosticEntry } from '@/store'
-import { Checkbox, Input, Label } from '@/ui'
-
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { AdvancedKeyValueEditor } from './AdvancedKeyValueEditor'
 import { InspectorEmptyState, InspectorScaffold } from './InspectorScaffold'
 

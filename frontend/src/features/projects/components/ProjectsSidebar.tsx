@@ -3,8 +3,11 @@ import { FileText, Plus, Trash2 } from "lucide-react"
 
 import { HomeProjectSidebar } from "./HomeProjectSidebar"
 import type { ProjectConversationSummary } from "../model/types"
-import { Button, EmptyState, InlineNotice, Panel, PanelContent, PanelHeader, SectionHeader } from "@/ui"
-
+import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/app/empty-state"
+import { InlineNotice } from "@/components/app/inline-notice"
+import { Panel, PanelContent, PanelHeader } from "@/components/app/panel"
+import { SectionHeader } from "@/components/app/section-header"
 type ProjectEventLogEntry = {
     message: string
     timestamp: string

@@ -16,7 +16,7 @@ import { RunSummaryCard } from './components/RunSummaryCard'
 import type { RunRecord } from './model/shared'
 import type { RunDetailSessionState } from '@/state/viewSessionTypes'
 import { buildRunsScopeKey, getRunsSelectedRunIdForScope } from '@/state/runsSessionScope'
-import { InlineNotice } from '@/ui'
+import { InlineNotice } from '@/components/app/inline-notice'
 import { requestRunsTransportReconnect } from './services/runsTransportReconnect'
 
 const runRecordsMatch = (left: RunRecord | null, right: RunRecord | null) => {

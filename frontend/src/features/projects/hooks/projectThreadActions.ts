@@ -6,8 +6,7 @@ import {
     type ConversationSnapshotResponse,
     type ConversationSummaryResponse,
 } from '@/lib/workspaceClient'
-import { useDialogController } from '@/ui'
-
+import { useDialogController } from '@/components/app/dialog-controller'
 import {
     buildProjectConversationId,
     extractApiErrorMessage,

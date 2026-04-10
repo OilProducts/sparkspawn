@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 
 import type { ExtensionAttrEntry } from '@/lib/extensionAttrs'
-import { Button, FieldRow, Input } from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { FieldRow } from '@/components/app/field-row'
+import { Input } from '@/components/ui/input'
 interface AdvancedKeyValueEditorProps {
     testIdPrefix: string
     entries: ExtensionAttrEntry[]

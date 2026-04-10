@@ -1,5 +1,5 @@
-import type { CSSProperties } from 'react'
-import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
+import { useCallback, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
+import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from '@xyflow/react'
 
 import {
     buildRoundedPolylinePath,
@@ -63,6 +63,7 @@ export function ValidationEdge({
     targetY,
 }: EdgeProps) {
     const canvasMode = useCanvasSessionMode()
+    const { setEdges, setNodes } = useReactFlow()
     const edgeDiagnostics = useAppStore((state) =>
         canvasMode === 'editor'
             ? state.edgeDiagnostics
@@ -70,6 +71,8 @@ export function ValidationEdge({
                 ? state.runEdgeDiagnostics
                 : state.executionEdgeDiagnostics,
     )
+    const setSelectedNodeId = useAppStore((state) => state.setSelectedNodeId)
+    const setSelectedEdgeId = useAppStore((state) => state.setSelectedEdgeId)
     const diagnosticsForEdge = edgeDiagnostics[`${source}->${target}`] || []
     const hasError = diagnosticsForEdge.some((diag) => diag.severity === 'error')
     const hasWarning = diagnosticsForEdge.some((diag) => diag.severity === 'warning')
@@ -81,6 +84,23 @@ export function ValidationEdge({
     const derivedPreviewMeta = getDerivedPreviewMeta(data)
     const isDerivedChildEdge = derivedPreviewMeta?.kind === 'child-edge'
     const isDerivedLinkEdge = derivedPreviewMeta?.kind === 'child-link'
+    const isEditorSelectable = canvasMode === 'editor' && derivedPreviewMeta?.readOnly !== true
+
+    const handleSelect = useCallback((event: ReactMouseEvent<SVGElement | HTMLDivElement>) => {
+        if (!isEditorSelectable) {
+            return
+        }
+        event.stopPropagation()
+        setSelectedNodeId(null)
+        setSelectedEdgeId(id)
+        setNodes((nodes) => nodes.map((node) => (node.selected ? { ...node, selected: false } : node)))
+        setEdges((edges) =>
+            edges.map((edge) => ({
+                ...edge,
+                selected: edge.id === id,
+            })),
+        )
+    }, [id, isEditorSelectable, setEdges, setNodes, setSelectedEdgeId, setSelectedNodeId])
 
     const edgeStyle: CSSProperties = {
         strokeLinecap: 'round',
@@ -129,14 +149,23 @@ export function ValidationEdge({
 
     return (
         <>
-            <BaseEdge
-                id={id}
-                path={edgePath}
-                markerStart={markerStart}
-                markerEnd={markerEnd}
-                style={edgeStyle}
-                interactionWidth={16}
-            />
+            <g onClick={handleSelect}>
+                <path
+                    d={edgePath}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={16}
+                    className="react-flow__edge-interaction"
+                />
+                <BaseEdge
+                    id={id}
+                    path={edgePath}
+                    markerStart={markerStart}
+                    markerEnd={markerEnd}
+                    style={edgeStyle}
+                    interactionWidth={16}
+                />
+            </g>
             {diagnosticsForEdge.length > 0 && (
                 <EdgeLabelRenderer>
                     <div
@@ -147,6 +176,7 @@ export function ValidationEdge({
                     >
                         <div
                             data-testid="edge-diagnostic-badge"
+                            onClick={handleSelect}
                             className={`rounded-full border border-border bg-background/95 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badgeClass}`}
                             title={diagnosticsForEdge.map((diag) => diag.message).join('\n')}
                         >

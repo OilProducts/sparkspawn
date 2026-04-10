@@ -1,7 +1,10 @@
 import { useStore } from "@/store"
 import { getModelSuggestions, LLM_PROVIDER_OPTIONS } from "@/lib/llmSuggestions"
-import { FieldRow, Input, NativeSelect, Panel, PanelContent, PanelHeader, PanelTitle, SectionHeader } from "@/ui"
-
+import { FieldRow } from "@/components/app/field-row"
+import { Input } from "@/components/ui/input"
+import { NativeSelect } from "@/components/ui/native-select"
+import { Panel, PanelContent, PanelHeader, PanelTitle } from "@/components/app/panel"
+import { SectionHeader } from "@/components/app/section-header"
 export function SettingsPanel() {
     const uiDefaults = useStore((state) => state.uiDefaults)
     const setUiDefault = useStore((state) => state.setUiDefault)

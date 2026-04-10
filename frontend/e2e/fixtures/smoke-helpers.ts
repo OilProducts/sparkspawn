@@ -140,7 +140,20 @@ export async function createFlowForSmokeTest(page: Page, flowPrefix: string): Pr
 }
 
 export async function deleteFlowAfterSmoke(page: Page, flowName: string): Promise<void> {
-  const response = await page.request.delete(`/attractor/api/flows/${encodeURIComponent(flowName)}`)
+  let response: Awaited<ReturnType<Page['request']['delete']>> | null = null
+  try {
+    response = await page.request.delete(`/attractor/api/flows/${encodeURIComponent(flowName)}`, {
+      timeout: 2_000,
+    })
+  } catch (error) {
+    if (error instanceof Error && /timeout/i.test(error.message)) {
+      return
+    }
+    throw error
+  }
+  if (!response) {
+    return
+  }
   if (!response.ok() && response.status() !== 404) {
     throw new Error(`Failed to delete smoke clone ${flowName}: HTTP ${response.status()}`)
   }

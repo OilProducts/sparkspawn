@@ -14,19 +14,14 @@ import { formatProjectListLabel } from '@/features/projects/model/projectsHomeSt
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { useStore } from '@/store'
 import { buildRunsScopeKey } from '@/state/runsSessionScope'
-import {
-    Button,
-    Checkbox,
-    InlineNotice,
-    Input,
-    Label,
-    Panel,
-    PanelContent,
-    PanelHeader,
-    SectionHeader,
-    useDialogController,
-} from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Panel, PanelContent, PanelHeader } from '@/components/app/panel'
+import { SectionHeader } from '@/components/app/section-header'
+import { useDialogController } from '@/components/app/dialog-controller'
 import { ExecutionGraphCard } from './components/ExecutionGraphCard'
 import { ExecutionLaunchInputsSurface } from './components/ExecutionLaunchInputsSurface'
 import { ExecutionNoticeStack } from './components/ExecutionNoticeStack'

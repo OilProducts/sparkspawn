@@ -1,4 +1,4 @@
-import { Button } from '@/ui'
+import { Button } from '@/components/ui/button'
 import type { RunRecord } from '../model/shared'
 import {
     STATUS_LABELS,
@@ -10,7 +10,8 @@ import {
     formatOutcomeLabel,
     formatTimestamp,
 } from '../model/shared'
-import { Panel, PanelContent, PanelHeader, SectionHeader } from '@/ui'
+import { Panel, PanelContent, PanelHeader } from '@/components/app/panel'
+import { SectionHeader } from '@/components/app/section-header'
 import { RunSectionToggleButton } from './RunSectionToggleButton'
 
 function formatTokenCount(value: number | null | undefined): string {

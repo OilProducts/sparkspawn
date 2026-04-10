@@ -1,6 +1,9 @@
 import { cn } from '@/lib/utils'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
-import { Button, EmptyState, InlineNotice, ProjectContextChip } from '@/ui'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/app/empty-state'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { ProjectContextChip } from '@/components/app/project-context-chip'
 import type { RunRecord } from '../model/shared'
 import {
     STATUS_LABELS,

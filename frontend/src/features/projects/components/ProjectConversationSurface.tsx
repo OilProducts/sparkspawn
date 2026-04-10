@@ -1,7 +1,10 @@
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
 import { HomeWorkspace } from './HomeWorkspace'
-import { Button, EmptyState, InlineNotice, Panel, PanelContent, PanelHeader, PanelTitle, Textarea } from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/app/empty-state'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { Panel, PanelContent, PanelHeader, PanelTitle } from '@/components/app/panel'
+import { Textarea } from '@/components/ui/textarea'
 interface ProjectConversationSurfaceProps {
     activeProjectLabel: string | null
     activeProjectPath: string | null

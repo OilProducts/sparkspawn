@@ -1,18 +1,25 @@
 # Frontend Architecture
 
+Historical evidence in tests and notes may reference superseded shared UI paths. The current source of truth is the boundary described below.
+
 ## Intent
 
-- Keep implementation organized around feature modules, not a generic shared component grab bag.
-- Use `src/ui` as the canonical shared primitive and surface layer for non-canvas UI.
+- Keep implementation organized around feature modules with an explicit shared UI boundary.
+- Use `src/components/ui` for shadcn-managed primitives.
+- Use `src/components/app` for Spark-managed shared composites that are reused across features.
 - Keep workflow canvas rendering custom under `src/features/workflow-canvas`.
 - Treat this as an internal frontend architecture document. It does not change backend APIs, persisted contracts, or product behavior.
 
 ## Top-Level Layout
 
-- `src/ui`
-  - Canonical shared non-canvas primitives and reusable surface helpers.
-  - Safe to import from any feature.
+- `src/components/ui`
+  - Canonical shared non-canvas primitives managed through the shadcn CLI.
+  - Safe to import from any non-canvas feature.
+  - Import primitives directly from `@/components/ui/*`. Do not add or use a barrel.
+- `src/components/app`
+  - Spark-managed shared composites such as `Panel`, `FieldRow`, `InlineNotice`, `EmptyState`, `SectionHeader`, `ProjectContextChip`, `FlowTree`, and the dialog controller surface.
   - Shared dialog flows should use `DialogProvider` and `useDialogController`, not browser `alert`, `confirm`, or `prompt`.
+  - Import composites directly from `@/components/app/*`. Do not add or use a barrel.
 - `src/features/projects`
 - `src/features/runs`
 - `src/features/editor`
@@ -26,13 +33,11 @@
 - `src/App.tsx`
   - Top-level wiring between the app shell and feature entrypoints.
 
-There is no generic `src/components` layer. New implementation code belongs in `src/features/*` or `src/ui`.
-
 ## Feature Internals
 
 - `src/features/<feature>/components`
   - Presentational feature components and local composition surfaces.
-  - May import `@/ui/*`, local feature model types, and store selectors.
+  - May import `@/components/ui/*`, `@/components/app/*`, local feature model types, and store selectors.
   - Must not call API clients directly.
 - `src/features/<feature>/hooks`
   - Orchestration hooks, loaders, subscriptions, and other effectful feature behavior.
@@ -46,9 +51,11 @@ There is no generic `src/components` layer. New implementation code belongs in `
 
 ## Shared UI Rules
 
-- Non-canvas feature UI should compose `@/ui/*` primitives instead of hand-rolled raw controls.
+- Non-canvas feature UI should compose primitives from `@/components/ui/*` instead of hand-rolled raw controls.
 - Shared primitives cover controls such as buttons, inputs, selects, tabs, badges, cards, scroll areas, textareas, labels, separators, dialogs, tooltips, switches, and checkboxes.
-- Shared surface helpers such as `Panel`, `SectionHeader`, `FieldRow`, `InlineNotice`, and `EmptyState` are the default building blocks for repeated non-canvas surfaces. When a pattern repeats across features, formalize it in `src/ui` instead of re-implementing it locally.
+- Shared Spark-specific composites belong in `src/components/app` when they are reused across features and remain Spark-owned rather than shadcn-owned.
+- Feature-specific presentation code stays in the owning feature instead of moving into shared folders just because it looks visually similar.
+- `FlowTree` remains shared because both editor and execution surfaces depend on the same reusable tree behavior.
 - Canvas renderers are the exception. Inspector chrome, sidebars, forms, and other non-canvas surfaces are not exempt.
 
 ## Import Boundaries
@@ -56,7 +63,8 @@ There is no generic `src/components` layer. New implementation code belongs in `
 - Presentational feature components must not import API clients directly.
 - API client usage is limited to feature hooks and services.
 - Presentational components may read store selectors, but store mutation and cross-feature coordination should stay in hooks, services, or top-level composition files.
-- Non-canvas feature components should import shared controls from `@/ui/*`.
+- Import shadcn primitives directly from `@/components/ui/*`, not from a barrel.
+- Import Spark-managed shared composites directly from `@/components/app/*`, not from a retired mixed shared layer.
 
 ## Shared State
 

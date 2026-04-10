@@ -1,6 +1,11 @@
 import type { LaunchInputDefinition, LaunchInputType } from '@/lib/flowContracts'
-import { Button, Checkbox, FieldRow, Input, Label, NativeSelect, Textarea } from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { FieldRow } from '@/components/app/field-row'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Textarea } from '@/components/ui/textarea'
 const LAUNCH_INPUT_TYPE_OPTIONS: Array<{ value: LaunchInputType; label: string }> = [
     { value: 'string', label: 'String' },
     { value: 'string[]', label: 'String List' },

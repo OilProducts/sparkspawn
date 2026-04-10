@@ -4,8 +4,7 @@ import {
     type ConversationSnapshotResponse,
     type FlowRunRequestResponse,
 } from '@/lib/workspaceClient'
-import { useDialogController } from '@/ui'
-
+import { useDialogController } from '@/components/app/dialog-controller'
 type UseConversationReviewsArgs = {
     activeConversationId: string | null
     activeProjectPath: string | null

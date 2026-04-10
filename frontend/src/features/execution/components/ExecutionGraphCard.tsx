@@ -28,8 +28,10 @@ import {
     type HydratedFlowGraph,
 } from '@/features/workflow-canvas'
 import { useStore } from '@/store'
-import { EmptyState, InlineNotice, Panel, PanelContent, PanelHeader, SectionHeader } from '@/ui'
-
+import { EmptyState } from '@/components/app/empty-state'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { Panel, PanelContent, PanelHeader } from '@/components/app/panel'
+import { SectionHeader } from '@/components/app/section-header'
 import { RunSectionToggleButton } from '@/features/runs/components/RunSectionToggleButton'
 
 type ExecutionGraphCanvasProps = {

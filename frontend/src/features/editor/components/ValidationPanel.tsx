@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useStore } from '@/store';
 import { useNarrowViewport } from '@/lib/useNarrowViewport';
-import { Button, NativeSelect } from '@/ui';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 
 const severityStyles: Record<string, string> = {
     error: 'bg-destructive/15 text-destructive',

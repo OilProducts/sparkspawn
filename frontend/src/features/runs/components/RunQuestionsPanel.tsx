@@ -1,7 +1,8 @@
 import type { PendingInterviewGate, PendingInterviewGateGroup } from '../model/shared'
 import { pendingGateSemanticHint, formatTimestamp } from '../model/shared'
-import { Button, InlineNotice, Input } from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { Input } from '@/components/ui/input'
 interface RunQuestionsPanelProps {
     freeformAnswersByGateId: Record<string, string>
     groupedPendingInterviewGates: PendingInterviewGateGroup[]

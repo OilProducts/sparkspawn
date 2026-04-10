@@ -1,8 +1,7 @@
 import { useCallback } from 'react'
 
 import { ApiHttpError, fetchPipelineCancelValidated } from '@/lib/attractorClient'
-import { useDialogController } from '@/ui'
-
+import { useDialogController } from '@/components/app/dialog-controller'
 import type { RunRecord } from '../model/shared'
 
 const logUnexpectedRunError = (error: unknown) => {

@@ -3,9 +3,7 @@ import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-
-import { DialogProvider, useDialogController } from '@/ui'
-
+import { DialogProvider, useDialogController } from '@/components/app/dialog-controller'
 function DialogHarness() {
   const { confirm, prompt } = useDialogController()
   const [result, setResult] = useState('idle')

@@ -7,8 +7,7 @@ import { RunStream, RunsPanel } from "@/features/runs"
 import { SettingsPanel } from "@/features/settings"
 import { TriggersPanel } from "@/features/triggers"
 import { useStore } from "@/store"
-import { DialogProvider } from "@/ui"
-
+import { DialogProvider } from "@/components/app/dialog-controller"
 function App() {
   const viewMode = useStore((state) => state.viewMode)
   const isHomeMode = viewMode === 'home' || viewMode === 'projects'

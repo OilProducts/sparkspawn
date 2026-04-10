@@ -15,7 +15,7 @@ import {
 import { saveFlowContent } from "@/lib/flowPersistence"
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { useFlowSaveScheduler } from '@/lib/useFlowSaveScheduler'
-import { useDialogController } from '@/ui'
+import { useDialogController } from '@/components/app/dialog-controller'
 import { deleteFlowCatalogEntry, loadFlowCatalog } from './services/flowCatalog'
 import { EdgeInspectorPanel } from './components/EdgeInspectorPanel'
 import { FlowBrowserPanel } from './components/FlowBrowserPanel'
@@ -26,6 +26,7 @@ import {
     parseContextKeyList,
     serializeContextKeyList,
 } from '@/lib/flowContracts'
+import { useEditorGraphBridgeRef } from './EditorGraphBridgeContext'
 
 const DEFAULT_NODE_INSPECTOR_SESSION = {
     showAdvanced: false,
@@ -119,9 +120,16 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
     const editorNodeInspectorSessionsByNodeId = useStore((state) => state.editorNodeInspectorSessionsByNodeId)
     const updateEditorNodeInspectorSession = useStore((state) => state.updateEditorNodeInspectorSession)
     const [flows, setFlows] = useState<string[]>([])
+    const editorGraphBridgeRef = useEditorGraphBridgeRef()
     const { getNodes, setNodes, getEdges, setEdges } = useReactFlow()
     const nodes = useReactFlowStore((state) => state.nodes)
     const edges = useReactFlowStore((state) => state.edges)
+    const readNodes = () => editorGraphBridgeRef?.current?.getNodes() ?? getNodes()
+    const readEdges = () => editorGraphBridgeRef?.current?.getEdges() ?? getEdges()
+    const updateNodes = (updater: Parameters<typeof setNodes>[0]) =>
+        (editorGraphBridgeRef?.current?.setNodes ?? setNodes)(updater)
+    const updateEdges = (updater: Parameters<typeof setEdges>[0]) =>
+        (editorGraphBridgeRef?.current?.setEdges ?? setEdges)(updater)
     const { scheduleSave } = useFlowSaveScheduler<FlowGraphSnapshot>({
         flowName: activeFlow,
         debounceMs: INSPECTOR_SAVE_DEBOUNCE_MS,
@@ -229,7 +237,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
         if (!activeFlow) return;
 
         let newNodes: Node[] = [];
-        setNodes(nds => {
+        updateNodes((nds) => {
             newNodes = nds.map(node => {
                 if (node.id === nodeId) {
                     return applyNodeVisualState(node, { ...node.data, [key]: value });
@@ -240,7 +248,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
         });
 
         if (newNodes.length > 0) {
-            scheduleSave({ nodes: newNodes, edges: getEdges() });
+            scheduleSave({ nodes: newNodes, edges: readEdges() });
         }
     }
 
@@ -355,7 +363,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
         if (!selectedEdgeId || !activeFlow) return;
 
         let newEdges: Edge[] = [];
-        setEdges((eds) => {
+        updateEdges((eds) => {
             newEdges = eds.map((edge) => {
                 if (edge.id !== selectedEdgeId) return edge;
                 const nextData = { ...(edge.data || {}), [key]: value };
@@ -369,7 +377,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
         });
 
         if (newEdges.length > 0) {
-            scheduleSave({ nodes: getNodes(), edges: newEdges });
+            scheduleSave({ nodes: readNodes(), edges: newEdges });
         }
     };
 
@@ -378,7 +386,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
             return
         }
         let newNodes: Node[] = []
-        setNodes((currentNodes) => {
+        updateNodes((currentNodes) => {
             newNodes = currentNodes.map((node) => {
                 if (node.id !== selectedNodeId) {
                     return node
@@ -389,7 +397,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
             return newNodes
         })
         if (newNodes.length > 0) {
-            scheduleSave({ nodes: newNodes, edges: getEdges() })
+            scheduleSave({ nodes: newNodes, edges: readEdges() })
         }
     }
 
@@ -447,7 +455,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
             return
         }
         let newEdges: Edge[] = []
-        setEdges((currentEdges) => {
+        updateEdges((currentEdges) => {
             newEdges = currentEdges.map((edge) => {
                 if (edge.id !== selectedEdgeId) {
                     return edge
@@ -462,7 +470,7 @@ export function Sidebar({ desktopWidthPx = 288 }: { desktopWidthPx?: number }) {
             return newEdges
         })
         if (newEdges.length > 0) {
-            scheduleSave({ nodes: getNodes(), edges: newEdges })
+            scheduleSave({ nodes: readNodes(), edges: newEdges })
         }
     }
 

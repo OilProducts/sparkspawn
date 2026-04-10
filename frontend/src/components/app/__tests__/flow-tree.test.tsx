@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { FlowTree } from '@/ui/flow-tree'
+import { FlowTree } from '@/components/app/flow-tree'
 
 describe('FlowTree', () => {
   it('renders nested directories and selects the requested flow', async () => {

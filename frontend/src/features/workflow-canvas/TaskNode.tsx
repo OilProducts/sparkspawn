@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { generateDot } from '@/lib/dotUtils'
+import { useEditorGraphBridgeRef } from '@/features/editor/EditorGraphBridgeContext'
 
 import {
     WorkflowNodeFrame,
@@ -116,7 +117,11 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
         }
         return canvasMode === 'runs' ? state.runNodeDiagnostics : state.executionNodeDiagnostics
     })
+    const editorGraphBridgeRef = useEditorGraphBridgeRef()
     const { setNodes, getEdges } = useReactFlow()
+    const readEdges = () => editorGraphBridgeRef?.current?.getEdges() ?? getEdges()
+    const updateNodes = (updater: Parameters<typeof setNodes>[0]) =>
+        (editorGraphBridgeRef?.current?.setNodes ?? setNodes)(updater)
     const inputRef = useRef<HTMLInputElement>(null)
     const humanGate = isRunCanvas ? executionHumanGate : null
 
@@ -224,7 +229,7 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
         }
 
         let updatedNodes: Node[] = []
-        setNodes((currentNodes) => {
+        updateNodes((currentNodes) => {
             updatedNodes = currentNodes.map((node) => {
                 if (node.id !== id) {
                     return node
@@ -242,7 +247,7 @@ function BaseWorkflowNode({ id, data, selected, defaultShape }: BaseWorkflowNode
         })
 
         if (updatedNodes.length > 0) {
-            const dot = generateDot(flowName, updatedNodes, getEdges(), graphAttrs)
+            const dot = generateDot(flowName, updatedNodes, readEdges(), graphAttrs)
             void saveFlowContent(flowName, dot)
         }
     }

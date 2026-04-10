@@ -1,7 +1,5 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
-
-import { Button } from '@/ui'
-
+import { Button } from '@/components/ui/button'
 interface RunSectionToggleButtonProps {
     collapsed: boolean
     onToggle: () => void

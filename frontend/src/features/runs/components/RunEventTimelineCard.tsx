@@ -13,17 +13,13 @@ import {
     formatTimestamp,
 } from '../model/shared'
 import { TIMELINE_UPDATE_BUDGET_MS } from '@/lib/performanceBudgets'
-import {
-    EmptyState,
-    FieldRow,
-    InlineNotice,
-    Input,
-    NativeSelect,
-    Panel,
-    PanelContent,
-    PanelHeader,
-    SectionHeader,
-} from '@/ui'
+import { EmptyState } from '@/components/app/empty-state'
+import { FieldRow } from '@/components/app/field-row'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Panel, PanelContent, PanelHeader } from '@/components/app/panel'
+import { SectionHeader } from '@/components/app/section-header'
 import { RunQuestionsPanel } from './RunQuestionsPanel'
 import { RunSectionToggleButton } from './RunSectionToggleButton'
 

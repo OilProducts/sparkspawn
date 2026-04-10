@@ -7,8 +7,7 @@ import {
     pickProjectDirectoryValidated,
     registerProjectValidated,
 } from '@/lib/workspaceClient'
-import { useDialogController } from '@/ui'
-
+import { useDialogController } from '@/components/app/dialog-controller'
 import type { ProjectGitMetadata } from '../model/presentation'
 import {
     deriveProjectPathFromDirectorySelection,

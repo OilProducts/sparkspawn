@@ -9,7 +9,7 @@ import {
     registerProjectValidated,
     updateProjectStateValidated,
 } from '@/lib/workspaceClient'
-import { useDialogController } from '@/ui'
+import { useDialogController } from '@/components/app/dialog-controller'
 import { useProjectRegistryBootstrap } from '@/features/projects/hooks/useProjectRegistryBootstrap'
 import {
     buildOrderedProjects,

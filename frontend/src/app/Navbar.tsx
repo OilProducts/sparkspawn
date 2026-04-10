@@ -2,7 +2,8 @@ import { type KeyboardEvent } from "react"
 import { useStore, type ViewMode } from "@/store"
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { Plus, Settings2, Trash2, X } from "lucide-react"
-import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui"
+import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useProjectSwitcherControls } from './useProjectSwitcherControls'
 import { formatProjectListLabel } from '@/features/projects/model/projectsHomeState'
 

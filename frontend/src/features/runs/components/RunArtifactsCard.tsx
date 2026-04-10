@@ -2,15 +2,11 @@ import type {
     ArtifactErrorState,
     ArtifactListEntry,
 } from '../model/shared'
-import {
-    Button,
-    EmptyState,
-    InlineNotice,
-    Panel,
-    PanelContent,
-    PanelHeader,
-    SectionHeader,
-} from '@/ui'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/app/empty-state'
+import { InlineNotice } from '@/components/app/inline-notice'
+import { Panel, PanelContent, PanelHeader } from '@/components/app/panel'
+import { SectionHeader } from '@/components/app/section-header'
 import { RunSectionToggleButton } from './RunSectionToggleButton'
 
 interface RunArtifactsCardProps {

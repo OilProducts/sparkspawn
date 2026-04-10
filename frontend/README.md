@@ -29,12 +29,19 @@ Override that with `VITE_BACKEND_URL` if needed.
 
 From the repo root, `just run` is the normal full-stack workflow.
 
+## Shared UI Boundary
+
+- The shadcn CLI source of truth is `src/components/ui`.
+- Spark-managed shared wrappers such as dialog control, panels, notices, and shared flow browsing live in `src/components/app`.
+- Import shared UI by direct module path under `@/components/ui/*` or `@/components/app/*`, not through a mixed barrel.
+
 ## Scripts
 
 - `npm run dev`: start the Vite dev server
 - `npm run build`: type-check and produce a production build in `dist/`
 - `npm run lint`: run ESLint
 - `npm run preview`: serve the production build locally
+- `npm run shadcn:verify`: verify `components.json` and the shadcn-managed primitives against the pinned repo-local baseline, including `native-select`, without depending on live `shadcn@latest` network calls at evaluation time
 - `npm run test:unit`: run Vitest unit tests
 - `npm run test:unit:watch`: run Vitest in watch mode
 - `npm run ui:smoke`: run Playwright smoke checks

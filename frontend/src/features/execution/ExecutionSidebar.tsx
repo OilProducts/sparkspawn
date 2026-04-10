@@ -2,10 +2,9 @@ import { useEffect, useState } from 'react'
 
 import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
-import { FlowTree } from '@/ui/flow-tree'
+import { FlowTree } from '@/components/app/flow-tree'
 import { loadExecutionFlowCatalog } from './services/flowCatalog'
-import { ProjectContextChip } from '@/ui'
-
+import { ProjectContextChip } from '@/components/app/project-context-chip'
 export function ExecutionSidebar() {
     const activeProjectPath = useStore((state) => state.activeProjectPath)
     const executionFlow = useStore((state) => state.executionFlow)

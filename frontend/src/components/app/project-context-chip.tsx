@@ -1,4 +1,4 @@
-import { Badge } from './badge'
+import { Badge } from '@/components/ui/badge'
 import { normalizeProjectPath } from '@/lib/projectPaths'
 
 const formatProjectLabel = (projectPath: string | null) => {

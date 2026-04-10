@@ -1,5 +1,9 @@
-import { Checkbox, FieldRow, Input, Label, NativeSelect, Textarea } from '@/ui'
-
+import { Checkbox } from '@/components/ui/checkbox'
+import { FieldRow } from '@/components/app/field-row'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Textarea } from '@/components/ui/textarea'
 import {
     SHARED_WEBHOOK_ENDPOINT,
     type TriggerFormState,

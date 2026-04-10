@@ -16,8 +16,8 @@ import {
     parseThinkingSummaryContent,
     summarizeToolCallDetail,
 } from '../model/presentation'
-import { Button, InlineNotice } from '@/ui'
-
+import { Button } from '@/components/ui/button'
+import { InlineNotice } from '@/components/app/inline-notice'
 interface ProjectConversationHistoryProps {
     activeConversationId: string | null
     isConversationHistoryLoading: boolean
