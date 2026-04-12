@@ -1172,6 +1172,9 @@ def test_codex_app_server_backend_repairs_undeclared_context_updates_on_same_thr
     assert "undeclared context_updates keys" in str(prompts[1]["prompt"])
     assert "context.review.extra" in str(prompts[1]["prompt"])
     assert "context.review.summary" in str(prompts[1]["prompt"])
+    assert 'flat JSON object whose keys are the literal declared context keys' in str(prompts[1]["prompt"])
+    assert 'Do not nest objects to represent dotted keys' in str(prompts[1]["prompt"])
+    assert '{"context_updates":{"context.review.summary":"..."}}' in str(prompts[1]["prompt"])
 
 
 def test_codex_app_server_backend_repairs_invalid_context_update_keys_on_same_thread(

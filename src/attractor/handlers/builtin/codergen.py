@@ -29,6 +29,8 @@ STATUS_ENVELOPE_PROMPT_APPENDIX = "\n".join(
         '- Use "preferred_label" for routing; do not use legacy aliases.',
         '- "suggested_next_ids" must be a list of strings.',
         '- "context_updates" must be a JSON object.',
+        '- Inside "context_updates", emit a flat key/value map. Keys with dots stay literal keys, for example "context.review.summary".',
+        '- Do not nest objects inside "context_updates" for dotted keys. Use {"context_updates":{"context.review.summary":"..."}} not {"context_updates":{"context":{"review":{"summary":"..."}}}}.',
         '- Do not emit any other top-level keys.',
         '- Put machine-readable details in "context_updates", not ad hoc top-level fields.',
         '- If no routing or context updates are needed, prefer: {"outcome":"success"}',

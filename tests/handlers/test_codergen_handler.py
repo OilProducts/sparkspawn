@@ -316,6 +316,9 @@ class TestCodergenHandler:
 
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0][1] == f"Plan for ship\n\n{STATUS_ENVELOPE_PROMPT_APPENDIX}"
+        assert 'Inside "context_updates", emit a flat key/value map.' in backend.calls[0][1]
+        assert '"context.review.summary"' in backend.calls[0][1]
+        assert 'Do not nest objects inside "context_updates" for dotted keys.' in backend.calls[0][1]
         assert backend.calls[0][3] == "status_envelope"
         assert backend.calls[0][4] == 1
 
