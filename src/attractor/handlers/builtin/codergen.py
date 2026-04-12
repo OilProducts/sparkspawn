@@ -12,6 +12,7 @@ from attractor.engine.context_contracts import (
     resolve_context_write_contract,
 )
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
+from attractor.engine.status_envelope_prompting import build_status_envelope_prompt_appendix
 from attractor.llm_runtime import resolve_effective_llm_model
 
 from ..base import CodergenBackend, HandlerRuntime
@@ -20,22 +21,7 @@ RUNTIME_CONTEXT_CARRYOVER_KEY = "_attractor.runtime.context_carryover"
 DECLARED_CONTEXT_MISSING_SENTINEL = "<missing>"
 STATUS_ENVELOPE_RESPONSE_CONTRACT = "status_envelope"
 DEFAULT_CONTRACT_REPAIR_ATTEMPTS = 1
-STATUS_ENVELOPE_PROMPT_APPENDIX = "\n".join(
-    [
-        "Structured response contract:",
-        '- Return ONLY a JSON object.',
-        '- Required top-level key: "outcome" with one of "success", "fail", "partial_success", or "retry".',
-        '- Optional top-level keys: "preferred_label", "suggested_next_ids", "context_updates", "notes", "failure_reason", and "retryable".',
-        '- Use "preferred_label" for routing; do not use legacy aliases.',
-        '- "suggested_next_ids" must be a list of strings.',
-        '- "context_updates" must be a JSON object.',
-        '- Inside "context_updates", emit a flat key/value map. Keys with dots stay literal keys, for example "context.review.summary".',
-        '- Do not nest objects inside "context_updates" for dotted keys. Use {"context_updates":{"context.review.summary":"..."}} not {"context_updates":{"context":{"review":{"summary":"..."}}}}.',
-        '- Do not emit any other top-level keys.',
-        '- Put machine-readable details in "context_updates", not ad hoc top-level fields.',
-        '- If no routing or context updates are needed, prefer: {"outcome":"success"}',
-    ]
-)
+STATUS_ENVELOPE_PROMPT_APPENDIX = build_status_envelope_prompt_appendix(None)
 
 
 class CodergenHandler:
@@ -67,8 +53,9 @@ class CodergenHandler:
             _write_stage_file(stage_dir, "response.md", failure_reason)
             _write_status_file(stage_dir, outcome)
             return outcome
+        write_contract = resolve_context_write_contract(runtime.node_attrs)
         prompt = _expand_goal(prompt, runtime.context, runtime.graph)
-        prompt = _apply_response_contract(prompt, runtime.node_attrs)
+        prompt = _apply_response_contract(prompt, runtime.node_attrs, write_contract)
         prompt = _compose_prompt(prompt, runtime.context, read_contract)
         _write_stage_file(stage_dir, "prompt.md", prompt)
 
@@ -89,7 +76,6 @@ class CodergenHandler:
         timeout = _to_seconds(runtime.node_attrs.get("timeout"))
         response_contract = _normalized_response_contract_name(runtime.node_attrs)
         contract_repair_attempts = _contract_repair_attempts(runtime.node_attrs, response_contract)
-        write_contract = resolve_context_write_contract(runtime.node_attrs)
         effective_model = resolve_effective_llm_model(
             runtime.node_attrs,
             runtime.context,
@@ -190,11 +176,11 @@ def _backend_stage_logging_context(backend: object, node_id: str, logs_root: Pat
     return nullcontext()
 
 
-def _apply_response_contract(prompt: str, node_attrs) -> str:
+def _apply_response_contract(prompt: str, node_attrs, write_contract) -> str:
     contract_name = _normalized_response_contract_name(node_attrs)
     if contract_name != STATUS_ENVELOPE_RESPONSE_CONTRACT:
         return prompt
-    return "\n\n".join([prompt, STATUS_ENVELOPE_PROMPT_APPENDIX])
+    return "\n\n".join([prompt, build_status_envelope_prompt_appendix(write_contract)])
 
 
 def _normalized_response_contract_name(node_attrs) -> str:

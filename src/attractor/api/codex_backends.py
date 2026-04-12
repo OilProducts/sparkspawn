@@ -21,6 +21,10 @@ from attractor.engine.context_contracts import (
     validate_context_updates_against_contract,
 )
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
+from attractor.engine.status_envelope_prompting import (
+    build_status_envelope_context_updates_contract_text,
+    format_status_envelope_allowed_keys,
+)
 from attractor.handlers.base import CodergenBackend
 from spark_common.codex_app_client import CodexAppServerClient
 from spark_common import codex_app_server
@@ -53,6 +57,7 @@ class _StructuredContractViolation:
     response_contract: str
     raw_text: str
     reason: str
+    write_contract: ContextWriteContract | None = None
 
 
 class CodexAppServerBackend(CodergenBackend):
@@ -312,7 +317,7 @@ class CodexAppServerBackend(CodergenBackend):
         if contract_repair_attempts <= 0:
             return _contract_failure_outcome(result)
 
-        current_violation = result
+        current_violation = _with_write_contract(result, write_contract)
         for attempt in range(1, contract_repair_attempts + 1):
             log_line(
                 f"response contract violation for {node_id}; requesting corrected final answer "
@@ -346,7 +351,7 @@ class CodexAppServerBackend(CodergenBackend):
                 continue
             if isinstance(repaired, _PlainTextParseResult):
                 return repaired.raw_text
-            current_violation = repaired
+            current_violation = _with_write_contract(repaired, write_contract)
         return _contract_failure_outcome(current_violation)
 
 
@@ -366,6 +371,21 @@ def _validate_write_contract_violation(
         response_contract=response_contract,
         raw_text=raw_text.strip(),
         reason=violation.format_reason(),
+        write_contract=write_contract,
+    )
+
+
+def _with_write_contract(
+    violation: _StructuredContractViolation,
+    write_contract: ContextWriteContract | None,
+) -> _StructuredContractViolation:
+    if violation.write_contract is write_contract:
+        return violation
+    return _StructuredContractViolation(
+        response_contract=violation.response_contract,
+        raw_text=violation.raw_text,
+        reason=violation.reason,
+        write_contract=write_contract,
     )
 
 
@@ -508,23 +528,32 @@ def _has_response_contract(response_contract: str) -> bool:
 
 
 def _build_contract_repair_prompt(violation: _StructuredContractViolation) -> str:
-    return "\n".join(
+    lines = [
+        f"Your previous final answer violated the {violation.response_contract} response contract.",
+        f"Validation error: {violation.reason}",
+        "",
+        "Re-emit only a corrected final answer for the same decision.",
+        "Do not do new repository work.",
+        "Do not run commands.",
+        "Do not change the substantive decision, routing label, or context updates except as required to satisfy the response contract.",
+    ]
+    allowed_keys = tuple(violation.write_contract.allowed_keys) if violation.write_contract is not None else ()
+    if allowed_keys:
+        lines.append(
+            'Re-emit the same decision using only these "context_updates" keys when needed: '
+            f"{format_status_envelope_allowed_keys(violation.write_contract)}."
+        )
+    else:
+        lines.append('Re-emit the same decision with no "context_updates".')
+    lines.extend(
         [
-            f"Your previous final answer violated the {violation.response_contract} response contract.",
-            f"Validation error: {violation.reason}",
-            "",
-            "Re-emit only a corrected final answer for the same decision.",
-            "Do not do new repository work.",
-            "Do not run commands.",
-            "Do not change the substantive decision, routing label, or context updates except as required to satisfy the response contract.",
-            'When using "context_updates", emit a flat JSON object whose keys are the literal declared context keys.',
-            'If an allowed key contains dots, keep it as a single key string, for example "context.review.summary".',
-            'Do not nest objects to represent dotted keys. Use {"context_updates":{"context.review.summary":"..."}} not {"context_updates":{"context":{"review":{"summary":"..."}}}}.',
+            build_status_envelope_context_updates_contract_text(violation.write_contract),
             "",
             "Previous invalid final answer:",
             violation.raw_text,
         ]
     )
+    return "\n".join(lines)
 
 
 def _contract_failure_outcome(violation: _StructuredContractViolation) -> Outcome:

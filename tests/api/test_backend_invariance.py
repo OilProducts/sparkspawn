@@ -14,6 +14,7 @@ import attractor.api.server as server
 from attractor.engine import Context, load_checkpoint
 from attractor.engine.context_contracts import ContextWriteContract
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
+from attractor.engine.status_envelope_prompting import build_status_envelope_context_updates_contract_text
 from spark_common.runtime import (
     build_codex_runtime_environment,
     build_project_id,
@@ -1169,12 +1170,87 @@ def test_codex_app_server_backend_repairs_undeclared_context_updates_on_same_thr
     assert len(prompts) == 2
     assert prompts[0]["thread_id"] == "thread-123"
     assert prompts[1]["thread_id"] == "thread-123"
-    assert "undeclared context_updates keys" in str(prompts[1]["prompt"])
-    assert "context.review.extra" in str(prompts[1]["prompt"])
-    assert "context.review.summary" in str(prompts[1]["prompt"])
-    assert 'flat JSON object whose keys are the literal declared context keys' in str(prompts[1]["prompt"])
-    assert 'Do not nest objects to represent dotted keys' in str(prompts[1]["prompt"])
-    assert '{"context_updates":{"context.review.summary":"..."}}' in str(prompts[1]["prompt"])
+    repair_prompt = str(prompts[1]["prompt"])
+    assert "undeclared context_updates keys" in repair_prompt
+    assert "context.review.extra" in repair_prompt
+    assert "context.review.summary" in repair_prompt
+    assert (
+        build_status_envelope_context_updates_contract_text(
+            ContextWriteContract(allowed_keys=("context.review.summary",))
+        )
+        in repair_prompt
+    )
+    assert (
+        'Re-emit the same decision using only these "context_updates" keys when needed: '
+        '"context.review.summary".'
+    ) in repair_prompt
+    assert "Do not do new repository work." in repair_prompt
+    assert "Previous invalid final answer:" in repair_prompt
+    assert (
+        '{"outcome":"success","context_updates":{"context.review.summary":"ready","context.review.extra":"nope"}}'
+        in repair_prompt
+    )
+
+
+def test_codex_app_server_backend_repairs_context_updates_when_node_declares_no_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: List[dict] = []
+    backend = server.CodexAppServerBackend(str(tmp_path), events.append, model=None)
+    prompts: list[dict[str, object]] = []
+
+    class FakeResult:
+        def __init__(self, assistant_message: str) -> None:
+            self.assistant_message = assistant_message
+            self.command_text = ""
+            self.token_total = None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, **kwargs) -> None:
+            return None
+
+        def start_thread(self, **kwargs) -> str:
+            return "thread-123"
+
+        def run_turn(self, **kwargs) -> FakeResult:
+            prompts.append(kwargs)
+            if len(prompts) == 1:
+                return FakeResult('{"outcome":"success","context_updates":{"context.review.summary":"ready"}}')
+            return FakeResult('{"outcome":"success"}')
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerClient", FakeClient)
+
+    result = backend.run(
+        "review",
+        "hello",
+        Context(),
+        response_contract="status_envelope",
+        contract_repair_attempts=1,
+        write_contract=ContextWriteContract(),
+    )
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.SUCCESS
+    assert result.context_updates == {}
+    assert len(prompts) == 2
+    assert prompts[0]["thread_id"] == "thread-123"
+    assert prompts[1]["thread_id"] == "thread-123"
+    repair_prompt = str(prompts[1]["prompt"])
+    assert "undeclared context_updates keys" in repair_prompt
+    assert build_status_envelope_context_updates_contract_text(ContextWriteContract()) in repair_prompt
+    assert 'Re-emit the same decision with no "context_updates".' in repair_prompt
+    assert 'This node must not emit "context_updates".' in repair_prompt
+    assert 'Keys with dots stay literal keys' not in repair_prompt
+    assert "Do not do new repository work." in repair_prompt
+    assert "Previous invalid final answer:" in repair_prompt
+    assert '{"outcome":"success","context_updates":{"context.review.summary":"ready"}}' in repair_prompt
 
 
 def test_codex_app_server_backend_repairs_invalid_context_update_keys_on_same_thread(

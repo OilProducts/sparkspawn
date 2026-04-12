@@ -174,7 +174,11 @@ These attrs are only meaningful for specific node types:
 Authoring guidance:
 
 - Use `codergen.response_contract="status_envelope"` on codergen nodes that are expected to emit structured routing/context outcomes.
+- `status_envelope` prompt guidance is dynamic: the runtime keeps the shared envelope schema, then derives node-specific `context_updates` rules from normalized `spark.writes_context`.
+- If a node does not declare `spark.writes_context`, the prompt tells the model not to emit `context_updates`.
+- If a node does declare `spark.writes_context`, the prompt lists the exact allowed keys and reminds the model to keep dotted keys flat inside `context_updates`.
 - Use `codergen.contract_repair_attempts` only when you need to override the default repair budget. The runtime already defaults to one repair attempt for response-contract nodes.
+- Same-thread repair prompts reuse the same node-specific write guidance, but runtime enforcement still decides whether the final output is accepted.
 - Keep the node prompt focused on the task and any node-specific fields it must set; the runtime supplies the canonical envelope schema.
 - Do not set this attr on `tool`, `wait.human`, `stack.manager_loop`, `start`, or `exit` nodes.
 

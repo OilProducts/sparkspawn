@@ -4,9 +4,13 @@ from pathlib import Path
 
 from attractor.dsl import parse_dot
 from attractor.engine.context import Context
+from attractor.engine.context_contracts import resolve_context_write_contract
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
+from attractor.engine.status_envelope_prompting import (
+    build_status_envelope_context_updates_contract_text,
+    build_status_envelope_prompt_appendix,
+)
 from attractor.handlers import HandlerRunner, build_default_registry
-from attractor.handlers.builtin.codergen import STATUS_ENVELOPE_PROMPT_APPENDIX
 from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
 from attractor.transforms import ModelStylesheetTransform, RuntimePreambleTransform, TransformPipeline
 
@@ -299,7 +303,38 @@ class TestCodergenHandler:
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0][1] == "Plan for Ship docs"
 
-    def test_codergen_handler_appends_status_envelope_contract_when_configured(self):
+    def test_codergen_handler_appends_status_envelope_contract_with_declared_writes(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [
+                    shape=box,
+                    prompt="Plan for $goal",
+                    codergen.response_contract="status_envelope",
+                    spark.writes_context="[\\"review.required_changes\\",\\"context.review.summary\\"]"
+                ]
+            }
+            """
+        )
+
+        backend = _StubBackend(ok=True)
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("task", "Plan for $goal", Context(values={"graph.goal": "ship"}))
+
+        write_contract = resolve_context_write_contract(graph.nodes["task"].attrs)
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0][1] == f"Plan for ship\n\n{build_status_envelope_prompt_appendix(write_contract)}"
+        assert build_status_envelope_context_updates_contract_text(write_contract) in backend.calls[0][1]
+        assert (
+            'Allowed "context_updates" keys for this node, and no others: '
+            '"context.review.required_changes", "context.review.summary".'
+        ) in backend.calls[0][1]
+        assert backend.calls[0][3] == "status_envelope"
+        assert backend.calls[0][4] == 1
+
+    def test_codergen_handler_disallows_context_updates_in_status_envelope_prompt_without_declared_writes(self):
         graph = parse_dot(
             """
             digraph G {
@@ -315,12 +350,10 @@ class TestCodergenHandler:
         outcome = runner("task", "Plan for $goal", Context(values={"graph.goal": "ship"}))
 
         assert outcome.status == OutcomeStatus.SUCCESS
-        assert backend.calls[0][1] == f"Plan for ship\n\n{STATUS_ENVELOPE_PROMPT_APPENDIX}"
-        assert 'Inside "context_updates", emit a flat key/value map.' in backend.calls[0][1]
-        assert '"context.review.summary"' in backend.calls[0][1]
-        assert 'Do not nest objects inside "context_updates" for dotted keys.' in backend.calls[0][1]
-        assert backend.calls[0][3] == "status_envelope"
-        assert backend.calls[0][4] == 1
+        assert backend.calls[0][1] == f"Plan for ship\n\n{build_status_envelope_prompt_appendix(None)}"
+        assert build_status_envelope_context_updates_contract_text(None) in backend.calls[0][1]
+        assert 'This node must not emit "context_updates".' in backend.calls[0][1]
+        assert 'Keys with dots stay literal keys' not in backend.calls[0][1]
 
     def test_codergen_handler_passes_explicit_contract_repair_budget(self):
         graph = parse_dot(

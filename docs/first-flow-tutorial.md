@@ -188,6 +188,8 @@ That lets Spark turn the review result into:
 - a real `fail` outcome for routing
 - structured context that the next implementation pass can use
 
+When you set `codergen.response_contract="status_envelope"`, Spark appends the shared envelope schema automatically. It also derives node-specific `context_updates` guidance from `spark.writes_context`: review nodes with declared writes are shown the exact keys they may emit, and nodes without declared writes are told not to emit `context_updates`. Runtime enforcement still validates the result if the model ignores that guidance.
+
 ## Part 4: Add A Tool Node And Preserve Artifacts
 
 Tool nodes are for shell commands. They use `shape=parallelogram` or `type="tool"`, and their command now lives under the `tool.*` namespace.
