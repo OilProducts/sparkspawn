@@ -39,10 +39,10 @@ That gives you:
 
 ## Part 1: Start From A Minimal Flow
 
-Seeded starter flows already live in `~/.spark/flows`. Copy the smallest one so you can edit your own version:
+Seeded packaged flows already live in `~/.spark/flows`. Copy the smallest example so you can edit your own version:
 
 ```bash
-cp ~/.spark/flows/simple-linear.dot ~/.spark/flows/my-first-flow.dot
+cp ~/.spark/flows/examples/simple-linear.dot ~/.spark/flows/my-first-flow.dot
 spark-workspace validate-flow --flow my-first-flow.dot --text
 ```
 
@@ -125,10 +125,10 @@ On Codergen nodes, `spark.reads_context` is the deterministic prompt-input contr
 
 Once a flow needs iteration, split the work into explicit stages. Do not try to do planning, implementation, and review in one prompt.
 
-The easiest way to learn this pattern is to start from the bundled review-loop starter:
+The easiest way to learn this pattern is to start from the bundled review-loop example:
 
 ```bash
-cp ~/.spark/flows/implement-review-loop.dot ~/.spark/flows/my-review-loop.dot
+cp ~/.spark/flows/examples/implement-review-loop.dot ~/.spark/flows/my-review-loop.dot
 spark-workspace validate-flow --flow my-review-loop.dot --text
 ```
 
@@ -254,11 +254,11 @@ When a run behaves unexpectedly, check these first:
 
 After this tutorial, the next useful flows are:
 
-- [src/spark/starter_flows/implement-from-plan.dot](../src/spark/starter_flows/implement-from-plan.dot) for implementing an existing plan document from per-run `.spark/planflows/<run>/plan-source.md` and `.spark/planflows/<run>/state.json` snapshots, with `context.planflow.*` carrying the workspace paths through evaluation
-- [src/spark/starter_flows/spec-implementation/implement-spec.dot](../src/spark/starter_flows/spec-implementation/implement-spec.dot) for long-running greenfield spec implementation with repo-local state under `.specflow/`
-- [src/spark/starter_flows/human-review-loop.dot](../src/spark/starter_flows/human-review-loop.dot) for explicit human approval
-- [src/spark/starter_flows/parallel-review.dot](../src/spark/starter_flows/parallel-review.dot) for fan-out and fan-in
-- [src/spark/starter_flows/supervision/supervised-implementation.dot](../src/spark/starter_flows/supervision/supervised-implementation.dot) for parent/child supervision with `stack.manager_loop`
+- [src/spark/flows/implement-from-plan.dot](../src/spark/flows/implement-from-plan.dot) for implementing an existing plan document from per-run `.spark/planflows/<run>/plan-source.md` and `.spark/planflows/<run>/state.json` snapshots, with `context.planflow.*` carrying the workspace paths through evaluation
+- [src/spark/flows/spec-implementation/implement-spec.dot](../src/spark/flows/spec-implementation/implement-spec.dot) for long-running greenfield spec implementation with repo-local state under `.specflow/`
+- [src/spark/flows/examples/human-review-loop.dot](../src/spark/flows/examples/human-review-loop.dot) for explicit human approval
+- [src/spark/flows/examples/parallel-review.dot](../src/spark/flows/examples/parallel-review.dot) for fan-out and fan-in
+- [src/spark/flows/examples/supervision/supervised-implementation.dot](../src/spark/flows/examples/supervision/supervised-implementation.dot) for parent/child supervision with `stack.manager_loop`
 
 Use these documents for the next level of detail:
 

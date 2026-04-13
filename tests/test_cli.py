@@ -101,16 +101,16 @@ def test_run_init_seeds_missing_starter_flows_without_overwriting_existing(
     capsys,
 ) -> None:
     flows_dir = tmp_path / "flows"
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    existing_flow = flows_dir / "parallel-review.dot"
+    existing_flow = flows_dir / "examples" / "parallel-review.dot"
+    existing_flow.parent.mkdir(parents=True, exist_ok=True)
     existing_flow.write_text("custom-parallel\n", encoding="utf-8")
 
     monkeypatch.setattr(
         starter_assets,
         "load_starter_flow_assets",
         lambda *, project_root=None: (
-            starter_assets.StarterFlowAsset("parallel-review.dot", "canonical-parallel\n"),
-            starter_assets.StarterFlowAsset("simple-linear.dot", "simple-linear\n"),
+            starter_assets.StarterFlowAsset("examples/parallel-review.dot", "canonical-parallel\n"),
+            starter_assets.StarterFlowAsset("examples/simple-linear.dot", "simple-linear\n"),
         ),
     )
 
@@ -126,7 +126,7 @@ def test_run_init_seeds_missing_starter_flows_without_overwriting_existing(
 
     assert result == 0
     assert existing_flow.read_text(encoding="utf-8") == "custom-parallel\n"
-    assert (flows_dir / "simple-linear.dot").read_text(encoding="utf-8") == "simple-linear\n"
+    assert (flows_dir / "examples" / "simple-linear.dot").read_text(encoding="utf-8") == "simple-linear\n"
     output = capsys.readouterr().out
     assert "created=1 updated=0 skipped=1" in output
 
@@ -137,16 +137,16 @@ def test_run_init_force_overwrites_existing_starter_flows(
     capsys,
 ) -> None:
     flows_dir = tmp_path / "flows"
-    flows_dir.mkdir(parents=True, exist_ok=True)
-    existing_flow = flows_dir / "parallel-review.dot"
+    existing_flow = flows_dir / "examples" / "parallel-review.dot"
+    existing_flow.parent.mkdir(parents=True, exist_ok=True)
     existing_flow.write_text("custom-parallel\n", encoding="utf-8")
 
     monkeypatch.setattr(
         starter_assets,
         "load_starter_flow_assets",
         lambda *, project_root=None: (
-            starter_assets.StarterFlowAsset("parallel-review.dot", "canonical-parallel\n"),
-            starter_assets.StarterFlowAsset("simple-linear.dot", "simple-linear\n"),
+            starter_assets.StarterFlowAsset("examples/parallel-review.dot", "canonical-parallel\n"),
+            starter_assets.StarterFlowAsset("examples/simple-linear.dot", "simple-linear\n"),
         ),
     )
 
@@ -163,7 +163,7 @@ def test_run_init_force_overwrites_existing_starter_flows(
 
     assert result == 0
     assert existing_flow.read_text(encoding="utf-8") == "canonical-parallel\n"
-    assert (flows_dir / "simple-linear.dot").read_text(encoding="utf-8") == "simple-linear\n"
+    assert (flows_dir / "examples" / "simple-linear.dot").read_text(encoding="utf-8") == "simple-linear\n"
     output = capsys.readouterr().out
     assert "created=1 updated=1 skipped=0" in output
 
@@ -180,8 +180,8 @@ def test_run_init_creates_nested_starter_flow_directories(
         starter_assets,
         "load_starter_flow_assets",
         lambda *, project_root=None: (
-            starter_assets.StarterFlowAsset("supervision/implementation-worker.dot", "worker\n"),
-            starter_assets.StarterFlowAsset("supervision/supervised-implementation.dot", "parent\n"),
+            starter_assets.StarterFlowAsset("examples/supervision/implementation-worker.dot", "worker\n"),
+            starter_assets.StarterFlowAsset("examples/supervision/supervised-implementation.dot", "parent\n"),
         ),
     )
 
@@ -196,8 +196,8 @@ def test_run_init_creates_nested_starter_flow_directories(
     )
 
     assert result == 0
-    assert (flows_dir / "supervision" / "implementation-worker.dot").read_text(encoding="utf-8") == "worker\n"
-    assert (flows_dir / "supervision" / "supervised-implementation.dot").read_text(encoding="utf-8") == "parent\n"
+    assert (flows_dir / "examples" / "supervision" / "implementation-worker.dot").read_text(encoding="utf-8") == "worker\n"
+    assert (flows_dir / "examples" / "supervision" / "supervised-implementation.dot").read_text(encoding="utf-8") == "parent\n"
     output = capsys.readouterr().out
     assert "created=2 updated=0 skipped=0" in output
 
@@ -230,7 +230,7 @@ def test_run_init_allows_explicit_home_env_from_source_checkout(
         starter_assets,
         "load_starter_flow_assets",
         lambda *, project_root=None: (
-            starter_assets.StarterFlowAsset("simple-linear.dot", "simple-linear\n"),
+            starter_assets.StarterFlowAsset("examples/simple-linear.dot", "simple-linear\n"),
         ),
     )
 
@@ -239,19 +239,19 @@ def test_run_init_allows_explicit_home_env_from_source_checkout(
     assert result == 0
     output = capsys.readouterr().out
     assert f"Initialized Spark at {(tmp_path / 'dev-home').resolve(strict=False)}" in output
-    assert f"Starter flows: {(tmp_path / 'dev-home' / 'flows').resolve(strict=False)}" in output
+    assert f"Seeded flows: {(tmp_path / 'dev-home' / 'flows').resolve(strict=False)}" in output
 
 
 def test_packaged_starter_flows_exist_in_single_source_tree() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    packaged_starter_dir = repo_root / "src" / "spark" / "starter_flows"
+    packaged_starter_dir = repo_root / "src" / "spark" / "flows"
 
     packaged_payload = {
         path.relative_to(packaged_starter_dir).as_posix(): path.read_text(encoding="utf-8")
         for path in sorted(packaged_starter_dir.rglob("*.dot"))
     }
 
-    assert "simple-linear.dot" in packaged_payload
+    assert "examples/simple-linear.dot" in packaged_payload
     assert "spec-implementation/implement-spec.dot" in packaged_payload
 
 
@@ -271,7 +271,7 @@ def test_packaged_starter_flows_are_loadable_without_repo_checkout(tmp_path: Pat
 
     payload = {asset.name: asset.content for asset in assets}
 
-    assert "simple-linear.dot" in payload
+    assert "examples/simple-linear.dot" in payload
     assert "spec-implementation/implement-spec.dot" in payload
     assert payload["spec-implementation/implement-spec.dot"]
 

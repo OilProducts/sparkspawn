@@ -15,8 +15,8 @@ REQUIRED_WHEEL_ENTRIES = (
     "spark_app/ui_dist/index.html",
     "spark/guides/dot-authoring.md",
     "spark/guides/spark-operations.md",
-    "spark/starter_flows/simple-linear.dot",
-    "spark/starter_flows/spec-implementation/implement-spec.dot",
+    "spark/flows/examples/simple-linear.dot",
+    "spark/flows/spec-implementation/implement-spec.dot",
 )
 FORBIDDEN_WHEEL_ENTRIES = (
     "spark/guides/attractor-spec.md",
@@ -39,7 +39,7 @@ with TemporaryDirectory() as tmp:
     assert (ui_dir / "index.html").exists()
 
 assets = {asset.name for asset in load_starter_flow_assets(project_root=Path("."))}
-assert "simple-linear.dot" in assets
+assert "examples/simple-linear.dot" in assets
 assert "spec-implementation/implement-spec.dot" in assets
 
 for path in (dot_authoring_guide_path(), spark_operations_guide_path()):

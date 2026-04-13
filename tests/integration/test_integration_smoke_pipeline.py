@@ -3,7 +3,7 @@ from pathlib import Path
 from attractor.dsl import DiagnosticSeverity, parse_dot, validate_graph
 from attractor.engine import Context, PipelineExecutor, goal_gate_satisfied, load_checkpoint
 from attractor.handlers import HandlerRunner, build_default_registry
-from attractor.release_gate_checks import validate_artifact_and_status_contract
+from tests.support.artifact_status_contracts import validate_run_artifact_contract
 
 
 class _SmokeBackend:
@@ -84,7 +84,7 @@ def test_spec_smoke_pipeline_parse_validate_execute_and_artifacts(tmp_path: Path
         assert (stage_dir / "prompt.md").is_file()
         assert (stage_dir / "response.md").is_file()
         assert (stage_dir / "status.json").is_file()
-    contract_errors = validate_artifact_and_status_contract(
+    contract_errors = validate_run_artifact_contract(
         logs_root=logs_root,
         status_node_ids=("plan", "implement", "review"),
     )

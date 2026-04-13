@@ -5,7 +5,7 @@ from pathlib import Path
 from attractor.dsl import parse_dot
 
 
-FLOW_PATH = Path(__file__).resolve().parents[2] / "src" / "spark" / "starter_flows" / "implement-from-plan.dot"
+FLOW_PATH = Path(__file__).resolve().parents[2] / "src" / "spark" / "flows" / "implement-from-plan.dot"
 
 
 def _prompt(node_id: str) -> str:

@@ -1,5 +1,5 @@
 digraph editor_smoke_base {
-  graph [goal="Exercise editor and execution smoke-test surfaces without relying on shipped starter flows.", label="Editor Smoke Base", ui_default_llm_model="gpt-5.3-codex-spark", ui_default_llm_provider="openai"];
+  graph [goal="Exercise editor and execution smoke-test surfaces without relying on shipped example flows.", label="Editor Smoke Base", ui_default_llm_model="gpt-5.3-codex-spark", ui_default_llm_provider="openai"];
   audit_human_gate [label="Human Audit Decision", prompt="Choose whether to rework or accept risk.", shape="hexagon"];
   audit_rework [label="Rework Queue State", prompt="Repair the queued work and continue.", shape="box"];
   done [label="Done", shape="Msquare"];

@@ -17,7 +17,7 @@ from attractor.interviewer import Answer, QueueInterviewer
 from attractor.transforms import GoalVariableTransform, ModelStylesheetTransform, TransformPipeline
 
 
-CROSS_FEATURE_PARITY_MATRIX_ROWS = [
+CROSS_FEATURE_MATRIX_ROWS = [
     "Parse a simple linear pipeline (start -> A -> B -> done)",
     "Parse a pipeline with graph-level attributes (goal, label)",
     "Parse multi-line node attributes",
@@ -44,7 +44,7 @@ CROSS_FEATURE_PARITY_MATRIX_ROWS = [
 
 
 @dataclass(frozen=True)
-class ParityMatrixCase:
+class CrossFeatureMatrixCase:
     name: str
     check: Callable[[], bool]
 
@@ -102,11 +102,11 @@ class _CustomHandler:
         return Outcome(status=OutcomeStatus.SUCCESS, context_updates={"custom.handler.ran": "true"})
 
 
-def run_cross_feature_parity_matrix(report_path: Path | str) -> Dict[str, object]:
+def run_cross_feature_matrix(report_path: Path | str) -> Dict[str, object]:
     path = Path(report_path)
     rows: List[Dict[str, object]] = []
 
-    for case in _cross_feature_parity_cases():
+    for case in _cross_feature_matrix_cases():
         try:
             passed = bool(case.check())
             evidence = "check returned true" if passed else "check returned false"
@@ -130,10 +130,10 @@ def run_cross_feature_parity_matrix(report_path: Path | str) -> Dict[str, object
     return report
 
 
-def enforce_cross_feature_parity_release_gate(report: Dict[str, object]) -> None:
+def assert_cross_feature_matrix_passes(report: Dict[str, object]) -> None:
     rows = report.get("rows")
     if not isinstance(rows, list):
-        raise RuntimeError("Cross-feature parity matrix release gate failed: unchecked rows")
+        raise RuntimeError("Cross-feature matrix is missing row results")
 
     row_pass_by_name: Dict[str, bool] = {}
     for row in rows:
@@ -144,36 +144,36 @@ def enforce_cross_feature_parity_release_gate(report: Dict[str, object]) -> None
             continue
         row_pass_by_name[name] = bool(row.get("pass", False))
 
-    unchecked = [name for name in CROSS_FEATURE_PARITY_MATRIX_ROWS if not row_pass_by_name.get(name, False)]
-    if unchecked:
-        joined = ", ".join(unchecked)
-        raise RuntimeError(f"Cross-feature parity matrix release gate failed: unchecked rows: {joined}")
+    failing_rows = [name for name in CROSS_FEATURE_MATRIX_ROWS if not row_pass_by_name.get(name, False)]
+    if failing_rows:
+        joined = ", ".join(failing_rows)
+        raise RuntimeError(f"Cross-feature matrix has failing or missing rows: {joined}")
 
 
-def _cross_feature_parity_cases() -> List[ParityMatrixCase]:
+def _cross_feature_matrix_cases() -> List[CrossFeatureMatrixCase]:
     cases = [
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[0], _check_parse_simple_linear_pipeline),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[1], _check_parse_graph_attributes),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[2], _check_parse_multiline_node_attributes),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[3], _check_validate_missing_start_node),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[4], _check_validate_missing_exit_node),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[5], _check_validate_orphan_node_warning),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[6], _check_execute_linear_pipeline),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[7], _check_execute_conditional_success_fail),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[8], _check_retry_max_retries_two),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[9], _check_goal_gate_blocks_exit),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[10], _check_goal_gate_allows_exit),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[11], _check_wait_human_routes_on_selection),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[12], _check_edge_condition_over_weight),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[13], _check_edge_weight_for_unconditional_edges),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[14], _check_edge_lexical_tiebreak),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[15], _check_context_updates_visible_to_next),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[16], _check_checkpoint_resume_same_result),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[17], _check_stylesheet_model_override),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[18], _check_prompt_goal_variable_expansion),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[19], _check_parallel_fan_out_and_fan_in),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[20], _check_custom_handler_registration),
-        ParityMatrixCase(CROSS_FEATURE_PARITY_MATRIX_ROWS[21], _check_pipeline_with_ten_nodes),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[0], _check_parse_simple_linear_pipeline),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[1], _check_parse_graph_attributes),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[2], _check_parse_multiline_node_attributes),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[3], _check_validate_missing_start_node),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[4], _check_validate_missing_exit_node),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[5], _check_validate_orphan_node_warning),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[6], _check_execute_linear_pipeline),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[7], _check_execute_conditional_success_fail),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[8], _check_retry_max_retries_two),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[9], _check_goal_gate_blocks_exit),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[10], _check_goal_gate_allows_exit),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[11], _check_wait_human_routes_on_selection),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[12], _check_edge_condition_over_weight),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[13], _check_edge_weight_for_unconditional_edges),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[14], _check_edge_lexical_tiebreak),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[15], _check_context_updates_visible_to_next),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[16], _check_checkpoint_resume_same_result),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[17], _check_stylesheet_model_override),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[18], _check_prompt_goal_variable_expansion),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[19], _check_parallel_fan_out_and_fan_in),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[20], _check_custom_handler_registration),
+        CrossFeatureMatrixCase(CROSS_FEATURE_MATRIX_ROWS[21], _check_pipeline_with_ten_nodes),
     ]
     return cases
 
@@ -547,7 +547,7 @@ def _check_prompt_goal_variable_expansion() -> bool:
 
 
 def _check_parallel_fan_out_and_fan_in() -> bool:
-    flow_path = Path(__file__).resolve().parents[2] / "src" / "spark" / "starter_flows" / "parallel-review.dot"
+    flow_path = Path(__file__).resolve().parents[2] / "src" / "spark" / "flows" / "examples" / "parallel-review.dot"
     graph = parse_dot(flow_path.read_text(encoding="utf-8"))
     interviewer = QueueInterviewer([Answer(selected_values=["Proceed"])])
     backend = _Backend(

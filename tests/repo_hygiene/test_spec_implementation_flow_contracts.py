@@ -6,7 +6,7 @@ from attractor.dsl import parse_dot
 
 
 _SPEC_IMPLEMENTATION_DIR = (
-    Path(__file__).resolve().parents[2] / "src" / "spark" / "starter_flows" / "spec-implementation"
+    Path(__file__).resolve().parents[2] / "src" / "spark" / "flows" / "spec-implementation"
 )
 
 

@@ -551,7 +551,7 @@ def _running_from_source_checkout(project_root: Path) -> bool:
         (project_root / ".git").exists()
         or (
             (project_root / "pyproject.toml").is_file()
-            and (project_root / "src" / "spark" / "starter_flows").is_dir()
+            and (project_root / "src" / "spark" / "flows").is_dir()
             and (project_root / "frontend").is_dir()
         )
     )
@@ -578,8 +578,8 @@ def _require_explicit_agent_base_url(
                 f"Run the source checkout with an explicit dev server target before `{command}`, for example:",
                 "",
                 "  SPARK_API_BASE_URL=http://127.0.0.1:8010 uv run spark flow list",
-                "  SPARK_API_BASE_URL=http://127.0.0.1:8010 uv run spark flow describe --flow simple-linear",
-                "  uv run spark flow validate --file src/spark/starter_flows/simple-linear.dot --text",
+                "  SPARK_API_BASE_URL=http://127.0.0.1:8010 uv run spark flow describe --flow examples/simple-linear.dot",
+                "  uv run spark flow validate --file src/spark/flows/examples/simple-linear.dot --text",
             ]
         )
     )

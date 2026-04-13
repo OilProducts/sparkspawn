@@ -7,7 +7,6 @@ import sys
 from typing import Mapping, Sequence
 
 import spark.starter_assets as starter_assets
-from spark_app.ui_release_gate import run_required_ui_feature_release_gate
 
 
 def _running_from_source_checkout(project_root: Path) -> bool:
@@ -15,7 +14,7 @@ def _running_from_source_checkout(project_root: Path) -> bool:
         (project_root / ".git").exists()
         or (
             (project_root / "pyproject.toml").is_file()
-            and (project_root / "src" / "spark" / "starter_flows").is_dir()
+            and (project_root / "src" / "spark" / "flows").is_dir()
             and (project_root / "frontend").is_dir()
         )
     )
@@ -69,21 +68,11 @@ def _build_runtime_parser() -> argparse.ArgumentParser:
 
     init = subparsers.add_parser(
         "init",
-        help="Initialize Spark runtime directories and seed starter flows",
+        help="Initialize Spark runtime directories and seed packaged flows",
     )
     init.add_argument("--data-dir", type=Path, default=None, help="Runtime data directory root")
     init.add_argument("--flows-dir", type=Path, default=None, help="Flow storage directory")
-    init.add_argument("--force", action="store_true", help="Overwrite existing starter flows")
-
-    release_gate = subparsers.add_parser(
-        "release-gate",
-        help="Fail release if required UI checklist rows are incomplete",
-    )
-    release_gate.add_argument(
-        "--checklist",
-        default="ui-implementation-checklist.md",
-        help="Path to ui-implementation-checklist.md",
-    )
+    init.add_argument("--force", action="store_true", help="Overwrite existing packaged flows")
 
     return parser
 
@@ -100,8 +89,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_serve(args)
     if args.command == "init":
         return _run_init(args)
-    if args.command == "release-gate":
-        return _run_release_gate(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 
@@ -170,7 +157,7 @@ def _run_init(args: argparse.Namespace) -> int:
         return 1
 
     print(f"Initialized Spark at {settings.data_dir}")
-    print(f"Starter flows: {result.flows_dir}")
+    print(f"Seeded flows: {result.flows_dir}")
     print(
         "created={created} updated={updated} skipped={skipped}".format(
             created=len(result.created),
@@ -179,12 +166,5 @@ def _run_init(args: argparse.Namespace) -> int:
         )
     )
     return 0
-
-
-def _run_release_gate(args: argparse.Namespace) -> int:
-    run_required_ui_feature_release_gate(args.checklist)
-    return 0
-
-
 if __name__ == "__main__":
     raise SystemExit(main())

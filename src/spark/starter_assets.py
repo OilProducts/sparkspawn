@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 
-STARTER_ASSET_DIR_NAME = "starter_flows"
+STARTER_ASSET_DIR_NAME = "flows"
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ def load_starter_flow_assets(*, project_root: Path | None = None) -> tuple[Start
         key=lambda asset: asset.name,
     )
     if not packaged_assets:
-        raise RuntimeError("Starter flow assets are unavailable.")
+        raise RuntimeError("Packaged flow assets are unavailable.")
     return tuple(
         StarterFlowAsset(name=asset.name, content=asset.content)
         for asset in packaged_assets

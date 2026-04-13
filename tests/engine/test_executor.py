@@ -15,13 +15,13 @@ from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
 BRANCHING_CONDITION_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "branching_condition_workflow.dot"
 REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "flows" / "parallel-review-reference.dot"
 STARTER_SPEC_IMPLEMENTATION_FIXTURE = (
-    Path(__file__).resolve().parents[2] / "src" / "spark" / "starter_flows" / "spec-implementation" / "implement-spec.dot"
+    Path(__file__).resolve().parents[2] / "src" / "spark" / "flows" / "spec-implementation" / "implement-spec.dot"
 )
 STARTER_SPEC_IMPLEMENTATION_MILESTONE_FIXTURE = (
     Path(__file__).resolve().parents[2]
     / "src"
     / "spark"
-    / "starter_flows"
+    / "flows"
     / "spec-implementation"
     / "implement-milestone.dot"
 )

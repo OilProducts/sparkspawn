@@ -6,11 +6,11 @@ from pathlib import Path
 from attractor.dsl import parse_dot
 
 
-_STARTER_FLOWS_DIR = Path(__file__).resolve().parents[2] / "src" / "spark" / "starter_flows"
+_PACKAGED_FLOWS_DIR = Path(__file__).resolve().parents[2] / "src" / "spark" / "flows"
 
 
 def _load_graph(relative_path: str):
-    return parse_dot((_STARTER_FLOWS_DIR / relative_path).read_text(encoding="utf-8"))
+    return parse_dot((_PACKAGED_FLOWS_DIR / relative_path).read_text(encoding="utf-8"))
 
 
 def _reads_context(graph, node_id: str) -> set[str]:
@@ -22,13 +22,13 @@ def _reads_context(graph, node_id: str) -> set[str]:
 
 
 def test_parallel_review_final_review_reads_parallel_results() -> None:
-    graph = _load_graph("parallel-review.dot")
+    graph = _load_graph("examples/parallel-review.dot")
 
     assert "parallel.results" in _reads_context(graph, "final_review")
 
 
 def test_supervised_implementation_summaries_read_child_runtime_telemetry() -> None:
-    graph = _load_graph("supervision/supervised-implementation.dot")
+    graph = _load_graph("examples/supervision/supervised-implementation.dot")
     expected_reads = {
         "context.stack.child.status",
         "context.stack.child.outcome",

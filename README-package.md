@@ -6,7 +6,7 @@ It packages:
 
 - a FastAPI backend for running Attractor workflows
 - a bundled web UI for flow authoring, execution, and run inspection
-- curated starter `.dot` flows and packaged authoring/operations guides
+- bundled `.dot` flows and packaged authoring/operations guides
 - CLIs for launching the server and interacting with workspace conversations
 
 ## Install
@@ -17,7 +17,7 @@ pip install spark
 
 ## Quick Start
 
-Initialize a Spark home and seed the starter flows:
+Initialize a Spark home and seed the bundled flows:
 
 ```bash
 spark-server init
@@ -34,7 +34,7 @@ By default, Spark stores runtime data under `~/.spark` and serves the bundled UI
 ## Included Commands
 
 - `spark-server serve`: start the Spark API server
-- `spark-server init`: initialize runtime directories and seed starter flows
+- `spark-server init`: initialize runtime directories and seed bundled flows
 - `spark`: workspace conversation, run-launch, flow, and trigger commands
 
 ## Requirements
@@ -49,7 +49,7 @@ The supported install artifacts are the wheel and sdist.
 Both include:
 
 - bundled UI assets under `spark_app/ui_dist`
-- starter flows under `spark/starter_flows`
+- packaged flows under `spark/flows`, including examples under `spark/flows/examples`
 - packaged guidance docs under `spark/guides`, including `dot-authoring.md` and `spark-operations.md`
 
 ## Development

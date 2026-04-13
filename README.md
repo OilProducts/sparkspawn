@@ -36,13 +36,18 @@ After direct flow edits, validate with `spark flow validate --file /path/to/flow
 
 Start with the smallest flow that matches the job:
 
-- [src/spark/starter_flows/simple-linear.dot](src/spark/starter_flows/simple-linear.dot): one pass through plan -> implement -> summarize
-- [src/spark/starter_flows/implement-review-loop.dot](src/spark/starter_flows/implement-review-loop.dot): plan -> implement -> review with an actual retry loop
-- [src/spark/starter_flows/implement-from-plan.dot](src/spark/starter_flows/implement-from-plan.dot): snapshot a plan file into `.spark/planflows/<run>/plan-source.md` plus `.spark/planflows/<run>/state.json`, expose that workspace via `context.planflow.*`, implement it, evaluate completion, and iterate
-- [src/spark/starter_flows/spec-implementation/implement-spec.dot](src/spark/starter_flows/spec-implementation/implement-spec.dot): greenfield spec-implementation program flow that keeps repo-local state under `.specflow/` and dispatches milestone workers
-- [src/spark/starter_flows/human-review-loop.dot](src/spark/starter_flows/human-review-loop.dot): explicit human approval or requested fixes
-- [src/spark/starter_flows/parallel-review.dot](src/spark/starter_flows/parallel-review.dot): fan-out / fan-in structure
-- [src/spark/starter_flows/supervision/supervised-implementation.dot](src/spark/starter_flows/supervision/supervised-implementation.dot): parent/child composition with `stack.manager_loop`
+Examples:
+
+- [src/spark/flows/examples/simple-linear.dot](src/spark/flows/examples/simple-linear.dot): one pass through plan -> implement -> summarize
+- [src/spark/flows/examples/implement-review-loop.dot](src/spark/flows/examples/implement-review-loop.dot): plan -> implement -> review with an actual retry loop
+- [src/spark/flows/examples/human-review-loop.dot](src/spark/flows/examples/human-review-loop.dot): explicit human approval or requested fixes
+- [src/spark/flows/examples/parallel-review.dot](src/spark/flows/examples/parallel-review.dot): fan-out / fan-in structure
+- [src/spark/flows/examples/supervision/supervised-implementation.dot](src/spark/flows/examples/supervision/supervised-implementation.dot): parent/child composition with `stack.manager_loop`
+
+Packaged workflows:
+
+- [src/spark/flows/implement-from-plan.dot](src/spark/flows/implement-from-plan.dot): snapshot a plan file into `.spark/planflows/<run>/plan-source.md` plus `.spark/planflows/<run>/state.json`, expose that workspace via `context.planflow.*`, implement it, evaluate completion, and iterate
+- [src/spark/flows/spec-implementation/implement-spec.dot](src/spark/flows/spec-implementation/implement-spec.dot): greenfield spec-implementation program flow that keeps repo-local state under `.specflow/` and dispatches milestone workers
 
 Use the flow `goal` as the user-facing stated goal for the run:
 
@@ -116,7 +121,7 @@ Use hooks and model defaults deliberately:
 - [src/attractor/](src/attractor): Attractor runtime, pipeline engine, handlers, CLI, and mounted Attractor API
 - [src/workspace/](src/workspace): Spark workspace service, conversations, review artifacts, trigger subsystem, and mounted Workspace API
 - [frontend/](frontend): React 19 + Vite UI
-- [src/spark/starter_flows/](src/spark/starter_flows): curated starter `.dot` flows intended for first-run seeding
+- [src/spark/flows/](src/spark/flows): packaged `.dot` flows shipped with Spark; examples live under [src/spark/flows/examples/](src/spark/flows/examples)
 - [tests/fixtures/flows/](tests/fixtures/flows): repo-only `.dot` fixtures used by tests and local development
 - [tests/](tests): backend tests, UI contracts, and acceptance assets
 - [specs/](specs): Attractor, workspace, frontend, and storage specifications
@@ -138,7 +143,7 @@ Prepare a fresh checkout:
 just setup
 ```
 
-Initialize the runtime tree and seed starter flows:
+Initialize the runtime tree and seed packaged flows:
 
 ```bash
 uv run spark-server init
@@ -323,7 +328,8 @@ pip install dist/*.whl
 - The agent-facing CLI exposes curated flow discovery commands with JSON default output: `spark flow list`, `spark flow describe --flow <name>`, and `spark flow get --flow <name>`.
 - The editor supports both structured editing and raw DOT editing, including semantic-equivalence safety checks during handoff.
 - The Runs view is intended for historical inspection, diagnostics, artifact browsing, and replaying execution context.
-- Starter flow templates live in [src/spark/starter_flows/parallel-review.dot](src/spark/starter_flows/parallel-review.dot), [src/spark/starter_flows/simple-linear.dot](src/spark/starter_flows/simple-linear.dot), [src/spark/starter_flows/human-review-loop.dot](src/spark/starter_flows/human-review-loop.dot), [src/spark/starter_flows/implement-from-plan.dot](src/spark/starter_flows/implement-from-plan.dot), [src/spark/starter_flows/implement-review-loop.dot](src/spark/starter_flows/implement-review-loop.dot), [src/spark/starter_flows/spec-implementation/implement-spec.dot](src/spark/starter_flows/spec-implementation/implement-spec.dot), [src/spark/starter_flows/spec-implementation/implement-milestone.dot](src/spark/starter_flows/spec-implementation/implement-milestone.dot), [src/spark/starter_flows/supervision/implementation-worker.dot](src/spark/starter_flows/supervision/implementation-worker.dot), and [src/spark/starter_flows/supervision/supervised-implementation.dot](src/spark/starter_flows/supervision/supervised-implementation.dot).
+- Packaged example flows live in [src/spark/flows/examples/simple-linear.dot](src/spark/flows/examples/simple-linear.dot), [src/spark/flows/examples/implement-review-loop.dot](src/spark/flows/examples/implement-review-loop.dot), [src/spark/flows/examples/human-review-loop.dot](src/spark/flows/examples/human-review-loop.dot), [src/spark/flows/examples/parallel-review.dot](src/spark/flows/examples/parallel-review.dot), [src/spark/flows/examples/supervision/implementation-worker.dot](src/spark/flows/examples/supervision/implementation-worker.dot), and [src/spark/flows/examples/supervision/supervised-implementation.dot](src/spark/flows/examples/supervision/supervised-implementation.dot).
+- Packaged workflows live in [src/spark/flows/implement-from-plan.dot](src/spark/flows/implement-from-plan.dot), [src/spark/flows/spec-implementation/implement-spec.dot](src/spark/flows/spec-implementation/implement-spec.dot), and [src/spark/flows/spec-implementation/implement-milestone.dot](src/spark/flows/spec-implementation/implement-milestone.dot).
 - Repo-only advanced/test fixtures live under [tests/fixtures/flows/](tests/fixtures/flows).
 
 ## Project Status

@@ -15,11 +15,11 @@ from attractor.dsl.dot_lint import (
 
 def test_flows_are_canonical_dot() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    starter_flows_dir = repo_root / "src" / "spark" / "starter_flows"
+    starter_flows_dir = repo_root / "src" / "spark" / "flows"
     fixture_flows_dir = repo_root / "tests" / "fixtures" / "flows"
     dot_paths = find_dot_paths(starter_flows_dir) + find_dot_paths(fixture_flows_dir)
 
-    assert dot_paths, "expected at least one .dot file under src/spark/starter_flows/ or tests/fixtures/flows/"
+    assert dot_paths, "expected at least one .dot file under src/spark/flows/ or tests/fixtures/flows/"
     non_canonical = find_non_canonical_dot_diffs(dot_paths)
 
     assert not non_canonical, "non-canonical .dot files detected:\n" + "\n".join(non_canonical)
@@ -51,9 +51,9 @@ def test_lint_reports_start_node_cardinality_violations(tmp_path: Path) -> None:
     assert "exactly one start node" in errors[0]
 
 
-def test_starter_child_dotfile_references_are_relative_and_resolve_within_starter_flows() -> None:
+def test_packaged_child_dotfile_references_are_relative_and_resolve_within_packaged_flows() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    starter_flows_dir = repo_root / "src" / "spark" / "starter_flows"
+    starter_flows_dir = repo_root / "src" / "spark" / "flows"
     resolved_starter_root = starter_flows_dir.resolve()
 
     for dot_path in find_dot_paths(starter_flows_dir):
@@ -75,13 +75,13 @@ def test_starter_child_dotfile_references_are_relative_and_resolve_within_starte
             resolved_child.relative_to(resolved_starter_root)
         except ValueError as exc:
             raise AssertionError(
-                f"starter child flow must stay within src/spark/starter_flows/: {resolved_child}"
+                f"packaged child flow must stay within src/spark/flows/: {resolved_child}"
             ) from exc
 
 
 def test_starter_status_envelope_contracts_only_appear_on_codergen_nodes() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    starter_flows_dir = repo_root / "src" / "spark" / "starter_flows"
+    starter_flows_dir = repo_root / "src" / "spark" / "flows"
 
     for dot_path in find_dot_paths(starter_flows_dir):
         graph = parse_dot(dot_path.read_text(encoding="utf-8"))
@@ -100,7 +100,7 @@ def test_starter_status_envelope_contracts_only_appear_on_codergen_nodes() -> No
 
 def test_starter_json_status_envelope_prompts_opt_into_runtime_contract() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    starter_flows_dir = repo_root / "src" / "spark" / "starter_flows"
+    starter_flows_dir = repo_root / "src" / "spark" / "flows"
     envelope_markers = ("JSON status envelope", "Attractor's status envelope")
 
     for dot_path in find_dot_paths(starter_flows_dir):
@@ -123,7 +123,7 @@ def test_starter_json_status_envelope_prompts_opt_into_runtime_contract() -> Non
 
 def test_starter_nodes_that_request_context_updates_declare_writes_contracts() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    starter_flows_dir = repo_root / "src" / "spark" / "starter_flows"
+    starter_flows_dir = repo_root / "src" / "spark" / "flows"
 
     for dot_path in find_dot_paths(starter_flows_dir):
         graph = parse_dot(dot_path.read_text(encoding="utf-8"))

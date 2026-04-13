@@ -46,21 +46,21 @@ curl http://127.0.0.1:8000/workspace/api/flows?surface=agent
 Describe one flow:
 
 ```bash
-spark flow describe --flow simple-linear.dot --text
+spark flow describe --flow examples/simple-linear.dot --text
 ```
 
 ```bash
-curl http://127.0.0.1:8000/workspace/api/flows/simple-linear.dot?surface=agent
+curl http://127.0.0.1:8000/workspace/api/flows/examples/simple-linear.dot?surface=agent
 ```
 
 Fetch raw DOT for a stored flow:
 
 ```bash
-spark flow get --flow simple-linear.dot --text
+spark flow get --flow examples/simple-linear.dot --text
 ```
 
 ```bash
-curl http://127.0.0.1:8000/workspace/api/flows/simple-linear.dot/raw?surface=agent
+curl http://127.0.0.1:8000/workspace/api/flows/examples/simple-linear.dot/raw?surface=agent
 ```
 
 Validate a file you are editing directly:
@@ -72,11 +72,11 @@ spark flow validate --file /absolute/path/to/flow.dot --text
 Validate a stored flow through the server:
 
 ```bash
-spark flow validate --flow simple-linear.dot --text
+spark flow validate --flow examples/simple-linear.dot --text
 ```
 
 ```bash
-curl http://127.0.0.1:8000/workspace/api/flows/simple-linear.dot/validate
+curl http://127.0.0.1:8000/workspace/api/flows/examples/simple-linear.dot/validate
 ```
 
 ## Launch Runs And Create Run Requests
@@ -85,7 +85,7 @@ Launch a flow immediately against an explicit project:
 
 ```bash
 spark run launch \
-  --flow simple-linear.dot \
+  --flow examples/simple-linear.dot \
   --summary "Inspect the repo and summarize next steps." \
   --project /absolute/path/to/project
 ```
@@ -94,7 +94,7 @@ spark run launch \
 curl -X POST http://127.0.0.1:8000/workspace/api/runs/launch \
   -H 'Content-Type: application/json' \
   -d '{
-    "flow_name": "simple-linear.dot",
+    "flow_name": "examples/simple-linear.dot",
     "summary": "Inspect the repo and summarize next steps.",
     "project_path": "/absolute/path/to/project"
   }'
@@ -104,7 +104,7 @@ Launch with explicit goal text or launch context:
 
 ```bash
 spark run launch \
-  --flow implement-review-loop.dot \
+  --flow examples/implement-review-loop.dot \
   --summary "Implement the approved change." \
   --project /absolute/path/to/project \
   --goal "Add the requested endpoint and tests." \

@@ -60,7 +60,7 @@ class _ContextReaderHandler:
         return Outcome(status=OutcomeStatus.FAIL, failure_reason="missing context")
 
 
-class TestParityMatrixSubset:
+class TestCrossFeatureMatrixSubset:
     REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "flows" / "parallel-review-reference.dot"
 
     def test_parse_simple_linear_pipeline(self):

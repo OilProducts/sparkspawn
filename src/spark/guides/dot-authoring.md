@@ -496,13 +496,13 @@ Treat any extra attrs you encounter as one of:
 
 Do not assume an undocumented attribute is portable just because it round-trips.
 
-## Starter Flow Starting Points
+## Bundled Example Starting Points
 
-- `simple-linear.dot`: smallest useful single-pass pattern
-- `implement-review-loop.dot`: review-driven retry loop
-- `human-review-loop.dot`: human approval / revise loop
-- `parallel-review.dot`: fan-out / fan-in flow
-- `supervision/supervised-implementation.dot`: parent/child composition
+- `examples/simple-linear.dot`: smallest useful single-pass pattern
+- `examples/implement-review-loop.dot`: review-driven retry loop
+- `examples/human-review-loop.dot`: human approval / revise loop
+- `examples/parallel-review.dot`: fan-out / fan-in flow
+- `examples/supervision/supervised-implementation.dot`: parent/child composition
 
 ## Authoring Checklist
 

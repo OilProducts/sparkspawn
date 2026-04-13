@@ -1,4 +1,4 @@
-"""Documentation and spec artifact contracts for UI traceability governance.
+"""Documentation and spec artifact contracts for UI documentation consistency.
 
 These tests validate documentation structure and traceability contracts rather
 than exact prose wording, so editorial rewording does not cause false failures.

@@ -8,7 +8,7 @@ from typing import Iterable, List
 _ALLOWED_STATUS_OUTCOMES = {"success", "retry", "fail", "partial_success"}
 
 
-def validate_artifact_and_status_contract(*, logs_root: Path, status_node_ids: Iterable[str]) -> List[str]:
+def validate_run_artifact_contract(*, logs_root: Path, status_node_ids: Iterable[str]) -> List[str]:
     errors: List[str] = []
     artifacts_dir = logs_root / "artifacts"
     if not artifacts_dir.is_dir():
