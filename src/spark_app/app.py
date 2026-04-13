@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -14,9 +15,13 @@ import attractor.api.server as attractor_server
 from spark_app.ui import resolve_ui_asset_path, resolve_ui_index_path
 from workspace.attractor_client import AttractorApiClient
 from workspace.api import WorkspaceApiDependencies, create_workspace_router
+from workspace.project_chat import ProjectChatService
 from workspace.triggers import TriggerRuntime
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+_PROJECT_CHAT_LOCK = threading.Lock()
+_PROJECT_CHAT: ProjectChatService | None = None
+_PROJECT_CHAT_RUNTIME_KEY: tuple[Path, Path] | None = None
 TRIGGER_RUNTIME = TriggerRuntime(
     get_settings=attractor_server.get_settings,
     get_attractor_client=lambda: AttractorApiClient(
@@ -91,6 +96,17 @@ def _pick_project_directory(prompt: str = "Select Spark project directory") -> P
     raise RuntimeError(picker_errors[-1] if picker_errors else "No native directory picker is available in this runtime.")
 
 
+def get_project_chat() -> ProjectChatService:
+    global _PROJECT_CHAT, _PROJECT_CHAT_RUNTIME_KEY
+    settings = attractor_server.get_settings()
+    runtime_key = (settings.data_dir, settings.flows_dir)
+    with _PROJECT_CHAT_LOCK:
+        if _PROJECT_CHAT is None or _PROJECT_CHAT_RUNTIME_KEY != runtime_key:
+            _PROJECT_CHAT = ProjectChatService(settings.data_dir, flows_dir=settings.flows_dir)
+            _PROJECT_CHAT_RUNTIME_KEY = runtime_key
+        return _PROJECT_CHAT
+
+
 @asynccontextmanager
 async def _workspace_lifespan(_: FastAPI):
     await TRIGGER_RUNTIME.start()
@@ -123,7 +139,7 @@ app.router.lifespan_context = _product_lifespan
 WORKSPACE_ROUTER = create_workspace_router(
     WorkspaceApiDependencies(
         get_settings=attractor_server.get_settings,
-        get_project_chat=lambda: attractor_server.PROJECT_CHAT,
+        get_project_chat=get_project_chat,
         get_attractor_client=lambda: AttractorApiClient(
             base_url="http://attractor.internal",
             app=attractor_server.attractor_app,

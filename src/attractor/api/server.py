@@ -85,7 +85,6 @@ from attractor.interviewer.models import Answer, AnswerValue, Question
 from spark_common.launch_context import normalize_launch_context
 from spark_common.runtime import resolve_runtime_workspace_path
 from spark_common.settings import Settings, resolve_settings, validate_settings
-from workspace.project_chat import ProjectChatService
 
 
 attractor_app = FastAPI(title="Attractor API", docs_url="/docs", redoc_url=None, openapi_url="/openapi.json")
@@ -93,7 +92,6 @@ attractor_router = APIRouter()
 LOGGER = logging.getLogger(__name__)
 SETTINGS_LOCK = threading.Lock()
 SETTINGS = resolve_settings()
-PROJECT_CHAT = ProjectChatService(SETTINGS.data_dir, flows_dir=SETTINGS.flows_dir)
 REGISTERED_TRANSFORMS: List[object] = []
 _REGISTERED_TRANSFORMS_LOCK = threading.Lock()
 _UNSET = object()
@@ -111,7 +109,7 @@ def configure_runtime_paths(
     flows_dir: Path | str | None | object = _UNSET,
     ui_dir: Path | str | None | object = _UNSET,
 ) -> Settings:
-    global SETTINGS, PROJECT_CHAT
+    global SETTINGS
     current = get_settings()
     updated = resolve_settings(
         data_dir=current.data_dir if data_dir is _UNSET else data_dir,
@@ -122,7 +120,6 @@ def configure_runtime_paths(
     validate_settings(updated)
     with SETTINGS_LOCK:
         SETTINGS = updated
-    PROJECT_CHAT = ProjectChatService(updated.data_dir, flows_dir=updated.flows_dir)
     return updated
 
 

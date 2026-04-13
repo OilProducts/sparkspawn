@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 import pytest
 
 import attractor.api.server as server
+import spark_app.app as product_app
 from spark_common.codex_app_client import CodexAppServerTurnResult
 import spark_common.codex_app_server as codex_app_server
 import spark_common.process_line_reader as process_line_reader
@@ -25,6 +26,10 @@ from workspace.storage import conversation_handles_path, ensure_project_paths
 
 
 TEST_DISPATCH_FLOW = "test-dispatch.dot"
+
+
+def _project_chat_service() -> project_chat.ProjectChatService:
+    return product_app.get_project_chat()
 
 
 def _completed_turn_result(
@@ -929,8 +934,9 @@ def test_flow_run_request_routes_create_and_approve_launch(
             ),
         ],
     )
-    server.PROJECT_CHAT._write_state(state)
-    snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
+    service = _project_chat_service()
+    service._write_state(state)
+    snapshot = service.get_snapshot(conversation_id, str(project_dir))
 
     _seed_flow(TEST_DISPATCH_FLOW)
 
@@ -1053,8 +1059,9 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
             ),
         ],
     )
-    server.PROJECT_CHAT._write_state(state)
-    snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
+    service = _project_chat_service()
+    service._write_state(state)
+    snapshot = service.get_snapshot(conversation_id, str(project_dir))
 
     _seed_flow(TEST_DISPATCH_FLOW)
 
@@ -1111,7 +1118,7 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
     assert launch_payload["run_id"] == "run-launch-123"
     assert launch_payload["flow_launch_id"].startswith("flow-launch-")
 
-    updated_snapshot = server.PROJECT_CHAT.get_snapshot(conversation_id, str(project_dir))
+    updated_snapshot = _project_chat_service().get_snapshot(conversation_id, str(project_dir))
     flow_launch = next(
         entry for entry in updated_snapshot["flow_launches"] if entry["id"] == launch_payload["flow_launch_id"]
     )
@@ -1573,7 +1580,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    service = server.PROJECT_CHAT
+    service = _project_chat_service()
     entered_turn = threading.Event()
     finish_turn = threading.Event()
 
@@ -1745,7 +1752,7 @@ def test_snapshot_rejects_unsupported_turn_event_only_payload(tmp_path: Path) ->
 
 
 def test_list_project_conversations_endpoint_returns_project_threads(product_api_client, tmp_path: Path) -> None:
-    service = server.PROJECT_CHAT
+    service = _project_chat_service()
     service._write_state(
         project_chat.ConversationState(
             conversation_id="conversation-a",
@@ -1775,7 +1782,7 @@ def test_list_project_conversations_endpoint_returns_project_threads(product_api
 
 
 def test_delete_project_conversation_endpoint_removes_thread_state(product_api_client, tmp_path: Path) -> None:
-    service = server.PROJECT_CHAT
+    service = _project_chat_service()
     conversation_id = "conversation-delete-me"
     project_paths = ensure_project_paths(tmp_path / ".spark", str(tmp_path))
     service._write_state(
