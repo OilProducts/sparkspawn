@@ -6,16 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
-from workspace.project_chat_common import (
-    as_non_empty_string,
-    build_conversation_preview,
-    derive_conversation_title,
-    iso_now,
-    normalize_project_path_value,
-    resolve_runtime_workspace_path,
-    truncate_text,
-)
-from workspace.project_chat_models import (
+from spark.workspace.conversations.models import (
     CONVERSATION_STATE_SCHEMA_VERSION,
     ConversationSegment,
     ConversationSessionState,
@@ -24,7 +15,15 @@ from workspace.project_chat_models import (
     ConversationTurn,
     WorkflowEvent,
 )
-from workspace.storage import (
+from spark.workspace.conversations.utils import (
+    as_non_empty_string,
+    build_conversation_preview,
+    derive_conversation_title,
+    iso_now,
+    normalize_project_path_value,
+    truncate_text,
+)
+from spark.workspace.storage import (
     ProjectPaths,
     ensure_conversation_handle,
     ensure_project_paths,
@@ -34,6 +33,7 @@ from workspace.storage import (
     remove_conversation_handle,
     workspace_projects_root,
 )
+from spark_common.runtime import resolve_runtime_workspace_path
 
 
 class ProjectChatRepository:

@@ -4,58 +4,16 @@ import json
 import logging
 import os
 import re
-import time
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from spark_common.launch_context import normalize_launch_context
-from spark_common.runtime import (
-    build_codex_runtime_environment as _build_codex_runtime_environment,
-    normalize_project_path,
-    resolve_runtime_workspace_path as _resolve_runtime_workspace_path,
-)
-from workspace.project_chat_models import ConversationTurn
+from spark.workspace.conversations.utils import as_non_empty_string
+
+if TYPE_CHECKING:
+    from spark.workspace.conversations.models import ConversationTurn
 
 
 LOGGER = logging.getLogger(__name__)
-
-
-def iso_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def slugify(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or "project"
-
-
-def truncate_text(value: str, limit: int) -> str:
-    trimmed = value.strip()
-    if len(trimmed) <= limit:
-        return trimmed
-    return trimmed[: max(0, limit - 1)].rstrip() + "…"
-
-
-def normalize_project_path_value(value: str) -> str:
-    return normalize_project_path(value)
-
-
-def resolve_runtime_workspace_path(value: str) -> str:
-    return _resolve_runtime_workspace_path(value)
-
-
-def build_codex_runtime_environment() -> dict[str, str]:
-    return _build_codex_runtime_environment()
-
-
-def as_non_empty_string(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        trimmed = value.strip()
-        return trimmed or None
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    return None
 
 
 def normalize_flow_run_request_payload(
@@ -122,32 +80,12 @@ def parse_chat_response_payload(raw: str) -> tuple[str, Optional[dict[str, Any]]
     return fallback_text, parsed if isinstance(parsed, dict) else None
 
 
-def derive_conversation_title(turns: list[ConversationTurn]) -> str:
-    for turn in turns:
-        if turn.role != "user":
-            continue
-        title = as_non_empty_string(turn.content)
-        if title:
-            return truncate_text(title, 64)
-    return "New thread"
-
-
-def build_conversation_preview(turns: list[ConversationTurn]) -> Optional[str]:
-    for turn in reversed(turns):
-        if turn.kind != "message":
-            continue
-        preview = as_non_empty_string(turn.content)
-        if preview:
-            return truncate_text(preview, 96)
-    return None
-
-
 def is_project_chat_debug_enabled() -> bool:
     value = str(os.environ.get("SPARK_DEBUG_PROJECT_CHAT", "")).strip().lower()
     return value in {"1", "true", "yes", "on"}
 
 
-def summarize_turns_for_debug(turns: list[ConversationTurn]) -> list[dict[str, Any]]:
+def summarize_turns_for_debug(turns: list["ConversationTurn"]) -> list[dict[str, Any]]:
     return [
         {
             "id": turn.id,

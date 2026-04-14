@@ -12,11 +12,11 @@ from fastapi.responses import FileResponse
 
 import attractor.api.pipeline_runs as pipeline_runs
 import attractor.api.server as attractor_server
+from spark.chat.service import ProjectChatService
 from spark.ui import resolve_ui_asset_path, resolve_ui_index_path
-from workspace.attractor_client import AttractorApiClient
-from workspace.api import WorkspaceApiDependencies, create_workspace_router
-from workspace.project_chat import ProjectChatService
-from workspace.triggers import TriggerRuntime
+from spark.workspace.api import WorkspaceApiDependencies, create_workspace_router
+from spark.workspace.attractor_client import AttractorApiClient
+from spark.workspace.triggers import TriggerRuntime
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 _PROJECT_CHAT_LOCK = threading.Lock()

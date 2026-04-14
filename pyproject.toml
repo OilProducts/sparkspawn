@@ -37,7 +37,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["attractor*", "workspace*", "spark*", "spark_common*"]
+include = ["attractor*", "spark*", "spark_common*"]
 
 [tool.setuptools.package-data]
 spark = ["flows/*.dot", "flows/*/*.dot", "flows/*/*/*.dot", "guides/*.md", "ui_dist/**"]

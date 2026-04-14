@@ -88,7 +88,7 @@ def load_prompt_templates(config_dir: Path) -> PromptTemplates:
 def render_prompt_template(template: str, values: dict[str, str]) -> str:
     rendered = template
     for key, value in values.items():
-        rendered = rendered.replace(f"{{{{{key}}}}}", value)
+        rendered = rendered.replace(f"{{{{{key}}}}}", value) # Pentuple brackets LOL
     return rendered
 
 

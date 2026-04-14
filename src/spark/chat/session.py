@@ -5,21 +5,21 @@ import threading
 import uuid
 from typing import Any, Callable, Optional
 
+from spark.workspace.conversations.models import (
+    ChatTurnLiveEvent,
+    ChatTurnResult,
+    ToolCallRecord,
+)
+from spark.workspace.conversations.utils import (
+    as_non_empty_string,
+    normalize_project_path_value,
+)
 from spark_common.codex_app_client import (
     APP_SERVER_REQUEST_TIMEOUT_SECONDS,
     CodexAppServerClient,
 )
 from spark_common import codex_app_server
-from workspace.project_chat_common import (
-    as_non_empty_string,
-    normalize_project_path_value,
-    resolve_runtime_workspace_path,
-)
-from workspace.project_chat_models import (
-    ChatTurnLiveEvent,
-    ChatTurnResult,
-    ToolCallRecord,
-)
+from spark_common.runtime import resolve_runtime_workspace_path
 
 
 CHAT_TURN_IDLE_TIMEOUT_SECONDS = codex_app_server.APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS

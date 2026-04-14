@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
-from workspace.flow_catalog import (
+from spark.workspace.flow_catalog import (
     LAUNCH_POLICY_AGENT_REQUESTABLE,
     LAUNCH_POLICY_DISABLED,
     read_flow_launch_policy,

@@ -10,6 +10,9 @@ import pytest
 
 import attractor.api.server as server
 import spark.app as product_app
+import spark.chat.service as project_chat
+import spark.chat.session as project_chat_session
+import spark.workspace.attractor_client as attractor_client
 from spark_common.codex_app_client import CodexAppServerTurnResult
 import spark_common.codex_app_server as codex_app_server
 import spark_common.process_line_reader as process_line_reader
@@ -17,12 +20,9 @@ from spark.authoring_assets import (
     dot_authoring_guide_path,
     spark_operations_guide_path,
 )
-import workspace.project_chat as project_chat
-import workspace.project_chat_session as project_chat_session
-import workspace.attractor_client as attractor_client
 from tests.support.flow_fixtures import seed_flow_fixture
-from workspace.prompt_templates import PROMPTS_FILE_NAME
-from workspace.storage import conversation_handles_path, ensure_project_paths
+from spark.chat.prompt_templates import PROMPTS_FILE_NAME
+from spark.workspace.storage import conversation_handles_path, ensure_project_paths
 
 
 TEST_DISPATCH_FLOW = "test-dispatch.dot"
@@ -883,7 +883,7 @@ def test_create_flow_run_request_places_artifact_on_latest_assistant_turn(tmp_pa
             "goal": "Implement the approved scope.",
             "launch_context": {
                 "context.request.summary": "Implement the approved scope.",
-                "context.request.target_paths": ["src/workspace", "tests/api"],
+                "context.request.target_paths": ["src/spark/workspace", "tests/api"],
             },
             "model": "gpt-5.4",
         },
@@ -901,7 +901,7 @@ def test_create_flow_run_request_places_artifact_on_latest_assistant_turn(tmp_pa
     assert snapshot["flow_run_requests"][0]["summary"] == "Run implementation for the approved scope."
     assert snapshot["flow_run_requests"][0]["launch_context"] == {
         "context.request.summary": "Implement the approved scope.",
-        "context.request.target_paths": ["src/workspace", "tests/api"],
+        "context.request.target_paths": ["src/spark/workspace", "tests/api"],
     }
 
 

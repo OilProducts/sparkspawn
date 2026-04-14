@@ -4,11 +4,7 @@ import copy
 import uuid
 from typing import Optional
 
-from workspace.project_chat_common import (
-    iso_now,
-    normalize_project_path_value,
-)
-from workspace.project_chat_models import (
+from spark.workspace.conversations.models import (
     ConversationSegment,
     ConversationSegmentSource,
     ConversationState,
@@ -16,7 +12,11 @@ from workspace.project_chat_models import (
     FlowLaunch,
     FlowRunRequest,
 )
-from workspace.project_chat_storage import ProjectChatRepository
+from spark.workspace.conversations.repository import ProjectChatRepository
+from spark.workspace.conversations.utils import (
+    iso_now,
+    normalize_project_path_value,
+)
 
 
 class ProjectChatReviewService:

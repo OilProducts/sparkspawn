@@ -11,7 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from attractor.validation_preview import preview_dot_source
-from workspace.project_chat_common import (
+from spark.chat.response_parsing import (
     normalize_flow_run_request_payload,
 )
 

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 import spark.app as product_app
-import workspace.storage as workspace_storage
+import spark.workspace.storage as workspace_storage
 
 
 def _write_flow(name: str, content: str = "digraph G { start [shape=Mdiamond]; done [shape=Msquare]; start -> done; }\n") -> None:

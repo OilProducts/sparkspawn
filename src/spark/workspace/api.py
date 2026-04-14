@@ -12,9 +12,10 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from attractor.api.flow_sources import resolve_flow_path
-from spark_common.runtime import normalize_project_path, resolve_runtime_workspace_path
-from workspace.attractor_client import AttractorApiClient, AttractorApiError
-from workspace.flow_catalog import (
+from spark.chat.response_parsing import normalize_flow_run_request_payload
+from spark.chat.service import ProjectChatService, TurnInProgressError
+from spark.workspace.attractor_client import AttractorApiClient, AttractorApiError
+from spark.workspace.flow_catalog import (
     ALLOWED_LAUNCH_POLICIES,
     LAUNCH_POLICY_AGENT_REQUESTABLE,
     FlowDescription,
@@ -26,15 +27,13 @@ from workspace.flow_catalog import (
     read_flow_raw,
     set_flow_launch_policy,
 )
-from workspace.project_chat_common import normalize_flow_run_request_payload
-from workspace.project_chat import ProjectChatService, TurnInProgressError
-from workspace.storage import (
+from spark.workspace.storage import (
     delete_project_record,
     list_project_records,
     read_project_record,
     update_project_record,
 )
-from workspace.triggers import (
+from spark.workspace.triggers import (
     TriggerError,
     TriggerRuntime,
     create_trigger_definition,
@@ -46,6 +45,7 @@ from workspace.triggers import (
     serialize_trigger,
     update_trigger_definition,
 )
+from spark_common.runtime import normalize_project_path, resolve_runtime_workspace_path
 
 
 class ConversationTurnRequest(BaseModel):

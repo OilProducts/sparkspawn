@@ -119,7 +119,8 @@ Use hooks and model defaults deliberately:
 ## Architecture
 
 - [src/attractor/](src/attractor): Attractor runtime, pipeline engine, handlers, CLI, and mounted Attractor API
-- [src/workspace/](src/workspace): Spark workspace service, conversations, review artifacts, trigger subsystem, and mounted Workspace API
+- [src/spark/workspace/](src/spark/workspace): Spark workspace service, conversations, review artifacts, trigger subsystem, and mounted Workspace API
+- [src/spark/chat/](src/spark/chat): Spark chat orchestration, prompt templates, session plumbing, and chat response parsing
 - [frontend/](frontend): React 19 + Vite UI
 - [src/spark/flows/](src/spark/flows): packaged `.dot` flows shipped with Spark; examples live under [src/spark/flows/examples/](src/spark/flows/examples)
 - [tests/fixtures/flows/](tests/fixtures/flows): repo-only `.dot` fixtures used by tests and local development
@@ -246,7 +247,7 @@ Important path overrides:
 
 For a task-oriented packaged reference that pairs Spark CLI commands with the matching HTTP routes, use [src/spark/guides/spark-operations.md](src/spark/guides/spark-operations.md).
 
-The canonical route inventory lives in [app.py](src/spark/app.py), [server.py](src/attractor/api/server.py), and [api.py](src/workspace/api.py).
+The canonical route inventory lives in [app.py](src/spark/app.py), [server.py](src/attractor/api/server.py), and [api.py](src/spark/workspace/api.py).
 
 The root app is a mount host only. Canonical public API surfaces are:
 - Attractor docs/OpenAPI under `/attractor/docs` and `/attractor/openapi.json`

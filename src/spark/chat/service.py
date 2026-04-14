@@ -4,22 +4,28 @@ import json
 import logging
 import threading
 import uuid
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from spark.authoring_assets import (
     dot_authoring_guide_path,
     spark_operations_guide_path,
 )
-from workspace.project_chat_common import (
-    as_non_empty_string as _as_non_empty_string,
-    iso_now as _iso_now,
+from spark.chat.prompt_templates import (
+    load_prompt_templates,
+    render_chat_prompt,
+)
+from spark.chat.response_parsing import (
     log_project_chat_debug as _log_project_chat_debug,
     normalize_flow_run_request_payload as _normalize_flow_run_request_payload,
-    normalize_project_path_value as _normalize_project_path,
     parse_chat_response_payload as _parse_chat_response_payload,
     summarize_turns_for_debug as _summarize_turns_for_debug,
 )
-from workspace.project_chat_models import (
+from spark.chat.session import (
+    CodexAppServerChatSession,
+)
+from spark.workspace.conversations.artifacts import ProjectChatReviewService
+from spark.workspace.conversations.models import (
     ChatTurnLiveEvent,
     ChatTurnResult,
     ConversationSegment,
@@ -32,16 +38,13 @@ from workspace.project_chat_models import (
     PreparedChatTurn,
     ToolCallRecord,
 )
-from workspace.project_chat_reviews import ProjectChatReviewService
-from workspace.project_chat_session import (
-    CodexAppServerChatSession,
+from spark.workspace.conversations.repository import ProjectChatRepository
+from spark.workspace.conversations.utils import (
+    as_non_empty_string as _as_non_empty_string,
+    iso_now as _iso_now,
+    normalize_project_path_value as _normalize_project_path,
 )
-from workspace.project_chat_storage import ProjectChatRepository
-from workspace.prompt_templates import (
-    load_prompt_templates,
-    render_chat_prompt,
-)
-from workspace.storage import ProjectPaths
+from spark.workspace.storage import ProjectPaths
 
 
 CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
