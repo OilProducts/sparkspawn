@@ -252,6 +252,11 @@ def test_service_install_writes_user_unit_and_starts_service(
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
     monkeypatch.setattr(spark_server_cli.sys, "platform", "linux")
+    monkeypatch.setattr(
+        spark_server_cli.sys,
+        "executable",
+        str(tmp_path / "venv" / "bin" / "python"),
+    )
     monkeypatch.setattr(spark_server_cli.shutil, "which", lambda name: "/usr/bin/systemctl")
     monkeypatch.setattr(
         starter_assets,
@@ -280,6 +285,7 @@ def test_service_install_writes_user_unit_and_starts_service(
     unit_path = xdg_config_home / "systemd" / "user" / "spark.service"
     unit_text = unit_path.read_text(encoding="utf-8")
     assert "ExecStart=" in unit_text
+    assert f"ExecStart={tmp_path / 'venv' / 'bin' / 'python'} -m spark.server_cli" in unit_text
     assert "spark.server_cli" in unit_text
     assert f"--data-dir {data_dir.resolve(strict=False)}" in unit_text
     assert "Listening on http://127.0.0.1:8000" in capsys.readouterr().out

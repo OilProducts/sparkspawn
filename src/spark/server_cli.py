@@ -335,7 +335,7 @@ def _build_service_unit(*, settings, host: str, port: int) -> str:
         service_environment.append(_quote_systemd_arg(f"SPARK_UI_DIR={settings.ui_dir}"))
 
     exec_args = [
-        str(Path(sys.executable).resolve(strict=False)),
+        sys.executable,
         "-m",
         "spark.server_cli",
         "serve",
