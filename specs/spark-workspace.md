@@ -219,6 +219,10 @@ It does not need to persist frontend-only view sessions such as:
 
 `state.json` is a materialized view, not a raw transcript.
 
+Durable workspace state is the render, provenance, and restart authority for the workspace surface. It is not required to be the primary continuity mechanism for the upstream model runtime on every turn.
+
+Spark may preserve backend conversational continuity through a reused runtime thread or session that is tracked alongside durable workspace state.
+
 Historical shapes that lack the modern schema or segment model may be rejected rather than heuristically reconstructed.
 
 ## 11. Review Artifacts
@@ -306,11 +310,21 @@ The fixed system frame owns:
 - invariant workflow boundaries
 - tool-use boundaries
 - runtime-bound values Spark must always inject
+- the stable authoring and operations guidance references Spark requires for flow editing and run control
 
 The editable template owns:
 - project-specific guidance
 - tone and emphasis
 - explicitly allowed runtime variables
+
+Project-chat continuity should normally come from the reused backend thread or session rather than from replaying prior workspace transcript text into each turn prompt.
+
+Rules:
+- the current user message is always injected as turn input through `latest_user_message`
+- supported editable-template runtime variables are explicitly allowlisted by Spark rather than being open-ended
+- `recent_conversation` is not a supported prompt variable
+- local prompt templates that still reference `{{recent_conversation}}` may be rejected rather than silently rendered with stale semantics
+- if a persisted backend thread cannot be resumed, Spark may start a fresh backend thread for the turn instead of reconstructing recent transcript history from durable workspace state
 
 ## 14. Provenance Model
 
