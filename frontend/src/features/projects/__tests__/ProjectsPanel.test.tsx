@@ -382,6 +382,7 @@ describe('ProjectsPanel', () => {
   it('renders the user turn before the assistant response completes', async () => {
     const user = userEvent.setup()
     let resolveTurnResponse: ((response: Response) => void) | null = null
+
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -492,6 +493,9 @@ describe('ProjectsPanel', () => {
 
   it('renders the assistant reply even when the backend canonicalizes project_path', async () => {
     const user = userEvent.setup()
+    const requestedProjectPath = '/tmp/project-canonicalization'
+    const canonicalProjectPath = '/private/tmp/project-canonicalization'
+
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -518,7 +522,7 @@ describe('ProjectsPanel', () => {
           return new Response(
             JSON.stringify(withSnapshotSchema({
               conversation_id: 'conversation-home-project-1',
-              project_path: '/System/Volumes/Data/home/chris/tinker/spark',
+              project_path: canonicalProjectPath,
               title: 'Reply with a one-line acknowledgement only.',
               created_at: '2026-03-07T15:55:00Z',
               updated_at: '2026-03-07T15:55:04Z',
@@ -558,8 +562,8 @@ describe('ProjectsPanel', () => {
       }),
     )
 
-    useStore.getState().registerProject('/home/chris/tinker/spark')
-    useStore.getState().setActiveProjectPath('/home/chris/tinker/spark')
+    useStore.getState().registerProject(requestedProjectPath)
+    useStore.getState().setActiveProjectPath(requestedProjectPath)
 
     renderProjectsPanel()
 
