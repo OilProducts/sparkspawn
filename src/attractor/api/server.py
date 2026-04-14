@@ -80,49 +80,57 @@ from attractor.handlers.base import CodergenBackend
 from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, AnswerValue, Question
-from spark_common.launch_context import normalize_launch_context
-from spark_common.runtime import resolve_runtime_workspace_path
-from spark_common.settings import Settings, resolve_settings, validate_settings
+from attractor.launch_context import normalize_launch_context
+from attractor.api.runtime_paths import (
+    AttractorRuntimePaths,
+    resolve_runtime_paths as resolve_attractor_runtime_paths,
+    validate_runtime_paths as validate_attractor_runtime_paths,
+)
+from spark_common.runtime_path import resolve_runtime_workspace_path
 
 
 attractor_app = FastAPI(title="Attractor API", docs_url="/docs", redoc_url=None, openapi_url="/openapi.json")
 attractor_router = APIRouter()
 LOGGER = logging.getLogger(__name__)
-SETTINGS_LOCK = threading.Lock()
-SETTINGS = resolve_settings()
+RUNTIME_PATHS_LOCK = threading.Lock()
+RUNTIME_PATHS: AttractorRuntimePaths | None = None
 REGISTERED_TRANSFORMS: List[object] = []
 _REGISTERED_TRANSFORMS_LOCK = threading.Lock()
 _UNSET = object()
 
 
-def get_settings() -> Settings:
-    with SETTINGS_LOCK:
-        return SETTINGS
+def get_runtime_paths() -> AttractorRuntimePaths:
+    with RUNTIME_PATHS_LOCK:
+        if RUNTIME_PATHS is None:
+            raise RuntimeError(
+                "Attractor runtime paths are not configured. "
+                "Inject them from spark.app or an explicit test fixture before serving requests."
+            )
+        return RUNTIME_PATHS
 
 
 def configure_runtime_paths(
     *,
-    data_dir: Path | str | None | object = _UNSET,
+    runtime_dir: Path | str | None | object = _UNSET,
     runs_dir: Path | str | None | object = _UNSET,
     flows_dir: Path | str | None | object = _UNSET,
-    ui_dir: Path | str | None | object = _UNSET,
-) -> Settings:
-    global SETTINGS
-    current = get_settings()
-    updated = resolve_settings(
-        data_dir=current.data_dir if data_dir is _UNSET else data_dir,
-        runs_dir=current.runs_dir if runs_dir is _UNSET else runs_dir,
-        flows_dir=current.flows_dir if flows_dir is _UNSET else flows_dir,
-        ui_dir=current.ui_dir if ui_dir is _UNSET else ui_dir,
+) -> AttractorRuntimePaths:
+    global RUNTIME_PATHS
+    with RUNTIME_PATHS_LOCK:
+        current = RUNTIME_PATHS
+    updated = resolve_attractor_runtime_paths(
+        runtime_dir=current.runtime_dir if runtime_dir is _UNSET and current is not None else runtime_dir,
+        runs_dir=current.runs_dir if runs_dir is _UNSET and current is not None else runs_dir,
+        flows_dir=current.flows_dir if flows_dir is _UNSET and current is not None else flows_dir,
     )
-    validate_settings(updated)
-    with SETTINGS_LOCK:
-        SETTINGS = updated
+    validate_attractor_runtime_paths(updated)
+    with RUNTIME_PATHS_LOCK:
+        RUNTIME_PATHS = updated
     return updated
 
 
 def validate_runtime_paths() -> None:
-    validate_settings(get_settings())
+    validate_attractor_runtime_paths(get_runtime_paths())
 
 
 def register_transform(transform: object) -> None:
@@ -161,27 +169,27 @@ MAX_RUN_JOURNAL_PAGE_SIZE = 250
 
 
 def _runs_root() -> Path:
-    return pipeline_runs.runs_root(get_settings)
+    return pipeline_runs.runs_root(get_runtime_paths)
 
 
 def _project_runs_dir(project_path: str) -> Optional[Path]:
-    return pipeline_runs.project_runs_dir(get_settings, project_path)
+    return pipeline_runs.project_runs_dir(get_runtime_paths, project_path)
 
 
 def _iter_run_roots(*, project_path: Optional[str] = None) -> list[Path]:
-    return pipeline_runs.iter_run_roots(get_settings, project_path=project_path)
+    return pipeline_runs.iter_run_roots(get_runtime_paths, project_path=project_path)
 
 
 def _find_run_root(run_id: str) -> Optional[Path]:
-    return pipeline_runs.find_run_root(get_settings, run_id)
+    return pipeline_runs.find_run_root(get_runtime_paths, run_id)
 
 
 def _ensure_run_root_for_project(run_id: str, project_path: str) -> Path:
-    return pipeline_runs.ensure_run_root_for_project(get_settings, run_id, project_path)
+    return pipeline_runs.ensure_run_root_for_project(get_runtime_paths, run_id, project_path)
 
 
 def _run_root(run_id: str) -> Path:
-    return pipeline_runs.run_root(get_settings, run_id)
+    return pipeline_runs.run_root(get_runtime_paths, run_id)
 
 
 def _orphaned_run_terminal_state(status: str) -> tuple[str, str]:
@@ -299,7 +307,7 @@ def _resolve_launch_model(graph, requested_model: Optional[str]) -> tuple[Option
 
 
 def _run_meta_path(run_id: str) -> Path:
-    return pipeline_runs.run_meta_path(get_settings, run_id)
+    return pipeline_runs.run_meta_path(get_runtime_paths, run_id)
 
 
 def _run_events_path(run_id: str) -> Path:
@@ -726,7 +734,7 @@ def _run_journal_entries(run_id: str) -> list[dict[str, Any]]:
 
 
 def _write_run_meta(record: RunRecord) -> None:
-    pipeline_runs.write_run_meta(get_settings, record)
+    pipeline_runs.write_run_meta(get_runtime_paths, record)
 
 
 def _read_run_meta(path: Path) -> Optional[RunRecord]:
@@ -746,7 +754,7 @@ def _record_run_start(
     continued_from_flow_name: Optional[str] = None,
 ) -> None:
     pipeline_runs.record_run_start(
-        get_settings,
+        get_runtime_paths,
         RUN_HISTORY_LOCK,
         run_id=run_id,
         flow_name=flow_name,
@@ -763,7 +771,7 @@ def _record_run_start(
 
 
 def _ensure_known_pipeline(pipeline_id: str) -> None:
-    pipeline_runs.ensure_known_pipeline(get_settings, _get_active_run(pipeline_id), pipeline_id)
+    pipeline_runs.ensure_known_pipeline(get_runtime_paths, _get_active_run(pipeline_id), pipeline_id)
 
 
 def _artifact_media_type(path: Path) -> str:
@@ -793,7 +801,7 @@ def _record_run_end(
     outcome_reason_message: str | None = None,
 ) -> None:
     pipeline_runs.record_run_end(
-        get_settings,
+        get_runtime_paths,
         RUN_HISTORY_LOCK,
         run_id=run_id,
         working_directory=working_directory,
@@ -815,7 +823,7 @@ def _record_run_status(
     outcome_reason_message: str | None = None,
 ) -> None:
     pipeline_runs.record_run_status(
-        get_settings,
+        get_runtime_paths,
         RUN_HISTORY_LOCK,
         run_id=run_id,
         status=status,
@@ -831,7 +839,7 @@ def _record_run_usage(
     token_usage_breakdown: TokenUsageBreakdown,
 ) -> None:
     pipeline_runs.record_run_usage(
-        get_settings,
+        get_runtime_paths,
         RUN_HISTORY_LOCK,
         run_id=run_id,
         token_usage_breakdown=token_usage_breakdown,
@@ -839,7 +847,7 @@ def _record_run_usage(
 
 
 def _append_run_log(run_id: str, message: str) -> None:
-    pipeline_runs.append_run_log(get_settings, run_id, message)
+    pipeline_runs.append_run_log(get_runtime_paths, run_id, message)
 
 
 async def _publish_run_event(run_id: str, message: dict) -> None:
@@ -936,7 +944,7 @@ def _get_active_run(run_id: str) -> Optional[ActiveRun]:
 
 
 def _read_checkpoint_progress(run_id: str) -> tuple[str, List[str]]:
-    return pipeline_runs.read_checkpoint_progress(get_settings, run_id)
+    return pipeline_runs.read_checkpoint_progress(get_runtime_paths, run_id)
 
 
 def _pipeline_progress_payload(current_node: str, completed_nodes: List[str]) -> Dict[str, object]:
@@ -2351,7 +2359,7 @@ async def submit_pipeline_answer(pipeline_id: str, question_id: str, req: HumanA
 
 @attractor_router.post("/reset")
 async def reset_checkpoint(req: ResetRequest):
-    runs_root = get_settings().runs_dir
+    runs_root = get_runtime_paths().runs_dir
     if runs_root.exists():
         shutil.rmtree(runs_root, ignore_errors=True)
         runs_root.mkdir(parents=True, exist_ok=True)
@@ -2398,7 +2406,7 @@ async def list_flows():
 
 
 def _flows_dir() -> Path:
-    return _ensure_flows_dir_impl(get_settings().flows_dir)
+    return _ensure_flows_dir_impl(get_runtime_paths().flows_dir)
 
 
 def _resolve_flow_path(flow_name: str) -> Path:

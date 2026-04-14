@@ -6,7 +6,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
-from spark_common.launch_context import normalize_launch_context
+from attractor.launch_context import normalize_launch_context
 from spark.workspace.conversations.utils import as_non_empty_string
 
 if TYPE_CHECKING:

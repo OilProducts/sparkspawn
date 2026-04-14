@@ -127,7 +127,7 @@ class StubChatClient:
 
 
 def _seed_flow(name: str) -> None:
-    seed_flow_fixture(server.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
+    seed_flow_fixture(product_app.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
 
 
 def test_extract_command_text_handles_list_and_string_payloads() -> None:
@@ -1248,7 +1248,7 @@ def test_direct_flow_launch_uses_flow_ui_default_model_when_request_model_missin
     project_dir = tmp_path / "project"
     project_dir.mkdir(parents=True, exist_ok=True)
     flow_name = "test-ui-default-model.dot"
-    flows_dir = server.get_settings().flows_dir
+    flows_dir = product_app.get_settings().flows_dir
     flows_dir.mkdir(parents=True, exist_ok=True)
     (flows_dir / flow_name).write_text(
         """

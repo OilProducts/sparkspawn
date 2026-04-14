@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark_common.settings import Settings
+from spark.settings import SparkSettings
 
 
 def resolve_default_ui_dir(project_root: Path) -> Path | None:
@@ -17,7 +17,7 @@ def resolve_default_ui_dir(project_root: Path) -> Path | None:
     return None
 
 
-def resolve_ui_dir(settings: Settings) -> Path | None:
+def resolve_ui_dir(settings: SparkSettings) -> Path | None:
     if settings.ui_dir:
         index_path = settings.ui_dir / "index.html"
         if index_path.exists():
@@ -25,7 +25,7 @@ def resolve_ui_dir(settings: Settings) -> Path | None:
     return resolve_default_ui_dir(settings.project_root)
 
 
-def resolve_ui_index_path(settings: Settings) -> Path | None:
+def resolve_ui_index_path(settings: SparkSettings) -> Path | None:
     ui_dir = resolve_ui_dir(settings)
     if ui_dir is None:
         return None
@@ -35,7 +35,7 @@ def resolve_ui_index_path(settings: Settings) -> Path | None:
     return None
 
 
-def resolve_ui_asset_path(settings: Settings, relative_path: str) -> Path | None:
+def resolve_ui_asset_path(settings: SparkSettings, relative_path: str) -> Path | None:
     ui_dir = resolve_ui_dir(settings)
     if ui_dir is None:
         return None

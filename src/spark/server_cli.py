@@ -102,22 +102,20 @@ def _run_serve(args: argparse.Namespace) -> int:
 
     import uvicorn
 
-    import attractor.api.server as server
     import spark.app as product_app
-    from spark_common.settings import ENV_FLOWS_DIR, ENV_HOME_DIR, ENV_UI_DIR
+    from spark.settings import ENV_FLOWS_DIR, ENV_HOME_DIR, ENV_UI_DIR
 
     def _set_path_env(name: str, value: Path | None) -> None:
         if value is None:
             return
         os.environ[name] = str(value.expanduser().resolve(strict=False))
 
-    server.configure_runtime_paths(
+    product_app.configure_settings(
         data_dir=args.data_dir,
-        runs_dir=None,
         flows_dir=args.flows_dir,
         ui_dir=args.ui_dir,
     )
-    server.validate_runtime_paths()
+    product_app.validate_settings()
     _set_path_env(ENV_HOME_DIR, args.data_dir)
     _set_path_env(ENV_FLOWS_DIR, args.flows_dir)
     _set_path_env(ENV_UI_DIR, args.ui_dir)
@@ -132,7 +130,7 @@ def _run_serve(args: argparse.Namespace) -> int:
 
 
 def _run_init(args: argparse.Namespace) -> int:
-    from spark_common.settings import resolve_settings, validate_settings
+    from spark.settings import resolve_settings, validate_settings
 
     try:
         _require_explicit_dev_home(command="spark-server init", data_dir=args.data_dir)

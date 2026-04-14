@@ -28,7 +28,7 @@ from attractor.engine.status_envelope_prompting import (
 from attractor.handlers.base import CodergenBackend
 from spark_common.codex_app_client import CodexAppServerClient
 from spark_common import codex_app_server
-from spark_common.runtime import resolve_runtime_workspace_path
+from spark_common.runtime_path import resolve_runtime_workspace_path
 
 _STRUCTURED_OUTCOME_KEYS = {
     "outcome",

@@ -11,11 +11,12 @@ import spark.app as product_app
 
 @pytest.fixture(autouse=True)
 def _reset_api_server_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("SPARK_HOME", raising=False)
+    monkeypatch.delenv("SPARK_FLOWS_DIR", raising=False)
     monkeypatch.delenv("SPARK_UI_DIR", raising=False)
     server.shutdown_attractor_runtime()
-    server.configure_runtime_paths(
+    product_app.configure_settings(
         data_dir=tmp_path / ".spark",
-        runs_dir=None,
         flows_dir=tmp_path / "flows",
         ui_dir=None,
     )

@@ -1,1 +1,1 @@
-"""Shared Spark helpers used across workspace and Attractor."""
+"""Temporary shared Spark/Attractor infrastructure pending boundary cleanup."""

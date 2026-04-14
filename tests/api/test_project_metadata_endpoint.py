@@ -12,7 +12,7 @@ import spark.workspace.storage as workspace_storage
 
 
 def _write_flow(name: str, content: str = "digraph G { start [shape=Mdiamond]; done [shape=Msquare]; start -> done; }\n") -> None:
-    flows_dir = server.get_settings().flows_dir
+    flows_dir = product_app.get_settings().flows_dir
     flows_dir.mkdir(parents=True, exist_ok=True)
     (flows_dir / name).write_text(content, encoding="utf-8")
 
@@ -161,7 +161,7 @@ def test_project_registry_endpoints_persist_project_metadata(
     assert list_response.status_code == 200
     assert list_response.json() == [register_payload]
 
-    project_file = server.get_settings().projects_dir / register_payload["project_id"] / "project.toml"
+    project_file = product_app.get_settings().projects_dir / register_payload["project_id"] / "project.toml"
     assert project_file.exists()
     project_text = project_file.read_text(encoding="utf-8")
     assert f'project_path = "{project_dir}"' in project_text
@@ -171,7 +171,7 @@ def test_project_registry_logs_malformed_project_records(
     product_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    broken_project_dir = server.get_settings().projects_dir / "broken-project"
+    broken_project_dir = product_app.get_settings().projects_dir / "broken-project"
     broken_project_dir.mkdir(parents=True, exist_ok=True)
     broken_project_file = broken_project_dir / "project.toml"
     broken_project_file.write_text('project_path = "unterminated\n', encoding="utf-8")
@@ -236,7 +236,7 @@ def test_project_delete_endpoint_removes_registered_project_storage(
     assert register_response.status_code == 200
     register_payload = register_response.json()
 
-    project_root = server.get_settings().projects_dir / register_payload["project_id"]
+    project_root = product_app.get_settings().projects_dir / register_payload["project_id"]
     (project_root / "conversations" / "conversation-a").mkdir(parents=True)
     (project_root / "workflow").mkdir(parents=True, exist_ok=True)
     (project_root / "workflow" / "conversation-a.json").write_text("{}", encoding="utf-8")

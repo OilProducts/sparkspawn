@@ -19,7 +19,7 @@ from spark_common.codex_app_client import (
     CodexAppServerClient,
 )
 from spark_common import codex_app_server
-from spark_common.runtime import resolve_runtime_workspace_path
+from spark_common.runtime_path import resolve_runtime_workspace_path
 
 
 CHAT_TURN_IDLE_TIMEOUT_SECONDS = codex_app_server.APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS

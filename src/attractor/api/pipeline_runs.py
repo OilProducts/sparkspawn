@@ -16,38 +16,42 @@ from attractor.api.run_records import (
     normalize_run_status,
 )
 from attractor.api.token_usage import TokenUsageBreakdown, estimate_model_cost
+from attractor.api.runtime_paths import AttractorRuntimePaths
 from attractor.engine import load_checkpoint
 from attractor.graph_prep import (
     DEFAULT_MAX_RETRIES_KEY,
     resolve_default_max_retries_value,
 )
-from spark_common.runtime import build_project_id, normalize_project_path
-from spark_common.settings import Settings
+from spark_common.project_identity import build_project_id, normalize_project_path
 
 
-def runs_root(get_settings: Callable[[], Settings]) -> Path:
-    root = get_settings().runs_dir
+def runs_root(get_runtime_paths: Callable[[], AttractorRuntimePaths]) -> Path:
+    root = get_runtime_paths().runs_dir
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
-def project_runs_dir(get_settings: Callable[[], Settings], project_path: str) -> Optional[Path]:
+def project_runs_dir(get_runtime_paths: Callable[[], AttractorRuntimePaths], project_path: str) -> Optional[Path]:
     normalized_project_path = normalize_project_path(project_path)
     if not normalized_project_path:
         return None
     project_id = build_project_id(normalized_project_path)
-    return runs_root(get_settings) / project_id
+    return runs_root(get_runtime_paths) / project_id
 
 
-def iter_run_roots(get_settings: Callable[[], Settings], *, project_path: Optional[str] = None) -> list[Path]:
+def iter_run_roots(
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
+    *,
+    project_path: Optional[str] = None,
+) -> list[Path]:
     if project_path:
-        run_dir = project_runs_dir(get_settings, project_path)
+        run_dir = project_runs_dir(get_runtime_paths, project_path)
         if run_dir is None or not run_dir.exists():
             return []
         return sorted((path for path in run_dir.iterdir() if path.is_dir()), key=lambda item: item.name)
 
     run_roots: list[Path] = []
-    projects_root = runs_root(get_settings)
+    projects_root = runs_root(get_runtime_paths)
     if not projects_root.exists():
         return run_roots
     for run_dir in sorted(projects_root.iterdir()):
@@ -57,27 +61,31 @@ def iter_run_roots(get_settings: Callable[[], Settings], *, project_path: Option
     return run_roots
 
 
-def find_run_root(get_settings: Callable[[], Settings], run_id: str) -> Optional[Path]:
-    for run_root in iter_run_roots(get_settings):
+def find_run_root(get_runtime_paths: Callable[[], AttractorRuntimePaths], run_id: str) -> Optional[Path]:
+    for run_root in iter_run_roots(get_runtime_paths):
         if run_root.name == run_id:
             return run_root
     return None
 
 
-def ensure_run_root_for_project(get_settings: Callable[[], Settings], run_id: str, project_path: str) -> Path:
+def ensure_run_root_for_project(
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
+    run_id: str,
+    project_path: str,
+) -> Path:
     normalized_project_path = normalize_project_path(project_path)
     if not normalized_project_path:
         raise ValueError("Run storage requires a project path.")
-    run_root = project_runs_dir(get_settings, normalized_project_path) / run_id
+    run_root = project_runs_dir(get_runtime_paths, normalized_project_path) / run_id
     run_root.mkdir(parents=True, exist_ok=True)
     return run_root
 
 
-def run_root(get_settings: Callable[[], Settings], run_id: str) -> Path:
-    existing = find_run_root(get_settings, run_id)
+def run_root(get_runtime_paths: Callable[[], AttractorRuntimePaths], run_id: str) -> Path:
+    existing = find_run_root(get_runtime_paths, run_id)
     if existing is not None:
         return existing
-    return get_settings().runtime_dir / "_missing-runs" / run_id
+    return get_runtime_paths().runtime_dir / "_missing-runs" / run_id
 
 
 def resolve_start_node_id(graph) -> str:
@@ -107,15 +115,19 @@ def graph_attr_context_seed(graph) -> Dict[str, object]:
     return seeded
 
 
-def run_meta_path(get_settings: Callable[[], Settings], run_id: str) -> Path:
-    return run_root(get_settings, run_id) / "run.json"
+def run_meta_path(get_runtime_paths: Callable[[], AttractorRuntimePaths], run_id: str) -> Path:
+    return run_root(get_runtime_paths, run_id) / "run.json"
 
 
-def write_run_meta(get_settings: Callable[[], Settings], record: RunRecord) -> None:
+def write_run_meta(get_runtime_paths: Callable[[], AttractorRuntimePaths], record: RunRecord) -> None:
     try:
         if record.project_path or record.working_directory:
-            ensure_run_root_for_project(get_settings, record.run_id, record.project_path or record.working_directory)
-        meta_path = run_meta_path(get_settings, record.run_id)
+            ensure_run_root_for_project(
+                get_runtime_paths,
+                record.run_id,
+                record.project_path or record.working_directory,
+            )
+        meta_path = run_meta_path(get_runtime_paths, record.run_id)
         meta_path.parent.mkdir(parents=True, exist_ok=True)
         with meta_path.open("w", encoding="utf-8") as handle:
             json.dump(record.to_dict(), handle, indent=2, sort_keys=True)
@@ -185,7 +197,7 @@ def resolve_run_project_git_metadata(
 
 
 def record_run_start(
-    get_settings: Callable[[], Settings],
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
     run_history_lock: threading.Lock,
     *,
     run_id: str,
@@ -225,15 +237,15 @@ def record_run_start(
         continued_from_flow_name=continued_from_flow_name,
     )
     with run_history_lock:
-        write_run_meta(get_settings, record)
+        write_run_meta(get_runtime_paths, record)
 
 
 def ensure_known_pipeline(
-    get_settings: Callable[[], Settings],
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
     active_run: object | None,
     pipeline_id: str,
 ) -> None:
-    if not active_run and not read_run_meta(run_meta_path(get_settings, pipeline_id)):
+    if not active_run and not read_run_meta(run_meta_path(get_runtime_paths, pipeline_id)):
         raise HTTPException(status_code=404, detail="Unknown pipeline")
 
 
@@ -317,7 +329,7 @@ def list_run_output_artifacts(run_root: Path) -> List[Dict[str, object]]:
 
 
 def record_run_end(
-    get_settings: Callable[[], Settings],
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
     run_history_lock: threading.Lock,
     *,
     run_id: str,
@@ -330,7 +342,7 @@ def record_run_end(
 ) -> None:
     normalized_status = normalize_run_status(status)
     with run_history_lock:
-        record = read_run_meta(run_meta_path(get_settings, run_id))
+        record = read_run_meta(run_meta_path(get_runtime_paths, run_id))
         if not record:
             record = RunRecord(
                 run_id=run_id,
@@ -354,12 +366,12 @@ def record_run_end(
             record.token_usage = record.token_usage_breakdown.total_tokens
             record.estimated_model_cost = estimate_model_cost(record.token_usage_breakdown)
         elif record.token_usage is None:
-            record.token_usage = extract_token_usage(run_root(get_settings, run_id), run_id)
-        write_run_meta(get_settings, record)
+            record.token_usage = extract_token_usage(run_root(get_runtime_paths, run_id), run_id)
+        write_run_meta(get_runtime_paths, record)
 
 
 def record_run_status(
-    get_settings: Callable[[], Settings],
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
     run_history_lock: threading.Lock,
     *,
     run_id: str,
@@ -371,7 +383,7 @@ def record_run_status(
 ) -> None:
     normalized_status = normalize_run_status(status)
     with run_history_lock:
-        record = read_run_meta(run_meta_path(get_settings, run_id))
+        record = read_run_meta(run_meta_path(get_runtime_paths, run_id))
         if not record:
             return
         record.status = normalized_status
@@ -383,28 +395,28 @@ def record_run_status(
             record.outcome_reason_message = outcome_reason_message
         if last_error:
             record.last_error = last_error
-        write_run_meta(get_settings, record)
+        write_run_meta(get_runtime_paths, record)
 
 
 def record_run_usage(
-    get_settings: Callable[[], Settings],
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
     run_history_lock: threading.Lock,
     *,
     run_id: str,
     token_usage_breakdown: TokenUsageBreakdown,
 ) -> None:
     with run_history_lock:
-        record = read_run_meta(run_meta_path(get_settings, run_id))
+        record = read_run_meta(run_meta_path(get_runtime_paths, run_id))
         if not record:
             return
         record.token_usage_breakdown = token_usage_breakdown.copy()
         record.token_usage = token_usage_breakdown.total_tokens
         record.estimated_model_cost = estimate_model_cost(token_usage_breakdown)
-        write_run_meta(get_settings, record)
+        write_run_meta(get_runtime_paths, record)
 
 
-def append_run_log(get_settings: Callable[[], Settings], run_id: str, message: str) -> None:
-    log_path = run_root(get_settings, run_id) / "run.log"
+def append_run_log(get_runtime_paths: Callable[[], AttractorRuntimePaths], run_id: str, message: str) -> None:
+    log_path = run_root(get_runtime_paths, run_id) / "run.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
@@ -414,8 +426,11 @@ def append_run_log(get_settings: Callable[[], Settings], run_id: str, message: s
         pass
 
 
-def read_checkpoint_progress(get_settings: Callable[[], Settings], run_id: str) -> tuple[str, List[str]]:
-    checkpoint = load_checkpoint(run_root(get_settings, run_id) / "state.json")
+def read_checkpoint_progress(
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
+    run_id: str,
+) -> tuple[str, List[str]]:
+    checkpoint = load_checkpoint(run_root(get_runtime_paths, run_id) / "state.json")
     if checkpoint is None:
         return "", []
     return checkpoint.current_node, list(checkpoint.completed_nodes)
@@ -428,10 +443,14 @@ def pipeline_progress_payload(current_node: str, completed_nodes: List[str]) -> 
     }
 
 
-def read_pipeline_stage_response(get_settings: Callable[[], Settings], run_id: str, stage_id: str) -> str:
+def read_pipeline_stage_response(
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
+    run_id: str,
+    stage_id: str,
+) -> str:
     candidate_paths = [
-        run_root(get_settings, run_id) / "logs" / stage_id / "response.md",
-        run_root(get_settings, run_id) / stage_id / "response.md",
+        run_root(get_runtime_paths, run_id) / "logs" / stage_id / "response.md",
+        run_root(get_runtime_paths, run_id) / stage_id / "response.md",
     ]
     for path in candidate_paths:
         if not path.exists():
@@ -443,14 +462,14 @@ def read_pipeline_stage_response(get_settings: Callable[[], Settings], run_id: s
 
 
 def record_run_plan_id(
-    get_settings: Callable[[], Settings],
+    get_runtime_paths: Callable[[], AttractorRuntimePaths],
     run_history_lock: threading.Lock,
     run_id: str,
     plan_id: str,
 ) -> None:
     with run_history_lock:
-        record = read_run_meta(run_meta_path(get_settings, run_id))
+        record = read_run_meta(run_meta_path(get_runtime_paths, run_id))
         if record is None:
             return
         record.plan_id = plan_id
-        write_run_meta(get_settings, record)
+        write_run_meta(get_runtime_paths, record)

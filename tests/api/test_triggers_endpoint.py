@@ -7,13 +7,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+import spark.app as product_app
 from tests.support.flow_fixtures import seed_flow_fixture
 
 TEST_PLANNING_FLOW = "test-planning.dot"
 
 
 def _seed_flow(name: str) -> None:
-    seed_flow_fixture(server.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
+    seed_flow_fixture(product_app.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
 
 
 def test_create_and_list_custom_schedule_trigger(

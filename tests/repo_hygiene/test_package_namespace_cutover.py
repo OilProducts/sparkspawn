@@ -13,3 +13,12 @@ def test_package_discovery_uses_spark_namespaces_only() -> None:
 def test_legacy_workspace_package_is_removed_from_source_tree() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     assert not (repo_root / "src" / "workspace").exists()
+
+
+def test_legacy_spark_common_boundary_modules_are_removed() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+
+    assert not (repo_root / "src" / "spark_common" / "settings.py").exists()
+    assert not (repo_root / "src" / "spark_common" / "logging.py").exists()
+    assert not (repo_root / "src" / "spark_common" / "launch_context.py").exists()
+    assert not (repo_root / "src" / "spark_common" / "runtime.py").exists()

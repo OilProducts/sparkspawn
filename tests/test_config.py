@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark_common.settings import resolve_settings
+from attractor.api.runtime_paths import resolve_runtime_paths, validate_runtime_paths
+from spark.settings import resolve_settings
 
 
 def test_resolve_settings_defaults_flows_dir_to_repo_flows_when_running_from_git_repo() -> None:
@@ -22,3 +23,29 @@ def test_resolve_settings_defaults_flows_dir_under_resolved_data_dir_from_env(tm
 
     assert settings.data_dir == data_dir.resolve(strict=False)
     assert settings.flows_dir == data_dir.resolve(strict=False) / "flows"
+
+
+def test_resolve_attractor_runtime_paths_requires_explicit_runtime_runs_and_flows(tmp_path: Path) -> None:
+    paths = resolve_runtime_paths(
+        runtime_dir=tmp_path / "runtime",
+        runs_dir=tmp_path / "runs",
+        flows_dir=tmp_path / "flows",
+    )
+
+    assert paths.runtime_dir == (tmp_path / "runtime").resolve(strict=False)
+    assert paths.runs_dir == (tmp_path / "runs").resolve(strict=False)
+    assert paths.flows_dir == (tmp_path / "flows").resolve(strict=False)
+
+
+def test_validate_attractor_runtime_paths_creates_required_directories(tmp_path: Path) -> None:
+    paths = resolve_runtime_paths(
+        runtime_dir=tmp_path / "runtime",
+        runs_dir=tmp_path / "runs",
+        flows_dir=tmp_path / "flows",
+    )
+
+    validate_runtime_paths(paths)
+
+    assert paths.runtime_dir.is_dir()
+    assert paths.runs_dir.is_dir()
+    assert paths.flows_dir.is_dir()

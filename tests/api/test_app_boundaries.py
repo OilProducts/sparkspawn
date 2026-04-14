@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+import spark.app as product_app
 
 
 def test_attractor_subapp_exposes_status_endpoint(attractor_api_client: TestClient) -> None:
@@ -37,6 +38,15 @@ def test_workspace_subapp_exposes_project_listing(product_api_client: TestClient
     payload = response.json()
     assert isinstance(payload, list)
     assert any(project["project_path"] == str(project_path) for project in payload)
+
+
+def test_product_app_injects_attractor_runtime_paths() -> None:
+    settings = product_app.get_settings()
+    runtime_paths = server.get_runtime_paths()
+
+    assert runtime_paths.runtime_dir == settings.runtime_dir
+    assert runtime_paths.runs_dir == settings.runs_dir
+    assert runtime_paths.flows_dir == settings.flows_dir
 
 
 def test_root_app_serves_ui_index_and_static_assets(product_api_client: TestClient) -> None:

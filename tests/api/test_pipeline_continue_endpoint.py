@@ -169,7 +169,7 @@ def test_continue_pipeline_flow_name_mode_uses_selected_installed_flow(
     server.configure_runtime_paths(runs_dir=tmp_path / "runs", flows_dir=tmp_path / "flows")
     monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
 
-    flow_path = server.get_settings().flows_dir / "override.dot"
+    flow_path = server.get_runtime_paths().flows_dir / "override.dot"
     flow_path.parent.mkdir(parents=True, exist_ok=True)
     flow_path.write_text(
         """

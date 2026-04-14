@@ -8,8 +8,8 @@ import shutil
 import tomllib
 from typing import Any
 
-from spark_common.logging import get_spark_logger
-from spark_common.runtime import build_project_id, normalize_project_path
+from spark.logging import get_spark_logger
+from spark_common.project_identity import build_project_id, normalize_project_path
 
 
 LOGGER = get_spark_logger("workspace.storage")

@@ -15,11 +15,9 @@ from attractor.engine import Context, load_checkpoint
 from attractor.engine.context_contracts import ContextWriteContract
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.engine.status_envelope_prompting import build_status_envelope_context_updates_contract_text
-from spark_common.runtime import (
-    build_codex_runtime_environment,
-    build_project_id,
-    resolve_runtime_workspace_path,
-)
+from spark_common.codex_runtime import build_codex_runtime_environment
+from spark_common.project_identity import build_project_id
+from spark_common.runtime_path import resolve_runtime_workspace_path
 from tests.api._support import (
     SIMPLE_FLOW as FLOW,
     close_task_immediately as _close_task_immediately,

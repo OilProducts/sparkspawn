@@ -4,7 +4,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
-from spark_common.runtime import normalize_project_path
+from spark_common.project_identity import normalize_project_path
 
 if TYPE_CHECKING:
     from .models import ConversationTurn

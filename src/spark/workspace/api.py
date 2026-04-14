@@ -45,7 +45,8 @@ from spark.workspace.triggers import (
     serialize_trigger,
     update_trigger_definition,
 )
-from spark_common.runtime import normalize_project_path, resolve_runtime_workspace_path
+from spark_common.project_identity import normalize_project_path
+from spark_common.runtime_path import resolve_runtime_workspace_path
 
 
 class ConversationTurnRequest(BaseModel):

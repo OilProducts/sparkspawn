@@ -33,7 +33,7 @@ from spark.workspace.storage import (
     remove_conversation_handle,
     workspace_projects_root,
 )
-from spark_common.runtime import resolve_runtime_workspace_path
+from spark_common.runtime_path import resolve_runtime_workspace_path
 
 
 class ProjectChatRepository:

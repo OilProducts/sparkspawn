@@ -9,8 +9,8 @@ import time
 from typing import Any, Callable, Optional
 
 from spark_common import codex_app_server
+from spark_common.codex_runtime import build_codex_runtime_environment
 from spark_common.process_line_reader import ProcessLineReader
-from spark_common.runtime import build_codex_runtime_environment
 
 
 APP_SERVER_REQUEST_TIMEOUT_SECONDS = 15.0

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import attractor.api.server as server
+import spark.app as product_app
 from spark.workspace.flow_catalog import (
     LAUNCH_POLICY_AGENT_REQUESTABLE,
     LAUNCH_POLICY_DISABLED,
@@ -14,14 +14,14 @@ from spark.workspace.flow_catalog import (
 
 
 def _write_flow(name: str, content: str) -> Path:
-    flow_path = server.get_settings().flows_dir / name
+    flow_path = product_app.get_settings().flows_dir / name
     flow_path.parent.mkdir(parents=True, exist_ok=True)
     flow_path.write_text(content, encoding="utf-8")
     return flow_path
 
 
 def test_flow_catalog_round_trip_defaults_uncataloged_to_disabled() -> None:
-    config_dir = server.get_settings().config_dir
+    config_dir = product_app.get_settings().config_dir
 
     uncataloged = read_flow_launch_policy(config_dir, "uncataloged.dot")
     assert uncataloged.launch_policy is None
@@ -35,7 +35,7 @@ def test_flow_catalog_round_trip_defaults_uncataloged_to_disabled() -> None:
     assert reloaded.launch_policy == LAUNCH_POLICY_AGENT_REQUESTABLE
     assert reloaded.effective_launch_policy == LAUNCH_POLICY_AGENT_REQUESTABLE
 
-    catalog_path = server.get_settings().config_dir / "flow-catalog.toml"
+    catalog_path = product_app.get_settings().config_dir / "flow-catalog.toml"
     assert catalog_path.read_text(encoding="utf-8") == (
         '[flows."agent-visible.dot"]\n'
         'launch_policy = "agent_requestable"\n'
@@ -144,9 +144,9 @@ def test_list_workspace_flows_agent_surface_filters_non_requestable_flows(
     _write_flow("requestable.dot", "digraph requestable { start -> done; }\n")
     _write_flow("trigger-only.dot", "digraph trigger_only { start -> done; }\n")
     _write_flow("disabled.dot", "digraph disabled { start -> done; }\n")
-    set_flow_launch_policy(server.get_settings().config_dir, "requestable.dot", "agent_requestable")
-    set_flow_launch_policy(server.get_settings().config_dir, "trigger-only.dot", "trigger_only")
-    set_flow_launch_policy(server.get_settings().config_dir, "disabled.dot", "disabled")
+    set_flow_launch_policy(product_app.get_settings().config_dir, "requestable.dot", "agent_requestable")
+    set_flow_launch_policy(product_app.get_settings().config_dir, "trigger-only.dot", "trigger_only")
+    set_flow_launch_policy(product_app.get_settings().config_dir, "disabled.dot", "disabled")
 
     response = product_api_client.get("/workspace/api/flows", params={"surface": "agent"})
 
@@ -183,7 +183,7 @@ digraph inspectable {
 """.strip()
         + "\n",
     )
-    set_flow_launch_policy(server.get_settings().config_dir, "inspectable.dot", "agent_requestable")
+    set_flow_launch_policy(product_app.get_settings().config_dir, "inspectable.dot", "agent_requestable")
 
     response = product_api_client.get("/workspace/api/flows/inspectable.dot", params={"surface": "agent"})
 
@@ -219,7 +219,7 @@ digraph nested {
 }
 """.strip() + "\n"
     _write_flow("ops/review/inspectable.dot", flow_content)
-    set_flow_launch_policy(server.get_settings().config_dir, "ops/review/inspectable.dot", "agent_requestable")
+    set_flow_launch_policy(product_app.get_settings().config_dir, "ops/review/inspectable.dot", "agent_requestable")
 
     describe_response = product_api_client.get("/workspace/api/flows/ops/review/inspectable.dot", params={"surface": "agent"})
     raw_response = product_api_client.get("/workspace/api/flows/ops/review/inspectable.dot/raw", params={"surface": "agent"})
@@ -239,14 +239,14 @@ digraph nested {
     assert validate_response.json()["path"].endswith("/ops/review/inspectable.dot")
     assert policy_response.status_code == 200
     assert policy_response.json()["name"] == "ops/review/inspectable.dot"
-    assert read_flow_launch_policy(server.get_settings().config_dir, "ops/review/inspectable.dot").launch_policy == "trigger_only"
+    assert read_flow_launch_policy(product_app.get_settings().config_dir, "ops/review/inspectable.dot").launch_policy == "trigger_only"
 
 
 def test_workspace_flow_agent_surface_hides_non_requestable_describe_and_raw(
     product_api_client: TestClient,
 ) -> None:
     _write_flow("trigger-only.dot", "digraph trigger_only { start -> done; }\n")
-    set_flow_launch_policy(server.get_settings().config_dir, "trigger-only.dot", "trigger_only")
+    set_flow_launch_policy(product_app.get_settings().config_dir, "trigger-only.dot", "trigger_only")
 
     describe_response = product_api_client.get("/workspace/api/flows/trigger-only.dot", params={"surface": "agent"})
     raw_response = product_api_client.get("/workspace/api/flows/trigger-only.dot/raw", params={"surface": "agent"})
@@ -260,7 +260,7 @@ def test_workspace_flow_raw_returns_dot_for_requestable_flow(
 ) -> None:
     flow_content = 'digraph requestable { graph [label="Requestable"]; start -> done; }\n'
     _write_flow("requestable.dot", flow_content)
-    set_flow_launch_policy(server.get_settings().config_dir, "requestable.dot", "agent_requestable")
+    set_flow_launch_policy(product_app.get_settings().config_dir, "requestable.dot", "agent_requestable")
 
     response = product_api_client.get("/workspace/api/flows/requestable.dot/raw", params={"surface": "agent"})
 
@@ -334,5 +334,5 @@ def test_workspace_flow_launch_policy_update_persists_catalog_entry(
             "trigger_only",
         ],
     }
-    catalog_state = read_flow_launch_policy(server.get_settings().config_dir, "editable.dot")
+    catalog_state = read_flow_launch_policy(product_app.get_settings().config_dir, "editable.dot")
     assert catalog_state.launch_policy == "trigger_only"

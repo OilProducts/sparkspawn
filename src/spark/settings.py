@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Mapping
+
+from attractor.api.runtime_paths import ensure_writable_directory
 
 ENV_HOME_DIR = "SPARK_HOME"
 ENV_FLOWS_DIR = "SPARK_FLOWS_DIR"
@@ -11,7 +13,7 @@ ENV_UI_DIR = "SPARK_UI_DIR"
 
 
 @dataclass(frozen=True)
-class Settings:
+class SparkSettings:
     project_root: Path
     data_dir: Path
     config_dir: Path
@@ -22,7 +24,7 @@ class Settings:
     attractor_dir: Path
     runs_dir: Path
     flows_dir: Path
-    ui_dir: Optional[Path]
+    ui_dir: Path | None
 
 
 def resolve_settings(
@@ -32,7 +34,7 @@ def resolve_settings(
     flows_dir: Path | str | None = None,
     ui_dir: Path | str | None = None,
     env: Mapping[str, str] | None = None,
-) -> Settings:
+) -> SparkSettings:
     env_map = env if env is not None else os.environ
     project_root = _detect_project_root()
     default_data_dir = Path.home() / ".spark"
@@ -64,7 +66,7 @@ def resolve_settings(
         default_value=None,
     )
 
-    return Settings(
+    return SparkSettings(
         project_root=project_root,
         data_dir=resolved_data_dir,
         config_dir=resolved_config_dir,
@@ -79,7 +81,7 @@ def resolve_settings(
     )
 
 
-def validate_settings(settings: Settings) -> None:
+def validate_settings(settings: SparkSettings) -> None:
     ensure_writable_directory(settings.config_dir, "config")
     ensure_writable_directory(settings.runtime_dir, "runtime")
     ensure_writable_directory(settings.logs_dir, "logs")
@@ -92,21 +94,6 @@ def validate_settings(settings: Settings) -> None:
         ui_index = settings.ui_dir / "index.html"
         if not ui_index.exists():
             raise RuntimeError(f"UI directory does not contain index.html: {settings.ui_dir}")
-
-
-def ensure_writable_directory(path: Path, label: str) -> None:
-    target = path.resolve(strict=False)
-    try:
-        target.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise RuntimeError(f"Unable to create {label} directory: {target}") from exc
-
-    probe = target / ".spark-write-test"
-    try:
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink()
-    except OSError as exc:
-        raise RuntimeError(f"{label} directory is not writable: {target}") from exc
 
 
 def _detect_project_root() -> Path:
@@ -130,8 +117,8 @@ def _coalesce_optional_path(
     *,
     cli_value: Path | str | None,
     env_value: str | None,
-    default_value: Optional[Path],
-) -> Optional[Path]:
+    default_value: Path | None,
+) -> Path | None:
     if cli_value is not None:
         return _normalize_path(cli_value)
     if env_value:

@@ -18,7 +18,7 @@ services:
       - OPENAI_API_KEY
       - OPENAI_ORG
       - OPENAI_PROJECT
-    command: uvicorn attractor.api.server:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn spark.app:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - .:/app
       - codex_runtime:/codex-runtime

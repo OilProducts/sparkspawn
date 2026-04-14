@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+import spark.app as product_app
 from attractor.api.token_usage import TokenUsageBreakdown, TokenUsageBucket, estimate_model_cost
 from tests.api._support import (
     close_task_immediately as _close_task_immediately,
@@ -18,7 +19,7 @@ from tests.api._support import (
 from tests.support.flow_fixtures import seed_flow_fixture
 
 def _seed_flow(name: str) -> None:
-    seed_flow_fixture(server.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
+    seed_flow_fixture(product_app.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
 
 
 class _DisconnectImmediatelyRequest:

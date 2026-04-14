@@ -392,7 +392,7 @@ def test_attractor_startup_reconciles_orphaned_running_run(tmp_path: Path) -> No
     assert payload["last_error"] == "Run was interrupted when the Attractor server stopped before completion."
     assert payload["ended_at"]
 
-    persisted = server.pipeline_runs.read_run_meta(server.pipeline_runs.run_meta_path(server.get_settings, run_id))
+    persisted = server.pipeline_runs.read_run_meta(server.pipeline_runs.run_meta_path(server.get_runtime_paths, run_id))
     assert persisted is not None
     assert persisted.status == "failed"
     assert persisted.ended_at
