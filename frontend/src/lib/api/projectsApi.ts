@@ -7,14 +7,17 @@ import {
 } from './shared'
 import { fetchWorkspaceJsonValidated } from './apiClient'
 
-export type ProjectDirectoryPickResponse =
-    | {
-        status: 'selected'
-        directory_path: string
-    }
-    | {
-        status: 'canceled'
-    }
+export interface ProjectBrowseEntryResponse {
+    name: string
+    path: string
+    is_dir: true
+}
+
+export interface ProjectBrowseResponse {
+    current_path: string
+    parent_path: string | null
+    entries: ProjectBrowseEntryResponse[]
+}
 
 export interface ProjectMetadataResponse {
     name?: string
@@ -95,22 +98,39 @@ export function parseProjectDeleteResponse(
     }
 }
 
-export function parseProjectDirectoryPickResponse(
+function parseProjectBrowseEntryResponse(
     payload: unknown,
-    endpoint = '/workspace/api/projects/pick-directory',
-): ProjectDirectoryPickResponse {
+    endpoint: string,
+): ProjectBrowseEntryResponse {
     const record = expectObjectRecord(payload, endpoint)
-    const status = expectString(record.status, endpoint, 'status')
-    if (status === 'canceled') {
-        return { status: 'canceled' }
+    const isDir = record.is_dir
+    if (isDir !== true) {
+        throw new ApiSchemaError(endpoint, 'Expected browse entry "is_dir" to be true.')
     }
-    if (status === 'selected') {
-        return {
-            status: 'selected',
-            directory_path: expectString(record.directory_path, endpoint, 'directory_path'),
-        }
+    return {
+        name: expectString(record.name, endpoint, 'name'),
+        path: expectString(record.path, endpoint, 'path'),
+        is_dir: true,
     }
-    throw new ApiSchemaError(endpoint, `Expected "status" to be "selected" or "canceled"; got "${status}".`)
+}
+
+export function parseProjectBrowseResponse(
+    payload: unknown,
+    endpoint = '/workspace/api/projects/browse',
+): ProjectBrowseResponse {
+    const record = expectObjectRecord(payload, endpoint)
+    if (!Array.isArray(record.entries)) {
+        throw new ApiSchemaError(endpoint, 'Expected "entries" to be an array.')
+    }
+    const parentPath = record.parent_path
+    if (parentPath !== null && typeof parentPath !== 'string') {
+        throw new ApiSchemaError(endpoint, 'Expected "parent_path" to be a string or null.')
+    }
+    return {
+        current_path: expectString(record.current_path, endpoint, 'current_path'),
+        parent_path: parentPath,
+        entries: record.entries.map((entry) => parseProjectBrowseEntryResponse(entry, endpoint)),
+    }
 }
 
 export function parseProjectMetadataResponse(
@@ -172,14 +192,13 @@ export async function updateProjectStateValidated(payload: {
     )
 }
 
-export async function pickProjectDirectoryValidated(): Promise<ProjectDirectoryPickResponse> {
+export async function fetchProjectBrowseValidated(path?: string): Promise<ProjectBrowseResponse> {
+    const query = typeof path === 'string' ? `?path=${encodeURIComponent(path)}` : ''
     return fetchWorkspaceJsonValidated(
-        '/projects/pick-directory',
-        {
-            method: 'POST',
-        },
-        '/workspace/api/projects/pick-directory',
-        parseProjectDirectoryPickResponse,
+        `/projects/browse${query}`,
+        undefined,
+        '/workspace/api/projects/browse',
+        parseProjectBrowseResponse,
     )
 }
 

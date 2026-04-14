@@ -534,14 +534,18 @@ describe('App shell behavior', () => {
     expect(screen.getByTestId('top-nav-project-switcher')).toHaveTextContent('project-shell')
   })
 
-  it('adds a project from the navbar picker and clears the active project', async () => {
+  it('adds a project from the remote browser modal and clears the active project', async () => {
     const user = userEvent.setup()
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/workspace/api/projects/pick-directory')) {
-          return new Response(JSON.stringify({ status: 'selected', directory_path: '/tmp/project-shell' }), {
+        if (url.includes('/workspace/api/projects/browse')) {
+          return new Response(JSON.stringify({
+            current_path: '/tmp/project-shell',
+            parent_path: '/tmp',
+            entries: [],
+          }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -602,8 +606,12 @@ describe('App shell behavior', () => {
     )
 
     render(<App />)
+    expect(screen.queryByTestId('project-directory-picker-input')).not.toBeInTheDocument()
 
     await user.click(screen.getByTestId('top-nav-project-add-button'))
+    expect(await screen.findByTestId('project-browser-dialog')).toBeVisible()
+    expect(screen.getByTestId('project-browser-current-path')).toHaveTextContent('/tmp/project-shell')
+    await user.click(screen.getByTestId('project-browser-select-button'))
 
     await waitFor(() => {
       expect(useStore.getState().activeProjectPath).toBe('/tmp/project-shell')
@@ -612,6 +620,95 @@ describe('App shell behavior', () => {
 
     await user.click(screen.getByTestId('top-nav-project-clear-button'))
     expect(useStore.getState().activeProjectPath).toBeNull()
+  })
+
+  it('navigates the remote browser modal and surfaces browse failures', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(resolveRequestUrl(input), 'http://localhost')
+        if (url.pathname === '/workspace/api/projects/browse') {
+          const requestedPath = url.searchParams.get('path')
+          if (requestedPath === null) {
+            return jsonResponse({
+              current_path: '/home/spark',
+              parent_path: '/home',
+              entries: [
+                { name: 'broken', path: '/home/spark/broken', is_dir: true },
+                { name: 'repo', path: '/home/spark/repo', is_dir: true },
+              ],
+            })
+          }
+          if (requestedPath === '/home/spark/broken') {
+            return jsonResponse({ detail: 'Browse backend unavailable.' }, { status: 503 })
+          }
+          if (requestedPath === '/home/spark/repo') {
+            return jsonResponse({
+              current_path: '/home/spark/repo',
+              parent_path: '/home/spark',
+              entries: [],
+            })
+          }
+          if (requestedPath === '/home') {
+            return jsonResponse({
+              current_path: '/home',
+              parent_path: '/',
+              entries: [{ name: 'spark', path: '/home/spark', is_dir: true }],
+            })
+          }
+          if (requestedPath === '/') {
+            return jsonResponse({
+              current_path: '/',
+              parent_path: null,
+              entries: [{ name: 'home', path: '/home', is_dir: true }],
+            })
+          }
+        }
+        if (url.pathname === '/workspace/api/projects') {
+          return jsonResponse([])
+        }
+        if (url.pathname === '/attractor/status') {
+          return jsonResponse({ status: 'idle' })
+        }
+        if (url.pathname === '/attractor/api/flows') {
+          return jsonResponse([])
+        }
+        if (url.pathname === '/attractor/runs') {
+          return jsonResponse({ runs: [] })
+        }
+        return jsonResponse({})
+      }),
+    )
+
+    render(<App />)
+
+    await user.click(screen.getByTestId('top-nav-project-add-button'))
+    expect(await screen.findByTestId('project-browser-dialog')).toBeVisible()
+    expect(screen.getByTestId('project-browser-current-path')).toHaveTextContent('/home/spark')
+
+    await user.click(screen.getByTestId('project-browser-entry-broken'))
+    expect(await screen.findByTestId('project-browser-error')).toHaveTextContent('Browse backend unavailable.')
+
+    await user.click(screen.getByTestId('project-browser-entry-repo'))
+    await waitFor(() => {
+      expect(screen.getByTestId('project-browser-current-path')).toHaveTextContent('/home/spark/repo')
+    })
+
+    await user.click(screen.getByTestId('project-browser-parent-button'))
+    await waitFor(() => {
+      expect(screen.getByTestId('project-browser-current-path')).toHaveTextContent('/home/spark')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Root' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('project-browser-current-path')).toHaveTextContent('/')
+    })
+
+    await user.click(screen.getByTestId('project-browser-entry-home'))
+    await waitFor(() => {
+      expect(screen.getByTestId('project-browser-current-path')).toHaveTextContent('/home')
+    })
   })
 
   it('propagates navbar project switches across Home, Execution, Triggers, and Runs', async () => {

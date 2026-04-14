@@ -106,7 +106,7 @@ REQUIRED_UI_ENDPOINT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     ("/workspace/api/conversations/{id}", re.compile(r"fetchConversationSnapshotValidated\(")),
     ("/workspace/api/conversations/{id} (DELETE)", re.compile(r"deleteConversationValidated\(")),
-    ("/workspace/api/projects/pick-directory", re.compile(r"pickProjectDirectoryValidated\(")),
+    ("/workspace/api/projects/browse", re.compile(r"fetchProjectBrowseValidated\(")),
     (
         "/workspace/api/conversations/{id}/events",
         re.compile(r"new EventSource\(\s*eventStreamUrl\s*\)|/workspace/api/conversations/\$\{encodeURIComponent\([^)]+\)\}/events\?project_path="),

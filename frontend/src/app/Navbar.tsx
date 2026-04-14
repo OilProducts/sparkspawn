@@ -4,6 +4,7 @@ import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { Plus, Settings2, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ProjectBrowserDialog } from './ProjectBrowserDialog'
 import { useProjectSwitcherControls } from './useProjectSwitcherControls'
 import { formatProjectListLabel } from '@/features/projects/model/projectsHomeState'
 
@@ -55,14 +56,19 @@ export function Navbar() {
     const isNarrowViewport = useNarrowViewport()
     const {
         activeProjectPath,
+        isProjectBrowserLoading,
+        isProjectBrowserOpen,
         orderedProjects,
-        projectDirectoryPickerInputRef,
+        projectBrowserErrorMessage,
+        projectBrowserState,
         projectErrorMessage,
         onActivateProject,
+        onBrowseProjectDirectory,
         onClearActiveProject,
         onDeleteActiveProject,
         onOpenProjectDirectoryChooser,
-        onProjectDirectorySelected,
+        onSelectProjectBrowserDirectory,
+        onSetProjectBrowserOpen,
     } = useProjectSwitcherControls()
     const projectSwitcherValue = activeProjectPath ?? '__no-active-project__'
 
@@ -235,22 +241,23 @@ export function Navbar() {
                         </Button>
                     ) : null}
                 </div>
-                <input
-                    ref={projectDirectoryPickerInputRef}
-                    data-testid="project-directory-picker-input"
-                    type="file"
-                    multiple
-                    onChange={onProjectDirectorySelected}
-                    className="hidden"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                />
                 {projectErrorMessage ? (
                     <p data-testid="top-nav-project-error" className="text-xs text-destructive">
                         {projectErrorMessage}
                     </p>
                 ) : null}
             </div>
+            <ProjectBrowserDialog
+                open={isProjectBrowserOpen}
+                currentPath={projectBrowserState?.current_path ?? null}
+                parentPath={projectBrowserState?.parent_path ?? null}
+                entries={projectBrowserState?.entries ?? []}
+                errorMessage={projectBrowserErrorMessage}
+                isLoading={isProjectBrowserLoading}
+                onBrowse={onBrowseProjectDirectory}
+                onOpenChange={onSetProjectBrowserOpen}
+                onSelectCurrentFolder={onSelectProjectBrowserDirectory}
+            />
         </header>
     )
 }

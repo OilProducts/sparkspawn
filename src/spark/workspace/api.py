@@ -127,7 +127,6 @@ class WorkspaceApiDependencies:
     get_attractor_client: Callable[[], AttractorApiClient]
     resolve_project_git_branch: Callable[[Path], Optional[str]]
     resolve_project_git_commit: Callable[[Path], Optional[str]]
-    pick_project_directory: Callable[[], Optional[Path]]
     get_trigger_runtime: Callable[[], TriggerRuntime]
 
 
@@ -166,6 +165,23 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         if not normalized_project_path:
             raise HTTPException(status_code=400, detail="Project path is required.")
         return normalized_project_path
+
+    def _normalize_browse_path_or_400(requested_path: str | None) -> Path:
+        if requested_path is None:
+            return Path(normalize_project_path(str(Path.home())))
+
+        trimmed_path = requested_path.strip()
+        if not trimmed_path:
+            raise HTTPException(status_code=400, detail="Browse path is required.")
+
+        raw_path = Path(trimmed_path).expanduser()
+        if not raw_path.is_absolute():
+            raise HTTPException(status_code=400, detail="Browse path must be absolute.")
+
+        normalized_path = Path(normalize_project_path(str(raw_path)))
+        if not normalized_path.is_absolute():
+            raise HTTPException(status_code=400, detail="Browse path must be absolute.")
+        return normalized_path
 
     def _validate_flow_surface(surface: Optional[str]) -> str:
         normalized_surface = str(surface or "human").strip().lower()
@@ -853,19 +869,35 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             "commit": deps.resolve_project_git_commit(runtime_path),
         }
 
-    @router.post("/api/projects/pick-directory")
-    async def pick_project_directory():
+    @router.get("/api/projects/browse")
+    async def browse_project_directories(path: str | None = None):
+        current_path = _normalize_browse_path_or_400(path)
+        if not current_path.exists():
+            raise HTTPException(status_code=404, detail=f"Browse path does not exist: {current_path}")
+        if not current_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Browse path is not a directory: {current_path}")
+
         try:
-            selected_directory = await asyncio.to_thread(deps.pick_project_directory)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        if selected_directory is None:
-            return {"status": "canceled"}
-        if not selected_directory.is_absolute():
-            raise HTTPException(status_code=500, detail="Directory picker returned a non-absolute path.")
+            entries = sorted(
+                (
+                    {
+                        "name": entry.name,
+                        "path": normalize_project_path(str(entry)),
+                        "is_dir": True,
+                    }
+                    for entry in current_path.iterdir()
+                    if entry.is_dir()
+                ),
+                key=lambda entry: (entry["name"].casefold(), entry["name"]),
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=f"Browse path is not accessible: {current_path}") from exc
+
+        parent_path = current_path.parent
         return {
-            "status": "selected",
-            "directory_path": str(selected_directory),
+            "current_path": str(current_path),
+            "parent_path": None if parent_path == current_path else str(parent_path),
+            "entries": entries,
         }
 
     return router

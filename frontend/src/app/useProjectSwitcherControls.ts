@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { useStore } from '@/store'
 import {
     ApiHttpError,
     deleteProjectValidated,
+    fetchProjectBrowseValidated,
     fetchProjectMetadataValidated,
-    pickProjectDirectoryValidated,
     registerProjectValidated,
+    type ProjectBrowseResponse,
     updateProjectStateValidated,
 } from '@/lib/workspaceClient'
 import { useDialogController } from '@/components/app/dialog-controller'
 import { useProjectRegistryBootstrap } from '@/features/projects/hooks/useProjectRegistryBootstrap'
 import {
     buildOrderedProjects,
-    deriveProjectPathFromDirectorySelection,
     extractApiErrorMessage,
     formatProjectListLabel,
     resolveProjectPathValidation,
@@ -39,7 +39,11 @@ export function useProjectSwitcherControls() {
 
     const [bootstrapError, setBootstrapError] = useState<string | null>(null)
     const [controllerError, setControllerError] = useState<string | null>(null)
-    const projectDirectoryPickerInputRef = useRef<HTMLInputElement | null>(null)
+    const [isProjectBrowserOpen, setProjectBrowserOpen] = useState(false)
+    const [isProjectBrowserLoading, setProjectBrowserLoading] = useState(false)
+    const [projectBrowserState, setProjectBrowserState] = useState<ProjectBrowseResponse | null>(null)
+    const [projectBrowserError, setProjectBrowserError] = useState<string | null>(null)
+    const projectBrowserRequestIdRef = useRef(0)
 
     const orderedProjects = useMemo(
         () => buildOrderedProjects(Object.values(projectRegistry), projectRegistry, recentProjectPaths),
@@ -52,14 +56,6 @@ export function useProjectSwitcherControls() {
         enabled: shouldBootstrapRegistry,
         onError: setBootstrapError,
     })
-
-    useEffect(() => {
-        if (!projectDirectoryPickerInputRef.current) {
-            return
-        }
-        projectDirectoryPickerInputRef.current.setAttribute('webkitdirectory', '')
-        projectDirectoryPickerInputRef.current.setAttribute('directory', '')
-    }, [])
 
     const persistProjectState = async (
         projectPath: string,
@@ -100,25 +96,26 @@ export function useProjectSwitcherControls() {
         const validation = resolveProjectPathValidation(rawProjectPath, projectRegistry)
         if (!validation.ok || !validation.normalizedPath) {
             setProjectRegistrationError(validation.error ?? 'Project directory path is required.')
-            return
+            return false
         }
 
         const normalizedProjectPath = validation.normalizedPath
         const gitReady = await ensureProjectGitRepository(normalizedProjectPath)
         if (!gitReady) {
-            return
+            return false
         }
 
         const optimisticResult = registerProject(normalizedProjectPath)
         if (!optimisticResult.ok) {
             setProjectRegistrationError(optimisticResult.error ?? 'Unable to register the project.')
-            return
+            return false
         }
 
         try {
             const projectRecord = await registerProjectValidated(normalizedProjectPath)
             upsertProjectRegistryEntry(toHydratedProjectRecord(projectRecord))
             clearProjectRegistrationError()
+            return true
         } catch (error) {
             useStore.setState((state) => {
                 const nextProjectRegistry = { ...state.projectRegistry }
@@ -136,48 +133,64 @@ export function useProjectSwitcherControls() {
                 }
             })
             setProjectRegistrationError(extractApiErrorMessage(error, 'Unable to register the project.'))
+            return false
         }
+    }
+
+    const browseProjectDirectory = async (path?: string) => {
+        const requestId = projectBrowserRequestIdRef.current + 1
+        projectBrowserRequestIdRef.current = requestId
+        setProjectBrowserLoading(true)
+        setProjectBrowserError(null)
+        try {
+            const response = await fetchProjectBrowseValidated(path)
+            if (projectBrowserRequestIdRef.current !== requestId) {
+                return false
+            }
+            setProjectBrowserState(response)
+            return true
+        } catch (error) {
+            if (projectBrowserRequestIdRef.current !== requestId) {
+                return false
+            }
+            setProjectBrowserError(extractApiErrorMessage(error, 'Unable to browse project directories.'))
+            return false
+        } finally {
+            if (projectBrowserRequestIdRef.current === requestId) {
+                setProjectBrowserLoading(false)
+            }
+        }
+    }
+
+    const closeProjectBrowser = () => {
+        projectBrowserRequestIdRef.current += 1
+        setProjectBrowserOpen(false)
+        setProjectBrowserLoading(false)
+        setProjectBrowserState(null)
+        setProjectBrowserError(null)
     }
 
     const onOpenProjectDirectoryChooser = async () => {
         clearProjectRegistrationError()
         setControllerError(null)
-        try {
-            const selection = await pickProjectDirectoryValidated()
-            if (selection.status === 'canceled') {
-                return
-            }
-            await registerProjectFromPath(selection.directory_path)
-            return
-        } catch (error) {
-            const canUseBrowserFallback = error instanceof ApiHttpError
-                && [404, 405, 501, 503].includes(error.status)
-                && projectDirectoryPickerInputRef.current
-            if (!canUseBrowserFallback) {
-                setProjectRegistrationError(extractApiErrorMessage(error, 'Directory picker is unavailable.'))
-                return
-            }
-        }
-
-        if (!projectDirectoryPickerInputRef.current) {
-            setProjectRegistrationError('Directory picker is unavailable.')
-            return
-        }
-        projectDirectoryPickerInputRef.current.value = ''
-        projectDirectoryPickerInputRef.current.click()
+        setProjectBrowserOpen(true)
+        setProjectBrowserState(null)
+        await browseProjectDirectory()
     }
 
-    const onProjectDirectorySelected = (event: ChangeEvent<HTMLInputElement>) => {
-        const files = event.target.files
-        const selectedProjectPath = deriveProjectPathFromDirectorySelection(files)
-        event.target.value = ''
-        if (!selectedProjectPath) {
-            setProjectRegistrationError(
-                'Unable to resolve an absolute project path from the selected directory.',
-            )
+    const onBrowseProjectDirectory = (path?: string) => {
+        clearProjectRegistrationError()
+        void browseProjectDirectory(path)
+    }
+
+    const onSelectProjectBrowserDirectory = async () => {
+        if (!projectBrowserState) {
             return
         }
-        void registerProjectFromPath(selectedProjectPath)
+        const didRegister = await registerProjectFromPath(projectBrowserState.current_path)
+        if (didRegister) {
+            closeProjectBrowser()
+        }
     }
 
     const onActivateProject = async (projectPath: string) => {
@@ -234,13 +247,24 @@ export function useProjectSwitcherControls() {
     return {
         activeProjectPath,
         clearProjectRegistrationError,
+        isProjectBrowserLoading,
+        isProjectBrowserOpen,
         orderedProjects,
-        projectDirectoryPickerInputRef,
+        projectBrowserErrorMessage: projectBrowserError || projectRegistrationError,
+        projectBrowserState,
         projectErrorMessage: projectRegistrationError || controllerError || bootstrapError,
         onActivateProject,
+        onBrowseProjectDirectory,
         onClearActiveProject,
         onDeleteActiveProject,
         onOpenProjectDirectoryChooser,
-        onProjectDirectorySelected,
+        onSelectProjectBrowserDirectory,
+        onSetProjectBrowserOpen: (nextOpen: boolean) => {
+            if (!nextOpen) {
+                closeProjectBrowser()
+                return
+            }
+            setProjectBrowserOpen(true)
+        },
     }
 }

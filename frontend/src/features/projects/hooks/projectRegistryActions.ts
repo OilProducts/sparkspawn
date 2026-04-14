@@ -1,16 +1,13 @@
-import { useCallback, type ChangeEvent, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
+import { useCallback, type Dispatch, type SetStateAction } from 'react'
 
 import { useStore } from '@/store'
 import {
-    ApiHttpError,
     deleteProjectValidated,
-    pickProjectDirectoryValidated,
     registerProjectValidated,
 } from '@/lib/workspaceClient'
 import { useDialogController } from '@/components/app/dialog-controller'
 import type { ProjectGitMetadata } from '../model/presentation'
 import {
-    deriveProjectPathFromDirectorySelection,
     extractApiErrorMessage,
     formatProjectListLabel,
     removeProjectFromCache,
@@ -36,7 +33,6 @@ type UseProjectRegistryActionsArgs = {
     activeProjectPath: string | null
     projectRegistry: Record<string, unknown>
     orderedProjects: ProjectRecord[]
-    projectDirectoryPickerInputRef: MutableRefObject<HTMLInputElement | null>
     setPanelError: (value: string | null) => void
     setPendingDeleteProjectPath: (value: string | null) => void
     setProjectRegistrationError: (value: string | null) => void
@@ -60,7 +56,6 @@ export function useProjectRegistryActions({
     activeProjectPath,
     projectRegistry,
     orderedProjects,
-    projectDirectoryPickerInputRef,
     setPanelError,
     setPendingDeleteProjectPath,
     setProjectRegistrationError,
@@ -123,50 +118,6 @@ export function useProjectRegistryActions({
         setProjectRegistrationError,
         upsertProjectRegistryEntry,
     ])
-
-    const onOpenProjectDirectoryChooser = useCallback(async () => {
-        clearProjectRegistrationError()
-        try {
-            const selection = await pickProjectDirectoryValidated()
-            if (selection.status === 'canceled') {
-                return
-            }
-            await registerProjectFromPath(selection.directory_path)
-            return
-        } catch (error) {
-            const canUseBrowserFallback = error instanceof ApiHttpError
-                && [404, 405, 501, 503].includes(error.status)
-                && projectDirectoryPickerInputRef.current
-            if (!canUseBrowserFallback) {
-                setProjectRegistrationError(extractApiErrorMessage(error, 'Directory picker is unavailable.'))
-                return
-            }
-        }
-        if (!projectDirectoryPickerInputRef.current) {
-            setProjectRegistrationError('Directory picker is unavailable.')
-            return
-        }
-        projectDirectoryPickerInputRef.current.value = ''
-        projectDirectoryPickerInputRef.current.click()
-    }, [
-        clearProjectRegistrationError,
-        projectDirectoryPickerInputRef,
-        registerProjectFromPath,
-        setProjectRegistrationError,
-    ])
-
-    const onProjectDirectorySelected = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-        const files = event.target.files
-        const selectedProjectPath = deriveProjectPathFromDirectorySelection(files)
-        event.target.value = ''
-        if (!selectedProjectPath) {
-            setProjectRegistrationError(
-                'Unable to resolve an absolute project path from the selected directory.',
-            )
-            return
-        }
-        void registerProjectFromPath(selectedProjectPath)
-    }, [registerProjectFromPath, setProjectRegistrationError])
 
     const onActivateProject = useCallback(async (projectPath: string) => {
         if (!projectPath) {
@@ -244,8 +195,6 @@ export function useProjectRegistryActions({
     return {
         onActivateProject,
         onDeleteProject,
-        onOpenProjectDirectoryChooser,
-        onProjectDirectorySelected,
         registerProjectFromPath,
     }
 }

@@ -29,7 +29,7 @@ import {
   fetchPipelineStartValidated,
   fetchPipelineStatusValidated,
   fetchPreviewValidated,
-  pickProjectDirectoryValidated,
+  fetchProjectBrowseValidated,
   fetchWorkspaceFlowListValidated,
   fetchWorkspaceFlowRawValidated,
   fetchWorkspaceFlowValidated,
@@ -44,7 +44,7 @@ import {
   parseWorkspaceFlowRawResponse,
   parseWorkspaceFlowResponse,
   parsePipelineGraphResponse,
-  parseProjectDirectoryPickResponse,
+  parseProjectBrowseResponse,
   parsePipelineStatusResponse,
   parsePreviewResponse,
   parseRuntimeStatusResponse,
@@ -541,12 +541,16 @@ describe('Frontend contract behavior', () => {
 
     })).conversation_id).toBe('conversation-1')
     expect(() => parseConversationSnapshotResponse({ conversation_id: 'conversation-1' })).toThrow(ApiSchemaError)
-    expect(parseProjectDirectoryPickResponse({ status: 'selected', directory_path: '/tmp/project' })).toEqual({
-      status: 'selected',
-      directory_path: '/tmp/project',
+    expect(parseProjectBrowseResponse({
+      current_path: '/tmp/project',
+      parent_path: '/tmp',
+      entries: [{ name: 'child', path: '/tmp/project/child', is_dir: true }],
+    })).toEqual({
+      current_path: '/tmp/project',
+      parent_path: '/tmp',
+      entries: [{ name: 'child', path: '/tmp/project/child', is_dir: true }],
     })
-    expect(parseProjectDirectoryPickResponse({ status: 'canceled' })).toEqual({ status: 'canceled' })
-    expect(() => parseProjectDirectoryPickResponse({ status: 'selected' })).toThrow(ApiSchemaError)
+    expect(() => parseProjectBrowseResponse({ current_path: '/tmp/project', parent_path: '/tmp' })).toThrow(ApiSchemaError)
     expect(parsePipelineGraphResponse('<svg></svg>')).toContain('<svg')
     expect(() => parsePipelineGraphResponse('')).toThrow(ApiSchemaError)
   })
@@ -557,8 +561,12 @@ describe('Frontend contract behavior', () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = requestUrl(input)
         const method = init?.method ?? 'GET'
-        if (url === '/workspace/api/projects/pick-directory' && method === 'POST') {
-          return jsonResponse({ status: 'selected', directory_path: '/tmp/project one' })
+        if (url === '/workspace/api/projects/browse' && method === 'GET') {
+          return jsonResponse({
+            current_path: '/tmp/project one',
+            parent_path: '/tmp',
+            entries: [{ name: 'child', path: '/tmp/project one/child', is_dir: true }],
+          })
         }
         if (url === '/attractor/api/flows') {
           return jsonResponse(['alpha.dot'])
@@ -611,9 +619,10 @@ describe('Frontend contract behavior', () => {
       }),
     )
 
-    await expect(pickProjectDirectoryValidated()).resolves.toEqual({
-      status: 'selected',
-      directory_path: '/tmp/project one',
+    await expect(fetchProjectBrowseValidated()).resolves.toEqual({
+      current_path: '/tmp/project one',
+      parent_path: '/tmp',
+      entries: [{ name: 'child', path: '/tmp/project one/child', is_dir: true }],
     })
     await expect(fetchFlowListValidated()).resolves.toEqual(['alpha.dot'])
     await expect(fetchFlowPayloadValidated('alpha flow.dot')).resolves.toEqual({
@@ -2043,7 +2052,7 @@ describe('Frontend contract behavior', () => {
   })
 
   it('[CID:14.0.02] enforces unique project directories while allowing missing Git metadata', async () => {
-    const pickedDirectories = [
+    const browsedDirectories = [
       '/tmp/project-contract-behavior',
       '/tmp/non-git-project',
       '/tmp/detached-git-project',
@@ -2062,9 +2071,13 @@ describe('Frontend contract behavior', () => {
           },
         ])
       }
-      if (url.includes('/workspace/api/projects/pick-directory')) {
-        const nextDirectory = pickedDirectories.shift()
-        return jsonResponse(nextDirectory ? { status: 'selected', directory_path: nextDirectory } : { status: 'canceled' })
+      if (url.endsWith('/workspace/api/projects/browse')) {
+        const nextDirectory = browsedDirectories.shift() ?? '/tmp/fallback-project'
+        return jsonResponse({
+          current_path: nextDirectory,
+          parent_path: '/tmp',
+          entries: [],
+        })
       }
       if (url.includes('/workspace/api/projects/register')) {
         const payload = init?.body ? JSON.parse(String(init.body)) as { project_path?: string } : {}
@@ -2107,26 +2120,31 @@ describe('Frontend contract behavior', () => {
     render(<Navbar />)
     const newButton = screen.getByTestId('top-nav-project-add-button')
     await user.click(newButton)
+    await user.click(await screen.findByTestId('project-browser-select-button'))
 
-    expect(screen.getByTestId('top-nav-project-error')).toHaveTextContent(
+    expect(screen.getByTestId('project-browser-error')).toHaveTextContent(
       'Project already registered: /tmp/project-contract-behavior',
     )
+    await user.click(within(screen.getByTestId('project-browser-dialog')).getByRole('button', { name: 'Close' }))
 
     await user.click(newButton)
+    await user.click(await screen.findByTestId('project-browser-select-button'))
 
     await waitFor(() => {
       expect(useStore.getState().projectRegistry['/tmp/non-git-project']).toBeDefined()
     })
-    expect(screen.queryByTestId('top-nav-project-error')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('project-browser-dialog')).not.toBeInTheDocument()
 
     await user.click(newButton)
+    await user.click(await screen.findByTestId('project-browser-select-button'))
 
     await waitFor(() => {
       expect(useStore.getState().projectRegistry['/tmp/detached-git-project']).toBeDefined()
     })
-    expect(screen.queryByTestId('top-nav-project-error')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('project-browser-dialog')).not.toBeInTheDocument()
 
     await user.click(newButton)
+    await user.click(await screen.findByTestId('project-browser-select-button'))
 
     await waitFor(() => {
       expect(useStore.getState().projectRegistry['/tmp/git-project']).toBeDefined()

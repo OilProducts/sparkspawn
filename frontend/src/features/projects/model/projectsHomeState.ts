@@ -21,16 +21,6 @@ import {
     upsertConversationTurn,
 } from './conversationState'
 
-type PickerFileWithPath = File & {
-    path?: string
-    webkitRelativePath?: string
-}
-
-type ParsedAbsoluteProjectPath = {
-    prefix: string
-    segments: string[]
-}
-
 export type ConversationStreamEvent = ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse
 
 export type ProjectConversationCacheState = {
@@ -66,112 +56,6 @@ export function asProjectGitMetadataField(value: unknown): string | null {
     }
     const trimmed = value.trim()
     return trimmed.length > 0 ? trimmed : null
-}
-
-function parseAbsoluteProjectPath(value: string): ParsedAbsoluteProjectPath | null {
-    const normalized = normalizeProjectPath(value)
-    if (!isAbsoluteProjectPath(normalized)) {
-        return null
-    }
-    if (normalized.startsWith('/')) {
-        return { prefix: '/', segments: normalized.slice(1).split('/').filter(Boolean) }
-    }
-    const windowsPrefixMatch = normalized.match(/^[A-Za-z]:\//)
-    if (!windowsPrefixMatch) {
-        return null
-    }
-    return {
-        prefix: windowsPrefixMatch[0],
-        segments: normalized.slice(windowsPrefixMatch[0].length).split('/').filter(Boolean),
-    }
-}
-
-function buildAbsoluteProjectPath(prefix: string, segments: string[]) {
-    if (segments.length === 0) {
-        return prefix
-    }
-    return `${prefix}${segments.join('/')}`
-}
-
-function deriveCommonAbsoluteDirectory(directoryPaths: string[]): string | null {
-    const parsedDirectories = directoryPaths
-        .map((path) => parseAbsoluteProjectPath(path))
-        .filter((parsed): parsed is ParsedAbsoluteProjectPath => Boolean(parsed))
-    if (parsedDirectories.length === 0) {
-        return null
-    }
-    const firstPrefix = parsedDirectories[0].prefix
-    if (parsedDirectories.some((parsed) => parsed.prefix !== firstPrefix)) {
-        return null
-    }
-    let commonSegments = [...parsedDirectories[0].segments]
-    for (const parsed of parsedDirectories.slice(1)) {
-        let index = 0
-        while (
-            index < commonSegments.length
-            && index < parsed.segments.length
-            && commonSegments[index] === parsed.segments[index]
-        ) {
-            index += 1
-        }
-        commonSegments = commonSegments.slice(0, index)
-    }
-    if (commonSegments.length === 0) {
-        return firstPrefix
-    }
-    return buildAbsoluteProjectPath(firstPrefix, commonSegments)
-}
-
-export function deriveProjectPathFromDirectorySelection(files: FileList | null): string | null {
-    if (!files || files.length === 0) {
-        return null
-    }
-    const inferredProjectPaths: string[] = []
-    const fallbackDirectories: string[] = []
-    for (const file of Array.from(files)) {
-        const pickerFile = file as PickerFileWithPath
-        const rawAbsoluteFilePath = typeof pickerFile.path === 'string' ? pickerFile.path : ''
-        const absoluteFilePath = normalizeProjectPath(rawAbsoluteFilePath)
-        if (!absoluteFilePath || !isAbsoluteProjectPath(absoluteFilePath)) {
-            continue
-        }
-        const fileSlashIndex = absoluteFilePath.lastIndexOf('/')
-        if (fileSlashIndex <= 0) {
-            continue
-        }
-        const absoluteDirectoryPath = normalizeProjectPath(absoluteFilePath.slice(0, fileSlashIndex))
-        if (absoluteDirectoryPath && isAbsoluteProjectPath(absoluteDirectoryPath)) {
-            fallbackDirectories.push(absoluteDirectoryPath)
-        }
-
-        const rawRelativePath = typeof pickerFile.webkitRelativePath === 'string'
-            ? pickerFile.webkitRelativePath.trim()
-            : ''
-        if (!rawRelativePath) {
-            continue
-        }
-        const relativePath = normalizeProjectPath(rawRelativePath).replace(/^\/+/, '')
-        if (!relativePath || !absoluteFilePath.endsWith(relativePath)) {
-            continue
-        }
-        const basePath = normalizeProjectPath(absoluteFilePath.slice(0, absoluteFilePath.length - relativePath.length))
-        const relativeSegments = relativePath.split('/').filter(Boolean)
-        if (!basePath || relativeSegments.length === 0) {
-            continue
-        }
-        const inferredProjectPath = normalizeProjectPath(`${basePath}/${relativeSegments[0]}`)
-        if (inferredProjectPath && isAbsoluteProjectPath(inferredProjectPath)) {
-            inferredProjectPaths.push(inferredProjectPath)
-        }
-    }
-
-    const uniqueInferredPaths = [...new Set(inferredProjectPaths)]
-    if (uniqueInferredPaths.length > 0) {
-        uniqueInferredPaths.sort((left, right) => left.length - right.length)
-        return uniqueInferredPaths[0]
-    }
-
-    return deriveCommonAbsoluteDirectory(fallbackDirectories)
 }
 
 export function formatProjectListLabel(projectPath: string) {

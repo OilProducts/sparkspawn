@@ -90,50 +90,105 @@ def test_project_metadata_rejects_non_absolute_directory(product_api_client: Tes
     assert "must be absolute" in response.json()["detail"]
 
 
-def test_project_directory_picker_returns_selected_absolute_directory(
+def test_project_directory_browser_defaults_to_service_user_home_directory(
     product_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    project_dir = (tmp_path / "picked-project").resolve()
-    project_dir.mkdir()
+    home_dir = (tmp_path / "service-home").resolve()
+    home_dir.mkdir()
+    monkeypatch.setenv("HOME", str(home_dir))
 
-    monkeypatch.setattr(product_app, "_pick_project_directory", lambda prompt="": project_dir)
-
-    response = product_api_client.post("/workspace/api/projects/pick-directory")
+    response = product_api_client.get("/workspace/api/projects/browse")
 
     assert response.status_code == 200
     assert response.json() == {
-        "status": "selected",
-        "directory_path": str(project_dir),
+        "current_path": str(home_dir),
+        "parent_path": str(home_dir.parent),
+        "entries": [],
     }
 
 
-def test_project_directory_picker_returns_canceled_when_no_directory_selected(
-    product_api_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(product_app, "_pick_project_directory", lambda prompt="": None)
-
-    response = product_api_client.post("/workspace/api/projects/pick-directory")
+def test_project_directory_browser_supports_root_directory(product_api_client: TestClient) -> None:
+    response = product_api_client.get("/workspace/api/projects/browse", params={"path": "/"})
 
     assert response.status_code == 200
-    assert response.json() == {"status": "canceled"}
+    payload = response.json()
+    assert payload["current_path"] == "/"
+    assert payload["parent_path"] is None
+    assert all(entry["is_dir"] is True for entry in payload["entries"])
 
 
-def test_project_directory_picker_reports_unavailable_runtime(
+def test_project_directory_browser_returns_normalized_directory_only_entries(
     product_api_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    def fail(prompt: str = "") -> Path | None:
-        raise RuntimeError("Native directory picker is unavailable.")
+    project_dir = (tmp_path / "Browse Root").resolve()
+    project_dir.mkdir()
+    (project_dir / "zeta").mkdir()
+    (project_dir / "Alpha").mkdir()
+    (project_dir / ".hidden-dir").mkdir()
+    (project_dir / "notes.txt").write_text("ignore me", encoding="utf-8")
 
-    monkeypatch.setattr(product_app, "_pick_project_directory", fail)
+    response = product_api_client.get(
+        "/workspace/api/projects/browse",
+        params={"path": str(project_dir / "nested" / "..")},
+    )
 
-    response = product_api_client.post("/workspace/api/projects/pick-directory")
+    assert response.status_code == 200
+    assert response.json() == {
+        "current_path": str(project_dir),
+        "parent_path": str(project_dir.parent),
+        "entries": [
+            {
+                "name": ".hidden-dir",
+                "path": str((project_dir / ".hidden-dir").resolve()),
+                "is_dir": True,
+            },
+            {
+                "name": "Alpha",
+                "path": str((project_dir / "Alpha").resolve()),
+                "is_dir": True,
+            },
+            {
+                "name": "zeta",
+                "path": str((project_dir / "zeta").resolve()),
+                "is_dir": True,
+            },
+        ],
+    }
 
-    assert response.status_code == 503
-    assert response.json()["detail"] == "Native directory picker is unavailable."
+
+def test_project_directory_browser_rejects_non_absolute_path(product_api_client: TestClient) -> None:
+    response = product_api_client.get("/workspace/api/projects/browse", params={"path": "./relative-project"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Browse path must be absolute."
+
+
+def test_project_directory_browser_reports_missing_directory(
+    product_api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    missing_path = (tmp_path / "missing-project").resolve()
+
+    response = product_api_client.get("/workspace/api/projects/browse", params={"path": str(missing_path)})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == f"Browse path does not exist: {missing_path}"
+
+
+def test_project_directory_browser_rejects_file_paths(
+    product_api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    file_path = (tmp_path / "file.txt").resolve()
+    file_path.write_text("not a directory", encoding="utf-8")
+
+    response = product_api_client.get("/workspace/api/projects/browse", params={"path": str(file_path)})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Browse path is not a directory: {file_path}"
 
 
 def test_project_registry_endpoints_persist_project_metadata(

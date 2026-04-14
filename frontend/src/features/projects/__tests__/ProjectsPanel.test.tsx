@@ -134,8 +134,8 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-      if (url.includes('/workspace/api/projects/pick-directory')) {
-        return new Response(JSON.stringify({ status: 'canceled' }), {
+      if (url.includes('/workspace/api/projects/browse')) {
+        return new Response(JSON.stringify({ current_path: '/tmp', parent_path: '/', entries: [] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -253,14 +253,14 @@ describe('ProjectsPanel', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = resolveRequestUrl(input)
-        if (url.includes('/workspace/api/projects') && !url.includes('/workspace/api/projects/conversations') && !url.includes('/workspace/api/projects/metadata') && !url.includes('/workspace/api/projects/register') && !url.includes('/workspace/api/projects/pick-directory')) {
+        if (url.includes('/workspace/api/projects') && !url.includes('/workspace/api/projects/conversations') && !url.includes('/workspace/api/projects/metadata') && !url.includes('/workspace/api/projects/register') && !url.includes('/workspace/api/projects/browse')) {
           return new Response(JSON.stringify({ detail: 'workspace registry unavailable' }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' },
           })
         }
-        if (url.includes('/workspace/api/projects/pick-directory')) {
-          return new Response(JSON.stringify({ status: 'canceled' }), {
+        if (url.includes('/workspace/api/projects/browse')) {
+          return new Response(JSON.stringify({ current_path: '/tmp', parent_path: '/', entries: [] }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })

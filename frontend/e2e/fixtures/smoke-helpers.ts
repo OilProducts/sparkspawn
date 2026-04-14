@@ -87,13 +87,14 @@ export async function stubProjectRegistration(page: Page, projectPath: string) {
     })
   })
 
-  await page.route('**/workspace/api/projects/pick-directory', async (route) => {
+  await page.route('**/workspace/api/projects/browse**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        status: 'selected',
-        directory_path: projectPath,
+        current_path: projectPath,
+        parent_path: path.dirname(projectPath),
+        entries: [],
       }),
     })
   })
@@ -118,6 +119,7 @@ export async function stubProjectRegistration(page: Page, projectPath: string) {
 
 export async function registerProjectForSmokeTest(page: Page, projectPath: string) {
   await page.getByTestId('top-nav-project-add-button').click()
+  await page.getByTestId('project-browser-select-button').click()
   await expect(page.getByTestId('top-nav-project-switcher')).toContainText(path.basename(projectPath) || projectPath)
 }
 
