@@ -16,13 +16,10 @@ setup:
 clean:
   rm -rf dist frontend/dist frontend/node_modules/.tmp
 
-dev:
+dev-docker:
   docker compose up --build
 
-dev-docker:
-  just dev
-
-run: frontend-deps
+dev-run: frontend-deps
   #!/usr/bin/env bash
   set -euo pipefail
   trap 'kill "${backend_pid:-}" "${frontend_pid:-}" 2>/dev/null || true; wait || true' EXIT INT TERM
@@ -36,17 +33,11 @@ run: frontend-deps
   while kill -0 "${backend_pid}" 2>/dev/null && kill -0 "${frontend_pid}" 2>/dev/null; do sleep 1; done
   if ! kill -0 "${backend_pid}" 2>/dev/null; then wait "${backend_pid}"; else wait "${frontend_pid}"; fi
 
-dev-run:
-  just run
-
-init-dev:
+dev-init:
   #!/usr/bin/env bash
   set -euo pipefail
   spark_home="${SPARK_HOME:-$HOME/.spark-dev}"
   SPARK_HOME="${spark_home}" uv run spark-server init
-
-dev-init:
-  just init-dev
 
 stop:
   docker compose down

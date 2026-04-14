@@ -28,7 +28,7 @@ npm run dev
 By default, the Vite dev server proxies API requests to `http://127.0.0.1:8000`.
 Override that with `VITE_BACKEND_URL` if needed.
 
-From the repo root, `just run` is the normal full-stack workflow.
+From the repo root, `just dev-run` is the normal full-stack workflow.
 
 ## Shared UI Boundary
 

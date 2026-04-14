@@ -161,7 +161,7 @@ just install
 Run the full stack locally:
 
 ```bash
-just run
+just dev-run
 ```
 
 This starts:
@@ -179,13 +179,13 @@ The source-checkout dev wrapper intentionally uses a separate runtime home and p
 Initialize that dev runtime explicitly with:
 
 ```bash
-just init-dev
+just dev-init
 ```
 
 For Docker-based development:
 
 ```bash
-just dev
+just dev-docker
 ```
 
 That starts the backend on port `8000` and the frontend on port `5173` via `docker compose`.
@@ -271,9 +271,9 @@ Useful `just` targets from [justfile](justfile):
 
 - `just clean`: remove generated build artifacts without deleting installed dependencies or runtime state
 - `just setup`: install Python and frontend development dependencies for a fresh checkout
-- `just run`: backend + Vite frontend for local development
-- `just init-dev`: initialize the source-checkout dev runtime under `~/.spark-dev`
-- `just dev`: `docker compose up --build`
+- `just dev-run`: backend + Vite frontend for local development
+- `just dev-init`: initialize the source-checkout dev runtime under `~/.spark-dev`
+- `just dev-docker`: `docker compose up --build`
 - `just test`: full Python test suite
 - `just frontend-unit`: frontend unit tests
 - `just ui-smoke`: Playwright smoke checks
@@ -305,7 +305,7 @@ just ui-smoke
 
 ## Packaging
 
-From a source checkout, `just run` remains the canonical development path.
+From a source checkout, `just dev-run` remains the canonical development path.
 For distributable artifacts, use the explicit deliverable workflow:
 
 ```bash

@@ -28,12 +28,12 @@ uv run spark-server init
 Start the app:
 
 ```bash
-just run
+just dev-run
 ```
 
 That gives you:
 
-- the backend at `http://127.0.0.1:8000`
+- the backend at `http://127.0.0.1:8010`
 - the frontend at `http://127.0.0.1:5173`
 - a local flow library at `~/.spark/flows`
 
