@@ -95,7 +95,8 @@ deliverable: frontend-deps
 build:
   just deliverable
 
-install:
+[private]
+install-wheel:
   #!/usr/bin/env bash
   set -euo pipefail
   just deliverable
@@ -105,4 +106,17 @@ install:
   python3 -m venv "${venv_dir}"
   wheel_path="$(ls -t dist/spark-[0-9]*.whl | head -n 1)"
   "${venv_dir}/bin/pip" install --upgrade --force-reinstall "${wheel_path}"
+
+install: install-wheel
+  #!/usr/bin/env bash
+  set -euo pipefail
+  spark_home="${SPARK_HOME:-$HOME/.spark}"
+  venv_dir="${spark_home}/venv"
   SPARK_HOME="${spark_home}" "${venv_dir}/bin/spark-server" init
+
+install-systemd: install-wheel
+  #!/usr/bin/env bash
+  set -euo pipefail
+  spark_home="${SPARK_HOME:-$HOME/.spark}"
+  venv_dir="${spark_home}/venv"
+  "${venv_dir}/bin/spark-server" service install --host 127.0.0.1 --port 8000 --data-dir "${spark_home}"

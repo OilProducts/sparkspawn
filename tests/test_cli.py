@@ -241,6 +241,109 @@ def test_run_init_allows_explicit_home_env_from_source_checkout(
     assert f"Seeded flows: {(tmp_path / 'dev-home' / 'flows').resolve(strict=False)}" in output
 
 
+def test_service_install_writes_user_unit_and_starts_service(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    xdg_config_home = tmp_path / "xdg"
+    data_dir = tmp_path / "data"
+    calls: list[list[str]] = []
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+    monkeypatch.setattr(spark_server_cli.sys, "platform", "linux")
+    monkeypatch.setattr(spark_server_cli.shutil, "which", lambda name: "/usr/bin/systemctl")
+    monkeypatch.setattr(
+        starter_assets,
+        "load_starter_flow_assets",
+        lambda *, project_root=None: (
+            starter_assets.StarterFlowAsset("examples/simple-linear.dot", "simple-linear\n"),
+        ),
+    )
+
+    def fake_run(cmd: list[str], check: bool, capture_output: bool, text: bool) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert text is True
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(spark_server_cli.subprocess, "run", fake_run)
+
+    result = spark_server_cli.main(["service", "install", "--data-dir", str(data_dir)])
+
+    assert result == 0
+    assert calls == [
+        ["/usr/bin/systemctl", "--user", "daemon-reload"],
+        ["/usr/bin/systemctl", "--user", "enable", "spark.service"],
+        ["/usr/bin/systemctl", "--user", "restart", "spark.service"],
+    ]
+    unit_path = xdg_config_home / "systemd" / "user" / "spark.service"
+    unit_text = unit_path.read_text(encoding="utf-8")
+    assert "ExecStart=" in unit_text
+    assert "spark.server_cli" in unit_text
+    assert f"--data-dir {data_dir.resolve(strict=False)}" in unit_text
+    assert "Listening on http://127.0.0.1:8000" in capsys.readouterr().out
+
+
+def test_service_install_requires_linux_systemd(monkeypatch, tmp_path: Path, capsys) -> None:
+    monkeypatch.setattr(spark_server_cli.sys, "platform", "darwin")
+
+    result = spark_server_cli.main(["service", "install", "--data-dir", str(tmp_path / "data")])
+
+    assert result == 1
+    assert "supports Linux user services via systemd only" in capsys.readouterr().err
+
+
+def test_service_remove_stops_and_deletes_user_unit(monkeypatch, tmp_path: Path, capsys) -> None:
+    xdg_config_home = tmp_path / "xdg"
+    unit_path = xdg_config_home / "systemd" / "user" / "spark.service"
+    unit_path.parent.mkdir(parents=True, exist_ok=True)
+    unit_path.write_text("[Unit]\nDescription=Spark\n", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+    monkeypatch.setattr(spark_server_cli.sys, "platform", "linux")
+    monkeypatch.setattr(spark_server_cli.shutil, "which", lambda name: "/usr/bin/systemctl")
+
+    def fake_run(cmd: list[str], check: bool, capture_output: bool, text: bool) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert text is True
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(spark_server_cli.subprocess, "run", fake_run)
+
+    result = spark_server_cli.main(["service", "remove"])
+
+    assert result == 0
+    assert not unit_path.exists()
+    assert calls == [
+        ["/usr/bin/systemctl", "--user", "disable", "--now", "spark.service"],
+        ["/usr/bin/systemctl", "--user", "daemon-reload"],
+        ["/usr/bin/systemctl", "--user", "reset-failed", "spark.service"],
+    ]
+    assert f"Removed Spark user service: {unit_path}" in capsys.readouterr().out
+
+
+def test_service_status_returns_systemctl_status_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(spark_server_cli.sys, "platform", "linux")
+    monkeypatch.setattr(spark_server_cli.shutil, "which", lambda name: "/usr/bin/systemctl")
+
+    def fake_run(cmd: list[str], check: bool, capture_output: bool, text: bool) -> subprocess.CompletedProcess[str]:
+        assert check is False
+        assert cmd == ["/usr/bin/systemctl", "--user", "--no-pager", "--full", "status", "spark.service"]
+        return subprocess.CompletedProcess(cmd, 3, "status output\n", "status error\n")
+
+    monkeypatch.setattr(spark_server_cli.subprocess, "run", fake_run)
+
+    result = spark_server_cli.main(["service", "status"])
+
+    captured = capsys.readouterr()
+    assert result == 3
+    assert captured.out == "status output\n"
+    assert captured.err == "status error\n"
+
+
 def test_packaged_starter_flows_exist_in_single_source_tree() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     packaged_starter_dir = repo_root / "src" / "spark" / "flows"

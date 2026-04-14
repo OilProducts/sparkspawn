@@ -17,24 +17,35 @@ pip install spark
 
 ## Quick Start
 
-Initialize a Spark home and seed the bundled flows:
+On Linux, initialize a Spark home, seed the bundled flows, install a `systemd --user` unit, and start Spark in the background:
 
 ```bash
-spark-server init
+spark-server service install
 ```
 
-Start the server:
+This serves the bundled UI at `http://127.0.0.1:8000`.
+
+Inspect or remove the service with:
 
 ```bash
-spark-server serve --host 127.0.0.1 --port 8000
+spark-server service status
+spark-server service remove
 ```
 
 By default, Spark stores runtime data under `~/.spark` and serves the bundled UI when no external UI directory is configured.
+
+If you prefer a foreground process instead of a user service:
+
+```bash
+spark-server init
+spark-server serve --host 127.0.0.1 --port 8000
+```
 
 ## Included Commands
 
 - `spark-server serve`: start the Spark API server
 - `spark-server init`: initialize runtime directories and seed bundled flows
+- `spark-server service install|remove|status`: manage the Linux user service
 - `spark`: workspace conversation, run-launch, flow, and trigger commands
 
 ## Requirements

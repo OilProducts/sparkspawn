@@ -158,6 +158,20 @@ Install a stable wheel into `~/.spark/venv` and initialize the stable runtime:
 just install
 ```
 
+Start the installed server in the foreground with:
+
+```bash
+~/.spark/venv/bin/spark-server serve --host 127.0.0.1 --port 8000
+```
+
+On Linux, install and start the background service explicitly with:
+
+```bash
+just install-systemd
+```
+
+Use `~/.spark/venv/bin/spark-server service status` to inspect it or `~/.spark/venv/bin/spark-server service remove` to stop and unregister it.
+
 Run the full stack locally:
 
 ```bash
@@ -280,6 +294,8 @@ Useful `just` targets from [justfile](justfile):
 - `just dot-lint`: DOT formatting lint regression
 - `just deliverable`: canonical wheel + sdist packaging workflow with bundled UI verification
 - `just build`: compatibility alias for `just deliverable`
+- `just install`: install the packaged wheel into `~/.spark/venv` and initialize the stable runtime
+- `just install-systemd`: Linux-only install flow that registers the packaged app as a `systemd --user` service
 
 ## Testing
 
@@ -320,6 +336,12 @@ Install the resulting wheel:
 
 ```bash
 pip install dist/*.whl
+```
+
+On Linux, start the installed package as a background user service with:
+
+```bash
+spark-server service install
 ```
 
 ## Notes
