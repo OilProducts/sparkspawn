@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import tomllib
 
 
@@ -16,9 +17,11 @@ CHAT_PROMPT_RUNTIME_VARIABLES = (
     "dot_authoring_guide_path",
     "spark_operations_guide_path",
     "flow_validation_command",
-    "recent_conversation",
     "latest_user_message",
 )
+
+CHAT_PROMPT_RUNTIME_VARIABLES_SET = frozenset(CHAT_PROMPT_RUNTIME_VARIABLES)
+TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
 
 FIXED_CHAT_SYSTEM_FRAME = """You are the Spark workspace assistant.
 
@@ -46,10 +49,7 @@ class PromptTemplates:
 
 
 DEFAULT_PROMPT_TEMPLATES = PromptTemplates(
-    chat="""Recent conversation:
-{{recent_conversation}}
-
-Latest user message:
+    chat="""Latest user message:
 {{latest_user_message}}
 """,
 )
@@ -108,7 +108,21 @@ def _read_template(section: dict[object, object], key: str) -> str:
     trimmed = value.strip()
     if not trimmed:
         raise RuntimeError(f"Prompt template {key!r} must not be empty.")
+    _validate_template_variables(trimmed, key)
     return trimmed
+
+
+def _validate_template_variables(template: str, key: str) -> None:
+    placeholders = set(TEMPLATE_PLACEHOLDER_PATTERN.findall(template))
+    if "recent_conversation" in placeholders:
+        raise RuntimeError(
+            f"Prompt template {key!r} uses deprecated placeholder "
+            "{{recent_conversation}}. Remove it from prompts.toml; Spark now relies on backend thread reuse for continuity."
+        )
+    unsupported = placeholders - CHAT_PROMPT_RUNTIME_VARIABLES_SET
+    if unsupported:
+        formatted = ", ".join(f"{{{{{name}}}}}" for name in sorted(unsupported))
+        raise RuntimeError(f"Prompt template {key!r} uses unsupported placeholder(s): {formatted}.")
 
 
 def _toml_multiline(value: str) -> str:

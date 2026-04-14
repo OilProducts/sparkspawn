@@ -160,7 +160,10 @@ def test_project_chat_service_creates_default_prompt_templates_file(tmp_path: Pa
     assert prompts_path.exists()
     prompt_text = prompts_path.read_text(encoding="utf-8")
     assert "[project_chat]" in prompt_text
+    assert "{{recent_conversation}}" not in prompt_text
+    assert "{{latest_user_message}}" in prompt_text
     assert service._prompt_templates.chat
+    assert "{{recent_conversation}}" not in service._prompt_templates.chat
 
 
 def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> None:
@@ -170,7 +173,7 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
         "\n".join(
             [
                 "[project_chat]",
-                "chat = '''CHAT {{project_path}} :: {{latest_user_message}} :: {{recent_conversation}}'''",
+                "chat = '''CHAT {{project_path}} :: {{latest_user_message}}'''",
                 "",
             ]
         ),
@@ -194,7 +197,8 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
     chat_prompt = service._build_chat_prompt(state, "Latest message")
 
     assert "Conversation handle: amber-otter" in chat_prompt
-    assert "CHAT /tmp/project :: Latest message :: USER: Older message" in chat_prompt
+    assert "CHAT /tmp/project :: Latest message" in chat_prompt
+    assert "Older message" not in chat_prompt
 
 
 def test_project_chat_prompt_includes_flow_authoring_boundary(tmp_path: Path) -> None:
@@ -219,6 +223,24 @@ def test_project_chat_service_rejects_malformed_prompt_templates(tmp_path: Path)
     prompts_path.write_text("[project_chat]\nchat = '''unterminated\n", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="Invalid prompt templates file"):
+        project_chat.ProjectChatService(tmp_path)
+
+
+def test_project_chat_service_rejects_deprecated_recent_conversation_prompt_placeholder(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "config" / PROMPTS_FILE_NAME
+    prompts_path.parent.mkdir(parents=True, exist_ok=True)
+    prompts_path.write_text(
+        "\n".join(
+            [
+                "[project_chat]",
+                "chat = '''CHAT {{project_path}} :: {{latest_user_message}} :: {{recent_conversation}}'''",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match=r"deprecated placeholder .*recent_conversation"):
         project_chat.ProjectChatService(tmp_path)
 
 
@@ -792,6 +814,79 @@ def test_send_turn_marks_assistant_failed_after_timeout_without_retry(tmp_path: 
     assert assistant_segments[0].kind == "assistant_message"
     assert assistant_segments[0].status == "failed"
     assert assistant_segments[0].content == "hi"
+
+
+def test_send_turn_starts_new_thread_cleanly_when_persisted_resume_fails(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    conversation_id = "conversation-test"
+    project_path = str(tmp_path.resolve())
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=conversation_id,
+            project_path=project_path,
+            conversation_handle="amber-otter",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="Older message",
+                    timestamp="2026-03-08T12:00:00Z",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-1",
+                    role="assistant",
+                    content="Older reply",
+                    timestamp="2026-03-08T12:01:00Z",
+                    status="complete",
+                ),
+            ],
+        )
+    )
+    service._write_session_state(
+        project_chat.ConversationSessionState(
+            conversation_id=conversation_id,
+            updated_at="2026-03-08T12:02:00Z",
+            project_path=project_path,
+            runtime_project_path=project_path,
+            thread_id="thread-stale",
+        )
+    )
+
+    session = service._build_session(conversation_id, project_path)
+    client = StubChatClient()
+    client.resume_result = None
+    client.start_result = "thread-fresh"
+    captured_prompts: list[str] = []
+
+    def run_turn(**kwargs) -> CodexAppServerTurnResult:
+        captured_prompts.append(kwargs["prompt"])
+        kwargs["on_event"](
+            codex_app_server.CodexAppServerTurnEvent(
+                kind="assistant_message_completed",
+                text="Ack",
+                item_id="msg-1",
+                phase="final_answer",
+            )
+        )
+        return _completed_turn_result(thread_id=kwargs["thread_id"], assistant_message="Ack")
+
+    client.run_turn_handler = run_turn
+    session._client = client
+
+    snapshot = service.send_turn(conversation_id, project_path, "Latest message", None)
+
+    assert snapshot["turns"][-1]["role"] == "assistant"
+    assert snapshot["turns"][-1]["status"] == "complete"
+    assert snapshot["turns"][-1]["content"] == "Ack"
+    assert len(client.resume_calls) == 1
+    assert client.resume_calls[0]["thread_id"] == "thread-stale"
+    assert len(client.start_calls) == 1
+    assert client.start_calls[0]["ephemeral"] is False
+    assert session._thread_id == "thread-fresh"
+    assert len(captured_prompts) == 1
+    assert "Latest user message:\nLatest message" in captured_prompts[0]
+    assert "Older message" not in captured_prompts[0]
+    assert "Older reply" not in captured_prompts[0]
 
 
 def test_send_turn_accepts_plain_text_final_response(tmp_path: Path, monkeypatch) -> None:

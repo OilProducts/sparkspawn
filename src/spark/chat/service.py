@@ -394,13 +394,6 @@ class ProjectChatService:
         return self._repository.build_segment_upsert_payload(state, segment)
 
     def _build_chat_prompt(self, state: ConversationState, message: str) -> str:
-        recent_turns = state.turns[-10:]
-        history_lines = []
-        for turn in recent_turns:
-            if turn.kind != "message":
-                continue
-            history_lines.append(f"{turn.role.upper()}: {turn.content}")
-        history_text = "\n".join(history_lines) if history_lines else "No prior conversation history."
         return render_chat_prompt(
             self._prompt_templates.chat,
             {
@@ -410,7 +403,6 @@ class ProjectChatService:
                 "dot_authoring_guide_path": str(self._authoring_guide_path),
                 "spark_operations_guide_path": str(self._operations_guide_path),
                 "flow_validation_command": "spark flow validate --file <path> --text",
-                "recent_conversation": history_text,
                 "latest_user_message": message,
             },
         )
