@@ -7,6 +7,6 @@
 - Do not add or keep tests that depend on source/prompt/doc/spec strings or deprecated details, or that would fail after harmless refactoring or rewording while behavior remains correct.
 
 ## UI Spec Guidance
-- Figma answers: what should this look like?
+- If the look is not already established in the product or request, clarify it before implementing.
 - Spec answers: what should happen?
 - Tests answer: does it actually do that?
