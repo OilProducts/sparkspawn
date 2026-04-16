@@ -119,4 +119,6 @@ install-systemd: install-wheel
   set -euo pipefail
   spark_home="${SPARK_HOME:-$HOME/.spark}"
   venv_dir="${spark_home}/venv"
-  "${venv_dir}/bin/spark-server" service install --host 127.0.0.1 --port 8000 --data-dir "${spark_home}"
+  spark_host="${SPARK_HOST:-127.0.0.1}"
+  spark_port="${SPARK_PORT:-8000}"
+  "${venv_dir}/bin/spark-server" service install --host "${spark_host}" --port "${spark_port}" --data-dir "${spark_home}"

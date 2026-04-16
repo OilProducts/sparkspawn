@@ -170,6 +170,18 @@ On Linux, install and start the background service explicitly with:
 just install-systemd
 ```
 
+To bind the service on every interface instead of loopback, set `SPARK_HOST=0.0.0.0` when installing it:
+
+```bash
+SPARK_HOST=0.0.0.0 just install-systemd
+```
+
+You can also bypass `just` and install the user service directly with an explicit host and port:
+
+```bash
+~/.spark/venv/bin/spark-server service install --host 0.0.0.0 --port 8000 --data-dir ~/.spark
+```
+
 Use `~/.spark/venv/bin/spark-server service status` to inspect it or `~/.spark/venv/bin/spark-server service remove` to stop and unregister it.
 
 Run the full stack locally:

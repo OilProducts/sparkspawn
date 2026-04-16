@@ -25,6 +25,12 @@ spark-server service install
 
 This serves the bundled UI at `http://127.0.0.1:8000`.
 
+To listen on every interface instead, install the service with an explicit bind host:
+
+```bash
+spark-server service install --host 0.0.0.0 --port 8000
+```
+
 Inspect or remove the service with:
 
 ```bash
