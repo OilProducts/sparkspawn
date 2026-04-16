@@ -22,7 +22,7 @@ Install dependencies and seed the runtime tree:
 ```bash
 uv sync --dev
 npm --prefix frontend install
-uv run spark-server init
+SPARK_HOME=~/.spark-dev uv run spark-server init
 ```
 
 Start the app:
@@ -35,15 +35,15 @@ That gives you:
 
 - the backend at `http://127.0.0.1:8010`
 - the frontend at `http://127.0.0.1:5173`
-- a local flow library at `~/.spark/flows`
+- a local flow library at `~/.spark-dev/flows`
 
 ## Part 1: Start From A Minimal Flow
 
-Seeded packaged flows already live in `~/.spark/flows`. Copy the smallest example so you can edit your own version:
+Seeded packaged flows already live in `~/.spark-dev/flows`. Copy the smallest example so you can edit your own version:
 
 ```bash
-cp ~/.spark/flows/examples/simple-linear.dot ~/.spark/flows/my-first-flow.dot
-spark-workspace validate-flow --flow my-first-flow.dot --text
+cp ~/.spark-dev/flows/examples/simple-linear.dot ~/.spark-dev/flows/my-first-flow.dot
+uv run spark flow validate --file ~/.spark-dev/flows/my-first-flow.dot --text
 ```
 
 Open `my-first-flow.dot` in the Editor.
@@ -83,7 +83,7 @@ In the UI:
 Validate after each meaningful edit:
 
 ```bash
-spark-workspace validate-flow --flow my-first-flow.dot --text
+uv run spark flow validate --file ~/.spark-dev/flows/my-first-flow.dot --text
 ```
 
 ## Part 2: Add Launch Inputs
@@ -128,8 +128,8 @@ Once a flow needs iteration, split the work into explicit stages. Do not try to 
 The easiest way to learn this pattern is to start from the bundled review-loop example:
 
 ```bash
-cp ~/.spark/flows/examples/implement-review-loop.dot ~/.spark/flows/my-review-loop.dot
-spark-workspace validate-flow --flow my-review-loop.dot --text
+cp ~/.spark-dev/flows/examples/implement-review-loop.dot ~/.spark-dev/flows/my-review-loop.dot
+uv run spark flow validate --file ~/.spark-dev/flows/my-review-loop.dot --text
 ```
 
 The core shape is:
@@ -239,7 +239,7 @@ Use this loop while authoring:
 Validation command:
 
 ```bash
-spark-workspace validate-flow --flow <name> --text
+uv run spark flow validate --file ~/.spark-dev/flows/<name>.dot --text
 ```
 
 When a run behaves unexpectedly, check these first:
