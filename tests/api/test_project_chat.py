@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-import shlex
 import threading
 import time
 from pathlib import Path
-import sys
 from typing import Any, Callable, Optional
 
 import pytest
@@ -212,17 +210,19 @@ def test_project_chat_prompt_includes_flow_authoring_boundary(tmp_path: Path) ->
     )
 
     prompt = service._build_chat_prompt(state, "Create a flow that drafts and reviews an email.")
-    spark_executable = Path(sys.executable).resolve(strict=False).with_name("spark")
-    expected_command = (
-        f"{shlex.quote(str(spark_executable))} flow validate --file <path> --text"
-        if spark_executable.exists()
-        else "spark flow validate --file <path> --text"
-    )
 
+    assert "Spark agent control surface" in prompt
+    assert "workspace tool interface" not in prompt
+    assert "`spark flow list`" in prompt
+    assert "`spark flow describe --flow <name>`" in prompt
+    assert "`spark flow get --flow <name>`" in prompt
+    assert "`spark flow validate --file <path> --text`" in prompt
+    assert "`spark convo run-request ...`" in prompt
+    assert "`spark run launch ...`" in prompt
     assert f"flow library at `{(tmp_path / 'flows').resolve(strict=False)}`" in prompt
     assert f"`{dot_authoring_guide_path()}`" in prompt
     assert f"`{spark_operations_guide_path()}`" in prompt
-    assert expected_command in prompt
+    assert "spark flow validate --file <path> --text" in prompt
 
 
 def test_project_chat_service_rejects_malformed_prompt_templates(tmp_path: Path) -> None:

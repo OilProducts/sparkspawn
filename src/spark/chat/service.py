@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shlex
-import sys
 import threading
 import uuid
 from pathlib import Path
@@ -54,9 +52,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _resolve_flow_validation_command() -> str:
-    spark_executable = Path(sys.executable).resolve(strict=False).with_name("spark")
-    if spark_executable.exists():
-        return f"{shlex.quote(str(spark_executable))} flow validate --file <path> --text"
     return "spark flow validate --file <path> --text"
 
 

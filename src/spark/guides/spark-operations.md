@@ -7,6 +7,12 @@ Use it for launch, inspection, human-gate, and trigger tasks. OpenAPI remains th
 - Attractor: `/attractor/docs`, `/attractor/openapi.json`
 - Workspace: `/workspace/docs`, `/workspace/openapi.json`
 
+Control-surface contract:
+
+- Inside the assistant runtime, the canonical Spark agent control surface is the bare `spark ...` CLI.
+- In a human source-checkout shell, run the same CLI commands as `uv run spark ...` instead.
+- The examples below use the assistant-runtime form unless a source-checkout example is called out explicitly.
+
 ## Environment And Bootstrap
 
 Installed or stable Spark instance:

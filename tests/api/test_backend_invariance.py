@@ -15,6 +15,7 @@ from attractor.engine import Context, load_checkpoint
 from attractor.engine.context_contracts import ContextWriteContract
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.engine.status_envelope_prompting import build_status_envelope_context_updates_contract_text
+import spark_common.codex_runtime as codex_runtime_module
 from spark_common.codex_runtime import build_codex_runtime_environment
 from spark_common.project_identity import build_project_id
 from spark_common.runtime_path import resolve_runtime_workspace_path
@@ -589,6 +590,39 @@ def test_build_codex_runtime_environment_falls_back_to_host_codex_home_when_seed
     assert env["CODEX_HOME"] == str(runtime_root / ".codex")
     assert (runtime_root / ".codex" / "auth.json").read_text(encoding="utf-8") == '{"token":"host-seed"}'
     assert (runtime_root / ".codex" / "config.toml").read_text(encoding="utf-8") == "model = 'host-model'\n"
+
+
+def test_build_codex_runtime_environment_prepends_first_party_tool_bins_to_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "codex-runtime"
+    runtime_python = tmp_path / "runtime-python" / "bin" / "python"
+    repo_root = tmp_path / "repo-root"
+    repo_bin = repo_root / ".venv" / "bin"
+
+    runtime_python.parent.mkdir(parents=True)
+    runtime_python.write_text("", encoding="utf-8")
+    repo_bin.mkdir(parents=True)
+
+    monkeypatch.setattr(codex_runtime_module, "RUNTIME_REPO_ROOT", repo_root)
+    monkeypatch.setattr(codex_runtime_module.sys, "executable", str(runtime_python))
+    monkeypatch.setenv("ATTRACTOR_CODEX_RUNTIME_ROOT", str(runtime_root))
+    monkeypatch.setenv("ATTRACTOR_CODEX_SEED_DIR", str(tmp_path / "missing-seed"))
+    monkeypatch.setenv("PATH", os_path := f"/usr/local/bin{codex_runtime_module.os.pathsep}/usr/bin")
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+    env = build_codex_runtime_environment()
+
+    assert env["PATH"] == codex_runtime_module.os.pathsep.join(
+        [
+            str(runtime_python.parent.resolve(strict=False)),
+            str(repo_bin.resolve(strict=False)),
+            os_path,
+        ]
+    )
 
 
 def test_codex_app_server_backend_missing_runtime_working_directory_returns_specific_failure(

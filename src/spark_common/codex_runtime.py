@@ -3,7 +3,34 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
+
+
+RUNTIME_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _venv_bin_dir(venv_root: Path) -> Path:
+    return venv_root / ("Scripts" if os.name == "nt" else "bin")
+
+
+def _first_party_tool_bin_dirs() -> list[Path]:
+    candidates = [
+        Path(sys.executable).resolve(strict=False).parent,
+        _venv_bin_dir(RUNTIME_REPO_ROOT / ".venv"),
+    ]
+    tool_bin_dirs: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = candidate.expanduser().resolve(strict=False)
+        if not normalized.exists():
+            continue
+        key = os.path.normcase(str(normalized))
+        if key in seen:
+            continue
+        seen.add(key)
+        tool_bin_dirs.append(normalized)
+    return tool_bin_dirs
 
 
 def build_codex_runtime_environment() -> dict[str, str]:
@@ -52,4 +79,8 @@ def build_codex_runtime_environment() -> dict[str, str]:
             "XDG_DATA_HOME": str(xdg_data_home),
         }
     )
+    tool_path_prefix = os.pathsep.join(str(path) for path in _first_party_tool_bin_dirs())
+    if tool_path_prefix:
+        existing_path = env.get("PATH", "")
+        env["PATH"] = tool_path_prefix if not existing_path else f"{tool_path_prefix}{os.pathsep}{existing_path}"
     return env

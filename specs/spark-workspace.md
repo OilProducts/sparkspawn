@@ -261,21 +261,33 @@ The main touch points are:
 - launch Attractor workflow directly from the conversation surface
 - inspect resulting run and outcomes
 
-### 13.1 Agent-Created Workspace Artifacts
+### 13.1 Spark Agent Control Surface
 
-Spark may expose a narrow first-party CLI surface for agent-created workspace artifacts:
+Spark must expose a first-class Spark agent control surface.
+
+Inside the assistant runtime, the canonical interface is the bare `spark` CLI. The runtime must make that surface available on `PATH` without requiring a user-global install.
+
+Human source-checkout shell instructions are a separate operational concern. In a source checkout, human docs should use `uv run spark ...` rather than treating bare `spark ...` as the default shell entrypoint.
+
+Stable read-only flow inspection and validation commands:
+
+```text
+spark flow list [--text]
+spark flow describe --flow <flow_name> [--text]
+spark flow get --flow <flow_name> [--text]
+spark flow validate --file <path> --text
+```
+
+Stable mutating workspace and run commands:
 
 ```text
 spark convo run-request --conversation <adjective-noun> --flow <flow_name> --summary <text> [--goal-file <path>|--goal -] [--model <model>]
 spark run launch --flow <flow_name> --summary <text> [--conversation <adjective-noun>] [--project <path>]
-spark flow list [--text]
-spark flow describe --flow <flow_name> [--text]
-spark flow get --flow <flow_name> [--text]
 ```
 
 `spark convo run-request` creates a pending review artifact. It must not approve or launch downstream execution by itself.
 
-The flow-discovery commands are read-only. They expose only workspace-requestable flows to the agent surface by default, while the workspace retains separate global policy for flows that are trigger-only or disabled.
+The read-only flow commands expose only workspace-requestable flows to the agent surface by default, while the workspace retains separate global policy for flows that are trigger-only or disabled.
 
 ### 13.2 Automatic Placement
 

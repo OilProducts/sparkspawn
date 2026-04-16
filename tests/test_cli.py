@@ -737,6 +737,45 @@ def test_agent_validate_flow_file_text_mode_succeeds_in_clean_subprocess(tmp_pat
     assert "Status: ok" in result.stdout
 
 
+def test_agent_validate_flow_file_text_mode_reports_validation_error_in_clean_subprocess(tmp_path: Path) -> None:
+    flow_path = tmp_path / "invalid.dot"
+    flow_path.write_text(
+        "\n".join(
+            [
+                "digraph invalid {",
+                '  start [shape=Mdiamond];',
+                '  plan [shape=box];',
+                '  done [shape=Msquare];',
+                "  start -> done;",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import spark.cli as c, sys; "
+                f"sys.exit(c.main(['flow', 'validate', '--file', r'{flow_path}', '--text']))"
+            ),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    assert f"Name: {flow_path.name}" in result.stdout
+    assert f"Path: {flow_path.resolve(strict=False)}" in result.stdout
+    assert "Status: validation_error" in result.stdout
+
+
 def test_agent_validate_flow_file_reports_missing_path(capsys) -> None:
     result = spark_cli.main(["flow", "validate", "--file", "/tmp/does-not-exist.dot"])
 

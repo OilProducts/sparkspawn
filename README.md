@@ -30,7 +30,7 @@ For flow authoring, use this progression:
 - Full raw DOT reference: [src/spark/guides/dot-authoring.md](src/spark/guides/dot-authoring.md)
 - Task-oriented CLI/API operations guide: [src/spark/guides/spark-operations.md](src/spark/guides/spark-operations.md)
 
-After direct flow edits, validate with `spark flow validate --file /path/to/flow.dot --text`.
+When working from a source checkout, validate direct flow edits with `uv run spark flow validate --file /path/to/flow.dot --text`.
 
 ## Flow Building Guide
 
@@ -53,13 +53,13 @@ Use the flow `goal` as the user-facing stated goal for the run:
 
 - In prompts and flow descriptions, write to the “stated goal”, not internal engine names like `graph.goal`.
 - Direct runs from the editor currently use the flow's saved `goal`.
-- Workspace chat run requests and `spark convo run-request --goal/--goal-file` can override that stated goal per run.
+- Workspace chat run requests and `uv run spark convo run-request --goal/--goal-file` can override that stated goal per run.
 
 Use `launch_context` when one goal string is not enough:
 
 - `launch_context` is first-class initial run state under `context.*`, not a prompt-only hack.
 - Use it for structured launch details like request summaries, target paths, constraints, and acceptance criteria.
-- Workspace run requests accept `launch_context`, and `spark convo run-request --launch-context-json/--launch-context-file` can populate it.
+- Workspace run requests accept `launch_context`, and `uv run spark convo run-request --launch-context-json/--launch-context-file` can populate it.
 - Keep launch keys stable and semantic, for example `context.request.summary`, `context.request.target_paths`, and `context.request.acceptance_criteria`.
 - In the flow editor, declare these inputs in Graph Settings -> Launch Inputs so direct execution can render a launch form from the flow itself.
 
@@ -348,7 +348,7 @@ spark-server service install
 
 - Flow files are stored as canonical DOT and validated before save.
 - Spark flow self-description lives in DOT via `spark.title` and `spark.description`, while workspace launch policy is stored separately in `~/.spark/config/flow-catalog.toml`.
-- The agent-facing CLI exposes curated flow discovery commands with JSON default output: `spark flow list`, `spark flow describe --flow <name>`, and `spark flow get --flow <name>`.
+- Inside the assistant runtime, the Spark agent control surface uses bare `spark` commands such as `spark flow list`, `spark flow describe --flow <name>`, `spark flow get --flow <name>`, `spark flow validate --file <path> --text`, `spark convo run-request ...`, and `spark run launch ...`. In a human source-checkout shell, use `uv run spark ...` instead.
 - The editor supports both structured editing and raw DOT editing, including semantic-equivalence safety checks during handoff.
 - The Runs view is intended for historical inspection, diagnostics, artifact browsing, and replaying execution context.
 - Packaged example flows live in [src/spark/flows/examples/simple-linear.dot](src/spark/flows/examples/simple-linear.dot), [src/spark/flows/examples/implement-review-loop.dot](src/spark/flows/examples/implement-review-loop.dot), [src/spark/flows/examples/human-review-loop.dot](src/spark/flows/examples/human-review-loop.dot), [src/spark/flows/examples/parallel-review.dot](src/spark/flows/examples/parallel-review.dot), [src/spark/flows/examples/supervision/implementation-worker.dot](src/spark/flows/examples/supervision/implementation-worker.dot), and [src/spark/flows/examples/supervision/supervised-implementation.dot](src/spark/flows/examples/supervision/supervised-implementation.dot).
