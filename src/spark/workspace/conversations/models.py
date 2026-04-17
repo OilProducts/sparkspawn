@@ -164,6 +164,106 @@ class ToolCallRecord:
 
 
 @dataclass
+class RequestUserInputOption:
+    label: str
+    description: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "label": self.label,
+        }
+        if self.description is not None:
+            payload["description"] = self.description
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RequestUserInputOption":
+        return cls(
+            label=str(payload.get("label", "")),
+            description=str(payload.get("description")) if payload.get("description") is not None else None,
+        )
+
+
+@dataclass
+class RequestUserInputQuestion:
+    id: str
+    header: str
+    question: str
+    question_type: str
+    options: list[RequestUserInputOption] = field(default_factory=list)
+    allow_other: bool = False
+    is_secret: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "header": self.header,
+            "question": self.question,
+            "question_type": self.question_type,
+            "options": [option.to_dict() for option in self.options],
+            "allow_other": self.allow_other,
+            "is_secret": self.is_secret,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RequestUserInputQuestion":
+        raw_options = payload.get("options")
+        return cls(
+            id=str(payload.get("id", "")),
+            header=str(payload.get("header", "")),
+            question=str(payload.get("question", "")),
+            question_type=str(payload.get("question_type", "FREEFORM") or "FREEFORM"),
+            options=[
+                RequestUserInputOption.from_dict(option)
+                for option in raw_options
+                if isinstance(option, dict)
+            ] if isinstance(raw_options, list) else [],
+            allow_other=bool(payload.get("allow_other")),
+            is_secret=bool(payload.get("is_secret")),
+        )
+
+
+@dataclass
+class RequestUserInputRecord:
+    request_id: str
+    status: str
+    questions: list[RequestUserInputQuestion] = field(default_factory=list)
+    answers: dict[str, str] = field(default_factory=dict)
+    submitted_at: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "request_id": self.request_id,
+            "status": self.status,
+            "questions": [question.to_dict() for question in self.questions],
+            "answers": dict(self.answers),
+        }
+        if self.submitted_at is not None:
+            payload["submitted_at"] = self.submitted_at
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RequestUserInputRecord":
+        raw_questions = payload.get("questions")
+        raw_answers = payload.get("answers")
+        return cls(
+            request_id=str(payload.get("request_id", "")),
+            status=str(payload.get("status", "pending") or "pending"),
+            questions=[
+                RequestUserInputQuestion.from_dict(question)
+                for question in raw_questions
+                if isinstance(question, dict)
+            ] if isinstance(raw_questions, list) else [],
+            answers={
+                str(key): str(value)
+                for key, value in raw_answers.items()
+                if value is not None
+            } if isinstance(raw_answers, dict) else {},
+            submitted_at=str(payload.get("submitted_at")) if payload.get("submitted_at") is not None else None,
+        )
+
+
+@dataclass
 class ChatTurnLiveEvent:
     kind: str
     content_delta: Optional[str] = None
@@ -174,6 +274,7 @@ class ChatTurnLiveEvent:
     item_id: Optional[str] = None
     summary_index: Optional[int] = None
     phase: Optional[str] = None
+    request_user_input: Optional[RequestUserInputRecord] = None
 
 
 @dataclass
@@ -238,6 +339,7 @@ class ConversationSegment:
     artifact_id: Optional[str] = None
     phase: Optional[str] = None
     tool_call: Optional[ToolCallRecord] = None
+    request_user_input: Optional[RequestUserInputRecord] = None
     source: ConversationSegmentSource = field(default_factory=ConversationSegmentSource)
 
     def to_dict(self) -> dict[str, Any]:
@@ -263,6 +365,8 @@ class ConversationSegment:
             payload["phase"] = self.phase
         if self.tool_call is not None:
             payload["tool_call"] = self.tool_call.to_dict()
+        if self.request_user_input is not None:
+            payload["request_user_input"] = self.request_user_input.to_dict()
         return payload
 
     @classmethod
@@ -284,6 +388,9 @@ class ConversationSegment:
             phase=str(payload.get("phase")) if payload.get("phase") is not None else None,
             tool_call=ToolCallRecord.from_dict(payload.get("tool_call"))
             if isinstance(payload.get("tool_call"), dict)
+            else None,
+            request_user_input=RequestUserInputRecord.from_dict(payload.get("request_user_input"))
+            if isinstance(payload.get("request_user_input"), dict)
             else None,
             source=ConversationSegmentSource.from_dict(source_payload)
             if isinstance(source_payload, dict)
@@ -603,15 +710,39 @@ class ConversationSessionState:
         )
 
 
+@dataclass(frozen=True)
+class _ConversationEventSubscriber:
+    loop: asyncio.AbstractEventLoop
+    queue: asyncio.Queue[dict[str, Any]]
+
+
 class ConversationEventHub:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._subscribers: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
+        self._subscribers: dict[str, list[_ConversationEventSubscriber]] = {}
+
+    @staticmethod
+    def _publish_to_queue(queue: asyncio.Queue[dict[str, Any]], payload: dict[str, Any]) -> None:
+        try:
+            queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                pass
 
     def subscribe(self, conversation_id: str) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=32)
+        subscriber = _ConversationEventSubscriber(
+            loop=asyncio.get_running_loop(),
+            queue=queue,
+        )
         with self._lock:
-            self._subscribers.setdefault(conversation_id, []).append(queue)
+            self._subscribers.setdefault(conversation_id, []).append(subscriber)
         return queue
 
     def unsubscribe(self, conversation_id: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
@@ -619,23 +750,43 @@ class ConversationEventHub:
             listeners = self._subscribers.get(conversation_id)
             if not listeners:
                 return
-            if queue in listeners:
-                listeners.remove(queue)
+            remaining = [listener for listener in listeners if listener.queue is not queue]
+            if remaining:
+                self._subscribers[conversation_id] = remaining
+            else:
+                self._subscribers.pop(conversation_id, None)
+
+    def publish_nowait(self, conversation_id: str, payload: dict[str, Any]) -> None:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        with self._lock:
+            listeners = list(self._subscribers.get(conversation_id, []))
+        stale_queues: list[asyncio.Queue[dict[str, Any]]] = []
+        for listener in listeners:
+            if listener.loop.is_closed():
+                stale_queues.append(listener.queue)
+                continue
+            try:
+                if current_loop is listener.loop:
+                    self._publish_to_queue(listener.queue, payload)
+                else:
+                    listener.loop.call_soon_threadsafe(self._publish_to_queue, listener.queue, payload)
+            except RuntimeError:
+                stale_queues.append(listener.queue)
+        if not stale_queues:
+            return
+        stale_queue_ids = {id(queue) for queue in stale_queues}
+        with self._lock:
+            listeners = self._subscribers.get(conversation_id)
             if not listeners:
+                return
+            remaining = [listener for listener in listeners if id(listener.queue) not in stale_queue_ids]
+            if remaining:
+                self._subscribers[conversation_id] = remaining
+            else:
                 self._subscribers.pop(conversation_id, None)
 
     async def publish(self, conversation_id: str, payload: dict[str, Any]) -> None:
-        with self._lock:
-            listeners = list(self._subscribers.get(conversation_id, []))
-        for queue in listeners:
-            try:
-                queue.put_nowait(payload)
-            except asyncio.QueueFull:
-                try:
-                    queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-                try:
-                    queue.put_nowait(payload)
-                except asyncio.QueueFull:
-                    continue
+        self.publish_nowait(conversation_id, payload)

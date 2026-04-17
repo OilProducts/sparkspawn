@@ -56,6 +56,12 @@ class ConversationTurnRequest(BaseModel):
     chat_mode: Optional[str] = None
 
 
+class ConversationRequestUserInputAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_path: str
+    answers: dict[str, str]
+
+
 class ConversationSettingsRequest(BaseModel):
     project_path: str
     chat_mode: str
@@ -643,17 +649,10 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
 
     @router.post("/api/conversations/{conversation_id}/turns")
     async def send_project_conversation_turn(conversation_id: str, req: ConversationTurnRequest):
-        loop = asyncio.get_running_loop()
         project_chat = deps.get_project_chat()
 
         def publish_progress_event(event: dict[str, Any]) -> None:
-            asyncio.run_coroutine_threadsafe(
-                project_chat.events().publish(
-                    conversation_id,
-                    event,
-                ),
-                loop,
-            )
+            project_chat.events().publish_nowait(conversation_id, event)
 
         try:
             snapshot = await asyncio.to_thread(
@@ -671,6 +670,36 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return snapshot
+
+    @router.post("/api/conversations/{conversation_id}/request-user-input/{request_id}/answer")
+    async def answer_project_conversation_request_user_input(
+        conversation_id: str,
+        request_id: str,
+        req: ConversationRequestUserInputAnswerRequest,
+    ):
+        project_chat = deps.get_project_chat()
+
+        def publish_progress_event(event: dict[str, Any]) -> None:
+            project_chat.events().publish_nowait(conversation_id, event)
+
+        try:
+            snapshot = await asyncio.to_thread(
+                project_chat.submit_request_user_input_answer,
+                conversation_id,
+                req.project_path,
+                request_id,
+                req.answers,
+                publish_progress_event,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Unknown conversation input request: {request_id}") from exc
+        except ValueError as exc:
+            detail = str(exc)
+            status_code = 409 if "already answered" in detail else 400
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return snapshot
 
     @router.post("/api/conversations/by-handle/{conversation_handle}/flow-run-requests")

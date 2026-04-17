@@ -37,6 +37,7 @@ export {
     registerProjectValidated,
     reviewFlowRunRequestValidated,
     sendConversationTurnValidated,
+    submitConversationRequestUserInputValidated,
     updateConversationSettingsValidated,
     updateWorkspaceFlowLaunchPolicyValidated,
     updateTriggerValidated,

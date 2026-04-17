@@ -116,4 +116,74 @@ describe('conversationsApi parsing', () => {
             content: 'Context compacted to continue the turn.',
         })
     })
+
+    it('parses request_user_input segments from snapshots', () => {
+        const snapshot = parseConversationSnapshotResponse({
+            schema_version: 4,
+            conversation_id: 'conversation-plan',
+            conversation_handle: 'steady-harbor',
+            project_path: '/tmp/project-plan',
+            chat_mode: 'plan',
+            title: 'Planning thread',
+            created_at: '2026-04-16T18:00:00Z',
+            updated_at: '2026-04-16T18:00:10Z',
+            turns: [],
+            segments: [
+                {
+                    id: 'segment-request-user-input-1',
+                    turn_id: 'turn-assistant-1',
+                    order: 1,
+                    kind: 'request_user_input',
+                    role: 'system',
+                    status: 'pending',
+                    timestamp: '2026-04-16T18:00:08Z',
+                    updated_at: '2026-04-16T18:00:08Z',
+                    content: 'Which path should I take?',
+                    request_user_input: {
+                        request_id: 'request-1',
+                        status: 'pending',
+                        questions: [
+                            {
+                                id: 'path_choice',
+                                header: 'Path',
+                                question: 'Which path should I take?',
+                                question_type: 'MULTIPLE_CHOICE',
+                                options: [
+                                    {
+                                        label: 'Inline card',
+                                        description: 'Keep the request inside the timeline.',
+                                    },
+                                ],
+                                allow_other: true,
+                                is_secret: false,
+                            },
+                        ],
+                        answers: {},
+                        submitted_at: null,
+                    },
+                    source: {
+                        app_turn_id: 'app-turn-1',
+                        item_id: 'request-1',
+                    },
+                },
+            ],
+            event_log: [],
+            flow_run_requests: [],
+            flow_launches: [],
+        })
+
+        expect(snapshot.segments[0]).toMatchObject({
+            kind: 'request_user_input',
+            role: 'system',
+            request_user_input: {
+                request_id: 'request-1',
+                questions: [
+                    {
+                        id: 'path_choice',
+                        question: 'Which path should I take?',
+                    },
+                ],
+            },
+        })
+    })
 })

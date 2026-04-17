@@ -112,6 +112,35 @@ function buildAssistantTimelineEntries(
             })
             return
         }
+        if (segment.kind === 'request_user_input' && segment.request_user_input) {
+            entries.push({
+                id: segment.id,
+                kind: 'request_user_input',
+                role: 'system',
+                content: segment.content,
+                timestamp: segment.timestamp,
+                status: segment.status,
+                requestUserInput: {
+                    requestId: segment.request_user_input.request_id,
+                    status: segment.request_user_input.status,
+                    questions: segment.request_user_input.questions.map((question) => ({
+                        id: question.id,
+                        header: question.header,
+                        question: question.question,
+                        questionType: question.question_type,
+                        options: question.options.map((option) => ({
+                            label: option.label,
+                            description: option.description ?? null,
+                        })),
+                        allowOther: question.allow_other,
+                        isSecret: question.is_secret,
+                    })),
+                    answers: segment.request_user_input.answers,
+                    submittedAt: segment.request_user_input.submitted_at ?? null,
+                },
+            })
+            return
+        }
         if (segment.kind === 'tool_call' && segment.tool_call) {
             entries.push({
                 id: segment.id,

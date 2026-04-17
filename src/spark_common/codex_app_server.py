@@ -243,6 +243,17 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
             )
         return events
 
+    if method == "item/tool/requestUserInput":
+        if isinstance(params, dict):
+            events.append(
+                CodexAppServerTurnEvent(
+                    kind="request_user_input_requested",
+                    item=dict(params),
+                    item_id=as_non_empty_string(params.get("itemId")),
+                )
+            )
+        return events
+
     if method == "item/started":
         item = params.get("item")
         if isinstance(item, dict):

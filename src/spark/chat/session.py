@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
 import threading
@@ -10,6 +11,9 @@ from typing import Any, Callable, Optional
 from spark.workspace.conversations.models import (
     ChatTurnLiveEvent,
     ChatTurnResult,
+    RequestUserInputOption,
+    RequestUserInputQuestion,
+    RequestUserInputRecord,
     ToolCallRecord,
 )
 from spark.workspace.conversations.utils import (
@@ -65,6 +69,74 @@ def _tool_call_from_item(item: dict[str, Any]) -> Optional[ToolCallRecord]:
     return None
 
 
+def _request_user_input_question_type(question: dict[str, Any]) -> str:
+    options = question.get("options")
+    if isinstance(options, list) and len(options) > 0:
+        return "MULTIPLE_CHOICE"
+    return "FREEFORM"
+
+
+def _request_user_input_record_from_payload(payload: dict[str, Any]) -> Optional[RequestUserInputRecord]:
+    request_id = as_non_empty_string(payload.get("itemId"))
+    raw_questions = payload.get("questions")
+    if not request_id or not isinstance(raw_questions, list) or len(raw_questions) == 0:
+        return None
+    questions: list[RequestUserInputQuestion] = []
+    for index, entry in enumerate(raw_questions):
+        if not isinstance(entry, dict):
+            continue
+        question_id = as_non_empty_string(entry.get("id")) or f"question-{index + 1}"
+        prompt = as_non_empty_string(entry.get("question"))
+        if not prompt:
+            continue
+        raw_options = entry.get("options")
+        options = [
+            RequestUserInputOption(
+                label=str(option.get("label", "")),
+                description=str(option.get("description")) if option.get("description") is not None else None,
+            )
+            for option in raw_options
+            if isinstance(option, dict) and as_non_empty_string(option.get("label"))
+        ] if isinstance(raw_options, list) else []
+        questions.append(
+            RequestUserInputQuestion(
+                id=question_id,
+                header=as_non_empty_string(entry.get("header")) or f"Question {index + 1}",
+                question=prompt,
+                question_type=_request_user_input_question_type(entry),
+                options=options,
+                allow_other=bool(entry.get("isOther")),
+                is_secret=bool(entry.get("isSecret")),
+            )
+        )
+    if len(questions) == 0:
+        return None
+    return RequestUserInputRecord(
+        request_id=request_id,
+        status="pending",
+        questions=questions,
+    )
+
+
+@dataclass
+class _PendingUserInputRequest:
+    request_id: str
+    question_ids: tuple[str, ...]
+    condition: threading.Condition = field(default_factory=threading.Condition)
+    answers: Optional[dict[str, str]] = None
+
+    def wait_for_answers(self) -> dict[str, str]:
+        with self.condition:
+            while self.answers is None:
+                self.condition.wait()
+            return dict(self.answers)
+
+    def submit(self, answers: dict[str, str]) -> None:
+        with self.condition:
+            self.answers = dict(answers)
+            self.condition.notify_all()
+
+
 class CodexAppServerChatSession:
     def __init__(
         self,
@@ -88,6 +160,9 @@ class CodexAppServerChatSession:
             request_timeout_seconds=APP_SERVER_REQUEST_TIMEOUT_SECONDS,
         )
         self._lock = threading.Lock()
+        self._pending_user_input_lock = threading.Lock()
+        self._pending_user_input_by_request_id: dict[str, _PendingUserInputRequest] = {}
+        self._pending_user_input_request_id_by_question_id: dict[str, str] = {}
 
     def _close_unlocked(self) -> None:
         self._client.close()
@@ -102,6 +177,54 @@ class CodexAppServerChatSession:
 
     def clear_raw_rpc_logger(self) -> None:
         self._client.clear_raw_rpc_logger()
+
+    def _register_pending_user_input(self, request: RequestUserInputRecord) -> _PendingUserInputRequest:
+        pending = _PendingUserInputRequest(
+            request_id=request.request_id,
+            question_ids=tuple(question.id for question in request.questions),
+        )
+        with self._pending_user_input_lock:
+            self._pending_user_input_by_request_id[request.request_id] = pending
+            for question_id in pending.question_ids:
+                self._pending_user_input_request_id_by_question_id[question_id] = request.request_id
+        return pending
+
+    def _clear_pending_user_input(self, request_id: str) -> None:
+        with self._pending_user_input_lock:
+            pending = self._pending_user_input_by_request_id.pop(request_id, None)
+            if pending is None:
+                return
+            for question_id in pending.question_ids:
+                current_request_id = self._pending_user_input_request_id_by_question_id.get(question_id)
+                if current_request_id == request_id:
+                    self._pending_user_input_request_id_by_question_id.pop(question_id, None)
+
+    def submit_request_user_input_answers(self, request_or_question_id: str, answers: dict[str, str]) -> bool:
+        normalized_lookup_id = as_non_empty_string(request_or_question_id)
+        if not normalized_lookup_id:
+            return False
+        normalized_answers = {
+            str(key): str(value).strip()
+            for key, value in answers.items()
+            if str(value).strip()
+        }
+        if len(normalized_answers) == 0:
+            return False
+        with self._pending_user_input_lock:
+            request_id = self._pending_user_input_request_id_by_question_id.get(normalized_lookup_id, normalized_lookup_id)
+            pending = self._pending_user_input_by_request_id.get(request_id)
+        if pending is None:
+            return False
+        pending.submit(normalized_answers)
+        return True
+
+    def has_pending_request_user_input(self, request_or_question_id: str) -> bool:
+        normalized_lookup_id = as_non_empty_string(request_or_question_id)
+        if not normalized_lookup_id:
+            return False
+        with self._pending_user_input_lock:
+            request_id = self._pending_user_input_request_id_by_question_id.get(normalized_lookup_id, normalized_lookup_id)
+            return request_id in self._pending_user_input_by_request_id
 
     def _ensure_process(self) -> None:
         previous_proc = self._client.proc
@@ -206,6 +329,44 @@ class CodexAppServerChatSession:
             def _handle_turn_started(turn_id: str) -> None:
                 nonlocal current_app_turn_id
                 current_app_turn_id = turn_id
+
+            def _handle_server_request(message: dict[str, Any]) -> dict[str, Any]:
+                method = message.get("method")
+                if method != "item/tool/requestUserInput":
+                    return self._client._handle_server_request(message)
+                params = message.get("params") or {}
+                request = _request_user_input_record_from_payload(params) if isinstance(params, dict) else None
+                request_id = message.get("id")
+                if request is None or request_id is None:
+                    self._client.send_response(
+                        request_id,
+                        error={"code": -32000, "message": "Malformed request_user_input request."},
+                    )
+                    return {
+                        "jsonrpc": message.get("jsonrpc", "2.0"),
+                        "method": "item/tool/requestUserInput/handled",
+                        "params": params if isinstance(params, dict) else {},
+                    }
+                self._emit_live_event(
+                    on_event,
+                    ChatTurnLiveEvent(
+                        kind="request_user_input_requested",
+                        app_turn_id=current_app_turn_id,
+                        item_id=request.request_id,
+                        request_user_input=request,
+                    ),
+                )
+                pending_request = self._register_pending_user_input(request)
+                try:
+                    answers = pending_request.wait_for_answers()
+                finally:
+                    self._clear_pending_user_input(request.request_id)
+                self._client.send_response(request_id, {"answers": answers})
+                return {
+                    "jsonrpc": message.get("jsonrpc", "2.0"),
+                    "method": "item/tool/requestUserInput/handled",
+                    "params": params,
+                }
 
             def _handle_normalized_event(normalized_event: codex_app_server.CodexAppServerTurnEvent) -> None:
                 if normalized_event.kind == "command_approval_requested":
@@ -319,6 +480,20 @@ class CodexAppServerChatSession:
                         ),
                     )
                     return
+                if normalized_event.kind == "request_user_input_requested" and isinstance(normalized_event.item, dict):
+                    request = _request_user_input_record_from_payload(normalized_event.item)
+                    if request is None:
+                        return
+                    self._emit_live_event(
+                        on_event,
+                        ChatTurnLiveEvent(
+                            kind="request_user_input_requested",
+                            app_turn_id=current_app_turn_id,
+                            item_id=request.request_id,
+                            request_user_input=request,
+                        ),
+                    )
+                    return
                 if normalized_event.kind == "assistant_message_completed" and normalized_event.text:
                     self._emit_live_event(
                         on_event,
@@ -392,6 +567,7 @@ class CodexAppServerChatSession:
                     on_event=_handle_normalized_event,
                     on_turn_started=_handle_turn_started,
                     idle_timeout_seconds=CHAT_TURN_IDLE_TIMEOUT_SECONDS,
+                    server_request_handler=_handle_server_request,
                 )
             except RuntimeError:
                 self._close_unlocked()

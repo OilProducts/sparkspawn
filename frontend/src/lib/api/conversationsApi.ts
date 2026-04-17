@@ -26,7 +26,7 @@ export interface ConversationSegmentResponse {
     id: string
     turn_id: string
     order: number
-    kind: 'assistant_message' | 'plan' | 'reasoning' | 'tool_call' | 'context_compaction' | 'flow_run_request' | 'flow_launch'
+    kind: 'assistant_message' | 'plan' | 'reasoning' | 'tool_call' | 'context_compaction' | 'request_user_input' | 'flow_run_request' | 'flow_launch'
     role: 'assistant' | 'system'
     status: 'pending' | 'streaming' | 'complete' | 'failed' | 'running'
     timestamp: string
@@ -44,6 +44,24 @@ export interface ConversationSegmentResponse {
         command?: string | null
         output?: string | null
         file_paths: string[]
+    } | null
+    request_user_input?: {
+        request_id: string
+        status: 'pending' | 'answered'
+        questions: Array<{
+            id: string
+            header: string
+            question: string
+            question_type: 'MULTIPLE_CHOICE' | 'FREEFORM'
+            options: Array<{
+                label: string
+                description?: string | null
+            }>
+            allow_other: boolean
+            is_secret: boolean
+        }>
+        answers: Record<string, string>
+        submitted_at?: string | null
     } | null
     source?: {
         app_turn_id?: string | null
@@ -209,6 +227,7 @@ function parseConversationSegmentResponse(value: unknown): ConversationSegmentRe
         || record.kind === 'reasoning'
         || record.kind === 'tool_call'
         || record.kind === 'context_compaction'
+        || record.kind === 'request_user_input'
         || record.kind === 'flow_run_request'
         || record.kind === 'flow_launch'
         ? record.kind
@@ -224,7 +243,9 @@ function parseConversationSegmentResponse(value: unknown): ConversationSegmentRe
         ? record.status
         : 'complete'
     const toolCall = asUnknownRecord(record.tool_call)
+    const requestUserInput = asUnknownRecord(record.request_user_input)
     const source = asUnknownRecord(record.source)
+    const requestUserInputAnswers = requestUserInput ? asUnknownRecord(requestUserInput.answers) : null
     return {
         id: record.id,
         turn_id: record.turn_id,
@@ -252,6 +273,46 @@ function parseConversationSegmentResponse(value: unknown): ConversationSegmentRe
                 command: asOptionalNullableString(toolCall.command),
                 output: asOptionalNullableString(toolCall.output),
                 file_paths: Array.isArray(toolCall.file_paths) ? toolCall.file_paths.map((entry) => String(entry)) : [],
+            }
+            : null,
+        request_user_input: requestUserInput && typeof requestUserInput.request_id === 'string'
+            ? {
+                request_id: requestUserInput.request_id,
+                status: requestUserInput.status === 'answered' ? 'answered' : 'pending',
+                questions: Array.isArray(requestUserInput.questions)
+                    ? requestUserInput.questions
+                        .map((entry) => asUnknownRecord(entry))
+                        .filter((entry): entry is Record<string, unknown> => (
+                            entry !== null
+                            && typeof entry.id === 'string'
+                            && typeof entry.question === 'string'
+                        ))
+                        .map((entry) => ({
+                            id: String(entry.id),
+                            header: typeof entry.header === 'string' ? entry.header : '',
+                            question: String(entry.question),
+                            question_type: entry.question_type === 'MULTIPLE_CHOICE' ? 'MULTIPLE_CHOICE' : 'FREEFORM',
+                            options: Array.isArray(entry.options)
+                                ? entry.options
+                                    .map((option) => asUnknownRecord(option))
+                                    .filter((option): option is Record<string, unknown> => option !== null && typeof option.label === 'string')
+                                    .map((option) => ({
+                                        label: String(option.label),
+                                        description: asOptionalNullableString(option.description),
+                                    }))
+                                : [],
+                            allow_other: entry.allow_other === true,
+                            is_secret: entry.is_secret === true,
+                        }))
+                    : [],
+                answers: requestUserInputAnswers
+                    ? Object.fromEntries(
+                        Object.entries(requestUserInputAnswers)
+                            .filter(([, answer]) => answer !== null && answer !== undefined)
+                            .map(([questionId, answer]) => [questionId, String(answer)]),
+                    )
+                    : {},
+                submitted_at: asOptionalNullableString(requestUserInput.submitted_at),
             }
             : null,
         source: source
@@ -568,6 +629,26 @@ export async function updateConversationSettingsValidated(
             body: JSON.stringify(payload),
         },
         '/workspace/api/conversations/{id}/settings',
+        parseConversationSnapshotResponse,
+    )
+}
+
+export async function submitConversationRequestUserInputValidated(
+    conversationId: string,
+    requestId: string,
+    payload: {
+        project_path: string
+        answers: Record<string, string>
+    },
+): Promise<ConversationSnapshotResponse> {
+    return fetchWorkspaceJsonValidated(
+        `/conversations/${encodeURIComponent(conversationId)}/request-user-input/${encodeURIComponent(requestId)}/answer`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        },
+        '/workspace/api/conversations/{id}/request-user-input/{requestId}/answer',
         parseConversationSnapshotResponse,
     )
 }

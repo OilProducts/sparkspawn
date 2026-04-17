@@ -3864,8 +3864,67 @@ describe('ProjectsPanel', () => {
                 kind: 'mode_change',
                 artifact_id: null,
               },
+              {
+                id: 'turn-request-user-input-1',
+                role: 'assistant',
+                content: '',
+                timestamp: '2026-04-16T18:00:02Z',
+                status: 'pending',
+                kind: 'message',
+                artifact_id: null,
+              },
             ],
-            segments: [],
+            segments: [
+              {
+                id: 'segment-request-user-input-1',
+                turn_id: 'turn-request-user-input-1',
+                order: 1,
+                kind: 'request_user_input',
+                role: 'system',
+                status: 'pending',
+                timestamp: '2026-04-16T18:00:02Z',
+                updated_at: '2026-04-16T18:00:02Z',
+                completed_at: null,
+                content: 'Which planning path should I take for this change?',
+                artifact_id: null,
+                error: null,
+                request_user_input: {
+                  request_id: 'request-1',
+                  status: 'pending',
+                  questions: [
+                    {
+                      id: 'planning_path',
+                      header: 'Path',
+                      question: 'Which planning path should I take for this change?',
+                      question_type: 'MULTIPLE_CHOICE',
+                      options: [
+                        {
+                          label: 'Inline card',
+                          description: 'Keep the request in the conversation timeline.',
+                        },
+                      ],
+                      allow_other: false,
+                      is_secret: false,
+                    },
+                    {
+                      id: 'constraints',
+                      header: 'Constraints',
+                      question: 'What context or constraints should the final plan preserve?',
+                      question_type: 'FREEFORM',
+                      options: [],
+                      allow_other: false,
+                      is_secret: false,
+                    },
+                  ],
+                  answers: {},
+                  submitted_at: null,
+                },
+                source: {
+                  app_turn_id: 'app-turn-1',
+                  item_id: 'request-1',
+                },
+              },
+            ],
             event_log: [],
             flow_run_requests: [],
             flow_launches: [],
@@ -3914,9 +3973,11 @@ describe('ProjectsPanel', () => {
     const history = screen.getByTestId('project-ai-conversation-history-list')
     expect(history).toHaveTextContent('Switched to Plan mode')
     expect(history).not.toHaveTextContent('/plan')
-    expect(screen.getByTestId('run-pending-human-gates-panel')).toHaveTextContent('Pending Questions')
-    expect(screen.getByTestId('run-pending-human-gates-panel')).toHaveTextContent('Which planning path should I take for this change?')
-    expect(screen.getByTestId('run-pending-human-gates-panel')).toHaveTextContent('What context or constraints should the final plan preserve?')
+    const requestCard = await screen.findByTestId('project-request-user-input-card-segment-request-user-input-1')
+    expect(requestCard).toHaveTextContent('Needs Input')
+    expect(requestCard).toHaveTextContent('Which planning path should I take for this change?')
+    expect(requestCard).toHaveTextContent('What context or constraints should the final plan preserve?')
+    expect(screen.queryByTestId('run-pending-human-gates-panel')).not.toBeInTheDocument()
   })
 
   it('restores the active-thread mode badge when switching back to a cached plan thread', async () => {

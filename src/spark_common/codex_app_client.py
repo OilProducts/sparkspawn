@@ -251,6 +251,7 @@ class CodexAppServerClient:
         read_line: Optional[Callable[[float], Optional[str]]] = None,
         now: Callable[[], float] = time.monotonic,
         on_activity: Optional[Callable[[], None]] = None,
+        server_request_handler: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
     ) -> Optional[dict[str, Any]]:
         if self._pending_messages:
             return self._pending_messages.popleft()
@@ -271,7 +272,8 @@ class CodexAppServerClient:
                 self._handle_unparsed_line(line)
                 continue
             if "id" in message and "method" in message:
-                return self._handle_server_request(message)
+                handler = server_request_handler or self._handle_server_request
+                return handler(message)
             if "method" in message:
                 return message
 
@@ -375,6 +377,7 @@ class CodexAppServerClient:
         send_request: Optional[Callable[[str, Optional[dict[str, Any]]], dict[str, Any]]] = None,
         next_message: Optional[Callable[[float], Optional[dict[str, Any]]]] = None,
         now: Callable[[], float] = time.monotonic,
+        server_request_handler: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
     ) -> CodexAppServerTurnResult:
         request = send_request or self.send_request
         stream_state = codex_app_server.CodexAppServerTurnState()
@@ -387,7 +390,12 @@ class CodexAppServerClient:
 
         if next_message is None:
             def read_message(wait: float) -> Optional[dict[str, Any]]:
-                return self.next_message(wait, now=now, on_activity=mark_activity)
+                return self.next_message(
+                    wait,
+                    now=now,
+                    on_activity=mark_activity,
+                    server_request_handler=server_request_handler,
+                )
         else:
             read_message = next_message
         params: dict[str, Any] = {

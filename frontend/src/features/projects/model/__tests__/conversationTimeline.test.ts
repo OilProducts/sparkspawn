@@ -199,4 +199,63 @@ describe('buildConversationTimelineEntries', () => {
     }))
   })
 
+  it('renders request_user_input segments as inline conversation request entries', () => {
+    const timeline = buildConversationTimelineEntries({
+      ...snapshot,
+      segments: [
+        {
+          id: 'request-user-input-segment',
+          turn_id: 'turn-assistant',
+          order: 1,
+          kind: 'request_user_input',
+          role: 'system',
+          status: 'pending',
+          timestamp: '2026-03-10T10:00:11Z',
+          updated_at: '2026-03-10T10:00:11Z',
+          completed_at: null,
+          content: 'Which path should I take?',
+          artifact_id: null,
+          error: null,
+          source: {
+            app_turn_id: 'app-turn-1',
+            item_id: 'request-1',
+          },
+          tool_call: null,
+          request_user_input: {
+            request_id: 'request-1',
+            status: 'pending',
+            questions: [
+              {
+                id: 'path_choice',
+                header: 'Path',
+                question: 'Which path should I take?',
+                question_type: 'MULTIPLE_CHOICE',
+                options: [
+                  {
+                    label: 'Inline card',
+                    description: 'Keep the request inline.',
+                  },
+                ],
+                allow_other: true,
+                is_secret: false,
+              },
+            ],
+            answers: {},
+            submitted_at: null,
+          },
+        },
+        ...snapshot.segments,
+      ],
+    }, null)
+
+    expect(timeline).toContainEqual(expect.objectContaining({
+      kind: 'request_user_input',
+      content: 'Which path should I take?',
+      requestUserInput: expect.objectContaining({
+        requestId: 'request-1',
+        status: 'pending',
+      }),
+    }))
+  })
+
 })

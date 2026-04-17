@@ -33,6 +33,7 @@ from spark.workspace.conversations.models import (
     ConversationSegment,
     ConversationSegmentSource,
     ConversationEventHub,
+    RequestUserInputRecord,
     ConversationSessionState,
     ConversationState,
     ConversationTurn,
@@ -116,6 +117,62 @@ def _extract_plan_mode_assistant_remainder(text: str, plan_text: Optional[str]) 
     if remainder:
         return remainder
     return _remove_standalone_text_block(rendered_text, normalized_plan)
+
+
+def _request_user_input_prompt_summary(request: RequestUserInputRecord) -> str:
+    prompts = [
+        _normalize_assistant_text(question.question)
+        for question in request.questions
+        if _normalize_assistant_text(question.question)
+    ]
+    if len(prompts) == 1:
+        return prompts[0]
+    if len(prompts) > 1:
+        return f"{len(prompts)} questions need user input."
+    return "User input requested."
+
+
+def _request_user_input_answer_summary(request: RequestUserInputRecord) -> str:
+    lines: list[str] = []
+    for question in request.questions:
+        prompt = _normalize_assistant_text(question.question)
+        answer = _normalize_assistant_text(request.answers.get(question.id, ""))
+        if not prompt or not answer:
+            continue
+        lines.append(f"{prompt}\nAnswer: {answer}")
+    if lines:
+        return "\n\n".join(lines)
+    return _request_user_input_prompt_summary(request)
+
+
+def _request_user_input_segment_content(request: RequestUserInputRecord) -> str:
+    if request.status == "answered":
+        return _request_user_input_answer_summary(request)
+    return _request_user_input_prompt_summary(request)
+
+
+def _normalize_request_user_input_answers(
+    request: RequestUserInputRecord,
+    answers: dict[str, Any],
+) -> dict[str, str]:
+    normalized_answers: dict[str, str] = {}
+    for question in request.questions:
+        raw_value = answers.get(question.id)
+        trimmed_value = str(raw_value).strip() if raw_value is not None else ""
+        if not trimmed_value:
+            raise ValueError(f"Missing answer for question '{question.id}'.")
+        if question.question_type == "MULTIPLE_CHOICE":
+            option_labels = {
+                _normalize_assistant_text(option.label)
+                for option in question.options
+                if _normalize_assistant_text(option.label)
+            }
+            if trimmed_value not in option_labels and not question.allow_other:
+                raise ValueError(f"Unsupported answer option for question '{question.id}'.")
+        normalized_answers[question.id] = trimmed_value
+    if len(normalized_answers) == 0:
+        raise ValueError("At least one answer is required.")
+    return normalized_answers
 
 
 def _build_mode_change_turn(chat_mode: str) -> ConversationTurn:
@@ -304,6 +361,11 @@ class ProjectChatService:
         app_turn_id = event.app_turn_id or turn_id
         return f"segment-context-compaction-{app_turn_id}"
 
+    def _build_request_user_input_segment_id(self, turn_id: str, event: ChatTurnLiveEvent) -> str:
+        app_turn_id = event.app_turn_id or turn_id
+        request_id = event.request_user_input.request_id if event.request_user_input is not None else (event.item_id or "request")
+        return f"segment-request-user-input-{app_turn_id}-{request_id}"
+
     def _assistant_segment_phase(self, event: ChatTurnLiveEvent, segment: Optional[ConversationSegment] = None) -> Optional[str]:
         if event.phase is not None:
             return _normalize_assistant_phase(event.phase)
@@ -330,6 +392,23 @@ class ProjectChatService:
             if segment.turn_id != turn_id or segment.kind != "plan":
                 continue
             if segment.status == "complete" and _as_non_empty_string(segment.content):
+                return segment
+        return None
+
+    def _request_user_input_segment_by_request_id(
+        self,
+        state: ConversationState,
+        request_or_question_id: str,
+    ) -> Optional[ConversationSegment]:
+        normalized_request_id = _as_non_empty_string(request_or_question_id)
+        if not normalized_request_id:
+            return None
+        for segment in state.segments:
+            if segment.kind != "request_user_input" or segment.request_user_input is None:
+                continue
+            if segment.request_user_input.request_id == normalized_request_id:
+                return segment
+            if any(question.id == normalized_request_id for question in segment.request_user_input.questions):
                 return segment
         return None
 
@@ -437,6 +516,36 @@ class ProjectChatService:
             segment.updated_at = timestamp
             segment.error = None
             segment.completed_at = timestamp if complete else None
+            self._upsert_segment(state, segment)
+            return segment
+        if event.kind == "request_user_input_requested" and event.request_user_input is not None:
+            request = RequestUserInputRecord.from_dict(event.request_user_input.to_dict())
+            segment_id = self._build_request_user_input_segment_id(turn.id, event)
+            segment = self._get_segment(state, segment_id)
+            if segment is not None and segment.status == "complete":
+                return None
+            if segment is None:
+                segment = ConversationSegment(
+                    id=segment_id,
+                    turn_id=turn.id,
+                    order=self._next_turn_segment_order(state, turn.id),
+                    kind="request_user_input",
+                    role="system",
+                    status="pending",
+                    timestamp=timestamp,
+                    updated_at=timestamp,
+                    content=_request_user_input_segment_content(request),
+                    request_user_input=request,
+                    source=self._build_segment_source(event),
+                )
+                self._upsert_segment(state, segment)
+                return segment
+            segment.status = "pending"
+            segment.updated_at = timestamp
+            segment.completed_at = None
+            segment.error = None
+            segment.content = _request_user_input_segment_content(request)
+            segment.request_user_input = request
             self._upsert_segment(state, segment)
             return segment
         if event.kind in {"tool_call_started", "tool_call_updated", "tool_call_completed", "tool_call_failed"} and event.tool_call is not None:
@@ -833,6 +942,10 @@ class ProjectChatService:
                     segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
                     if segment is not None:
                         emitted_payloads.append(self._build_segment_upsert_payload(current_state, segment))
+                elif event.kind == "request_user_input_requested" and event.request_user_input is not None:
+                    segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
+                    if segment is not None:
+                        emitted_payloads.append(self._build_segment_upsert_payload(current_state, segment))
                 elif event.kind == "assistant_completed":
                     assistant_message = _as_non_empty_string(event.content_delta)
                     current_assistant_turn.status = "streaming"
@@ -1051,6 +1164,78 @@ class ProjectChatService:
             progress_callback,
         )
         return self._run_prepared_turn(prepared, progress_callback)
+
+    def submit_request_user_input_answer(
+        self,
+        conversation_id: str,
+        project_path: str,
+        request_or_question_id: str,
+        answers: dict[str, Any],
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> dict[str, Any]:
+        normalized_project_path = _normalize_project_path(project_path)
+        if not normalized_project_path:
+            raise ValueError("Project path is required.")
+        normalized_lookup_id = _as_non_empty_string(request_or_question_id)
+        if not normalized_lookup_id:
+            raise ValueError("Request id is required.")
+        if not isinstance(answers, dict):
+            raise ValueError("Answers are required.")
+
+        with self._lock:
+            state = self._read_state(conversation_id, normalized_project_path)
+            if state is None:
+                raise FileNotFoundError(conversation_id)
+            if state.project_path != normalized_project_path:
+                raise ValueError("Conversation is already bound to a different project path.")
+            segment = self._request_user_input_segment_by_request_id(state, normalized_lookup_id)
+            if segment is None or segment.request_user_input is None:
+                raise FileNotFoundError(normalized_lookup_id)
+            request = RequestUserInputRecord.from_dict(segment.request_user_input.to_dict())
+            normalized_answers = _normalize_request_user_input_answers(request, answers)
+            if segment.status == "complete" or request.status == "answered":
+                if request.answers == normalized_answers:
+                    return state.to_dict()
+                raise ValueError("That conversation request is already answered.")
+            request_id = request.request_id
+
+        with self._sessions_lock:
+            session = self._sessions.get(conversation_id)
+        if session is None or not session.has_pending_request_user_input(request_id):
+            raise RuntimeError("Conversation is not waiting for that user input request.")
+        if not session.submit_request_user_input_answers(request_id, normalized_answers):
+            raise RuntimeError("Conversation could not accept that user input answer.")
+
+        with self._lock:
+            state = self._read_state(conversation_id, normalized_project_path)
+            if state is None:
+                raise FileNotFoundError(conversation_id)
+            segment = self._request_user_input_segment_by_request_id(state, request_id)
+            if segment is None or segment.request_user_input is None:
+                raise FileNotFoundError(request_id)
+            request = RequestUserInputRecord.from_dict(segment.request_user_input.to_dict())
+            if segment.status == "complete" or request.status == "answered":
+                if request.answers == normalized_answers:
+                    return state.to_dict()
+                raise ValueError("That conversation request is already answered.")
+            submitted_at = _iso_now()
+            request.status = "answered"
+            request.answers = normalized_answers
+            request.submitted_at = submitted_at
+            segment.status = "complete"
+            segment.updated_at = submitted_at
+            segment.completed_at = submitted_at
+            segment.error = None
+            segment.content = _request_user_input_segment_content(request)
+            segment.request_user_input = request
+            self._upsert_segment(state, segment)
+            self._touch_conversation_state(state)
+            payload = self._build_segment_upsert_payload(state, segment)
+            self._write_state(state)
+            snapshot = state.to_dict()
+
+        self._publish_progress_payload(progress_callback, payload)
+        return snapshot
 
     def resolve_conversation_handle(self, conversation_handle: str) -> tuple[str, str]:
         return self._repository.resolve_conversation_handle(conversation_handle)

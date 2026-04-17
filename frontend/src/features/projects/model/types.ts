@@ -22,6 +22,27 @@ export interface ConversationTimelineToolCall {
     filePaths: string[]
 }
 
+export interface ConversationTimelineRequestUserInputQuestion {
+    id: string
+    header: string
+    question: string
+    questionType: 'MULTIPLE_CHOICE' | 'FREEFORM'
+    options: Array<{
+        label: string
+        description?: string | null
+    }>
+    allowOther: boolean
+    isSecret: boolean
+}
+
+export interface ConversationTimelineRequestUserInput {
+    requestId: string
+    status: 'pending' | 'answered'
+    questions: ConversationTimelineRequestUserInputQuestion[]
+    answers: Record<string, string>
+    submittedAt?: string | null
+}
+
 export type ConversationTimelineEntry =
     | {
         id: string
@@ -56,6 +77,15 @@ export type ConversationTimelineEntry =
         timestamp: string
         content: string
         status: ConversationSegmentStatus
+    }
+    | {
+        id: string
+        kind: 'request_user_input'
+        role: 'system'
+        timestamp: string
+        content: string
+        status: ConversationSegmentStatus
+        requestUserInput: ConversationTimelineRequestUserInput
     }
     | {
         id: string

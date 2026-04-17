@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
-import type { PendingInterviewGateGroup } from '@/features/runs/model/shared'
+import { submitConversationRequestUserInputValidated } from '@/lib/workspaceClient'
 import { useHomeSidebarLayout } from './useHomeSidebarLayout'
 import { useConversationComposer } from './useConversationComposer'
 import { useConversationReviews } from './useConversationReviews'
@@ -19,62 +19,6 @@ import {
     formatConversationTimestamp,
 } from '../model/projectsHomeState'
 
-const PROJECT_CHAT_PENDING_QUESTION_PREVIEW_GROUPS: PendingInterviewGateGroup[] = [
-    {
-        key: 'project-chat-request-user-input-preview',
-        heading: 'Preview request_user_input',
-        gates: [
-            {
-                eventId: 'preview-multiple-choice',
-                sequence: 1,
-                receivedAt: '2026-04-17T12:00:00Z',
-                nodeId: null,
-                stageIndex: null,
-                sourceScope: 'root',
-                sourceParentNodeId: null,
-                sourceFlowName: null,
-                prompt: 'Which planning path should I take for this change?',
-                questionId: 'preview-multiple-choice',
-                questionType: 'MULTIPLE_CHOICE',
-                options: [
-                    {
-                        label: 'Inline card only',
-                        value: 'inline-card',
-                        key: 'A',
-                        description: 'Keep the request inside the timeline.',
-                    },
-                    {
-                        label: 'Composer takeover',
-                        value: 'composer-takeover',
-                        key: 'B',
-                        description: 'Turn the bottom input into the answer surface.',
-                    },
-                    {
-                        label: 'Hybrid',
-                        value: 'hybrid',
-                        key: 'C',
-                        description: 'Keep the timeline card and mirror controls in the composer.',
-                    },
-                ],
-            },
-            {
-                eventId: 'preview-freeform',
-                sequence: 2,
-                receivedAt: '2026-04-17T12:00:10Z',
-                nodeId: null,
-                stageIndex: null,
-                sourceScope: 'root',
-                sourceParentNodeId: null,
-                sourceFlowName: null,
-                prompt: 'What context or constraints should the final plan preserve?',
-                questionId: 'preview-freeform',
-                questionType: 'FREEFORM',
-                options: [],
-            },
-        ],
-    },
-]
-
 function buildConversationHistoryRevisionKey(history: ConversationTimelineEntry[]) {
     const latestEntry = history.at(-1)
     if (!latestEntry) {
@@ -87,6 +31,8 @@ function buildConversationHistoryRevisionKey(history: ConversationTimelineEntry[
         return `${history.length}:${latestEntry.kind}:${latestEntry.id}:${latestEntry.mode}:${latestEntry.timestamp}`
     case 'context_compaction':
         return `${history.length}:${latestEntry.kind}:${latestEntry.id}:${latestEntry.status}:${latestEntry.content}:${latestEntry.timestamp}`
+    case 'request_user_input':
+        return `${history.length}:${latestEntry.kind}:${latestEntry.id}:${latestEntry.status}:${latestEntry.requestUserInput.status}:${JSON.stringify(latestEntry.requestUserInput.answers)}:${latestEntry.timestamp}`
     case 'tool_call':
         return `${history.length}:${latestEntry.kind}:${latestEntry.id}:${latestEntry.toolCall.status}:${latestEntry.toolCall.output || ''}:${latestEntry.timestamp}`
     case 'final_separator':
@@ -150,6 +96,8 @@ export function useProjectsHomeController() {
         activeConversationId,
         activeProjectPath,
     })
+    const [requestUserInputActionError, setRequestUserInputActionError] = useState<string | null>(null)
+    const [submittingRequestUserInputIds, setSubmittingRequestUserInputIds] = useState<Record<string, boolean>>({})
     const {
         conversationBodyRef,
         homeSidebarRef,
@@ -195,10 +143,6 @@ export function useProjectsHomeController() {
         optimisticSend,
         projectGitMetadata,
     ])
-    const pendingQuestionPreviewGroups = useMemo(
-        () => (activeConversationId && activeChatMode === 'plan' ? PROJECT_CHAT_PENDING_QUESTION_PREVIEW_GROUPS : []),
-        [activeConversationId, activeChatMode],
-    )
     const conversationHistoryRevisionKey = useMemo(
         () => buildConversationHistoryRevisionKey(activeConversationHistory),
         [activeConversationHistory],
@@ -241,6 +185,11 @@ export function useProjectsHomeController() {
     useEffect(() => {
         resetComposerRef.current()
     }, [activeProjectPath])
+
+    useEffect(() => {
+        setRequestUserInputActionError(null)
+        setSubmittingRequestUserInputIds({})
+    }, [activeConversationId])
 
     useEffect(() => {
         isConversationPinnedToBottomRef.current = isConversationPinnedToBottom
@@ -326,6 +275,38 @@ export function useProjectsHomeController() {
         setViewMode('runs')
     }
 
+    const onSubmitRequestUserInput = useCallback(async (requestId: string, answers: Record<string, string>) => {
+        if (!activeConversationId || !activeProjectPath) {
+            return
+        }
+        setRequestUserInputActionError(null)
+        setSubmittingRequestUserInputIds((current) => ({
+            ...current,
+            [requestId]: true,
+        }))
+        try {
+            const snapshot = await submitConversationRequestUserInputValidated(
+                activeConversationId,
+                requestId,
+                {
+                    project_path: activeProjectPath,
+                    answers,
+                },
+            )
+            applyConversationSnapshot(activeProjectPath, snapshot, 'request-user-input-answer')
+        } catch (error) {
+            const message = extractApiErrorMessage(error, 'Unable to submit the requested input.')
+            setRequestUserInputActionError(message)
+            appendLocalProjectEvent(`Project chat request_user_input failed: ${message}`)
+        } finally {
+            setSubmittingRequestUserInputIds((current) => {
+                const next = { ...current }
+                delete next[requestId]
+                return next
+            })
+        }
+    }, [activeConversationId, activeProjectPath, appendLocalProjectEvent, applyConversationSnapshot])
+
     return {
         isNarrowViewport,
         historyProps: {
@@ -333,7 +314,6 @@ export function useProjectsHomeController() {
             isConversationHistoryLoading,
             hasRenderableConversationHistory,
             activeConversationHistory,
-            pendingQuestionPreviewGroups,
             activeFlowRunRequestsById,
             activeFlowLaunchesById,
             latestFlowRunRequestId,
@@ -341,7 +321,10 @@ export function useProjectsHomeController() {
             expandedToolCalls,
             expandedThinkingEntries,
             pendingFlowRunRequestId,
+            requestUserInputActionError,
+            submittingRequestUserInputIds,
             formatConversationTimestamp,
+            onSubmitRequestUserInput,
             onToggleToolCallExpanded: toggleToolCallExpanded,
             onToggleThinkingEntryExpanded: toggleThinkingEntryExpanded,
             onReviewFlowRunRequest,

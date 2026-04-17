@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import gc
 import json
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import pytest
+from fastapi.testclient import TestClient
 
 import attractor.api.server as server
 import spark.app as product_app
@@ -22,6 +25,11 @@ from spark.authoring_assets import (
 )
 from tests.support.flow_fixtures import seed_flow_fixture
 from spark.chat.prompt_templates import PROMPTS_FILE_NAME
+from spark.workspace.conversations.models import (
+    RequestUserInputOption,
+    RequestUserInputQuestion,
+    RequestUserInputRecord,
+)
 from spark.workspace.storage import conversation_handles_path, ensure_project_paths
 
 
@@ -70,6 +78,7 @@ class StubChatClient:
         self.run_turn_handler: Optional[Callable[..., CodexAppServerTurnResult]] = None
         self.raw_logger = None
         self.closed = False
+        self.sent_responses: list[dict[str, Any]] = []
 
     def close(self) -> None:
         self.closed = True
@@ -107,6 +116,20 @@ class StubChatClient:
             return self.run_turn_handler(**kwargs)
         return _completed_turn_result(thread_id=kwargs["thread_id"])
 
+    def send_response(
+        self,
+        request_id: Any,
+        result: Optional[dict[str, Any]] = None,
+        error: Optional[dict[str, Any]] = None,
+    ) -> None:
+        self.sent_responses.append(
+            {
+                "request_id": request_id,
+                "result": result,
+                "error": error,
+            }
+        )
+
     def default_model(self) -> Optional[str]:
         return self.default_model_result
 
@@ -136,6 +159,36 @@ def _seed_flow(name: str) -> None:
     seed_flow_fixture(product_app.get_settings().flows_dir, "minimal-valid.dot", as_name=name)
 
 
+def _request_user_input_record(request_id: str = "request-1") -> RequestUserInputRecord:
+    return RequestUserInputRecord(
+        request_id=request_id,
+        status="pending",
+        questions=[
+            RequestUserInputQuestion(
+                id="path_choice",
+                header="Path",
+                question="Which path should I take?",
+                question_type="MULTIPLE_CHOICE",
+                options=[
+                    RequestUserInputOption(label="Inline card", description="Keep the request inline."),
+                    RequestUserInputOption(label="Composer takeover", description="Move the request into the composer."),
+                ],
+                allow_other=True,
+                is_secret=False,
+            ),
+            RequestUserInputQuestion(
+                id="constraints",
+                header="Constraints",
+                question="What constraints matter?",
+                question_type="FREEFORM",
+                options=[],
+                allow_other=False,
+                is_secret=False,
+            ),
+        ],
+    )
+
+
 def test_extract_command_text_handles_list_and_string_payloads() -> None:
     assert codex_app_server.extract_command_text({"command": ["git", "status", "--short"]}) == "git status --short"
     assert codex_app_server.extract_command_text({"commandLine": "npm test"}) == "npm test"
@@ -156,6 +209,84 @@ def test_parse_chat_response_payload_accepts_plain_text_and_json() -> None:
         "assistant_message": "Hello.",
         "flow_run_request": None,
     }
+
+
+def test_codex_app_server_chat_session_resumes_request_user_input_after_answer_submission() -> None:
+    session = project_chat_session.CodexAppServerChatSession("/tmp/project-chat")
+    stub_client = StubChatClient()
+    session._client = stub_client
+    events: list[project_chat.ChatTurnLiveEvent] = []
+
+    def run_turn_handler(**kwargs) -> CodexAppServerTurnResult:
+        on_turn_started = kwargs.get("on_turn_started")
+        if on_turn_started is not None:
+            on_turn_started("app-turn-1")
+
+        def answer_request() -> None:
+            time.sleep(0.05)
+            accepted = session.submit_request_user_input_answers(
+                "path_choice",
+                {"path_choice": "Inline card"},
+            )
+            assert accepted is True
+
+        responder = threading.Thread(target=answer_request, daemon=True)
+        responder.start()
+        kwargs["server_request_handler"](
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "item/tool/requestUserInput",
+                "params": {
+                    "threadId": "thread-123",
+                    "turnId": "turn-123",
+                    "itemId": "request-1",
+                    "questions": [
+                        {
+                            "header": "Path",
+                            "id": "path_choice",
+                            "question": "Which path should I take?",
+                            "isOther": True,
+                            "isSecret": False,
+                            "options": [
+                                {"label": "Inline card", "description": "Keep the request inline."},
+                                {"label": "Composer takeover", "description": "Move the request into the composer."},
+                            ],
+                        },
+                    ],
+                },
+            }
+        )
+        responder.join(timeout=1)
+        kwargs["on_event"](
+            codex_app_server.CodexAppServerTurnEvent(
+                kind="assistant_message_completed",
+                text="ANSWER=Inline card",
+                item_id="msg-1",
+                phase="final_answer",
+            )
+        )
+        return _completed_turn_result(
+            thread_id=kwargs["thread_id"],
+            assistant_message="ANSWER=Inline card",
+        )
+
+    stub_client.run_turn_handler = run_turn_handler
+
+    result = session.turn(
+        "Use request_user_input.",
+        "gpt-test",
+        chat_mode="plan",
+        on_event=events.append,
+    )
+
+    request_events = [event for event in events if event.kind == "request_user_input_requested"]
+
+    assert result.assistant_message == "ANSWER=Inline card"
+    assert len(request_events) == 1
+    assert request_events[0].request_user_input is not None
+    assert request_events[0].request_user_input.request_id == "request-1"
+    assert [question.id for question in request_events[0].request_user_input.questions] == ["path_choice"]
 
 
 def test_project_chat_service_creates_default_prompt_templates_file(tmp_path: Path) -> None:
@@ -1581,6 +1712,199 @@ def test_send_turn_deduplicates_context_compaction_duplicate_completion_signals(
     assert [payload["status"] for payload in compaction_payloads] == ["running", "complete"]
 
 
+def test_request_user_input_segments_persist_and_answer_in_place(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    progress_updates: list[dict[str, Any]] = []
+
+    class WaitingRequestSession:
+        def __init__(self) -> None:
+            self._answer_event = threading.Event()
+            self._answers: dict[str, str] = {}
+
+        def has_pending_request_user_input(self, request_id: str) -> bool:
+            return request_id == "request-1" and not self._answer_event.is_set()
+
+        def submit_request_user_input_answers(self, request_id: str, answers: dict[str, str]) -> bool:
+            if request_id != "request-1":
+                return False
+            self._answers = dict(answers)
+            self._answer_event.set()
+            return True
+
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="request_user_input_requested",
+                        app_turn_id="app-turn-1",
+                        item_id="request-1",
+                        request_user_input=_request_user_input_record(),
+                    )
+                )
+            assert self._answer_event.wait(timeout=2)
+            assistant_message = (
+                f"ANSWER={self._answers['path_choice']} / {self._answers['constraints']}"
+            )
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta=assistant_message,
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
+            return project_chat.ChatTurnResult(assistant_message=assistant_message)
+
+    waiting_session = WaitingRequestSession()
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: waiting_session)
+    with service._sessions_lock:
+        service._sessions["conversation-request-user-input"] = waiting_session
+
+    service.start_turn(
+        "conversation-request-user-input",
+        str(tmp_path),
+        "Ask for the missing decision.",
+        None,
+        "plan",
+        progress_callback=progress_updates.append,
+    )
+
+    deadline = time.time() + 2.0
+    pending_snapshot: dict[str, Any] | None = None
+    while time.time() < deadline:
+        candidate = service.get_snapshot("conversation-request-user-input", str(tmp_path))
+        request_segments = [segment for segment in candidate["segments"] if segment["kind"] == "request_user_input"]
+        if request_segments:
+            pending_snapshot = candidate
+            break
+        time.sleep(0.02)
+
+    assert pending_snapshot is not None
+    request_segments = [segment for segment in pending_snapshot["segments"] if segment["kind"] == "request_user_input"]
+    assert len(request_segments) == 1
+    assert request_segments[0]["status"] == "pending"
+    assert request_segments[0]["request_user_input"]["status"] == "pending"
+
+    answered_snapshot = service.submit_request_user_input_answer(
+        "conversation-request-user-input",
+        str(tmp_path),
+        "path_choice",
+        {
+            "path_choice": "Inline card",
+            "constraints": "Preserve the inline timeline.",
+        },
+        progress_callback=progress_updates.append,
+    )
+
+    answered_request_segments = [
+        segment for segment in answered_snapshot["segments"] if segment["kind"] == "request_user_input"
+    ]
+    assert len(answered_request_segments) == 1
+    assert answered_request_segments[0]["status"] == "complete"
+    assert answered_request_segments[0]["request_user_input"]["status"] == "answered"
+    assert answered_request_segments[0]["request_user_input"]["answers"] == {
+        "path_choice": "Inline card",
+        "constraints": "Preserve the inline timeline.",
+    }
+
+    deadline = time.time() + 2.0
+    final_snapshot: dict[str, Any] | None = None
+    while time.time() < deadline:
+        candidate = service.get_snapshot("conversation-request-user-input", str(tmp_path))
+        if candidate["turns"][-1]["status"] == "complete":
+            final_snapshot = candidate
+            break
+        time.sleep(0.02)
+
+    assert final_snapshot is not None
+    assert final_snapshot["turns"][-1]["content"] == "ANSWER=Inline card / Preserve the inline timeline."
+    assert [segment["kind"] for segment in final_snapshot["segments"]] == [
+        "request_user_input",
+        "assistant_message",
+    ]
+    request_payloads = [
+        payload["segment"]
+        for payload in progress_updates
+        if payload.get("type") == "segment_upsert" and payload["segment"]["kind"] == "request_user_input"
+    ]
+    assert [payload["status"] for payload in request_payloads] == ["pending", "complete"]
+
+
+def test_conversation_request_user_input_segments_remain_scoped_to_their_conversation(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    project_path = str(tmp_path)
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-with-request",
+            project_path=project_path,
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="Ask me the missing question.",
+                    timestamp="2026-04-17T12:00:00Z",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-1",
+                    role="assistant",
+                    content="",
+                    timestamp="2026-04-17T12:00:01Z",
+                    status="streaming",
+                    parent_turn_id="turn-user-1",
+                ),
+            ],
+            segments=[
+                project_chat.ConversationSegment(
+                    id="segment-request-user-input-app-turn-1-request-1",
+                    turn_id="turn-assistant-1",
+                    order=1,
+                    kind="request_user_input",
+                    role="system",
+                    status="pending",
+                    timestamp="2026-04-17T12:00:02Z",
+                    updated_at="2026-04-17T12:00:02Z",
+                    content="Which path should I take?",
+                    request_user_input=_request_user_input_record(),
+                ),
+            ],
+        )
+    )
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-clean",
+            project_path=project_path,
+            chat_mode="plan",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-mode-1",
+                    role="system",
+                    content="plan",
+                    timestamp="2026-04-17T12:05:00Z",
+                    kind="mode_change",
+                ),
+            ],
+        )
+    )
+
+    clean_snapshot = service.get_snapshot("conversation-clean", project_path)
+
+    assert clean_snapshot["conversation_id"] == "conversation-clean"
+    assert clean_snapshot["segments"] == []
+
+
 def test_send_turn_persists_plan_mode_assistant_remainder_after_completion(
     tmp_path: Path,
     monkeypatch,
@@ -2697,6 +3021,232 @@ def test_send_project_conversation_turn_endpoint_switches_chat_mode_atomically(
     assert final_snapshot["turns"][0]["content"] == "plan"
     assert final_snapshot["turns"][1]["content"] == "Plan the mode switch."
     assert final_snapshot["turns"][-1]["content"] == "Mode switch acknowledged."
+
+
+def test_submit_project_conversation_request_user_input_endpoint_updates_existing_segment(
+    product_api_client,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    service = _project_chat_service()
+
+    class WaitingRequestSession:
+        def __init__(self) -> None:
+            self._answer_event = threading.Event()
+            self._answers: dict[str, str] = {}
+
+        def has_pending_request_user_input(self, request_id: str) -> bool:
+            return request_id == "request-1" and not self._answer_event.is_set()
+
+        def submit_request_user_input_answers(self, request_id: str, answers: dict[str, str]) -> bool:
+            if request_id != "request-1":
+                return False
+            self._answers = dict(answers)
+            self._answer_event.set()
+            return True
+
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="request_user_input_requested",
+                        app_turn_id="app-turn-1",
+                        item_id="request-1",
+                        request_user_input=_request_user_input_record(),
+                    )
+                )
+            assert self._answer_event.wait(timeout=2)
+            assistant_message = f"ANSWER={self._answers['path_choice']}"
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta=assistant_message,
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
+            return project_chat.ChatTurnResult(assistant_message=assistant_message)
+
+    waiting_session = WaitingRequestSession()
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: waiting_session)
+    with service._sessions_lock:
+        service._sessions["conversation-request-answer"] = waiting_session
+
+    start_response = product_api_client.post(
+        "/workspace/api/conversations/conversation-request-answer/turns",
+        json={
+            "project_path": str(tmp_path),
+            "message": "Ask for a decision.",
+            "chat_mode": "plan",
+        },
+    )
+
+    assert start_response.status_code == 200
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        candidate = service.get_snapshot("conversation-request-answer", str(tmp_path))
+        if any(segment["kind"] == "request_user_input" for segment in candidate["segments"]):
+            break
+        time.sleep(0.02)
+
+    response = product_api_client.post(
+        "/workspace/api/conversations/conversation-request-answer/request-user-input/request-1/answer",
+        json={
+            "project_path": str(tmp_path),
+            "answers": {
+                "path_choice": "Inline card",
+                "constraints": "Keep the request inline.",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    request_segments = [segment for segment in payload["segments"] if segment["kind"] == "request_user_input"]
+    assert len(request_segments) == 1
+    assert request_segments[0]["request_user_input"]["status"] == "answered"
+    assert request_segments[0]["request_user_input"]["answers"]["path_choice"] == "Inline card"
+
+
+def test_request_user_input_background_completion_stays_safe_after_api_client_closes(
+    monkeypatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    service = _project_chat_service()
+    conversation_id = "conversation-request-lifecycle"
+
+    class DeferredCompletionSession:
+        def __init__(self) -> None:
+            self._answer_event = threading.Event()
+            self._allow_completion_event = threading.Event()
+            self.completed = threading.Event()
+            self._answers: dict[str, str] = {}
+
+        def has_pending_request_user_input(self, request_id: str) -> bool:
+            return request_id == "request-1" and not self._answer_event.is_set()
+
+        def submit_request_user_input_answers(self, request_id: str, answers: dict[str, str]) -> bool:
+            if request_id != "request-1":
+                return False
+            self._answers = dict(answers)
+            self._answer_event.set()
+            return True
+
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="request_user_input_requested",
+                        app_turn_id="app-turn-1",
+                        item_id="request-1",
+                        request_user_input=_request_user_input_record(),
+                    )
+                )
+            assert self._answer_event.wait(timeout=2)
+            assert self._allow_completion_event.wait(timeout=2)
+            assistant_message = (
+                f"ANSWER={self._answers['path_choice']} / {self._answers['constraints']}"
+            )
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta=assistant_message,
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
+            self.completed.set()
+            return project_chat.ChatTurnResult(assistant_message=assistant_message)
+
+    waiting_session = DeferredCompletionSession()
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: waiting_session)
+    with service._sessions_lock:
+        service._sessions[conversation_id] = waiting_session
+
+    with caplog.at_level(logging.WARNING, logger=project_chat.__name__):
+        with TestClient(product_app.app) as client:
+            start_response = client.post(
+                f"/workspace/api/conversations/{conversation_id}/turns",
+                json={
+                    "project_path": str(tmp_path),
+                    "message": "Ask for a decision.",
+                    "chat_mode": "plan",
+                },
+            )
+
+            assert start_response.status_code == 200
+
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                candidate = service.get_snapshot(conversation_id, str(tmp_path))
+                if any(segment["kind"] == "request_user_input" for segment in candidate["segments"]):
+                    break
+                time.sleep(0.02)
+
+            response = client.post(
+                f"/workspace/api/conversations/{conversation_id}/request-user-input/request-1/answer",
+                json={
+                    "project_path": str(tmp_path),
+                    "answers": {
+                        "path_choice": "Inline card",
+                        "constraints": "Keep the request inline.",
+                    },
+                },
+            )
+
+            assert response.status_code == 200
+            assert waiting_session._answer_event.wait(timeout=1)
+
+        waiting_session._allow_completion_event.set()
+
+        deadline = time.time() + 2.0
+        final_snapshot: dict[str, Any] | None = None
+        while time.time() < deadline:
+            candidate = service.get_snapshot(conversation_id, str(tmp_path))
+            if candidate["turns"][-1]["status"] == "complete":
+                final_snapshot = candidate
+                break
+            time.sleep(0.02)
+
+        assert final_snapshot is not None
+        assert waiting_session.completed.wait(timeout=1)
+
+    gc.collect()
+
+    assert final_snapshot["turns"][-1]["content"] == "ANSWER=Inline card / Keep the request inline."
+    assert not [
+        record
+        for record in caplog.records
+        if "project chat background turn ended with runtime error" in record.getMessage()
+    ]
+    assert not [
+        warning
+        for warning in recwarn
+        if "ConversationEventHub.publish" in str(warning.message) and "never awaited" in str(warning.message)
+    ]
 
 
 def test_snapshot_rejects_unsupported_turn_event_only_payload(tmp_path: Path) -> None:

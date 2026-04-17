@@ -5,58 +5,15 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ProjectConversationHistory } from '@/features/projects/components/ProjectConversationHistory'
 import type { ConversationTimelineEntry } from '@/features/projects/model/types'
-import type { PendingInterviewGateGroup } from '@/features/runs/model/shared'
 
 const formatConversationTimestamp = (value: string) => `formatted:${value}`
-
-const pendingQuestionPreviewGroups: PendingInterviewGateGroup[] = [
-    {
-        key: 'preview-group',
-        heading: 'Preview request_user_input',
-        gates: [
-            {
-                eventId: 'gate-multiple-choice',
-                sequence: 1,
-                receivedAt: '2026-04-17T12:00:00Z',
-                nodeId: null,
-                stageIndex: null,
-                sourceScope: 'root',
-                sourceParentNodeId: null,
-                sourceFlowName: null,
-                prompt: 'Which path should I take?',
-                questionId: 'gate-multiple-choice',
-                questionType: 'MULTIPLE_CHOICE',
-                options: [
-                    {
-                        label: 'Inline card only',
-                        value: 'inline-card',
-                        key: 'A',
-                        description: 'Keep the request inside the timeline.',
-                    },
-                ],
-            },
-            {
-                eventId: 'gate-freeform',
-                sequence: 2,
-                receivedAt: '2026-04-17T12:00:10Z',
-                nodeId: null,
-                stageIndex: null,
-                sourceScope: 'root',
-                sourceParentNodeId: null,
-                sourceFlowName: null,
-                prompt: 'What constraints matter?',
-                questionId: 'gate-freeform',
-                questionType: 'FREEFORM',
-                options: [],
-            },
-        ],
-    },
-]
 
 const renderHistory = (
     activeConversationHistory: ConversationTimelineEntry[],
     overrides: {
-        pendingQuestionPreviewGroups?: PendingInterviewGateGroup[]
+        onSubmitRequestUserInput?: (requestId: string, answers: Record<string, string>) => void | Promise<void>
+        requestUserInputActionError?: string | null
+        submittingRequestUserInputIds?: Record<string, boolean>
     } = {},
 ) =>
     render(
@@ -65,7 +22,6 @@ const renderHistory = (
             isConversationHistoryLoading={false}
             hasRenderableConversationHistory={activeConversationHistory.length > 0}
             activeConversationHistory={activeConversationHistory}
-            pendingQuestionPreviewGroups={overrides.pendingQuestionPreviewGroups ?? []}
             activeFlowRunRequestsById={new Map()}
             activeFlowLaunchesById={new Map()}
             latestFlowRunRequestId={null}
@@ -73,7 +29,10 @@ const renderHistory = (
             expandedToolCalls={{}}
             expandedThinkingEntries={{}}
             pendingFlowRunRequestId={null}
+            requestUserInputActionError={overrides.requestUserInputActionError ?? null}
+            submittingRequestUserInputIds={overrides.submittingRequestUserInputIds ?? {}}
             formatConversationTimestamp={formatConversationTimestamp}
+            onSubmitRequestUserInput={overrides.onSubmitRequestUserInput ?? vi.fn()}
             onToggleToolCallExpanded={vi.fn()}
             onToggleThinkingEntryExpanded={vi.fn()}
             onReviewFlowRunRequest={vi.fn()}
@@ -95,7 +54,6 @@ const InteractiveHistory = ({
             isConversationHistoryLoading={false}
             hasRenderableConversationHistory
             activeConversationHistory={activeConversationHistory}
-            pendingQuestionPreviewGroups={[]}
             activeFlowRunRequestsById={new Map()}
             activeFlowLaunchesById={new Map()}
             latestFlowRunRequestId={null}
@@ -103,7 +61,10 @@ const InteractiveHistory = ({
             expandedToolCalls={expandedToolCalls}
             expandedThinkingEntries={expandedThinkingEntries}
             pendingFlowRunRequestId={null}
+            requestUserInputActionError={null}
+            submittingRequestUserInputIds={{}}
             formatConversationTimestamp={formatConversationTimestamp}
+            onSubmitRequestUserInput={vi.fn()}
             onToggleToolCallExpanded={(toolCallId) =>
                 setExpandedToolCalls((current) => ({
                     ...current,
@@ -172,6 +133,52 @@ const makeContextCompactionEntry = (
     timestamp: overrides.timestamp ?? '2026-04-16T15:27:47Z',
     content: overrides.content ?? 'Context compacted to continue the turn.',
     status: overrides.status ?? 'complete',
+})
+
+const makeRequestUserInputEntry = (
+    overrides: Partial<Extract<ConversationTimelineEntry, { kind: 'request_user_input' }>> = {},
+): Extract<ConversationTimelineEntry, { kind: 'request_user_input' }> => ({
+    id: overrides.id ?? 'request-user-input-1',
+    kind: 'request_user_input',
+    role: 'system',
+    timestamp: overrides.timestamp ?? '2026-04-17T12:00:00Z',
+    content: overrides.content ?? 'Which path should I take?',
+    status: overrides.status ?? 'pending',
+    requestUserInput: overrides.requestUserInput ?? {
+        requestId: 'request-1',
+        status: 'pending',
+        questions: [
+            {
+                id: 'path_choice',
+                header: 'Path',
+                question: 'Which path should I take?',
+                questionType: 'MULTIPLE_CHOICE',
+                options: [
+                    {
+                        label: 'Inline card',
+                        description: 'Keep the request inside the timeline.',
+                    },
+                    {
+                        label: 'Composer takeover',
+                        description: 'Move the unanswered state into the composer.',
+                    },
+                ],
+                allowOther: true,
+                isSecret: false,
+            },
+            {
+                id: 'constraints',
+                header: 'Constraints',
+                question: 'What constraints matter?',
+                questionType: 'FREEFORM',
+                options: [],
+                allowOther: false,
+                isSecret: false,
+            },
+        ],
+        answers: {},
+        submittedAt: null,
+    },
 })
 
 const makePlanEntry = (
@@ -245,28 +252,62 @@ describe('ProjectConversationHistory', () => {
         expect(within(planCard).getByText('Add the transport regression.')).toBeVisible()
     })
 
-    it('renders the pending-questions preview inline and keeps answers local', async () => {
+    it('renders unanswered request_user_input segments inline and submits answers through the real callback', async () => {
         const user = userEvent.setup()
+        const onSubmitRequestUserInput = vi.fn()
 
         renderHistory([
-            makeModeChangeEntry(),
+            makeRequestUserInputEntry(),
         ], {
-            pendingQuestionPreviewGroups,
+            onSubmitRequestUserInput,
         })
 
-        const previewPanel = screen.getByTestId('run-pending-human-gates-panel')
-        expect(within(previewPanel).getByText('Pending Questions')).toBeVisible()
-        expect(within(previewPanel).getByText('Which path should I take?')).toBeVisible()
-        expect(within(previewPanel).getByText('What constraints matter?')).toBeVisible()
-        expect(screen.getByTestId('project-pending-questions-preview-note')).toHaveTextContent(
-            'Preview only. Answers stay local to this browser session and are not sent.',
-        )
+        const card = screen.getByTestId('project-request-user-input-card-request-user-input-1')
+        expect(within(card).getByText('Needs Input')).toBeVisible()
+        expect(within(card).getByText('Which path should I take?')).toBeVisible()
+        expect(within(card).getByText('What constraints matter?')).toBeVisible()
+        expect(screen.queryByTestId('project-pending-questions-preview-note')).not.toBeInTheDocument()
 
-        await user.click(screen.getByTestId('run-pending-human-gate-answer-inline-card'))
+        await user.click(screen.getByTestId('project-request-user-input-option-path_choice-Inline card'))
+        await user.type(screen.getByTestId('project-request-user-input-field-constraints'), 'Preserve the inline timeline.')
+        await user.click(screen.getByTestId('project-request-user-input-submit-request-1'))
 
-        expect(screen.getByTestId('project-pending-questions-preview-answer')).toHaveTextContent(
-            'Preview captured for gate-multiple-choice: inline-card',
-        )
+        expect(onSubmitRequestUserInput).toHaveBeenCalledWith('request-1', {
+            path_choice: 'Inline card',
+            constraints: 'Preserve the inline timeline.',
+        })
+    })
+
+    it('renders answered request_user_input segments as compact summaries', () => {
+        renderHistory([
+            makeRequestUserInputEntry({
+                status: 'complete',
+                requestUserInput: {
+                    requestId: 'request-1',
+                    status: 'answered',
+                    questions: [
+                        {
+                            id: 'path_choice',
+                            header: 'Path',
+                            question: 'Which path should I take?',
+                            questionType: 'MULTIPLE_CHOICE',
+                            options: [],
+                            allowOther: false,
+                            isSecret: false,
+                        },
+                    ],
+                    answers: {
+                        path_choice: 'Inline card',
+                    },
+                    submittedAt: '2026-04-17T12:01:00Z',
+                },
+            }),
+        ])
+
+        const summary = screen.getByTestId('project-request-user-input-summary-request-user-input-1')
+        expect(within(summary).getByText('Answered Request')).toBeVisible()
+        expect(within(summary).getByText('Which path should I take?')).toBeVisible()
+        expect(within(summary).getByText('Inline card')).toBeVisible()
     })
 
     it('renders assistant markdown links as plain labels without anchors', () => {
