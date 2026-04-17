@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import type {
     ConversationTimelineEntry,
     ProjectFlowLaunch,
     ProjectFlowRunRequest,
+    ProjectProposedPlan,
 } from '../model/types'
 import {
     ProjectFlowLaunchEntry,
@@ -12,6 +14,7 @@ import { ProjectConversationRequestUserInputCard } from './ProjectConversationRe
 import {
     getFlowLaunchStatusPresentation,
     getFlowRunRequestStatusPresentation,
+    getProposedPlanStatusPresentation,
     getSurfaceToneClassName,
     getToolCallStatusPresentation,
     parseThinkingSummaryContent,
@@ -19,6 +22,7 @@ import {
 } from '../model/presentation'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ProjectConversationMarkdown } from './ProjectConversationMarkdown'
 interface ProjectConversationHistoryProps {
     activeConversationId: string | null
@@ -27,11 +31,13 @@ interface ProjectConversationHistoryProps {
     activeConversationHistory: ConversationTimelineEntry[]
     activeFlowRunRequestsById: Map<string, ProjectFlowRunRequest>
     activeFlowLaunchesById: Map<string, ProjectFlowLaunch>
+    activeProposedPlansById: Map<string, ProjectProposedPlan>
     latestFlowRunRequestId: string | null
     latestFlowLaunchId: string | null
     expandedToolCalls: Record<string, boolean>
     expandedThinkingEntries: Record<string, boolean>
     pendingFlowRunRequestId: string | null
+    pendingProposedPlanId: string | null
     requestUserInputActionError: string | null
     submittingRequestUserInputIds: Record<string, boolean>
     formatConversationTimestamp: (value: string) => string
@@ -41,6 +47,11 @@ interface ProjectConversationHistoryProps {
     onReviewFlowRunRequest: (
         flowRunRequest: ProjectFlowRunRequest,
         disposition: 'approved' | 'rejected',
+    ) => void | Promise<void>
+    onReviewProposedPlan: (
+        proposedPlan: ProjectProposedPlan,
+        disposition: 'approved' | 'rejected',
+        reviewNote?: string | null,
     ) => void | Promise<void>
     onOpenFlowRun: (request: { run_id?: string | null; flow_name: string }) => void
 }
@@ -52,11 +63,13 @@ export function ProjectConversationHistory({
     activeConversationHistory,
     activeFlowRunRequestsById,
     activeFlowLaunchesById,
+    activeProposedPlansById,
     latestFlowRunRequestId,
     latestFlowLaunchId,
     expandedToolCalls,
     expandedThinkingEntries,
     pendingFlowRunRequestId,
+    pendingProposedPlanId,
     requestUserInputActionError,
     submittingRequestUserInputIds,
     formatConversationTimestamp,
@@ -64,8 +77,11 @@ export function ProjectConversationHistory({
     onToggleToolCallExpanded,
     onToggleThinkingEntryExpanded,
     onReviewFlowRunRequest,
+    onReviewProposedPlan,
     onOpenFlowRun,
 }: ProjectConversationHistoryProps) {
+    const [planReviewNotes, setPlanReviewNotes] = useState<Record<string, string>>({})
+
     return (
         <div data-testid="project-ai-conversation-history" className="flex min-h-0 flex-col">
             {isConversationHistoryLoading && !hasRenderableConversationHistory ? (
@@ -303,20 +319,122 @@ export function ProjectConversationHistory({
                             const content = entry.status === 'failed' && !entry.content.trim()
                                 ? (entry.error || 'Plan generation failed.')
                                 : entry.content
+                            const proposedPlan = entry.artifactId
+                                ? (activeProposedPlansById.get(entry.artifactId) || null)
+                                : null
+                            const planLaunch = proposedPlan?.flow_launch_id
+                                ? (activeFlowLaunchesById.get(proposedPlan.flow_launch_id) || null)
+                                : null
+                            const statusPresentation = proposedPlan
+                                ? getProposedPlanStatusPresentation(proposedPlan.status)
+                                : null
+                            const reviewNoteValue = proposedPlan
+                                ? (planReviewNotes[proposedPlan.id] ?? proposedPlan.review_note ?? '')
+                                : ''
+                            const launchRunId = proposedPlan?.run_id ?? planLaunch?.run_id ?? null
+                            const launchFlowName = planLaunch?.flow_name || 'implement-from-plan.dot'
                             return (
                                 <li key={key} className="flex justify-start">
                                     <div
                                         data-testid={`project-plan-card-${entry.id}`}
                                         className="max-w-[85%] rounded-md border border-emerald-400/40 bg-emerald-50/60 px-3 py-2 text-foreground"
                                     >
-                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800/80">
-                                            Proposed Plan
-                                        </p>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800/80">
+                                                Proposed Plan
+                                            </p>
+                                            {statusPresentation ? (
+                                                <span className={getSurfaceToneClassName(statusPresentation.tone)}>
+                                                    {statusPresentation.label}
+                                                </span>
+                                            ) : null}
+                                        </div>
                                         {entry.status === 'failed' ? (
                                             <p className="whitespace-pre-wrap text-xs leading-5">{content}</p>
                                         ) : (
                                             <ProjectConversationMarkdown content={content} />
                                         )}
+                                        {proposedPlan ? (
+                                            <div className="mt-2 space-y-2 text-[11px] text-emerald-950/75">
+                                                {proposedPlan.review_note ? (
+                                                    <p>
+                                                        Review note: <span className="text-foreground">{proposedPlan.review_note}</span>
+                                                    </p>
+                                                ) : null}
+                                                {proposedPlan.written_plan_path ? (
+                                                    <p className="break-all font-mono text-[10px] text-emerald-950/70">
+                                                        {proposedPlan.written_plan_path}
+                                                    </p>
+                                                ) : null}
+                                                {proposedPlan.launch_error ? (
+                                                    <p className="text-destructive">
+                                                        Launch error: {proposedPlan.launch_error}
+                                                    </p>
+                                                ) : null}
+                                                {launchRunId ? (
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span>
+                                                            Run: <span className="font-mono text-foreground">{launchRunId}</span>
+                                                        </span>
+                                                        <Button
+                                                            type="button"
+                                                            data-testid={`project-proposed-plan-open-run-button-${proposedPlan.id}`}
+                                                            onClick={() => onOpenFlowRun({ run_id: launchRunId, flow_name: launchFlowName })}
+                                                            variant="outline"
+                                                            size="xs"
+                                                            className="px-2 text-xs"
+                                                        >
+                                                            Open run
+                                                        </Button>
+                                                    </div>
+                                                ) : null}
+                                                {proposedPlan.status === 'pending_review' ? (
+                                                    <div className="space-y-2">
+                                                        <Input
+                                                            data-testid={`project-proposed-plan-review-note-${proposedPlan.id}`}
+                                                            value={reviewNoteValue}
+                                                            onChange={(event) => {
+                                                                const nextValue = event.target.value
+                                                                setPlanReviewNotes((current) => ({
+                                                                    ...current,
+                                                                    [proposedPlan.id]: nextValue,
+                                                                }))
+                                                            }}
+                                                            placeholder="Optional review note"
+                                                            className="h-8 border-emerald-500/20 bg-background/80 text-xs"
+                                                        />
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <Button
+                                                                type="button"
+                                                                data-testid={`project-proposed-plan-approve-button-${proposedPlan.id}`}
+                                                                onClick={() => {
+                                                                    void onReviewProposedPlan(proposedPlan, 'approved', reviewNoteValue)
+                                                                }}
+                                                                disabled={pendingProposedPlanId === proposedPlan.id}
+                                                                variant="outline"
+                                                                size="xs"
+                                                                className="px-2 text-xs"
+                                                            >
+                                                                Approve
+                                                            </Button>
+                                                            <Button
+                                                                type="button"
+                                                                data-testid={`project-proposed-plan-reject-button-${proposedPlan.id}`}
+                                                                onClick={() => {
+                                                                    void onReviewProposedPlan(proposedPlan, 'rejected', reviewNoteValue)
+                                                                }}
+                                                                disabled={pendingProposedPlanId === proposedPlan.id}
+                                                                variant="outline"
+                                                                size="xs"
+                                                                className="px-2 text-xs"
+                                                            >
+                                                                Disapprove
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
                                         <p className="mt-1 text-[10px] text-emerald-900/70">
                                             {formatConversationTimestamp(entry.timestamp)}
                                         </p>

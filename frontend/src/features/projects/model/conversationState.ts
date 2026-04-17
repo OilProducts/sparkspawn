@@ -34,6 +34,7 @@ export function ensureConversationSnapshotShell(
         event_log: [],
         flow_run_requests: [],
         flow_launches: [],
+        proposed_plans: [],
     }
 }
 
@@ -129,6 +130,18 @@ function scoreConversationSnapshotFreshness(snapshot: ConversationSnapshotRespon
         }
         return score + 10
     }, 0)
+    const proposedPlanScore = (snapshot.proposed_plans || []).reduce((score, plan) => {
+        if (plan.status === 'launch_failed') {
+            return score + 45
+        }
+        if (plan.status === 'approved') {
+            return score + 35
+        }
+        if (plan.status === 'rejected') {
+            return score + 25
+        }
+        return score + 15
+    }, 0)
     const turnStatusScore = snapshot.turns.reduce((score, turn) => {
         if (turn.status === 'failed') {
             return score + 4
@@ -154,6 +167,7 @@ function scoreConversationSnapshotFreshness(snapshot: ConversationSnapshotRespon
         + eventLogScore
         + flowRunRequestScore
         + flowLaunchScore
+        + proposedPlanScore
     )
 }
 

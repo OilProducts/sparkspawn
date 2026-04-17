@@ -4,14 +4,22 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ProjectConversationHistory } from '@/features/projects/components/ProjectConversationHistory'
-import type { ConversationTimelineEntry } from '@/features/projects/model/types'
+import type {
+    ConversationTimelineEntry,
+    ProjectFlowLaunch,
+    ProjectProposedPlan,
+} from '@/features/projects/model/types'
 
 const formatConversationTimestamp = (value: string) => `formatted:${value}`
 
 const renderHistory = (
     activeConversationHistory: ConversationTimelineEntry[],
     overrides: {
+        activeFlowLaunchesById?: Map<string, ProjectFlowLaunch>
+        activeProposedPlansById?: Map<string, ProjectProposedPlan>
         onSubmitRequestUserInput?: (requestId: string, answers: Record<string, string>) => void | Promise<void>
+        onReviewProposedPlan?: (proposedPlan: ProjectProposedPlan, disposition: 'approved' | 'rejected', reviewNote?: string | null) => void | Promise<void>
+        pendingProposedPlanId?: string | null
         requestUserInputActionError?: string | null
         submittingRequestUserInputIds?: Record<string, boolean>
     } = {},
@@ -23,12 +31,14 @@ const renderHistory = (
             hasRenderableConversationHistory={activeConversationHistory.length > 0}
             activeConversationHistory={activeConversationHistory}
             activeFlowRunRequestsById={new Map()}
-            activeFlowLaunchesById={new Map()}
+            activeFlowLaunchesById={overrides.activeFlowLaunchesById ?? new Map()}
+            activeProposedPlansById={overrides.activeProposedPlansById ?? new Map()}
             latestFlowRunRequestId={null}
             latestFlowLaunchId={null}
             expandedToolCalls={{}}
             expandedThinkingEntries={{}}
             pendingFlowRunRequestId={null}
+            pendingProposedPlanId={overrides.pendingProposedPlanId ?? null}
             requestUserInputActionError={overrides.requestUserInputActionError ?? null}
             submittingRequestUserInputIds={overrides.submittingRequestUserInputIds ?? {}}
             formatConversationTimestamp={formatConversationTimestamp}
@@ -36,6 +46,7 @@ const renderHistory = (
             onToggleToolCallExpanded={vi.fn()}
             onToggleThinkingEntryExpanded={vi.fn()}
             onReviewFlowRunRequest={vi.fn()}
+            onReviewProposedPlan={overrides.onReviewProposedPlan ?? vi.fn()}
             onOpenFlowRun={vi.fn()}
         />,
     )
@@ -56,11 +67,13 @@ const InteractiveHistory = ({
             activeConversationHistory={activeConversationHistory}
             activeFlowRunRequestsById={new Map()}
             activeFlowLaunchesById={new Map()}
+            activeProposedPlansById={new Map()}
             latestFlowRunRequestId={null}
             latestFlowLaunchId={null}
             expandedToolCalls={expandedToolCalls}
             expandedThinkingEntries={expandedThinkingEntries}
             pendingFlowRunRequestId={null}
+            pendingProposedPlanId={null}
             requestUserInputActionError={null}
             submittingRequestUserInputIds={{}}
             formatConversationTimestamp={formatConversationTimestamp}
@@ -78,6 +91,7 @@ const InteractiveHistory = ({
                 }))
             }
             onReviewFlowRunRequest={vi.fn()}
+            onReviewProposedPlan={vi.fn()}
             onOpenFlowRun={vi.fn()}
         />
     )
@@ -190,6 +204,7 @@ const makePlanEntry = (
     content: overrides.content ?? '1. Ship the regression test.\n2. Validate the real session path.',
     timestamp: overrides.timestamp ?? '2026-04-16T15:27:47Z',
     status: overrides.status ?? 'complete',
+    artifactId: overrides.artifactId ?? null,
     error: overrides.error ?? null,
 })
 
@@ -250,6 +265,134 @@ describe('ProjectConversationHistory', () => {
         expect(within(planCard).getByText('Proposed Plan')).toBeVisible()
         expect(within(planCard).getByRole('heading', { level: 2, name: 'Proposed steps' })).toBeVisible()
         expect(within(planCard).getByText('Add the transport regression.')).toBeVisible()
+    })
+
+    it('renders pending proposed plan review controls and submits the inline note', async () => {
+        const user = userEvent.setup()
+        const onReviewProposedPlan = vi.fn()
+
+        renderHistory([
+            makePlanEntry({
+                artifactId: 'proposed-plan-1',
+            }),
+        ], {
+            activeProposedPlansById: new Map([
+                ['proposed-plan-1', {
+                    id: 'proposed-plan-1',
+                    created_at: '2026-04-16T15:27:47Z',
+                    updated_at: '2026-04-16T15:27:47Z',
+                    title: 'Ship the regression',
+                    content: '1. Ship the regression test.\n2. Validate the real session path.',
+                    project_path: '/tmp/project',
+                    conversation_id: 'conversation-1',
+                    source_turn_id: 'turn-assistant-1',
+                    source_segment_id: 'plan-1',
+                    status: 'pending_review',
+                    review_note: null,
+                    written_plan_path: null,
+                    flow_launch_id: null,
+                    run_id: null,
+                    launch_error: null,
+                }],
+            ]),
+            onReviewProposedPlan,
+        })
+
+        expect(screen.getByText('Pending review')).toBeVisible()
+        await user.type(screen.getByTestId('project-proposed-plan-review-note-proposed-plan-1'), 'Ship it.')
+        await user.click(screen.getByTestId('project-proposed-plan-approve-button-proposed-plan-1'))
+
+        expect(onReviewProposedPlan).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'proposed-plan-1' }),
+            'approved',
+            'Ship it.',
+        )
+    })
+
+    it('renders approved proposed plans with written path and run metadata', () => {
+        renderHistory([
+            makePlanEntry({
+                artifactId: 'proposed-plan-1',
+            }),
+        ], {
+            activeFlowLaunchesById: new Map([
+                ['flow-launch-1', {
+                    id: 'flow-launch-1',
+                    created_at: '2026-04-16T15:27:47Z',
+                    updated_at: '2026-04-16T15:28:10Z',
+                    flow_name: 'implement-from-plan.dot',
+                    summary: 'Implement approved plan',
+                    project_path: '/tmp/project',
+                    conversation_id: 'conversation-1',
+                    source_turn_id: 'turn-assistant-1',
+                    source_segment_id: 'segment-artifact-flow-launch-1',
+                    status: 'launched',
+                    goal: null,
+                    launch_context: null,
+                    model: null,
+                    run_id: 'run-123',
+                    launch_error: null,
+                }],
+            ]),
+            activeProposedPlansById: new Map([
+                ['proposed-plan-1', {
+                    id: 'proposed-plan-1',
+                    created_at: '2026-04-16T15:27:47Z',
+                    updated_at: '2026-04-16T15:28:10Z',
+                    title: 'Ship the regression',
+                    content: '1. Ship the regression test.\n2. Validate the real session path.',
+                    project_path: '/tmp/project',
+                    conversation_id: 'conversation-1',
+                    source_turn_id: 'turn-assistant-1',
+                    source_segment_id: 'plan-1',
+                    status: 'approved',
+                    review_note: 'Approved for implementation.',
+                    written_plan_path: '/tmp/project/ship-the-regression.md',
+                    flow_launch_id: 'flow-launch-1',
+                    run_id: 'run-123',
+                    launch_error: null,
+                }],
+            ]),
+        })
+
+        const planCard = screen.getByTestId('project-plan-card-plan-1')
+        expect(within(planCard).getByText('Approved')).toBeVisible()
+        expect(within(planCard).getByText('/tmp/project/ship-the-regression.md')).toBeVisible()
+        expect(within(planCard).getByText('run-123')).toBeVisible()
+        expect(within(planCard).queryByTestId('project-proposed-plan-approve-button-proposed-plan-1')).not.toBeInTheDocument()
+    })
+
+    it('renders rejected proposed plans as locked audit history with the review note', () => {
+        renderHistory([
+            makePlanEntry({
+                artifactId: 'proposed-plan-1',
+            }),
+        ], {
+            activeProposedPlansById: new Map([
+                ['proposed-plan-1', {
+                    id: 'proposed-plan-1',
+                    created_at: '2026-04-16T15:27:47Z',
+                    updated_at: '2026-04-16T15:28:10Z',
+                    title: 'Ship the regression',
+                    content: '1. Ship the regression test.\n2. Validate the real session path.',
+                    project_path: '/tmp/project',
+                    conversation_id: 'conversation-1',
+                    source_turn_id: 'turn-assistant-1',
+                    source_segment_id: 'plan-1',
+                    status: 'rejected',
+                    review_note: 'Needs a rollback plan first.',
+                    written_plan_path: null,
+                    flow_launch_id: null,
+                    run_id: null,
+                    launch_error: null,
+                }],
+            ]),
+        })
+
+        const planCard = screen.getByTestId('project-plan-card-plan-1')
+        expect(within(planCard).getByText('Rejected')).toBeVisible()
+        expect(within(planCard).getByText('Needs a rollback plan first.')).toBeVisible()
+        expect(within(planCard).queryByTestId('project-proposed-plan-reject-button-proposed-plan-1')).not.toBeInTheDocument()
     })
 
     it('renders unanswered request_user_input segments inline and submits answers through the real callback', async () => {

@@ -17,6 +17,7 @@ import type {
     ConversationTimelineEntry,
     ProjectFlowLaunch,
     ProjectFlowRunRequest,
+    ProjectProposedPlan,
 } from './types'
 
 type BuildProjectsHomeViewModelArgs = {
@@ -34,6 +35,7 @@ export type ProjectsHomeViewModel = {
     activeConversationHistory: ConversationTimelineEntry[]
     activeFlowLaunchesById: Map<string, ProjectFlowLaunch>
     activeFlowRunRequestsById: Map<string, ProjectFlowRunRequest>
+    activeProposedPlansById: Map<string, ProjectProposedPlan>
     activeProjectConversationSummaries: ConversationSummaryResponse[]
     activeProjectEventLog: ProjectSessionState['projectEventLog']
     activeProjectGitMetadata: ProjectGitMetadata
@@ -69,6 +71,7 @@ export function buildProjectsHomeViewModel({
     )
     const activeFlowRunRequests = activeConversationSnapshot?.flow_run_requests || []
     const activeFlowLaunches = activeConversationSnapshot?.flow_launches || []
+    const activeProposedPlans = activeConversationSnapshot?.proposed_plans || []
     const hasRenderableConversationHistory = activeConversationHistory.some((entry) => (
         entry.kind === 'mode_change'
         || entry.kind === 'context_compaction'
@@ -90,6 +93,7 @@ export function buildProjectsHomeViewModel({
         activeConversationHistory,
         activeFlowLaunchesById: buildIdMap(activeFlowLaunches),
         activeFlowRunRequestsById: buildIdMap(activeFlowRunRequests),
+        activeProposedPlansById: buildIdMap(activeProposedPlans),
         activeProjectConversationSummaries: activeProjectPath
             ? conversationCache.summariesByProjectPath[activeProjectPath] || []
             : [],

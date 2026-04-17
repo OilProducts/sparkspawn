@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import re
+import unicodedata
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from spark.workspace.conversations.models import (
@@ -11,12 +14,49 @@ from spark.workspace.conversations.models import (
     ConversationTurn,
     FlowLaunch,
     FlowRunRequest,
+    ProposedPlanArtifact,
 )
 from spark.workspace.conversations.repository import ProjectChatRepository
 from spark.workspace.conversations.utils import (
     iso_now,
     normalize_project_path_value,
 )
+
+IMPLEMENT_FROM_PLAN_FLOW = "implement-from-plan.dot"
+_PLAN_HEADING_PATTERN = re.compile(r"(?m)^\s*#\s+(.+?)\s*$")
+_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_MARKDOWN_DECORATION_PATTERN = re.compile(r"[*_~`#>\[\]()!]")
+_NON_SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+
+
+def _strip_markdown_text(value: str) -> str:
+    plain = _MARKDOWN_LINK_PATTERN.sub(r"\1", value)
+    plain = _MARKDOWN_DECORATION_PATTERN.sub("", plain)
+    return " ".join(plain.split()).strip()
+
+
+def _proposed_plan_title(content: str) -> str:
+    match = _PLAN_HEADING_PATTERN.search(content)
+    if match is None:
+        return "Proposed Plan"
+    title = _strip_markdown_text(match.group(1) or "")
+    return title or "Proposed Plan"
+
+
+def _slugify_filename_base(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").lower()
+    collapsed = _NON_SLUG_PATTERN.sub("-", normalized).strip("-")
+    return collapsed or "proposed-plan"
+
+
+def _unique_plan_path(project_root: Path, title: str) -> Path:
+    base_name = _slugify_filename_base(title)
+    candidate = project_root / f"{base_name}.md"
+    suffix = 2
+    while candidate.exists():
+        candidate = project_root / f"{base_name}-{suffix}.md"
+        suffix += 1
+    return candidate
 
 
 class ProjectChatReviewService:
@@ -125,7 +165,9 @@ class ProjectChatReviewService:
         state: ConversationState,
         parent_turn: ConversationTurn,
         flow_launch_payload: dict[str, object],
-    ) -> tuple[FlowLaunch, ConversationSegment]:
+        *,
+        create_segment: bool = True,
+    ) -> tuple[FlowLaunch, Optional[ConversationSegment]]:
         flow_name = str(flow_launch_payload.get("flow_name", "")).strip()
         summary = str(flow_launch_payload.get("summary", "")).strip()
         if not flow_name or not summary:
@@ -148,23 +190,70 @@ class ProjectChatReviewService:
             launch_context=launch_context,
             model=model,
         )
-        launch_segment = ConversationSegment(
-            id=f"segment-artifact-{launch.id}",
-            turn_id=parent_turn.id,
-            order=self._repository.next_turn_segment_order(state, parent_turn.id),
-            kind="flow_launch",
-            role="system",
-            status="complete",
-            timestamp=now,
-            updated_at=now,
-            artifact_id=launch.id,
-            source=ConversationSegmentSource(),
-        )
-        launch.source_segment_id = launch_segment.id
         state.flow_launches.append(launch)
-        self._repository.upsert_segment(state, launch_segment)
+        launch_segment: ConversationSegment | None = None
+        if create_segment:
+            launch_segment = ConversationSegment(
+                id=f"segment-artifact-{launch.id}",
+                turn_id=parent_turn.id,
+                order=self._repository.next_turn_segment_order(state, parent_turn.id),
+                kind="flow_launch",
+                role="system",
+                status="complete",
+                timestamp=now,
+                updated_at=now,
+                artifact_id=launch.id,
+                source=ConversationSegmentSource(),
+            )
+            launch.source_segment_id = launch_segment.id
+            self._repository.upsert_segment(state, launch_segment)
         self._repository.append_event(state, f"Created direct flow launch {launch.id} for {flow_name}.")
         return launch, launch_segment
+
+    def persist_proposed_plan_artifact(
+        self,
+        state: ConversationState,
+        parent_turn: ConversationTurn,
+        plan_segment: ConversationSegment,
+    ) -> ProposedPlanArtifact:
+        if plan_segment.kind != "plan":
+            raise ValueError("Only plan segments can be persisted as proposed plan artifacts.")
+        content = plan_segment.content.strip()
+        if not content:
+            raise ValueError("Proposed plan content is required.")
+        artifact = next(
+            (
+                entry
+                for entry in state.proposed_plans
+                if (
+                    (plan_segment.artifact_id and entry.id == plan_segment.artifact_id)
+                    or entry.source_segment_id == plan_segment.id
+                )
+            ),
+            None,
+        )
+        now = iso_now()
+        title = _proposed_plan_title(content)
+        if artifact is None:
+            artifact = ProposedPlanArtifact(
+                id=f"proposed-plan-{uuid.uuid4().hex[:12]}",
+                created_at=now,
+                updated_at=now,
+                title=title,
+                content=content,
+                project_path=state.project_path,
+                conversation_id=state.conversation_id,
+                source_turn_id=parent_turn.id,
+                source_segment_id=plan_segment.id,
+            )
+            state.proposed_plans.append(artifact)
+            self._repository.append_event(state, f"Created proposed plan artifact {artifact.id}.")
+        else:
+            artifact.title = title
+            artifact.content = content
+            artifact.updated_at = now
+        plan_segment.artifact_id = artifact.id
+        return artifact
 
     def create_flow_launch(
         self,
@@ -188,6 +277,8 @@ class ProjectChatReviewService:
             if parent_turn is None:
                 raise ValueError("Conversation has no assistant turn that can own a direct flow launch.")
             launch, launch_segment = self.persist_flow_launch(state, parent_turn, flow_launch_payload)
+            if launch_segment is None:
+                raise RuntimeError("Direct flow launch artifact did not create a segment.")
             self._repository.touch_conversation_state(state)
             self._repository.write_state(state)
             return {
@@ -239,6 +330,145 @@ class ProjectChatReviewService:
             self._repository.touch_conversation_state(state, title_hint=trimmed_message)
             self._repository.write_state(state)
             return state.to_dict(), request
+
+    def review_proposed_plan(
+        self,
+        conversation_id: str,
+        project_path: str,
+        plan_id: str,
+        disposition: str,
+        review_note: Optional[str],
+    ) -> tuple[dict[str, object], ProposedPlanArtifact, Optional[FlowLaunch]]:
+        normalized_project_path = normalize_project_path_value(project_path)
+        if disposition not in {"approved", "rejected"}:
+            raise ValueError("Proposed plan disposition must be approved or rejected.")
+        normalized_review_note = review_note.strip() if isinstance(review_note, str) else ""
+        with self._repository._lock:
+            state = self._repository.read_state(conversation_id, normalized_project_path)
+            if state is None or state.project_path != normalized_project_path:
+                raise ValueError("Conversation not found for project.")
+            proposed_plan = next((entry for entry in state.proposed_plans if entry.id == plan_id), None)
+            if proposed_plan is None:
+                raise ValueError("Unknown proposed plan artifact.")
+            if proposed_plan.status != "pending_review":
+                raise ValueError(f"Proposed plan is not reviewable in status '{proposed_plan.status}'.")
+
+            now = iso_now()
+            proposed_plan.review_note = normalized_review_note or None
+            proposed_plan.updated_at = now
+
+            if disposition == "rejected":
+                proposed_plan.status = "rejected"
+                self._repository.append_event(state, f"Rejected proposed plan {proposed_plan.id}.")
+                self._repository.touch_conversation_state(state)
+                self._repository.write_state(state)
+                return state.to_dict(), proposed_plan, None
+
+            source_turn = next((turn for turn in state.turns if turn.id == proposed_plan.source_turn_id), None)
+            if source_turn is None:
+                raise ValueError("Proposed plan is missing its source turn.")
+
+            project_root = Path(normalized_project_path)
+            if not project_root.exists() or not project_root.is_dir():
+                raise ValueError("Project path is not available for writing the approved plan.")
+
+            written_path = _unique_plan_path(project_root, proposed_plan.title)
+            written_path.write_text(proposed_plan.content.rstrip() + "\n", encoding="utf-8")
+            relative_plan_path = written_path.relative_to(project_root).as_posix()
+
+            launch, _ = self.persist_flow_launch(
+                state,
+                source_turn,
+                {
+                    "flow_name": IMPLEMENT_FROM_PLAN_FLOW,
+                    "summary": f"Implement approved plan: {proposed_plan.title}",
+                    "goal": f"Implement the approved plan written to {relative_plan_path}.",
+                    "launch_context": {
+                        "context.request.plan_path": relative_plan_path,
+                    },
+                },
+            )
+
+            proposed_plan.status = "approved"
+            proposed_plan.written_plan_path = str(written_path.resolve(strict=False))
+            proposed_plan.flow_launch_id = launch.id
+            proposed_plan.run_id = None
+            proposed_plan.launch_error = None
+            proposed_plan.updated_at = iso_now()
+            self._repository.append_event(
+                state,
+                f"Approved proposed plan {proposed_plan.id} and wrote {relative_plan_path}.",
+            )
+            self._repository.touch_conversation_state(state)
+            self._repository.write_state(state)
+            return state.to_dict(), proposed_plan, launch
+
+    def note_proposed_plan_launch_started(
+        self,
+        conversation_id: str,
+        plan_id: str,
+        run_id: str,
+        flow_name: str,
+    ) -> dict[str, object]:
+        with self._repository._lock:
+            state = self._repository.read_state(conversation_id)
+            if state is None:
+                raise ValueError("Conversation not found.")
+            proposed_plan = next((entry for entry in state.proposed_plans if entry.id == plan_id), None)
+            if proposed_plan is None:
+                raise ValueError("Unknown proposed plan artifact.")
+            proposed_plan.status = "approved"
+            proposed_plan.run_id = run_id
+            proposed_plan.launch_error = None
+            proposed_plan.updated_at = iso_now()
+            if proposed_plan.flow_launch_id is not None:
+                launch = next((entry for entry in state.flow_launches if entry.id == proposed_plan.flow_launch_id), None)
+                if launch is not None:
+                    launch.status = "launched"
+                    launch.updated_at = proposed_plan.updated_at
+                    launch.run_id = run_id
+                    launch.flow_name = flow_name
+                    launch.launch_error = None
+            self._repository.append_event(
+                state,
+                f"Launched proposed plan {proposed_plan.id} as run {run_id} using {flow_name}.",
+            )
+            self._repository.touch_conversation_state(state)
+            self._repository.write_state(state)
+            return state.to_dict()
+
+    def fail_proposed_plan_launch(
+        self,
+        conversation_id: str,
+        plan_id: str,
+        flow_name: str,
+        error: str,
+    ) -> dict[str, object]:
+        launch_error = error.strip() or "Flow launch failed."
+        with self._repository._lock:
+            state = self._repository.read_state(conversation_id)
+            if state is None:
+                raise ValueError("Conversation not found.")
+            proposed_plan = next((entry for entry in state.proposed_plans if entry.id == plan_id), None)
+            if proposed_plan is None:
+                raise ValueError("Unknown proposed plan artifact.")
+            proposed_plan.status = "launch_failed"
+            proposed_plan.launch_error = launch_error
+            proposed_plan.updated_at = iso_now()
+            if proposed_plan.flow_launch_id is not None:
+                launch = next((entry for entry in state.flow_launches if entry.id == proposed_plan.flow_launch_id), None)
+                if launch is not None:
+                    launch.status = "launch_failed"
+                    launch.updated_at = proposed_plan.updated_at
+                    launch.flow_name = flow_name
+                    launch.launch_error = launch_error
+            self._repository.append_event(
+                state,
+                f"Approved proposed plan {proposed_plan.id} failed to launch {flow_name}: {launch_error}",
+            )
+            self._repository.touch_conversation_state(state)
+            self._repository.write_state(state)
+            return state.to_dict()
 
     def note_flow_launch_started(
         self,

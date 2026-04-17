@@ -72,6 +72,7 @@ function buildAssistantTimelineEntries(
                 content: segment.content,
                 timestamp: segment.timestamp,
                 status: segment.status === 'running' ? 'streaming' : segment.status,
+                artifactId: segment.artifact_id ?? null,
                 error: segment.error ?? null,
             })
             return

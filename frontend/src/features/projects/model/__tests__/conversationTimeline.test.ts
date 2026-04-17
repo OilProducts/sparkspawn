@@ -164,6 +164,7 @@ describe('buildConversationTimelineEntries', () => {
     expect(timeline).toContainEqual(expect.objectContaining({
       kind: 'plan',
       content: '1. Capture the real session path.',
+      artifactId: null,
     }))
   })
 

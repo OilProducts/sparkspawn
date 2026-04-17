@@ -37,8 +37,10 @@ from spark.workspace.conversations.models import (
     ConversationSessionState,
     ConversationState,
     ConversationTurn,
+    FlowLaunch,
     FlowRunRequest,
     PreparedChatTurn,
+    ProposedPlanArtifact,
     ToolCallRecord,
     normalize_chat_mode,
     TURN_KIND_MODE_CHANGE,
@@ -57,6 +59,8 @@ CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
 LOGGER = logging.getLogger(__name__)
 PROPOSED_PLAN_BLOCK_PATTERN = re.compile(r"(?is)<proposed_plan>\s*(.*?)\s*</proposed_plan>")
 EXCESS_BLANK_LINES_PATTERN = re.compile(r"\n{3,}")
+REQUEST_USER_INPUT_DELIVERY_PENDING = "pending_delivery"
+REQUEST_USER_INPUT_DELIVERY_DELIVERED = "delivered"
 
 
 def _resolve_flow_validation_command() -> str:
@@ -395,6 +399,14 @@ class ProjectChatService:
                 return segment
         return None
 
+    def _persist_proposed_plan_segment_artifact(
+        self,
+        state: ConversationState,
+        turn: ConversationTurn,
+        plan_segment: ConversationSegment,
+    ) -> ProposedPlanArtifact:
+        return self._reviews.persist_proposed_plan_artifact(state, turn, plan_segment)
+
     def _request_user_input_segment_by_request_id(
         self,
         state: ConversationState,
@@ -411,6 +423,89 @@ class ProjectChatService:
             if any(question.id == normalized_request_id for question in segment.request_user_input.questions):
                 return segment
         return None
+
+    def _mark_request_user_input_delivered(
+        self,
+        conversation_id: str,
+        project_path: str,
+        request_id: str,
+    ) -> Optional[dict[str, Any]]:
+        with self._lock:
+            state = self._read_state(conversation_id, project_path)
+            if state is None:
+                return None
+            segment = self._request_user_input_segment_by_request_id(state, request_id)
+            if segment is None or segment.request_user_input is None:
+                return None
+            request = RequestUserInputRecord.from_dict(segment.request_user_input.to_dict())
+            if request.status != "answered":
+                return state.to_dict()
+            if request.delivery_status == REQUEST_USER_INPUT_DELIVERY_DELIVERED:
+                return state.to_dict()
+            delivered_at = _iso_now()
+            request.delivery_status = REQUEST_USER_INPUT_DELIVERY_DELIVERED
+            request.delivered_at = delivered_at
+            segment.updated_at = delivered_at
+            segment.content = _request_user_input_segment_content(request)
+            segment.request_user_input = request
+            self._upsert_segment(state, segment)
+            self._touch_conversation_state(state)
+            self._write_state(state)
+            return state.to_dict()
+
+    def _deliver_queued_request_user_input_answers(
+        self,
+        conversation_id: str,
+        project_path: str,
+        *,
+        session: Optional[Any] = None,
+        request_or_question_id: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        target_session = session
+        if target_session is None:
+            with self._sessions_lock:
+                target_session = self._sessions.get(conversation_id)
+        if target_session is None:
+            return None
+
+        normalized_lookup_id = _as_non_empty_string(request_or_question_id) if request_or_question_id is not None else None
+        pending_answers: list[tuple[str, dict[str, str]]] = []
+        with self._lock:
+            state = self._read_state(conversation_id, project_path)
+            if state is None:
+                return None
+            for segment in state.segments:
+                if segment.kind != "request_user_input" or segment.request_user_input is None:
+                    continue
+                request = RequestUserInputRecord.from_dict(segment.request_user_input.to_dict())
+                if request.status != "answered" or request.delivery_status != REQUEST_USER_INPUT_DELIVERY_PENDING:
+                    continue
+                if normalized_lookup_id is not None:
+                    question_ids = {question.id for question in request.questions}
+                    if request.request_id != normalized_lookup_id and normalized_lookup_id not in question_ids:
+                        continue
+                pending_answers.append((request.request_id, dict(request.answers)))
+
+        latest_snapshot: Optional[dict[str, Any]] = None
+        for request_id, answers in pending_answers:
+            try:
+                accepted = bool(target_session.submit_request_user_input_answers(request_id, answers))
+            except Exception:
+                LOGGER.warning(
+                    "project chat could not replay queued request_user_input answers for conversation %s request %s",
+                    conversation_id,
+                    request_id,
+                    exc_info=True,
+                )
+                continue
+            if not accepted:
+                continue
+            latest_snapshot = self._mark_request_user_input_delivered(
+                conversation_id,
+                project_path,
+                request_id,
+            )
+        return latest_snapshot
 
     def _materialize_segment_for_live_event(
         self,
@@ -937,6 +1032,7 @@ class ProjectChatService:
                 elif event.kind == "plan_completed":
                     segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
                     if segment is not None:
+                        self._persist_proposed_plan_segment_artifact(current_state, current_assistant_turn, segment)
                         emitted_payloads.append(self._build_segment_upsert_payload(current_state, segment))
                 elif event.kind in {"context_compaction_started", "context_compaction_completed"}:
                     segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
@@ -986,6 +1082,12 @@ class ProjectChatService:
                 )
             for payload in emitted_payloads:
                 self._publish_progress_payload(progress_callback, payload)
+            if event.kind == "request_user_input_requested" and event.request_user_input is not None:
+                self._deliver_queued_request_user_input_answers(
+                    prepared.conversation_id,
+                    prepared.project_path,
+                    request_or_question_id=event.request_user_input.request_id,
+                )
 
         try:
             turn_result = self._execute_turn(prepared, persist_live_event, progress_callback)
@@ -1008,6 +1110,9 @@ class ProjectChatService:
                 )
             plan_segment = self._completed_plan_segment(state, current_assistant_turn.id)
             emitted_payloads = []
+            if plan_segment is not None and not plan_segment.artifact_id:
+                self._persist_proposed_plan_segment_artifact(state, current_assistant_turn, plan_segment)
+                emitted_payloads.append(self._build_segment_upsert_payload(state, plan_segment))
             assistant_display_text = assistant_message
             if prepared.chat_mode == "plan":
                 assistant_display_text = _extract_plan_mode_assistant_remainder(
@@ -1098,27 +1203,33 @@ class ProjectChatService:
         with self._sessions_lock:
             session = self._sessions.get(conversation_id)
             if session is not None:
-                return session
-            persisted_session = self._read_session_state(conversation_id, project_path)
-            persisted_thread_id = persisted_session.thread_id if persisted_session is not None else None
-            persisted_model = persisted_session.model if persisted_session is not None else None
-            session = CodexAppServerChatSession(
-                project_path,
-                persisted_thread_id=persisted_thread_id,
-                persisted_model=persisted_model,
-                on_thread_id_updated=lambda thread_id: self._persist_session_thread(
-                    conversation_id,
+                target_session = session
+            else:
+                persisted_session = self._read_session_state(conversation_id, project_path)
+                persisted_thread_id = persisted_session.thread_id if persisted_session is not None else None
+                persisted_model = persisted_session.model if persisted_session is not None else None
+                target_session = CodexAppServerChatSession(
                     project_path,
-                    thread_id,
-                ),
-                on_model_updated=lambda model: self._persist_session_model(
-                    conversation_id,
-                    project_path,
-                    model,
-                ),
-            )
-            self._sessions[conversation_id] = session
-            return session
+                    persisted_thread_id=persisted_thread_id,
+                    persisted_model=persisted_model,
+                    on_thread_id_updated=lambda thread_id: self._persist_session_thread(
+                        conversation_id,
+                        project_path,
+                        thread_id,
+                    ),
+                    on_model_updated=lambda model: self._persist_session_model(
+                        conversation_id,
+                        project_path,
+                        model,
+                    ),
+                )
+                self._sessions[conversation_id] = target_session
+        self._deliver_queued_request_user_input_answers(
+            conversation_id,
+            project_path,
+            session=target_session,
+        )
+        return target_session
 
     def start_turn(
         self,
@@ -1182,6 +1293,7 @@ class ProjectChatService:
         if not isinstance(answers, dict):
             raise ValueError("Answers are required.")
 
+        emitted_payload: Optional[dict[str, Any]] = None
         with self._lock:
             state = self._read_state(conversation_id, normalized_project_path)
             if state is None:
@@ -1193,49 +1305,40 @@ class ProjectChatService:
                 raise FileNotFoundError(normalized_lookup_id)
             request = RequestUserInputRecord.from_dict(segment.request_user_input.to_dict())
             normalized_answers = _normalize_request_user_input_answers(request, answers)
-            if segment.status == "complete" or request.status == "answered":
-                if request.answers == normalized_answers:
-                    return state.to_dict()
-                raise ValueError("That conversation request is already answered.")
             request_id = request.request_id
-
-        with self._sessions_lock:
-            session = self._sessions.get(conversation_id)
-        if session is None or not session.has_pending_request_user_input(request_id):
-            raise RuntimeError("Conversation is not waiting for that user input request.")
-        if not session.submit_request_user_input_answers(request_id, normalized_answers):
-            raise RuntimeError("Conversation could not accept that user input answer.")
-
-        with self._lock:
-            state = self._read_state(conversation_id, normalized_project_path)
-            if state is None:
-                raise FileNotFoundError(conversation_id)
-            segment = self._request_user_input_segment_by_request_id(state, request_id)
-            if segment is None or segment.request_user_input is None:
-                raise FileNotFoundError(request_id)
-            request = RequestUserInputRecord.from_dict(segment.request_user_input.to_dict())
             if segment.status == "complete" or request.status == "answered":
                 if request.answers == normalized_answers:
-                    return state.to_dict()
-                raise ValueError("That conversation request is already answered.")
-            submitted_at = _iso_now()
-            request.status = "answered"
-            request.answers = normalized_answers
-            request.submitted_at = submitted_at
-            segment.status = "complete"
-            segment.updated_at = submitted_at
-            segment.completed_at = submitted_at
-            segment.error = None
-            segment.content = _request_user_input_segment_content(request)
-            segment.request_user_input = request
-            self._upsert_segment(state, segment)
-            self._touch_conversation_state(state)
-            payload = self._build_segment_upsert_payload(state, segment)
-            self._write_state(state)
-            snapshot = state.to_dict()
+                    snapshot = state.to_dict()
+                else:
+                    raise ValueError("That conversation request is already answered.")
+            else:
+                submitted_at = _iso_now()
+                request.status = "answered"
+                request.answers = normalized_answers
+                request.delivery_status = REQUEST_USER_INPUT_DELIVERY_PENDING
+                request.submitted_at = submitted_at
+                request.delivered_at = None
+                segment.status = "complete"
+                segment.updated_at = submitted_at
+                segment.completed_at = submitted_at
+                segment.error = None
+                segment.content = _request_user_input_segment_content(request)
+                segment.request_user_input = request
+                self._upsert_segment(state, segment)
+                self._touch_conversation_state(state)
+                emitted_payload = self._build_segment_upsert_payload(state, segment)
+                self._write_state(state)
+                snapshot = state.to_dict()
 
-        self._publish_progress_payload(progress_callback, payload)
-        return snapshot
+        if emitted_payload is not None:
+            self._publish_progress_payload(progress_callback, emitted_payload)
+
+        delivered_snapshot = self._deliver_queued_request_user_input_answers(
+            conversation_id,
+            normalized_project_path,
+            request_or_question_id=request_id,
+        )
+        return delivered_snapshot or snapshot
 
     def resolve_conversation_handle(self, conversation_handle: str) -> tuple[str, str]:
         return self._repository.resolve_conversation_handle(conversation_handle)
@@ -1321,6 +1424,40 @@ class ProjectChatService:
             flow_name,
             model,
         )
+
+    def review_proposed_plan(
+        self,
+        conversation_id: str,
+        project_path: str,
+        plan_id: str,
+        disposition: str,
+        review_note: Optional[str],
+    ) -> tuple[dict[str, Any], ProposedPlanArtifact, Optional[FlowLaunch]]:
+        return self._reviews.review_proposed_plan(
+            conversation_id,
+            project_path,
+            plan_id,
+            disposition,
+            review_note,
+        )
+
+    def note_proposed_plan_launch_started(
+        self,
+        conversation_id: str,
+        plan_id: str,
+        run_id: str,
+        flow_name: str,
+    ) -> dict[str, Any]:
+        return self._reviews.note_proposed_plan_launch_started(conversation_id, plan_id, run_id, flow_name)
+
+    def fail_proposed_plan_launch(
+        self,
+        conversation_id: str,
+        plan_id: str,
+        flow_name: str,
+        error: str,
+    ) -> dict[str, Any]:
+        return self._reviews.fail_proposed_plan_launch(conversation_id, plan_id, flow_name, error)
 
     def note_flow_run_request_launched(
         self,

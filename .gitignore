@@ -14,5 +14,3 @@ src/spark/ui_dist/
 .codex
 compose.override.yaml
 compose.override.yml
-
-.spark/

@@ -64,6 +64,7 @@ class ProjectPaths:
     conversations_dir: Path
     flow_run_requests_dir: Path
     flow_launches_dir: Path
+    proposed_plans_dir: Path
 
 
 @dataclass(frozen=True)
@@ -97,12 +98,14 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
     conversations_dir = project_root / "conversations"
     flow_run_requests_dir = project_root / "flow-run-requests"
     flow_launches_dir = project_root / "flow-launches"
+    proposed_plans_dir = project_root / "proposed-plans"
 
     for directory in (
         project_root,
         conversations_dir,
         flow_run_requests_dir,
         flow_launches_dir,
+        proposed_plans_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -134,6 +137,7 @@ def ensure_project_paths(home_dir: Path, project_path: str) -> ProjectPaths:
         conversations_dir=conversations_dir,
         flow_run_requests_dir=flow_run_requests_dir,
         flow_launches_dir=flow_launches_dir,
+        proposed_plans_dir=proposed_plans_dir,
     )
 
 
@@ -157,6 +161,7 @@ def read_project_paths_by_id(home_dir: Path, project_id: str) -> ProjectPaths | 
         conversations_dir=root / "conversations",
         flow_run_requests_dir=root / "flow-run-requests",
         flow_launches_dir=root / "flow-launches",
+        proposed_plans_dir=root / "proposed-plans",
     )
 
 

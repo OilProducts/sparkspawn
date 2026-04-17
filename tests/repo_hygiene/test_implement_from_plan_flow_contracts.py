@@ -34,6 +34,14 @@ def test_prepare_plan_workspace_uses_project_local_planflows_workspace() -> None
     assert ".spark/" in prompt
 
 
+def test_prepare_plan_workspace_keeps_gitignore_spark_entry_deduplicated() -> None:
+    prompt = _prompt("prepare_plan_workspace")
+
+    assert "ignores .spark/ exactly once" in prompt
+    assert "append a minimal .spark/ entry only when missing" in prompt
+    assert "remove duplicate .spark/ lines" in prompt
+
+
 def test_prepare_plan_workspace_writes_planflow_context_paths() -> None:
     writes_context = _attr("prepare_plan_workspace", "spark.writes_context")
 

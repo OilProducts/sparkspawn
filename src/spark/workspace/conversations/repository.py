@@ -107,6 +107,10 @@ class ProjectChatRepository:
         project_paths = self.project_paths_for_conversation(conversation_id, project_path)
         return project_paths.flow_launches_dir / f"{conversation_id}.json"
 
+    def proposed_plans_state_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
+        project_paths = self.project_paths_for_conversation(conversation_id, project_path)
+        return project_paths.proposed_plans_dir / f"{conversation_id}.json"
+
     def touch_conversation_state(self, state: ConversationState, *, title_hint: Optional[str] = None) -> None:
         self.ensure_state_handle(state)
         state.chat_mode = normalize_chat_mode(state.chat_mode)
@@ -150,11 +154,14 @@ class ProjectChatRepository:
         normalized_project_path = normalize_project_path_value(str(payload.get("project_path", "")))
         flow_run_requests_payload = self.read_json_dict(self.flow_run_requests_state_path(conversation_id, normalized_project_path))
         flow_launches_payload = self.read_json_dict(self.flow_launches_state_path(conversation_id, normalized_project_path))
+        proposed_plans_payload = self.read_json_dict(self.proposed_plans_state_path(conversation_id, normalized_project_path))
         if flow_run_requests_payload:
             payload["event_log"] = flow_run_requests_payload.get("event_log", payload.get("event_log", []))
             payload["flow_run_requests"] = flow_run_requests_payload.get("flow_run_requests", [])
         if flow_launches_payload:
             payload["flow_launches"] = flow_launches_payload.get("flow_launches", [])
+        if proposed_plans_payload:
+            payload["proposed_plans"] = proposed_plans_payload.get("proposed_plans", [])
         state = ConversationState.from_dict(payload)
         if not state.conversation_id:
             state.conversation_id = conversation_id
@@ -198,6 +205,15 @@ class ProjectChatRepository:
                 "project_id": project_paths.project_id,
                 "project_path": state.project_path,
                 "flow_launches": [launch.to_dict() for launch in state.flow_launches],
+            },
+        )
+        self.write_json(
+            self.proposed_plans_state_path(state.conversation_id, state.project_path),
+            {
+                "conversation_id": state.conversation_id,
+                "project_id": project_paths.project_id,
+                "project_path": state.project_path,
+                "proposed_plans": [artifact.to_dict() for artifact in state.proposed_plans],
             },
         )
 
@@ -370,6 +386,7 @@ class ProjectChatRepository:
         for sidecar in (
             project_paths.flow_run_requests_dir / f"{conversation_id}.json",
             project_paths.flow_launches_dir / f"{conversation_id}.json",
+            project_paths.proposed_plans_dir / f"{conversation_id}.json",
         ):
             sidecar.unlink(missing_ok=True)
         remove_conversation_handle(self._data_dir, conversation_id)

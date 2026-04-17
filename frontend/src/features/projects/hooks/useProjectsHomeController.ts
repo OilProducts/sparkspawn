@@ -118,6 +118,7 @@ export function useProjectsHomeController() {
         activeChatMode,
         activeFlowLaunchesById,
         activeFlowRunRequestsById,
+        activeProposedPlansById,
         activeProjectConversationSummaries,
         activeProjectEventLog,
         activeProjectLabel,
@@ -255,7 +256,9 @@ export function useProjectsHomeController() {
 
     const {
         onReviewFlowRunRequest,
+        onReviewProposedPlan,
         pendingFlowRunRequestId,
+        pendingProposedPlanId,
     } = useConversationReviews({
         activeConversationId,
         activeProjectPath,
@@ -316,11 +319,13 @@ export function useProjectsHomeController() {
             activeConversationHistory,
             activeFlowRunRequestsById,
             activeFlowLaunchesById,
+            activeProposedPlansById,
             latestFlowRunRequestId,
             latestFlowLaunchId,
             expandedToolCalls,
             expandedThinkingEntries,
             pendingFlowRunRequestId,
+            pendingProposedPlanId,
             requestUserInputActionError,
             submittingRequestUserInputIds,
             formatConversationTimestamp,
@@ -328,6 +333,7 @@ export function useProjectsHomeController() {
             onToggleToolCallExpanded: toggleToolCallExpanded,
             onToggleThinkingEntryExpanded: toggleThinkingEntryExpanded,
             onReviewFlowRunRequest,
+            onReviewProposedPlan,
             onOpenFlowRun,
         },
         sidebarProps: {

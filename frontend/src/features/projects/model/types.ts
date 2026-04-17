@@ -4,11 +4,13 @@ import type {
     ConversationTurnResponse,
     FlowLaunchResponse,
     FlowRunRequestResponse,
+    ProposedPlanArtifactResponse,
 } from '@/lib/workspaceClient'
 
 export type ProjectConversationSummary = ConversationSummaryResponse
 export type ProjectFlowLaunch = FlowLaunchResponse
 export type ProjectFlowRunRequest = FlowRunRequestResponse
+export type ProjectProposedPlan = ProposedPlanArtifactResponse
 export type ConversationTurnStatus = ConversationTurnResponse['status']
 export type ConversationSegmentStatus = ConversationSegmentResponse['status']
 
@@ -61,6 +63,7 @@ export type ConversationTimelineEntry =
         content: string
         timestamp: string
         status: ConversationTurnStatus
+        artifactId?: string | null
         error?: string | null
     }
     | {

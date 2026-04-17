@@ -1432,6 +1432,13 @@ def test_send_turn_completes_plan_only_real_session_path_with_plan_preview_fallb
     assert [segment["kind"] for segment in snapshot["segments"]] == ["plan"]
     assert snapshot["segments"][0]["content"] == "1. Patch the real session path.\n2. Add the regression coverage."
     assert snapshot["segments"][0]["status"] == "complete"
+    assert snapshot["segments"][0]["artifact_id"].startswith("proposed-plan-")
+    proposed_plan = snapshot["proposed_plans"][0]
+    assert proposed_plan["conversation_id"] == conversation_id
+    assert proposed_plan["source_turn_id"] == assistant_turn["id"]
+    assert proposed_plan["source_segment_id"] == snapshot["segments"][0]["id"]
+    assert proposed_plan["status"] == "pending_review"
+    assert proposed_plan["content"] == "1. Patch the real session path.\n2. Add the regression coverage."
     summaries = service.list_conversations(project_path)
     assert summaries[0]["last_message_preview"] == "1. Patch the real session path.\n2. Add the regression coverage."
 
@@ -1815,6 +1822,8 @@ def test_request_user_input_segments_persist_and_answer_in_place(
     assert len(answered_request_segments) == 1
     assert answered_request_segments[0]["status"] == "complete"
     assert answered_request_segments[0]["request_user_input"]["status"] == "answered"
+    assert answered_request_segments[0]["request_user_input"]["delivery_status"] == "delivered"
+    assert answered_request_segments[0]["request_user_input"]["delivered_at"] is not None
     assert answered_request_segments[0]["request_user_input"]["answers"] == {
         "path_choice": "Inline card",
         "constraints": "Preserve the inline timeline.",
@@ -1841,6 +1850,251 @@ def test_request_user_input_segments_persist_and_answer_in_place(
         if payload.get("type") == "segment_upsert" and payload["segment"]["kind"] == "request_user_input"
     ]
     assert [payload["status"] for payload in request_payloads] == ["pending", "complete"]
+
+
+def test_request_user_input_answers_queue_without_live_session(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    project_path = str(tmp_path)
+    conversation_id = "conversation-request-queued"
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=conversation_id,
+            project_path=project_path,
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="Ask me the missing question.",
+                    timestamp="2026-04-17T12:00:00Z",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-1",
+                    role="assistant",
+                    content="",
+                    timestamp="2026-04-17T12:00:01Z",
+                    status="streaming",
+                    parent_turn_id="turn-user-1",
+                ),
+            ],
+            segments=[
+                project_chat.ConversationSegment(
+                    id="segment-request-user-input-app-turn-1-request-1",
+                    turn_id="turn-assistant-1",
+                    order=1,
+                    kind="request_user_input",
+                    role="system",
+                    status="pending",
+                    timestamp="2026-04-17T12:00:02Z",
+                    updated_at="2026-04-17T12:00:02Z",
+                    content="Which path should I take?",
+                    request_user_input=_request_user_input_record(),
+                ),
+            ],
+        )
+    )
+
+    snapshot = service.submit_request_user_input_answer(
+        conversation_id,
+        project_path,
+        "request-1",
+        {
+            "path_choice": "Inline card",
+            "constraints": "Preserve the inline timeline.",
+        },
+    )
+
+    request_segment = next(segment for segment in snapshot["segments"] if segment["kind"] == "request_user_input")
+    request_payload = request_segment["request_user_input"]
+
+    assert request_segment["status"] == "complete"
+    assert request_segment["content"] == (
+        "Which path should I take?\n"
+        "Answer: Inline card\n\n"
+        "What constraints matter?\n"
+        "Answer: Preserve the inline timeline."
+    )
+    assert request_payload["status"] == "answered"
+    assert request_payload["delivery_status"] == "pending_delivery"
+    assert request_payload["submitted_at"] is not None
+    assert request_payload.get("delivered_at") is None
+
+
+def test_queued_request_user_input_answers_replay_when_session_reattaches(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    project_path = str(tmp_path)
+    conversation_id = "conversation-request-replay"
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=conversation_id,
+            project_path=project_path,
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="Ask me the missing question.",
+                    timestamp="2026-04-17T12:00:00Z",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-1",
+                    role="assistant",
+                    content="",
+                    timestamp="2026-04-17T12:00:01Z",
+                    status="streaming",
+                    parent_turn_id="turn-user-1",
+                ),
+            ],
+            segments=[
+                project_chat.ConversationSegment(
+                    id="segment-request-user-input-app-turn-1-request-1",
+                    turn_id="turn-assistant-1",
+                    order=1,
+                    kind="request_user_input",
+                    role="system",
+                    status="complete",
+                    timestamp="2026-04-17T12:00:02Z",
+                    updated_at="2026-04-17T12:00:03Z",
+                    completed_at="2026-04-17T12:00:03Z",
+                    content=(
+                        "Which path should I take?\n"
+                        "Answer: Inline card\n\n"
+                        "What constraints matter?\n"
+                        "Answer: Preserve the inline timeline."
+                    ),
+                    request_user_input=RequestUserInputRecord(
+                        request_id="request-1",
+                        status="answered",
+                        questions=_request_user_input_record().questions,
+                        answers={
+                            "path_choice": "Inline card",
+                            "constraints": "Preserve the inline timeline.",
+                        },
+                        delivery_status="pending_delivery",
+                        submitted_at="2026-04-17T12:00:03Z",
+                    ),
+                ),
+            ],
+        )
+    )
+
+    class ReattachedWaitingSession:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, str]]] = []
+
+        def submit_request_user_input_answers(self, request_id: str, answers: dict[str, str]) -> bool:
+            self.calls.append((request_id, dict(answers)))
+            return request_id == "request-1"
+
+    waiting_session = ReattachedWaitingSession()
+    with service._sessions_lock:
+        service._sessions[conversation_id] = waiting_session
+
+    service._build_session(conversation_id, project_path)
+    replayed_snapshot = service.get_snapshot(conversation_id, project_path)
+    replayed_request = next(
+        segment["request_user_input"]
+        for segment in replayed_snapshot["segments"]
+        if segment["kind"] == "request_user_input"
+    )
+
+    assert waiting_session.calls == [
+        (
+            "request-1",
+            {
+                "path_choice": "Inline card",
+                "constraints": "Preserve the inline timeline.",
+            },
+        )
+    ]
+    assert replayed_request["delivery_status"] == "delivered"
+    assert replayed_request["submitted_at"] == "2026-04-17T12:00:03Z"
+    assert replayed_request["delivered_at"] is not None
+
+
+def test_request_user_input_answer_submissions_are_idempotent_for_matching_duplicates(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    project_path = str(tmp_path)
+    conversation_id = "conversation-request-idempotent"
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=conversation_id,
+            project_path=project_path,
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="Ask me the missing question.",
+                    timestamp="2026-04-17T12:00:00Z",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-1",
+                    role="assistant",
+                    content="",
+                    timestamp="2026-04-17T12:00:01Z",
+                    status="streaming",
+                    parent_turn_id="turn-user-1",
+                ),
+            ],
+            segments=[
+                project_chat.ConversationSegment(
+                    id="segment-request-user-input-app-turn-1-request-1",
+                    turn_id="turn-assistant-1",
+                    order=1,
+                    kind="request_user_input",
+                    role="system",
+                    status="pending",
+                    timestamp="2026-04-17T12:00:02Z",
+                    updated_at="2026-04-17T12:00:02Z",
+                    content="Which path should I take?",
+                    request_user_input=_request_user_input_record(),
+                ),
+            ],
+        )
+    )
+
+    first_snapshot = service.submit_request_user_input_answer(
+        conversation_id,
+        project_path,
+        "request-1",
+        {
+            "path_choice": "Inline card",
+            "constraints": "Preserve the inline timeline.",
+        },
+    )
+    second_snapshot = service.submit_request_user_input_answer(
+        conversation_id,
+        project_path,
+        "path_choice",
+        {
+            "path_choice": "Inline card",
+            "constraints": "Preserve the inline timeline.",
+        },
+    )
+
+    first_request = next(
+        segment["request_user_input"]
+        for segment in first_snapshot["segments"]
+        if segment["kind"] == "request_user_input"
+    )
+    second_request = next(
+        segment["request_user_input"]
+        for segment in second_snapshot["segments"]
+        if segment["kind"] == "request_user_input"
+    )
+
+    assert second_request["answers"] == first_request["answers"]
+    assert second_request["submitted_at"] == first_request["submitted_at"]
+    assert second_request["delivery_status"] == "pending_delivery"
+
+    with pytest.raises(ValueError, match="already answered"):
+        service.submit_request_user_input_answer(
+            conversation_id,
+            project_path,
+            "request-1",
+            {
+                "path_choice": "Composer takeover",
+                "constraints": "Move it into the composer.",
+            },
+        )
 
 
 def test_conversation_request_user_input_segments_remain_scoped_to_their_conversation(tmp_path: Path) -> None:
@@ -2326,6 +2580,344 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
             "goal": "Implement the approved scope.",
             "launch_context": {
                 "context.request.summary": "Implement the approved scope.",
+            },
+            "spec_id": None,
+            "plan_id": None,
+        }
+    ]
+
+
+def test_review_proposed_plan_writes_slugged_markdown_and_creates_launch_artifact(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "reviewable-proposed-plan-artifacts-in-project-chat.md").write_text(
+        "# Existing plan\n",
+        encoding="utf-8",
+    )
+
+    assistant_turn = project_chat.ConversationTurn(
+        id="turn-assistant-plan",
+        role="assistant",
+        content="Here is the proposed plan.",
+        timestamp="2026-03-13T10:01:00Z",
+        status="complete",
+    )
+    plan_segment = project_chat.ConversationSegment(
+        id="segment-plan-inline",
+        turn_id=assistant_turn.id,
+        order=1,
+        kind="plan",
+        role="assistant",
+        status="complete",
+        timestamp="2026-03-13T10:01:05Z",
+        updated_at="2026-03-13T10:01:05Z",
+        completed_at="2026-03-13T10:01:05Z",
+        content="# Reviewable Proposed Plan Artifacts in Project Chat\n\n1. Add the backend artifact.\n2. Wire the review UI.",
+        artifact_id="proposed-plan-inline",
+        source=project_chat.ConversationSegmentSource(),
+    )
+    state = project_chat.ConversationState(
+        conversation_id="conversation-proposed-plan",
+        project_path=str(project_dir),
+        chat_mode="plan",
+        title="Plan review",
+        created_at="2026-03-13T10:00:00Z",
+        updated_at="2026-03-13T10:01:05Z",
+        turns=[
+            project_chat.ConversationTurn(
+                id="turn-user-plan",
+                role="user",
+                content="Draft the implementation plan.",
+                timestamp="2026-03-13T10:00:00Z",
+            ),
+            assistant_turn,
+        ],
+        segments=[plan_segment],
+        proposed_plans=[
+            project_chat.ProposedPlanArtifact(
+                id="proposed-plan-inline",
+                created_at="2026-03-13T10:01:05Z",
+                updated_at="2026-03-13T10:01:05Z",
+                title="Reviewable Proposed Plan Artifacts in Project Chat",
+                content=plan_segment.content,
+                project_path=str(project_dir),
+                conversation_id="conversation-proposed-plan",
+                source_turn_id=assistant_turn.id,
+                source_segment_id=plan_segment.id,
+            ),
+        ],
+    )
+    service._write_state(state)
+
+    snapshot, proposed_plan, flow_launch = service.review_proposed_plan(
+        "conversation-proposed-plan",
+        str(project_dir),
+        "proposed-plan-inline",
+        "approved",
+        "Ready to implement.",
+    )
+
+    assert snapshot["chat_mode"] == "plan"
+    assert proposed_plan.status == "approved"
+    assert proposed_plan.review_note == "Ready to implement."
+    assert proposed_plan.written_plan_path is not None
+    assert proposed_plan.written_plan_path.endswith("reviewable-proposed-plan-artifacts-in-project-chat-2.md")
+    written_plan_path = Path(proposed_plan.written_plan_path)
+    assert written_plan_path.read_text(encoding="utf-8") == (
+        "# Reviewable Proposed Plan Artifacts in Project Chat\n\n"
+        "1. Add the backend artifact.\n2. Wire the review UI.\n"
+    )
+    assert flow_launch is not None
+    assert flow_launch.flow_name == "implement-from-plan.dot"
+    assert flow_launch.launch_context == {
+        "context.request.plan_path": "reviewable-proposed-plan-artifacts-in-project-chat-2.md",
+    }
+    launch_segment = next(
+        entry for entry in snapshot["segments"] if entry["artifact_id"] == flow_launch.id
+    )
+    assert launch_segment["kind"] == "flow_launch"
+    assert launch_segment["turn_id"] == assistant_turn.id
+
+
+def test_review_proposed_plan_rejects_and_locks_the_artifact(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    assistant_turn = project_chat.ConversationTurn(
+        id="turn-assistant-plan",
+        role="assistant",
+        content="Here is the proposed plan.",
+        timestamp="2026-03-13T10:01:00Z",
+        status="complete",
+    )
+    plan_segment = project_chat.ConversationSegment(
+        id="segment-plan-inline",
+        turn_id=assistant_turn.id,
+        order=1,
+        kind="plan",
+        role="assistant",
+        status="complete",
+        timestamp="2026-03-13T10:01:05Z",
+        updated_at="2026-03-13T10:01:05Z",
+        completed_at="2026-03-13T10:01:05Z",
+        content="# Reviewable Proposed Plan Artifacts in Project Chat\n\n1. Add the backend artifact.",
+        artifact_id="proposed-plan-inline",
+        source=project_chat.ConversationSegmentSource(),
+    )
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id="conversation-proposed-plan",
+            project_path=str(project_dir),
+            title="Plan review",
+            created_at="2026-03-13T10:00:00Z",
+            updated_at="2026-03-13T10:01:05Z",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-plan",
+                    role="user",
+                    content="Draft the implementation plan.",
+                    timestamp="2026-03-13T10:00:00Z",
+                ),
+                assistant_turn,
+            ],
+            segments=[plan_segment],
+            proposed_plans=[
+                project_chat.ProposedPlanArtifact(
+                    id="proposed-plan-inline",
+                    created_at="2026-03-13T10:01:05Z",
+                    updated_at="2026-03-13T10:01:05Z",
+                    title="Reviewable Proposed Plan Artifacts in Project Chat",
+                    content=plan_segment.content,
+                    project_path=str(project_dir),
+                    conversation_id="conversation-proposed-plan",
+                    source_turn_id=assistant_turn.id,
+                    source_segment_id=plan_segment.id,
+                ),
+            ],
+        )
+    )
+
+    snapshot, proposed_plan, flow_launch = service.review_proposed_plan(
+        "conversation-proposed-plan",
+        str(project_dir),
+        "proposed-plan-inline",
+        "rejected",
+        "Needs acceptance criteria first.",
+    )
+
+    assert proposed_plan.status == "rejected"
+    assert proposed_plan.review_note == "Needs acceptance criteria first."
+    assert flow_launch is None
+    assert snapshot["flow_launches"] == []
+    with pytest.raises(ValueError, match="not reviewable"):
+        service.review_proposed_plan(
+            "conversation-proposed-plan",
+            str(project_dir),
+            "proposed-plan-inline",
+            "approved",
+            None,
+        )
+
+
+def test_proposed_plan_review_route_launches_in_owner_conversation_and_records_run_metadata(
+    product_api_client,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    owner_conversation_id = "conversation-proposed-plan"
+    other_conversation_id = "conversation-other"
+    owner_assistant_turn = project_chat.ConversationTurn(
+        id="turn-assistant-plan",
+        role="assistant",
+        content="Here is the proposed plan.",
+        timestamp="2026-03-13T10:01:00Z",
+        status="complete",
+    )
+    owner_plan_segment = project_chat.ConversationSegment(
+        id="segment-plan-inline",
+        turn_id=owner_assistant_turn.id,
+        order=1,
+        kind="plan",
+        role="assistant",
+        status="complete",
+        timestamp="2026-03-13T10:01:05Z",
+        updated_at="2026-03-13T10:01:05Z",
+        completed_at="2026-03-13T10:01:05Z",
+        content="# Reviewable Proposed Plan Artifacts in Project Chat\n\n1. Add the backend artifact.\n2. Wire the review UI.",
+        artifact_id="proposed-plan-inline",
+        source=project_chat.ConversationSegmentSource(),
+    )
+    service = _project_chat_service()
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=owner_conversation_id,
+            project_path=str(project_dir),
+            chat_mode="plan",
+            title="Plan review",
+            created_at="2026-03-13T10:00:00Z",
+            updated_at="2026-03-13T10:01:05Z",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-plan",
+                    role="user",
+                    content="Draft the implementation plan.",
+                    timestamp="2026-03-13T10:00:00Z",
+                ),
+                owner_assistant_turn,
+            ],
+            segments=[owner_plan_segment],
+            proposed_plans=[
+                project_chat.ProposedPlanArtifact(
+                    id="proposed-plan-inline",
+                    created_at="2026-03-13T10:01:05Z",
+                    updated_at="2026-03-13T10:01:05Z",
+                    title="Reviewable Proposed Plan Artifacts in Project Chat",
+                    content=owner_plan_segment.content,
+                    project_path=str(project_dir),
+                    conversation_id=owner_conversation_id,
+                    source_turn_id=owner_assistant_turn.id,
+                    source_segment_id=owner_plan_segment.id,
+                ),
+            ],
+        )
+    )
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=other_conversation_id,
+            project_path=str(project_dir),
+            title="Other thread",
+            created_at="2026-03-13T10:00:00Z",
+            updated_at="2026-03-13T10:02:00Z",
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-other",
+                    role="user",
+                    content="Something else.",
+                    timestamp="2026-03-13T10:00:00Z",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-other",
+                    role="assistant",
+                    content="Other reply.",
+                    timestamp="2026-03-13T10:02:00Z",
+                    status="complete",
+                ),
+            ],
+        )
+    )
+
+    _seed_flow("implement-from-plan.dot")
+    start_calls: list[dict[str, object | None]] = []
+
+    async def fake_start_pipeline(
+        self,
+        *,
+        run_id: str | None,
+        flow_name: str,
+        working_directory: str,
+        model: str | None,
+        goal: str | None = None,
+        launch_context: dict[str, object] | None = None,
+        spec_id: str | None = None,
+        plan_id: str | None = None,
+    ) -> dict[str, object]:
+        start_calls.append(
+            {
+                "run_id": run_id,
+                "flow_name": flow_name,
+                "working_directory": working_directory,
+                "model": model,
+                "goal": goal,
+                "launch_context": launch_context,
+                "spec_id": spec_id,
+                "plan_id": plan_id,
+            }
+        )
+        return {"status": "started", "run_id": "run-plan-123"}
+
+    monkeypatch.setattr(attractor_client.AttractorApiClient, "start_pipeline", fake_start_pipeline)
+
+    review_response = product_api_client.post(
+        f"/workspace/api/conversations/{owner_conversation_id}/proposed-plans/proposed-plan-inline/review",
+        json={
+            "project_path": str(project_dir),
+            "disposition": "approved",
+            "review_note": "Ready to implement.",
+        },
+    )
+
+    assert review_response.status_code == 200
+    approved_snapshot = review_response.json()
+    approved_plan = next(
+        entry for entry in approved_snapshot["proposed_plans"] if entry["id"] == "proposed-plan-inline"
+    )
+    assert approved_snapshot["chat_mode"] == "plan"
+    assert approved_plan["status"] == "approved"
+    assert approved_plan["review_note"] == "Ready to implement."
+    assert approved_plan["run_id"] == "run-plan-123"
+    assert approved_plan["written_plan_path"].endswith("reviewable-proposed-plan-artifacts-in-project-chat.md")
+    flow_launch = next(
+        entry for entry in approved_snapshot["flow_launches"] if entry["id"] == approved_plan["flow_launch_id"]
+    )
+    assert flow_launch["conversation_id"] == owner_conversation_id
+    assert flow_launch["run_id"] == "run-plan-123"
+    assert next(
+        entry for entry in approved_snapshot["segments"] if entry["artifact_id"] == flow_launch["id"]
+    )["turn_id"] == owner_assistant_turn.id
+    assert _project_chat_service().get_snapshot(other_conversation_id, str(project_dir))["flow_launches"] == []
+    assert start_calls == [
+        {
+            "run_id": None,
+            "flow_name": "implement-from-plan.dot",
+            "working_directory": str(project_dir),
+            "model": None,
+            "goal": "Implement the approved plan written to reviewable-proposed-plan-artifacts-in-project-chat.md.",
+            "launch_context": {
+                "context.request.plan_path": "reviewable-proposed-plan-artifacts-in-project-chat.md",
             },
             "spec_id": None,
             "plan_id": None,
@@ -3116,7 +3708,71 @@ def test_submit_project_conversation_request_user_input_endpoint_updates_existin
     request_segments = [segment for segment in payload["segments"] if segment["kind"] == "request_user_input"]
     assert len(request_segments) == 1
     assert request_segments[0]["request_user_input"]["status"] == "answered"
+    assert request_segments[0]["request_user_input"]["delivery_status"] == "delivered"
     assert request_segments[0]["request_user_input"]["answers"]["path_choice"] == "Inline card"
+
+
+def test_submit_project_conversation_request_user_input_endpoint_queues_delivery_without_live_session(
+    product_api_client,
+    tmp_path: Path,
+) -> None:
+    service = _project_chat_service()
+    project_path = str(tmp_path)
+    conversation_id = "conversation-request-answer-queued"
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=conversation_id,
+            project_path=project_path,
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="Ask me the missing question.",
+                    timestamp="2026-04-17T12:00:00Z",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-1",
+                    role="assistant",
+                    content="",
+                    timestamp="2026-04-17T12:00:01Z",
+                    status="streaming",
+                    parent_turn_id="turn-user-1",
+                ),
+            ],
+            segments=[
+                project_chat.ConversationSegment(
+                    id="segment-request-user-input-app-turn-1-request-1",
+                    turn_id="turn-assistant-1",
+                    order=1,
+                    kind="request_user_input",
+                    role="system",
+                    status="pending",
+                    timestamp="2026-04-17T12:00:02Z",
+                    updated_at="2026-04-17T12:00:02Z",
+                    content="Which path should I take?",
+                    request_user_input=_request_user_input_record(),
+                ),
+            ],
+        )
+    )
+
+    response = product_api_client.post(
+        f"/workspace/api/conversations/{conversation_id}/request-user-input/request-1/answer",
+        json={
+            "project_path": project_path,
+            "answers": {
+                "path_choice": "Inline card",
+                "constraints": "Keep the request inline.",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    request_segment = next(segment for segment in payload["segments"] if segment["kind"] == "request_user_input")
+    assert request_segment["request_user_input"]["status"] == "answered"
+    assert request_segment["request_user_input"]["delivery_status"] == "pending_delivery"
+    assert request_segment["request_user_input"].get("delivered_at") is None
 
 
 def test_request_user_input_background_completion_stays_safe_after_api_client_closes(

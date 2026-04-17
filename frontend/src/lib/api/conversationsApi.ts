@@ -113,6 +113,24 @@ export interface FlowLaunchResponse {
     launch_error?: string | null
 }
 
+export interface ProposedPlanArtifactResponse {
+    id: string
+    created_at: string
+    updated_at: string
+    title: string
+    content: string
+    project_path: string
+    conversation_id: string
+    source_turn_id: string
+    status: 'pending_review' | 'approved' | 'rejected' | 'launch_failed'
+    source_segment_id?: string | null
+    review_note?: string | null
+    written_plan_path?: string | null
+    flow_launch_id?: string | null
+    run_id?: string | null
+    launch_error?: string | null
+}
+
 export interface ConversationSnapshotResponse {
     schema_version: number
     conversation_id: string
@@ -127,6 +145,7 @@ export interface ConversationSnapshotResponse {
     event_log: WorkflowEventResponse[]
     flow_run_requests: FlowRunRequestResponse[]
     flow_launches: FlowLaunchResponse[]
+    proposed_plans?: ProposedPlanArtifactResponse[]
 }
 
 export interface ConversationSummaryResponse {
@@ -416,6 +435,45 @@ function parseFlowLaunchResponse(value: unknown): FlowLaunchResponse | null {
     }
 }
 
+function parseProposedPlanArtifactResponse(value: unknown): ProposedPlanArtifactResponse | null {
+    const record = asUnknownRecord(value)
+    if (
+        !record
+        || typeof record.id !== 'string'
+        || typeof record.created_at !== 'string'
+        || typeof record.updated_at !== 'string'
+        || typeof record.title !== 'string'
+        || typeof record.content !== 'string'
+        || typeof record.project_path !== 'string'
+        || typeof record.conversation_id !== 'string'
+        || typeof record.source_turn_id !== 'string'
+    ) {
+        return null
+    }
+    const status = record.status === 'approved'
+        || record.status === 'rejected'
+        || record.status === 'launch_failed'
+        ? record.status
+        : 'pending_review'
+    return {
+        id: record.id,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        title: record.title,
+        content: record.content,
+        project_path: record.project_path,
+        conversation_id: record.conversation_id,
+        source_turn_id: record.source_turn_id,
+        status,
+        source_segment_id: asOptionalNullableString(record.source_segment_id),
+        review_note: asOptionalNullableString(record.review_note),
+        written_plan_path: asOptionalNullableString(record.written_plan_path),
+        flow_launch_id: asOptionalNullableString(record.flow_launch_id),
+        run_id: asOptionalNullableString(record.run_id),
+        launch_error: asOptionalNullableString(record.launch_error),
+    }
+}
+
 function parseConversationSummaryResponse(value: unknown): ConversationSummaryResponse | null {
     const record = asUnknownRecord(value)
     if (
@@ -498,6 +556,11 @@ export function parseConversationSnapshotResponse(
             .map((entry) => parseFlowLaunchResponse(entry))
             .filter((entry): entry is FlowLaunchResponse => entry !== null)
         : []
+    const proposed_plans = Array.isArray(record.proposed_plans)
+        ? record.proposed_plans
+            .map((entry) => parseProposedPlanArtifactResponse(entry))
+            .filter((entry): entry is ProposedPlanArtifactResponse => entry !== null)
+        : []
     return {
         schema_version: schemaVersion,
         conversation_id: expectString(record.conversation_id, endpoint, 'conversation_id'),
@@ -512,6 +575,7 @@ export function parseConversationSnapshotResponse(
         event_log,
         flow_run_requests,
         flow_launches,
+        proposed_plans,
     }
 }
 
@@ -672,6 +736,27 @@ export async function reviewFlowRunRequestValidated(
             body: JSON.stringify(payload),
         },
         '/workspace/api/conversations/{id}/flow-run-requests/{requestId}/review',
+        parseConversationSnapshotResponse,
+    )
+}
+
+export async function reviewProposedPlanValidated(
+    conversationId: string,
+    planId: string,
+    payload: {
+        project_path: string
+        disposition: 'approved' | 'rejected'
+        review_note?: string | null
+    },
+): Promise<ConversationSnapshotResponse> {
+    return fetchWorkspaceJsonValidated(
+        `/conversations/${encodeURIComponent(conversationId)}/proposed-plans/${encodeURIComponent(planId)}/review`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        },
+        '/workspace/api/conversations/{id}/proposed-plans/{planId}/review',
         parseConversationSnapshotResponse,
     )
 }

@@ -2,6 +2,7 @@ import type {
     ConversationTimelineToolCall,
     ProjectFlowLaunch,
     ProjectFlowRunRequest,
+    ProjectProposedPlan,
 } from './types'
 
 export type ProjectGitMetadata = {
@@ -49,6 +50,19 @@ export const getFlowLaunchStatusPresentation = (status: ProjectFlowLaunch['statu
         return { label: 'Launch failed', tone: 'danger' as const }
     }
     return { label: 'Launching', tone: 'info' as const }
+}
+
+export const getProposedPlanStatusPresentation = (status: ProjectProposedPlan['status']) => {
+    if (status === 'approved') {
+        return { label: 'Approved', tone: 'success' as const }
+    }
+    if (status === 'rejected') {
+        return { label: 'Rejected', tone: 'danger' as const }
+    }
+    if (status === 'launch_failed') {
+        return { label: 'Launch failed', tone: 'danger' as const }
+    }
+    return { label: 'Pending review', tone: 'warning' as const }
 }
 
 export const getToolCallStatusPresentation = (status: 'running' | 'completed' | 'failed') => {

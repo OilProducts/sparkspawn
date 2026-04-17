@@ -1584,6 +1584,215 @@ describe('ProjectsPanel', () => {
     })
   })
 
+  it('renders proposed plan cards, approves them, and opens the launched implementation run', async () => {
+    const user = userEvent.setup()
+    const reviewCalls: Array<{ url: string; body: Record<string, unknown> }> = []
+
+    const pendingSnapshot = withSnapshotSchema({
+      conversation_id: 'conversation-proposed-plan',
+      conversation_handle: 'amber-otter',
+      project_path: '/tmp/chat-project',
+      chat_mode: 'plan',
+      title: 'Plan review',
+      created_at: '2026-03-09T21:00:00Z',
+      updated_at: '2026-03-09T21:00:03Z',
+      turns: [
+        {
+          id: 'turn-user-plan',
+          role: 'user',
+          content: 'Draft the implementation plan.',
+          timestamp: '2026-03-09T21:00:00Z',
+          status: 'complete',
+          kind: 'message',
+          artifact_id: null,
+        },
+        {
+          id: 'turn-assistant-plan',
+          role: 'assistant',
+          content: '## Proposed steps\n\n1. Add the backend artifact.\n2. Wire the review UI.',
+          timestamp: '2026-03-09T21:00:01Z',
+          status: 'complete',
+          kind: 'message',
+          artifact_id: null,
+        },
+      ],
+      segments: [
+        {
+          id: 'segment-plan-inline',
+          turn_id: 'turn-assistant-plan',
+          order: 1,
+          kind: 'plan',
+          role: 'assistant',
+          status: 'complete',
+          timestamp: '2026-03-09T21:00:02Z',
+          updated_at: '2026-03-09T21:00:02Z',
+          completed_at: '2026-03-09T21:00:02Z',
+          content: '## Proposed steps\n\n1. Add the backend artifact.\n2. Wire the review UI.',
+          artifact_id: 'proposed-plan-inline',
+          error: null,
+          tool_call: null,
+          source: null,
+        },
+      ],
+      event_log: [],
+      flow_run_requests: [],
+      flow_launches: [],
+      proposed_plans: [
+        {
+          id: 'proposed-plan-inline',
+          created_at: '2026-03-09T21:00:02Z',
+          updated_at: '2026-03-09T21:00:02Z',
+          title: 'Proposed steps',
+          content: '## Proposed steps\n\n1. Add the backend artifact.\n2. Wire the review UI.',
+          project_path: '/tmp/chat-project',
+          conversation_id: 'conversation-proposed-plan',
+          source_turn_id: 'turn-assistant-plan',
+          source_segment_id: 'segment-plan-inline',
+          status: 'pending_review',
+          review_note: null,
+          written_plan_path: null,
+          flow_launch_id: null,
+          run_id: null,
+          launch_error: null,
+        },
+      ],
+    })
+
+    const approvedSnapshot = withSnapshotSchema({
+      ...pendingSnapshot,
+      updated_at: '2026-03-09T21:00:05Z',
+      segments: [
+        ...pendingSnapshot.segments,
+        {
+          id: 'segment-artifact-flow-launch-1',
+          turn_id: 'turn-assistant-plan',
+          order: 2,
+          kind: 'flow_launch',
+          role: 'system',
+          status: 'complete',
+          timestamp: '2026-03-09T21:00:05Z',
+          updated_at: '2026-03-09T21:00:05Z',
+          completed_at: '2026-03-09T21:00:05Z',
+          content: '',
+          artifact_id: 'flow-launch-1',
+          error: null,
+          tool_call: null,
+          source: null,
+        },
+      ],
+      flow_launches: [
+        {
+          id: 'flow-launch-1',
+          created_at: '2026-03-09T21:00:05Z',
+          updated_at: '2026-03-09T21:00:05Z',
+          flow_name: 'implement-from-plan.dot',
+          summary: 'Implement approved plan: Proposed steps',
+          project_path: '/tmp/chat-project',
+          conversation_id: 'conversation-proposed-plan',
+          source_turn_id: 'turn-assistant-plan',
+          source_segment_id: 'segment-artifact-flow-launch-1',
+          status: 'launched',
+          goal: null,
+          launch_context: null,
+          model: null,
+          run_id: 'run-plan-123',
+          launch_error: null,
+        },
+      ],
+      proposed_plans: [
+        {
+          ...pendingSnapshot.proposed_plans[0],
+          updated_at: '2026-03-09T21:00:05Z',
+          status: 'approved',
+          review_note: 'Ready to implement.',
+          written_plan_path: '/tmp/chat-project/proposed-steps.md',
+          flow_launch_id: 'flow-launch-1',
+          run_id: 'run-plan-123',
+        },
+      ],
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify([
+            {
+              conversation_id: 'conversation-proposed-plan',
+              conversation_handle: 'amber-otter',
+              project_path: '/tmp/chat-project',
+              title: 'Plan review',
+              created_at: '2026-03-09T21:00:00Z',
+              updated_at: '2026-03-09T21:00:03Z',
+              last_message_preview: 'Draft the implementation plan.',
+            },
+          ]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/conversations/conversation-proposed-plan/proposed-plans/proposed-plan-inline/review')) {
+          reviewCalls.push({
+            url,
+            body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+          })
+          return new Response(JSON.stringify(approvedSnapshot), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/conversations/conversation-proposed-plan') && !init?.method) {
+          return new Response(JSON.stringify(pendingSnapshot), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response('Not found', { status: 404 })
+      }),
+    )
+
+    useStore.getState().registerProject('/tmp/chat-project')
+    useStore.getState().setActiveProjectPath('/tmp/chat-project')
+    useStore.getState().updateProjectSessionState('/tmp/chat-project', {
+      conversationId: 'conversation-proposed-plan',
+    })
+
+    renderProjectsPanel()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-proposed-plan-approve-button-proposed-plan-inline')).toBeVisible()
+    })
+
+    await user.type(screen.getByTestId('project-proposed-plan-review-note-proposed-plan-inline'), 'Ready to implement.')
+    await user.click(screen.getByTestId('project-proposed-plan-approve-button-proposed-plan-inline'))
+
+    await waitFor(() => {
+      expect(reviewCalls).toHaveLength(1)
+      expect(screen.getByTestId('project-proposed-plan-open-run-button-proposed-plan-inline')).toBeVisible()
+    })
+
+    expect(reviewCalls[0]?.body).toMatchObject({
+      project_path: '/tmp/chat-project',
+      disposition: 'approved',
+      review_note: 'Ready to implement.',
+    })
+
+    await user.click(screen.getByTestId('project-proposed-plan-open-run-button-proposed-plan-inline'))
+
+    await waitFor(() => {
+      expect(useStore.getState().selectedRunId).toBe('run-plan-123')
+      expect(useStore.getState().executionFlow).toBe('implement-from-plan.dot')
+      expect(useStore.getState().viewMode).toBe('runs')
+    })
+  })
+
   it('returns the send button to Send once the assistant turn completes even if the original POST is still pending', async () => {
     class MockEventSource {
       static instances: MockEventSource[] = []

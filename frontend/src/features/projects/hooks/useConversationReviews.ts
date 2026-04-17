@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import {
     reviewFlowRunRequestValidated,
+    reviewProposedPlanValidated,
     type ConversationSnapshotResponse,
     type FlowRunRequestResponse,
+    type ProposedPlanArtifactResponse,
 } from '@/lib/workspaceClient'
 import { useDialogController } from '@/components/app/dialog-controller'
 type UseConversationReviewsArgs = {
@@ -26,6 +28,7 @@ export function useConversationReviews({
 }: UseConversationReviewsArgs) {
     const { prompt } = useDialogController()
     const [pendingFlowRunRequestId, setPendingFlowRunRequestId] = useState<string | null>(null)
+    const [pendingProposedPlanId, setPendingProposedPlanId] = useState<string | null>(null)
 
     const onReviewFlowRunRequest = async (
         flowRunRequest: FlowRunRequestResponse,
@@ -70,8 +73,36 @@ export function useConversationReviews({
         }
     }
 
+    const onReviewProposedPlan = async (
+        proposedPlan: ProposedPlanArtifactResponse,
+        disposition: 'approved' | 'rejected',
+        reviewNote?: string | null,
+    ) => {
+        if (!activeProjectPath || !activeConversationId) {
+            return
+        }
+        setPendingProposedPlanId(proposedPlan.id)
+        setPanelError(null)
+        try {
+            const snapshot = await reviewProposedPlanValidated(activeConversationId, proposedPlan.id, {
+                project_path: activeProjectPath,
+                disposition,
+                review_note: reviewNote?.trim() || null,
+            })
+            applyConversationSnapshot(activeProjectPath, snapshot, 'proposed-plan-review')
+        } catch (error) {
+            const message = formatErrorMessage(error, 'Unable to review the proposed plan.')
+            setPanelError(message)
+            appendLocalProjectEvent(`Proposed plan review failed: ${message}`)
+        } finally {
+            setPendingProposedPlanId(null)
+        }
+    }
+
     return {
         onReviewFlowRunRequest,
+        onReviewProposedPlan,
         pendingFlowRunRequestId,
+        pendingProposedPlanId,
     }
 }

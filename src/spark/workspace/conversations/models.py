@@ -42,6 +42,19 @@ def _truncate_text(value: str, limit: int) -> str:
     return collapsed[: max(0, limit - 1)].rstrip() + "…"
 
 
+def _normalize_request_user_input_delivery_status(
+    value: Any,
+    *,
+    status: str,
+) -> Optional[str]:
+    if status != "answered":
+        return None
+    normalized = _as_non_empty_string(value)
+    if normalized == "pending_delivery":
+        return "pending_delivery"
+    return "delivered"
+
+
 def normalize_chat_mode(value: Any) -> str:
     if not isinstance(value, str):
         return CHAT_MODE_CHAT
@@ -229,7 +242,9 @@ class RequestUserInputRecord:
     status: str
     questions: list[RequestUserInputQuestion] = field(default_factory=list)
     answers: dict[str, str] = field(default_factory=dict)
+    delivery_status: Optional[str] = None
     submitted_at: Optional[str] = None
+    delivered_at: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -238,17 +253,22 @@ class RequestUserInputRecord:
             "questions": [question.to_dict() for question in self.questions],
             "answers": dict(self.answers),
         }
+        if self.delivery_status is not None:
+            payload["delivery_status"] = self.delivery_status
         if self.submitted_at is not None:
             payload["submitted_at"] = self.submitted_at
+        if self.delivered_at is not None:
+            payload["delivered_at"] = self.delivered_at
         return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "RequestUserInputRecord":
         raw_questions = payload.get("questions")
         raw_answers = payload.get("answers")
+        status = str(payload.get("status", "pending") or "pending")
         return cls(
             request_id=str(payload.get("request_id", "")),
-            status=str(payload.get("status", "pending") or "pending"),
+            status=status,
             questions=[
                 RequestUserInputQuestion.from_dict(question)
                 for question in raw_questions
@@ -259,7 +279,12 @@ class RequestUserInputRecord:
                 for key, value in raw_answers.items()
                 if value is not None
             } if isinstance(raw_answers, dict) else {},
+            delivery_status=_normalize_request_user_input_delivery_status(
+                payload.get("delivery_status"),
+                status=status,
+            ),
             submitted_at=str(payload.get("submitted_at")) if payload.get("submitted_at") is not None else None,
+            delivered_at=str(payload.get("delivered_at")) if payload.get("delivered_at") is not None else None,
         )
 
 
@@ -552,6 +577,71 @@ class FlowLaunch:
 
 
 @dataclass
+class ProposedPlanArtifact:
+    id: str
+    created_at: str
+    updated_at: str
+    title: str
+    content: str
+    project_path: str
+    conversation_id: str
+    source_turn_id: str
+    status: str = "pending_review"
+    source_segment_id: Optional[str] = None
+    review_note: Optional[str] = None
+    written_plan_path: Optional[str] = None
+    flow_launch_id: Optional[str] = None
+    run_id: Optional[str] = None
+    launch_error: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "title": self.title,
+            "content": self.content,
+            "project_path": self.project_path,
+            "conversation_id": self.conversation_id,
+            "source_turn_id": self.source_turn_id,
+            "status": self.status,
+        }
+        if self.source_segment_id:
+            payload["source_segment_id"] = self.source_segment_id
+        if self.review_note:
+            payload["review_note"] = self.review_note
+        if self.written_plan_path:
+            payload["written_plan_path"] = self.written_plan_path
+        if self.flow_launch_id:
+            payload["flow_launch_id"] = self.flow_launch_id
+        if self.run_id:
+            payload["run_id"] = self.run_id
+        if self.launch_error:
+            payload["launch_error"] = self.launch_error
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ProposedPlanArtifact":
+        return cls(
+            id=str(payload.get("id", "")),
+            created_at=str(payload.get("created_at", "")),
+            updated_at=str(payload.get("updated_at", payload.get("created_at", "")) or ""),
+            title=_as_non_empty_string(payload.get("title")) or "Proposed Plan",
+            content=str(payload.get("content", "")),
+            project_path=_normalize_project_path(str(payload.get("project_path", ""))),
+            conversation_id=str(payload.get("conversation_id", "")),
+            source_turn_id=str(payload.get("source_turn_id", "")),
+            status=str(payload.get("status", "pending_review") or "pending_review"),
+            source_segment_id=str(payload.get("source_segment_id")) if payload.get("source_segment_id") is not None else None,
+            review_note=str(payload.get("review_note")) if payload.get("review_note") is not None else None,
+            written_plan_path=str(payload.get("written_plan_path")) if payload.get("written_plan_path") is not None else None,
+            flow_launch_id=str(payload.get("flow_launch_id")) if payload.get("flow_launch_id") is not None else None,
+            run_id=str(payload.get("run_id")) if payload.get("run_id") is not None else None,
+            launch_error=str(payload.get("launch_error")) if payload.get("launch_error") is not None else None,
+        )
+
+
+@dataclass
 class ConversationState:
     conversation_id: str
     project_path: str
@@ -566,6 +656,7 @@ class ConversationState:
     event_log: list[WorkflowEvent] = field(default_factory=list)
     flow_run_requests: list[FlowRunRequest] = field(default_factory=list)
     flow_launches: list[FlowLaunch] = field(default_factory=list)
+    proposed_plans: list[ProposedPlanArtifact] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -582,6 +673,7 @@ class ConversationState:
             "event_log": [entry.to_dict() for entry in self.event_log],
             "flow_run_requests": [request.to_dict() for request in self.flow_run_requests],
             "flow_launches": [launch.to_dict() for launch in self.flow_launches],
+            "proposed_plans": [artifact.to_dict() for artifact in self.proposed_plans],
         }
 
     @classmethod
@@ -591,6 +683,7 @@ class ConversationState:
         raw_events = payload.get("event_log")
         raw_flow_run_requests = payload.get("flow_run_requests")
         raw_flow_launches = payload.get("flow_launches")
+        raw_proposed_plans = payload.get("proposed_plans")
         schema_version = payload.get("schema_version")
         if not isinstance(schema_version, int) or schema_version != CONVERSATION_STATE_SCHEMA_VERSION:
             raise ValueError(
@@ -641,6 +734,11 @@ class ConversationState:
                 for entry in raw_flow_launches
                 if isinstance(entry, dict)
             ] if isinstance(raw_flow_launches, list) else [],
+            proposed_plans=[
+                ProposedPlanArtifact.from_dict(entry)
+                for entry in raw_proposed_plans
+                if isinstance(entry, dict)
+            ] if isinstance(raw_proposed_plans, list) else [],
         )
 
 

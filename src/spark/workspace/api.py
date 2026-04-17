@@ -15,6 +15,7 @@ from attractor.api.flow_sources import resolve_flow_path
 from spark.chat.response_parsing import normalize_flow_run_request_payload
 from spark.chat.service import ProjectChatService, TurnInProgressError
 from spark.workspace.attractor_client import AttractorApiClient, AttractorApiError
+from spark.workspace.conversations.artifacts import IMPLEMENT_FROM_PLAN_FLOW
 from spark.workspace.flow_catalog import (
     ALLOWED_LAUNCH_POLICIES,
     LAUNCH_POLICY_AGENT_REQUESTABLE,
@@ -92,6 +93,12 @@ class FlowRunRequestReviewRequest(BaseModel):
     message: str
     flow_name: Optional[str] = None
     model: Optional[str] = None
+
+
+class ProposedPlanReviewRequest(BaseModel):
+    project_path: str
+    disposition: str
+    review_note: Optional[str] = None
 
 
 class RunLaunchRequest(BaseModel):
@@ -894,6 +901,67 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             return await asyncio.to_thread(
                 deps.get_project_chat().get_snapshot,
                 conversation_id,
+                normalized_project_path,
+            )
+        return snapshot
+
+    @router.post("/api/conversations/{conversation_id}/proposed-plans/{plan_id}/review")
+    async def review_proposed_plan(
+        conversation_id: str,
+        plan_id: str,
+        req: ProposedPlanReviewRequest,
+    ):
+        if req.disposition not in {"approved", "rejected"}:
+            raise HTTPException(status_code=400, detail="Proposed plan disposition must be approved or rejected.")
+        normalized_project_path = _normalize_project_path_or_400(req.project_path)
+        if req.disposition == "approved":
+            await _ensure_flow_exists(IMPLEMENT_FROM_PLAN_FLOW)
+        try:
+            snapshot, proposed_plan, flow_launch = await asyncio.to_thread(
+                deps.get_project_chat().review_proposed_plan,
+                conversation_id,
+                normalized_project_path,
+                plan_id,
+                req.disposition,
+                req.review_note,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await deps.get_project_chat().publish_snapshot(conversation_id)
+        if req.disposition == "approved" and flow_launch is not None:
+            try:
+                run_id = await _launch_direct_flow(
+                    flow_name=flow_launch.flow_name,
+                    project_path=normalized_project_path,
+                    goal=flow_launch.goal,
+                    launch_context=flow_launch.launch_context,
+                    model=flow_launch.model,
+                )
+            except HTTPException as exc:
+                await asyncio.to_thread(
+                    deps.get_project_chat().fail_proposed_plan_launch,
+                    proposed_plan.conversation_id,
+                    proposed_plan.id,
+                    flow_launch.flow_name,
+                    str(exc.detail),
+                )
+                await deps.get_project_chat().publish_snapshot(proposed_plan.conversation_id)
+                return await asyncio.to_thread(
+                    deps.get_project_chat().get_snapshot,
+                    proposed_plan.conversation_id,
+                    normalized_project_path,
+                )
+            await asyncio.to_thread(
+                deps.get_project_chat().note_proposed_plan_launch_started,
+                proposed_plan.conversation_id,
+                proposed_plan.id,
+                run_id,
+                flow_launch.flow_name,
+            )
+            await deps.get_project_chat().publish_snapshot(proposed_plan.conversation_id)
+            return await asyncio.to_thread(
+                deps.get_project_chat().get_snapshot,
+                proposed_plan.conversation_id,
                 normalized_project_path,
             )
         return snapshot

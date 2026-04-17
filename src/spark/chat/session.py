@@ -347,6 +347,7 @@ class CodexAppServerChatSession:
                         "method": "item/tool/requestUserInput/handled",
                         "params": params if isinstance(params, dict) else {},
                     }
+                pending_request = self._register_pending_user_input(request)
                 self._emit_live_event(
                     on_event,
                     ChatTurnLiveEvent(
@@ -356,7 +357,6 @@ class CodexAppServerChatSession:
                         request_user_input=request,
                     ),
                 )
-                pending_request = self._register_pending_user_input(request)
                 try:
                     answers = pending_request.wait_for_answers()
                 finally:

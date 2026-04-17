@@ -77,6 +77,46 @@ describe('conversationsApi parsing', () => {
         })
     })
 
+    it('parses proposed plan artifacts from snapshots', () => {
+        const snapshot = parseConversationSnapshotResponse({
+            schema_version: 4,
+            conversation_id: 'conversation-plan',
+            conversation_handle: 'steady-harbor',
+            project_path: '/tmp/project-plan',
+            chat_mode: 'plan',
+            title: 'Planning thread',
+            created_at: '2026-04-16T18:00:00Z',
+            updated_at: '2026-04-16T18:00:10Z',
+            turns: [],
+            segments: [],
+            event_log: [],
+            flow_run_requests: [],
+            flow_launches: [],
+            proposed_plans: [
+                {
+                    id: 'proposed-plan-1',
+                    created_at: '2026-04-16T18:00:08Z',
+                    updated_at: '2026-04-16T18:00:09Z',
+                    title: 'Reviewable proposed plans',
+                    content: '# Reviewable proposed plans',
+                    project_path: '/tmp/project-plan',
+                    conversation_id: 'conversation-plan',
+                    source_turn_id: 'turn-assistant-1',
+                    source_segment_id: 'segment-plan-1',
+                    status: 'pending_review',
+                },
+            ],
+        })
+
+        expect(snapshot.proposed_plans).toEqual([
+            expect.objectContaining({
+                id: 'proposed-plan-1',
+                status: 'pending_review',
+                source_segment_id: 'segment-plan-1',
+            }),
+        ])
+    })
+
     it('parses context_compaction segments from snapshots', () => {
         const snapshot = parseConversationSnapshotResponse({
             schema_version: 4,
