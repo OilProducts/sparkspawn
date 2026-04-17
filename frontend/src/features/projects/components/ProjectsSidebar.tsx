@@ -94,8 +94,8 @@ export function ProjectsSidebar({
                                 ) : null}
                             </div>
                         </CardHeader>
-                    <CardContent className={`px-4 pt-4 ${isNarrowViewport ? "" : "min-h-0 flex-1 overflow-y-auto pr-1"}`}>
-                        <div className={isNarrowViewport ? "" : "min-h-0 flex-1 overflow-y-auto pr-1"}>
+                    <CardContent className={`px-4 pt-4 ${isNarrowViewport ? "" : "min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1"}`}>
+                        <div className={isNarrowViewport ? "" : "min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1"}>
                             <ul data-testid="project-thread-list" className="space-y-1.5">
                                 {!activeProjectPath ? (
                                     <li>
@@ -148,12 +148,12 @@ export function ProjectsSidebar({
                                                     aria-label={`Open thread ${conversation.title}`}
                                                     variant={isActiveConversation ? "secondary" : "ghost"}
                                                     size="sm"
-                                                    className={`h-auto w-full justify-start rounded-xl px-2 py-2 pr-9 text-left ${isActiveConversation
+                                                    className={`h-auto w-full min-w-0 justify-start overflow-hidden rounded-xl px-2 py-2 pr-9 text-left ${isActiveConversation
                                                         ? "bg-muted text-foreground shadow-sm"
                                                         : "text-foreground/90 hover:bg-muted/60"
                                                         }`}
                                                 >
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex w-full min-w-0 items-center gap-2">
                                                         <FileText className={`h-3.5 w-3.5 shrink-0 ${isActiveConversation ? "text-foreground" : "text-muted-foreground"}`} />
                                                         <div className="min-w-0 flex-1">
                                                             <span className="block truncate text-[13px] font-medium">
@@ -165,7 +165,7 @@ export function ProjectsSidebar({
                                                                 </span>
                                                             ) : null}
                                                         </div>
-                                                        <span className="shrink-0 text-[11px] text-muted-foreground transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">
+                                                        <span className="ml-auto shrink-0 text-[11px] text-muted-foreground transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">
                                                             {ageLabel}
                                                         </span>
                                                     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { useStore } from '@/store'
 
 const DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT = 320
@@ -22,35 +22,23 @@ function clampHomeSidebarPrimaryHeight(height: number, containerHeight: number) 
     return Math.min(Math.max(height, HOME_SIDEBAR_MIN_PRIMARY_HEIGHT), maxPrimaryHeight)
 }
 
-function clampHomeSidebarPrimaryRatio(ratio: number) {
-    if (!Number.isFinite(ratio)) {
-        return null
-    }
-    return Math.min(Math.max(ratio, 0), 1)
-}
-
-function getDefaultHomeSidebarPrimaryRatio(containerHeight: number) {
+function resolveHomeSidebarPrimaryHeight(containerHeight: number, sidebarPrimarySplitRatio: number | null) {
+    const defaultHeight = clampHomeSidebarPrimaryHeight(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT, containerHeight)
     const splitSpace = getHomeSidebarSplitSpace(containerHeight)
     if (splitSpace <= 0) {
-        return null
+        return defaultHeight
     }
-    return clampHomeSidebarPrimaryRatio(
-        clampHomeSidebarPrimaryHeight(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT, containerHeight) / splitSpace,
+    const effectiveRatio = (
+        sidebarPrimarySplitRatio !== null && Number.isFinite(sidebarPrimarySplitRatio)
+            ? Math.min(Math.max(sidebarPrimarySplitRatio, 0), 1)
+            : defaultHeight / splitSpace
     )
+    return Math.round(clampHomeSidebarPrimaryHeight(splitSpace * effectiveRatio, containerHeight))
 }
 
-function resolveHomeSidebarPrimaryHeight(sidebarPrimarySplitRatio: number | null, containerHeight: number) {
-    if (containerHeight <= 0) {
-        return DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT
-    }
-    const effectiveRatio = sidebarPrimarySplitRatio ?? getDefaultHomeSidebarPrimaryRatio(containerHeight)
+function resolveHomeSidebarPrimaryRatio(height: number, containerHeight: number) {
     const splitSpace = getHomeSidebarSplitSpace(containerHeight)
-    if (effectiveRatio === null || splitSpace <= 0) {
-        return clampHomeSidebarPrimaryHeight(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT, containerHeight)
-    }
-    return Math.round(
-        clampHomeSidebarPrimaryHeight(splitSpace * effectiveRatio, containerHeight),
-    )
+    return splitSpace > 0 ? clampHomeSidebarPrimaryHeight(height, containerHeight) / splitSpace : null
 }
 
 export function useHomeSidebarLayout(
@@ -74,16 +62,7 @@ export function useHomeSidebarLayout(
     const homeSidebarResizeRef = useRef<{ startY: number; startHeight: number } | null>(null)
     const conversationBodyRef = useRef<HTMLDivElement | null>(null)
     const [isHomeSidebarResizing, setIsHomeSidebarResizing] = useState(false)
-    const [homeSidebarContainerHeight, setHomeSidebarContainerHeight] = useState(0)
-
-    const effectiveIsHomeSidebarResizing = isHomeSidebarResizing && !isNarrowViewport
-    const effectiveHomeSidebarContainerHeight = homeSidebarContainerHeight
-        || homeSidebarRef.current?.getBoundingClientRect().height
-        || 0
-    const homeSidebarPrimaryHeight = resolveHomeSidebarPrimaryHeight(
-        persistedHomeSidebarPrimarySplitRatio,
-        effectiveHomeSidebarContainerHeight,
-    )
+    const [homeSidebarPrimaryHeight, setHomeSidebarPrimaryHeight] = useState(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT)
 
     const setConversationLayoutState = (patch: {
         isPinnedToBottom?: boolean
@@ -133,33 +112,32 @@ export function useHomeSidebarLayout(
         })
     }
 
-    const readHomeSidebarContainerHeight = () => {
-        const containerHeight = homeSidebarRef.current?.getBoundingClientRect().height || 0
-        setHomeSidebarContainerHeight((currentHeight) => (
-            currentHeight === containerHeight ? currentHeight : containerHeight
-        ))
-        return containerHeight
-    }
+    const measureHomeSidebarContainerHeight = () => homeSidebarRef.current?.getBoundingClientRect().height || 0
 
-    const setSidebarPrimaryHeight = (nextHeight: number, containerHeight: number) => {
+    const syncHomeSidebarPrimaryHeight = useEffectEvent((containerHeight = measureHomeSidebarContainerHeight()) => {
+        const nextHeight = resolveHomeSidebarPrimaryHeight(containerHeight, persistedHomeSidebarPrimarySplitRatio)
+        setHomeSidebarPrimaryHeight((currentHeight) => (
+            currentHeight === nextHeight ? currentHeight : nextHeight
+        ))
+    })
+
+    const setSidebarPrimaryHeight = (nextHeight: number) => {
+        const containerHeight = measureHomeSidebarContainerHeight()
+        if (containerHeight <= 0) {
+            return
+        }
+        const clampedHeight = clampHomeSidebarPrimaryHeight(nextHeight, containerHeight)
+        setHomeSidebarPrimaryHeight(clampedHeight)
         if (!activeProjectPath) {
             return
         }
-        const splitSpace = getHomeSidebarSplitSpace(containerHeight)
-        const clampedHeight = clampHomeSidebarPrimaryHeight(nextHeight, containerHeight)
         updateHomeProjectSession(activeProjectPath, {
-            sidebarPrimarySplitRatio: splitSpace > 0
-                ? clampHomeSidebarPrimaryRatio(clampedHeight / splitSpace)
-                : null,
+            sidebarPrimarySplitRatio: resolveHomeSidebarPrimaryRatio(clampedHeight, containerHeight),
         })
     }
 
     const adjustHomeSidebarPrimaryHeight = (delta: number) => {
-        const containerHeight = readHomeSidebarContainerHeight()
-        if (containerHeight <= 0) {
-            return
-        }
-        setSidebarPrimaryHeight(homeSidebarPrimaryHeight + delta, containerHeight)
+        setSidebarPrimaryHeight(homeSidebarPrimaryHeight + delta)
     }
 
     const onHomeSidebarResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -189,20 +167,12 @@ export function useHomeSidebarLayout(
         }
         if (event.key === 'Home') {
             event.preventDefault()
-            const containerHeight = readHomeSidebarContainerHeight()
-            if (containerHeight <= 0) {
-                return
-            }
-            setSidebarPrimaryHeight(HOME_SIDEBAR_MIN_PRIMARY_HEIGHT, containerHeight)
+            setSidebarPrimaryHeight(HOME_SIDEBAR_MIN_PRIMARY_HEIGHT)
             return
         }
         if (event.key === 'End') {
             event.preventDefault()
-            const containerHeight = readHomeSidebarContainerHeight()
-            if (containerHeight <= 0) {
-                return
-            }
-            setSidebarPrimaryHeight(containerHeight, containerHeight)
+            setSidebarPrimaryHeight(Number.POSITIVE_INFINITY)
         }
     }
 
@@ -210,7 +180,14 @@ export function useHomeSidebarLayout(
         if (isNarrowViewport) {
             homeSidebarResizeRef.current = null
             setIsHomeSidebarResizing(false)
-            setHomeSidebarContainerHeight(0)
+            setHomeSidebarPrimaryHeight(DEFAULT_HOME_SIDEBAR_PRIMARY_HEIGHT)
+            return
+        }
+        syncHomeSidebarPrimaryHeight()
+    }, [activeProjectPath, isNarrowViewport, persistedHomeSidebarPrimarySplitRatio])
+
+    useEffect(() => {
+        if (isNarrowViewport) {
             return
         }
         const node = homeSidebarRef.current
@@ -218,10 +195,8 @@ export function useHomeSidebarLayout(
             return
         }
 
-        readHomeSidebarContainerHeight()
-
-        const resizeObserver = new ResizeObserver(() => {
-            readHomeSidebarContainerHeight()
+        const resizeObserver = new ResizeObserver((entries) => {
+            syncHomeSidebarPrimaryHeight(entries[0]?.contentRect.height ?? node.getBoundingClientRect().height)
         })
         resizeObserver.observe(node)
 
@@ -244,12 +219,11 @@ export function useHomeSidebarLayout(
 
         const handleHomeSidebarPointerMove = (event: PointerEvent) => {
             const resizeState = homeSidebarResizeRef.current
-            const containerHeight = readHomeSidebarContainerHeight()
-            if (!resizeState || containerHeight <= 0) {
+            if (!resizeState) {
                 return
             }
             const nextHeight = resizeState.startHeight + (event.clientY - resizeState.startY)
-            setSidebarPrimaryHeight(nextHeight, containerHeight)
+            setSidebarPrimaryHeight(nextHeight)
         }
 
         window.addEventListener('pointermove', handleHomeSidebarPointerMove)
@@ -287,7 +261,7 @@ export function useHomeSidebarLayout(
         homeSidebarRef,
         homeSidebarPrimaryHeight,
         isConversationPinnedToBottom,
-        isHomeSidebarResizing: effectiveIsHomeSidebarResizing,
+        isHomeSidebarResizing: isHomeSidebarResizing && !isNarrowViewport,
         onHomeSidebarResizeKeyDown,
         onHomeSidebarResizePointerDown,
         scrollConversationToBottom,
