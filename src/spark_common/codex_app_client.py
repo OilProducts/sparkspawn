@@ -40,6 +40,10 @@ class CodexAppServerTurnResult:
         return self.state.resolved_agent_text()
 
     @property
+    def plan_message(self) -> str:
+        return self.state.resolved_plan_text()
+
+    @property
     def command_text(self) -> str:
         return self.state.resolved_command_text()
 
@@ -148,7 +152,10 @@ class CodexAppServerClient:
         self._pending_messages.clear()
         init_response = self.send_request(
             "initialize",
-            {"clientInfo": {"name": "spark", "version": "0.1"}},
+            {
+                "clientInfo": {"name": "spark", "version": "0.1"},
+                "experimentalApi": True,
+            },
         )
         if init_response.get("error"):
             self.close()

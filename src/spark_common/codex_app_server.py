@@ -128,6 +128,31 @@ def extract_agent_message_phase(item: dict[str, Any]) -> Optional[str]:
     return normalized or None
 
 
+def extract_plan_text_from_item(item: dict[str, Any]) -> Optional[str]:
+    item_type = str(item.get("type") or "").strip().lower().replace("_", "")
+    if item_type not in {"plan", "proposedplan"}:
+        return None
+    for key in ("text", "planText", "plan_text", "markdown", "contentText", "content_text"):
+        value = item.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    content = item.get("content")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for entry in content:
+            if not isinstance(entry, dict):
+                continue
+            entry_type = str(entry.get("type") or "").strip().lower()
+            if entry_type in {"text", "markdown"}:
+                text = entry.get("text")
+                if text is not None and str(text).strip():
+                    parts.append(str(text).strip())
+        joined = "\n\n".join(part for part in parts if part)
+        if joined:
+            return joined
+    return None
+
+
 def is_tool_item(item: dict[str, Any]) -> bool:
     item_type = str(item.get("type") or "").strip()
     return item_type in {"commandExecution", "fileChange"}
@@ -149,8 +174,10 @@ class CodexAppServerTurnEvent:
 @dataclass
 class CodexAppServerTurnState:
     agent_chunks: list[str] = field(default_factory=list)
+    plan_chunks: list[str] = field(default_factory=list)
     command_chunks: list[str] = field(default_factory=list)
     final_agent_message: Optional[str] = None
+    final_plan_message: Optional[str] = None
     last_token_total: Optional[int] = None
     last_token_usage_payload: Optional[dict[str, Any]] = None
     turn_status: Optional[str] = None
@@ -161,6 +188,10 @@ class CodexAppServerTurnState:
 
     def resolved_agent_text(self) -> str:
         response_text = self.final_agent_message if self.final_agent_message is not None else "".join(self.agent_chunks)
+        return response_text.strip()
+
+    def resolved_plan_text(self) -> str:
+        response_text = self.final_plan_message if self.final_plan_message is not None else "".join(self.plan_chunks)
         return response_text.strip()
 
     def resolved_command_text(self) -> str:
@@ -239,6 +270,18 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
                     )
                 )
                 return events
+            plan_text = extract_plan_text_from_item(item)
+            if plan_text:
+                state.final_plan_message = plan_text
+                events.append(
+                    CodexAppServerTurnEvent(
+                        kind="plan_completed",
+                        text=plan_text,
+                        item=item,
+                        item_id=item_id,
+                    )
+                )
+                return events
             if is_tool_item(item):
                 events.append(
                     CodexAppServerTurnEvent(
@@ -260,6 +303,19 @@ def process_turn_message(message: dict[str, Any], state: CodexAppServerTurnState
                     text=str(delta),
                     item_id=item_id,
                     phase=state.agent_message_phases.get(item_id or ""),
+                )
+            )
+        return events
+
+    if method == "item/plan/delta":
+        delta = params.get("delta") or ""
+        if delta:
+            state.plan_chunks.append(str(delta))
+            events.append(
+                CodexAppServerTurnEvent(
+                    kind="plan_delta",
+                    text=str(delta),
+                    item_id=as_non_empty_string(params.get("itemId")),
                 )
             )
         return events

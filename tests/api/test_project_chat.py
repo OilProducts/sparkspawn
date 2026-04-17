@@ -37,12 +37,14 @@ def _completed_turn_result(
     thread_id: str = "thread-123",
     turn_id: str = "turn-123",
     assistant_message: str = "Ack",
+    plan_message: str = "",
     command_text: str = "",
     token_total: Optional[int] = None,
     error: Optional[str] = None,
 ) -> CodexAppServerTurnResult:
     state = codex_app_server.CodexAppServerTurnState()
     state.final_agent_message = assistant_message
+    state.final_plan_message = plan_message or None
     state.turn_status = "completed"
     if command_text:
         state.command_chunks.append(command_text)
@@ -166,7 +168,9 @@ def test_project_chat_service_creates_default_prompt_templates_file(tmp_path: Pa
     assert "[project_chat]" in prompt_text
     assert "{{recent_conversation}}" not in prompt_text
     assert "{{latest_user_message}}" in prompt_text
+    assert "plan = '''" in prompt_text
     assert service._prompt_templates.chat
+    assert service._prompt_templates.plan
     assert "{{recent_conversation}}" not in service._prompt_templates.chat
 
 
@@ -178,6 +182,7 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
             [
                 "[project_chat]",
                 "chat = '''CHAT {{project_path}} :: {{latest_user_message}}'''",
+                "plan = '''PLAN {{project_path}} :: {{latest_user_message}}'''",
                 "",
             ]
         ),
@@ -203,6 +208,36 @@ def test_project_chat_service_uses_custom_prompt_templates(tmp_path: Path) -> No
     assert "Conversation handle: amber-otter" in chat_prompt
     assert "CHAT /tmp/project :: Latest message" in chat_prompt
     assert "Older message" not in chat_prompt
+
+
+def test_prepare_turn_uses_plan_prompt_template_when_chat_mode_is_plan(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "config" / PROMPTS_FILE_NAME
+    prompts_path.parent.mkdir(parents=True, exist_ok=True)
+    prompts_path.write_text(
+        "\n".join(
+            [
+                "[project_chat]",
+                "chat = '''CHAT {{project_path}} :: {{latest_user_message}}'''",
+                "plan = '''PLAN {{project_path}} :: {{latest_user_message}}'''",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    service = project_chat.ProjectChatService(tmp_path)
+
+    prepared, _ = service._prepare_turn(
+        "conversation-plan-template",
+        str(tmp_path),
+        "Plan the fix.",
+        None,
+        "plan",
+    )
+
+    assert prepared.chat_mode == "plan"
+    assert "PLAN " + str(tmp_path.resolve()) + " :: Plan the fix." in prepared.prompt
+    assert "Official Codex Plan instructions remain the planning authority." in prepared.prompt
+    assert "planning theater or workflow artifacts" not in prepared.prompt
 
 
 def test_project_chat_prompt_includes_flow_authoring_boundary(tmp_path: Path) -> None:
@@ -694,6 +729,44 @@ def test_chat_session_turn_forwards_chat_mode_to_run_turn(monkeypatch) -> None:
     assert client.run_turn_calls[0]["chat_mode"] == "plan"
 
 
+def test_chat_session_uses_plan_text_when_turn_has_only_plan_item(monkeypatch) -> None:
+    session = project_chat.CodexAppServerChatSession("/tmp/project")
+    progress_updates: list[project_chat.ChatTurnLiveEvent] = []
+    client = StubChatClient()
+    client.resume_result = "thread-existing"
+    session._client = client
+    session._thread_id = "thread-existing"
+
+    def run_turn(**kwargs) -> CodexAppServerTurnResult:
+        on_event = kwargs["on_event"]
+        on_event(
+            codex_app_server.CodexAppServerTurnEvent(
+                kind="plan_delta",
+                text="1. Capture the plan-only session path.\n",
+                item_id="plan-1",
+            )
+        )
+        on_event(
+            codex_app_server.CodexAppServerTurnEvent(
+                kind="plan_completed",
+                text="1. Capture the plan-only session path.\n2. Validate the fix.",
+                item_id="plan-1",
+            )
+        )
+        return _completed_turn_result(
+            thread_id=kwargs["thread_id"],
+            assistant_message="",
+            plan_message="1. Capture the plan-only session path.\n2. Validate the fix.",
+        )
+
+    client.run_turn_handler = run_turn
+
+    result = session.turn("hello", None, chat_mode="plan", on_event=progress_updates.append)
+
+    assert result.assistant_message == "1. Capture the plan-only session path.\n2. Validate the fix."
+    assert [event.kind for event in progress_updates] == ["plan_delta", "plan_completed"]
+
+
 def test_chat_session_surfaces_reasoning_summary_progress(monkeypatch) -> None:
     session = project_chat.CodexAppServerChatSession("/tmp/project")
     progress_updates: list[project_chat.ChatTurnLiveEvent] = []
@@ -1086,6 +1159,209 @@ def test_send_turn_uses_persisted_plan_chat_mode_for_execution(tmp_path: Path, m
 
     assert snapshot["chat_mode"] == "plan"
     assert captured_chat_modes == ["plan"]
+
+
+def test_send_turn_completes_plan_only_real_session_path_with_plan_preview_fallback(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    conversation_id = "conversation-plan-only"
+    project_path = str(tmp_path.resolve())
+    session = service._build_session(conversation_id, project_path)
+    client = StubChatClient()
+    client.start_result = "thread-plan"
+
+    def run_turn(**kwargs) -> CodexAppServerTurnResult:
+        on_event = kwargs["on_event"]
+        on_event(
+            codex_app_server.CodexAppServerTurnEvent(
+                kind="plan_delta",
+                text="1. Patch the real session path.\n",
+                item_id="plan-1",
+            )
+        )
+        on_event(
+            codex_app_server.CodexAppServerTurnEvent(
+                kind="plan_completed",
+                text="1. Patch the real session path.\n2. Add the regression coverage.",
+                item_id="plan-1",
+            )
+        )
+        return _completed_turn_result(
+            thread_id=kwargs["thread_id"],
+            assistant_message="",
+            plan_message="1. Patch the real session path.\n2. Add the regression coverage.",
+        )
+
+    client.run_turn_handler = run_turn
+    session._client = client
+
+    snapshot = service.send_turn(
+        conversation_id,
+        project_path,
+        "Plan the remaining fixes.",
+        None,
+        "plan",
+    )
+
+    assistant_turn = snapshot["turns"][-1]
+    assert snapshot["chat_mode"] == "plan"
+    assert assistant_turn["role"] == "assistant"
+    assert assistant_turn["status"] == "complete"
+    assert assistant_turn["content"] == "1. Patch the real session path.\n2. Add the regression coverage."
+    assert [segment["kind"] for segment in snapshot["segments"]] == ["plan"]
+    assert snapshot["segments"][0]["content"] == "1. Patch the real session path.\n2. Add the regression coverage."
+    assert snapshot["segments"][0]["status"] == "complete"
+    summaries = service.list_conversations(project_path)
+    assert summaries[0]["last_message_preview"] == "1. Patch the real session path.\n2. Add the regression coverage."
+
+
+def test_send_turn_buffers_plan_mode_assistant_completion_without_leaking_markup(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    progress_updates: list[dict[str, Any]] = []
+    raw_plan_markup = "<proposed_plan>\n1. Patch the real session path.\n2. Add the regression coverage.\n</proposed_plan>"
+
+    class PlanSession:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            assert chat_mode == "plan"
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="reasoning_summary",
+                        content_delta="Checking the active session path.",
+                    )
+                )
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta=raw_plan_markup,
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="plan_delta",
+                        content_delta="1. Patch the real session path.\n",
+                        app_turn_id="app-turn-1",
+                        item_id="plan-1",
+                    )
+                )
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="plan_completed",
+                        content_delta="1. Patch the real session path.\n2. Add the regression coverage.",
+                        app_turn_id="app-turn-1",
+                        item_id="plan-1",
+                    )
+                )
+            return project_chat.ChatTurnResult(assistant_message=raw_plan_markup)
+
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: PlanSession())
+
+    snapshot = service.send_turn(
+        "conversation-buffered-plan",
+        str(tmp_path),
+        "Plan the remaining fixes.",
+        None,
+        "plan",
+        progress_callback=progress_updates.append,
+    )
+
+    live_segment_kinds = [
+        payload["segment"]["kind"]
+        for payload in progress_updates
+        if payload.get("type") == "segment_upsert"
+    ]
+    assert "assistant_message" not in live_segment_kinds
+    assert "plan" in live_segment_kinds
+    assert snapshot["turns"][-1]["content"] == "1. Patch the real session path.\n2. Add the regression coverage."
+    assert [segment["kind"] for segment in snapshot["segments"]] == ["reasoning", "plan"]
+    assert all("<proposed_plan>" not in segment["content"] for segment in snapshot["segments"])
+
+
+def test_send_turn_persists_plan_mode_assistant_remainder_after_completion(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    progress_updates: list[dict[str, Any]] = []
+    raw_response = (
+        "I checked the repository state.\n\n"
+        "<proposed_plan>\n"
+        "1. Patch the real session path.\n"
+        "2. Add the regression coverage.\n"
+        "</proposed_plan>\n\n"
+        "After that, validate with uv run pytest -q."
+    )
+    expected_remainder = "I checked the repository state.\n\nAfter that, validate with uv run pytest -q."
+
+    class PlanSession:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            assert chat_mode == "plan"
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta=raw_response,
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="plan_completed",
+                        content_delta="1. Patch the real session path.\n2. Add the regression coverage.",
+                        app_turn_id="app-turn-1",
+                        item_id="plan-1",
+                    )
+                )
+            return project_chat.ChatTurnResult(assistant_message=raw_response)
+
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: PlanSession())
+
+    snapshot = service.send_turn(
+        "conversation-plan-remainder",
+        str(tmp_path),
+        "Plan the remaining fixes.",
+        None,
+        "plan",
+        progress_callback=progress_updates.append,
+    )
+
+    assistant_segments = [segment for segment in snapshot["segments"] if segment["kind"] == "assistant_message"]
+    assistant_payloads = [
+        payload["segment"]
+        for payload in progress_updates
+        if payload.get("type") == "segment_upsert" and payload["segment"]["kind"] == "assistant_message"
+    ]
+
+    assert snapshot["turns"][-1]["content"] == expected_remainder
+    assert [segment["kind"] for segment in snapshot["segments"]] == ["plan", "assistant_message"]
+    assert len(assistant_segments) == 1
+    assert assistant_segments[0]["content"] == expected_remainder
+    assert len(assistant_payloads) == 1
+    assert assistant_payloads[0]["content"] == expected_remainder
+    assert "<proposed_plan>" not in assistant_segments[0]["content"]
 
 
 def test_send_turn_passes_default_chat_mode_for_execution(tmp_path: Path, monkeypatch) -> None:

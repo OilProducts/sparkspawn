@@ -276,6 +276,29 @@ class CodexAppServerChatSession:
                         ),
                     )
                     return
+                if normalized_event.kind == "plan_delta" and normalized_event.text:
+                    self._emit_live_event(
+                        on_event,
+                        ChatTurnLiveEvent(
+                            kind="plan_delta",
+                            content_delta=normalized_event.text,
+                            app_turn_id=current_app_turn_id,
+                            item_id=normalized_event.item_id,
+                        ),
+                    )
+                    return
+                if normalized_event.kind == "plan_completed" and normalized_event.text:
+                    self._emit_live_event(
+                        on_event,
+                        ChatTurnLiveEvent(
+                            kind="plan_completed",
+                            content_delta=normalized_event.text,
+                            message="Plan item completed.",
+                            app_turn_id=current_app_turn_id,
+                            item_id=normalized_event.item_id,
+                        ),
+                    )
+                    return
                 if normalized_event.kind == "assistant_message_completed" and normalized_event.text:
                     self._emit_live_event(
                         on_event,
@@ -365,7 +388,5 @@ class CodexAppServerChatSession:
                             app_turn_id=current_app_turn_id,
                         ),
                     )
-            response_text = result.assistant_message
-            if not response_text:
-                raise RuntimeError("codex app-server returned an empty chat response")
-            return ChatTurnResult(assistant_message=response_text)
+            response_text = result.assistant_message or result.plan_message
+            return ChatTurnResult(assistant_message=response_text or "")

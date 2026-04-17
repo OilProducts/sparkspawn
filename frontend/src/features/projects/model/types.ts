@@ -33,6 +33,15 @@ export type ConversationTimelineEntry =
     }
     | {
         id: string
+        kind: 'plan'
+        role: 'assistant'
+        content: string
+        timestamp: string
+        status: ConversationTurnStatus
+        error?: string | null
+    }
+    | {
+        id: string
         kind: 'mode_change'
         role: 'system'
         timestamp: string

@@ -288,6 +288,32 @@ export function ProjectConversationHistory({
                             )
                         }
 
+                        if (entry.kind === 'plan') {
+                            const content = entry.status === 'failed' && !entry.content.trim()
+                                ? (entry.error || 'Plan generation failed.')
+                                : entry.content
+                            return (
+                                <li key={key} className="flex justify-start">
+                                    <div
+                                        data-testid={`project-plan-card-${entry.id}`}
+                                        className="max-w-[85%] rounded-md border border-emerald-400/40 bg-emerald-50/60 px-3 py-2 text-foreground"
+                                    >
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800/80">
+                                            Proposed Plan
+                                        </p>
+                                        {entry.status === 'failed' ? (
+                                            <p className="whitespace-pre-wrap text-xs leading-5">{content}</p>
+                                        ) : (
+                                            <ProjectConversationMarkdown content={content} />
+                                        )}
+                                        <p className="mt-1 text-[10px] text-emerald-900/70">
+                                            {formatConversationTimestamp(entry.timestamp)}
+                                        </p>
+                                    </div>
+                                </li>
+                            )
+                        }
+
                         if (entry.kind !== 'message') {
                             return null
                         }

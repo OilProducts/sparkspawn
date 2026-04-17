@@ -137,4 +137,34 @@ describe('buildConversationTimelineEntries', () => {
     ])
   })
 
+  it('renders plan segments as dedicated timeline entries', () => {
+    const timeline = buildConversationTimelineEntries({
+      ...snapshot,
+      chat_mode: 'plan',
+      segments: [
+        {
+          id: 'plan-segment',
+          turn_id: 'turn-assistant',
+          order: 1,
+          kind: 'plan',
+          role: 'assistant',
+          status: 'complete',
+          timestamp: '2026-03-10T10:00:12Z',
+          updated_at: '2026-03-10T10:00:12Z',
+          completed_at: '2026-03-10T10:00:12Z',
+          content: '1. Capture the real session path.',
+          artifact_id: null,
+          error: null,
+          source: null,
+          tool_call: null,
+        },
+      ],
+    }, null)
+
+    expect(timeline).toContainEqual(expect.objectContaining({
+      kind: 'plan',
+      content: '1. Capture the real session path.',
+    }))
+  })
+
 })

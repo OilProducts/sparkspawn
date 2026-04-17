@@ -163,6 +163,18 @@ const makeModeChangeEntry = (
     mode: overrides.mode ?? 'plan',
 })
 
+const makePlanEntry = (
+    overrides: Partial<Extract<ConversationTimelineEntry, { kind: 'plan' }>> = {},
+): Extract<ConversationTimelineEntry, { kind: 'plan' }> => ({
+    id: overrides.id ?? 'plan-1',
+    kind: 'plan',
+    role: 'assistant',
+    content: overrides.content ?? '1. Ship the regression test.\n2. Validate the real session path.',
+    timestamp: overrides.timestamp ?? '2026-04-16T15:27:47Z',
+    status: overrides.status ?? 'complete',
+    error: overrides.error ?? null,
+})
+
 describe('ProjectConversationHistory', () => {
     it('renders markdown semantics for normal assistant messages', () => {
         renderHistory([
@@ -198,6 +210,19 @@ describe('ProjectConversationHistory', () => {
 
         const row = screen.getByTestId('project-mode-change-row-mode-change-1')
         expect(within(row).getByText('Switched to Plan mode')).toBeVisible()
+    })
+
+    it('renders plan entries as dedicated markdown cards', () => {
+        renderHistory([
+            makePlanEntry({
+                content: '## Proposed steps\n\n1. Add the transport regression.\n2. Run validation.',
+            }),
+        ])
+
+        const planCard = screen.getByTestId('project-plan-card-plan-1')
+        expect(within(planCard).getByText('Proposed Plan')).toBeVisible()
+        expect(within(planCard).getByRole('heading', { level: 2, name: 'Proposed steps' })).toBeVisible()
+        expect(within(planCard).getByText('Add the transport regression.')).toBeVisible()
     })
 
     it('renders the pending-questions preview inline and keeps answers local', async () => {

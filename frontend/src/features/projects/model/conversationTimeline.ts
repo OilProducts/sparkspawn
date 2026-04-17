@@ -50,7 +50,7 @@ function buildAssistantTimelineEntries(
     const sortedSegments = [...turnSegments].sort((left, right) => left.order - right.order)
 
     sortedSegments.forEach((segment) => {
-        if (!insertedFinalSeparator && hadWorkActivity && segment.kind === 'assistant_message') {
+        if (!insertedFinalSeparator && hadWorkActivity && (segment.kind === 'assistant_message' || segment.kind === 'plan')) {
             const elapsedSeconds = resolveWorkedElapsedSeconds(turn, turnSegments, segment.timestamp)
             const label = elapsedSeconds === null
                 ? 'Worked'
@@ -63,6 +63,18 @@ function buildAssistantTimelineEntries(
                 label,
             })
             insertedFinalSeparator = true
+        }
+        if (segment.kind === 'plan') {
+            entries.push({
+                id: segment.id,
+                kind: 'plan',
+                role: 'assistant',
+                content: segment.content,
+                timestamp: segment.timestamp,
+                status: segment.status === 'running' ? 'streaming' : segment.status,
+                error: segment.error ?? null,
+            })
+            return
         }
         if (segment.kind === 'assistant_message') {
             entries.push({

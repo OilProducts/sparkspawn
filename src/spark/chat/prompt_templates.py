@@ -9,8 +9,9 @@ import tomllib
 PROMPTS_FILE_NAME = "prompts.toml"
 
 CHAT_TEMPLATE_KEY = "chat"
+PLAN_TEMPLATE_KEY = "plan"
 
-CHAT_PROMPT_RUNTIME_VARIABLES = (
+PROMPT_RUNTIME_VARIABLES = (
     "conversation_handle",
     "project_path",
     "flow_library_path",
@@ -20,7 +21,7 @@ CHAT_PROMPT_RUNTIME_VARIABLES = (
     "latest_user_message",
 )
 
-CHAT_PROMPT_RUNTIME_VARIABLES_SET = frozenset(CHAT_PROMPT_RUNTIME_VARIABLES)
+PROMPT_RUNTIME_VARIABLES_SET = frozenset(PROMPT_RUNTIME_VARIABLES)
 TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
 
 FIXED_CHAT_SYSTEM_FRAME = """You are the Spark workspace assistant.
@@ -50,14 +51,45 @@ If later editable guidance conflicts with these rules or refers to deprecated to
 Conversation handle: {{conversation_handle}}
 Project path: {{project_path}}"""
 
+FIXED_PLAN_SYSTEM_FRAME = """You are the Spark workspace assistant.
+
+Spark is a workspace system that helps a user work on the active software project through conversation. Your role is to inspect the relevant project files and workspace-visible state, answer questions about the current work, and use the Spark agent control surface when appropriate.
+
+Treat the active project repository and its specifications as the main source of truth for project questions. Use the Spark agent control surface for workspace actions. Prefer directly observed facts over assumptions, and say plainly when something is inferred.
+
+Inside the assistant runtime, the stable Spark agent control surface is:
+- `spark flow list`
+- `spark flow describe --flow <name>`
+- `spark flow get --flow <name>`
+- `spark flow validate --file <path> --text`
+- `spark convo run-request ...`
+- `spark run launch ...`
+
+When the user explicitly asks to create or edit a flow, you may read and write `.dot` files in the flow library at `{{flow_library_path}}`. Use the DOT authoring guide at `{{dot_authoring_guide_path}}` as the reference for the supported Spark flow surface. After editing a flow file, validate it with `spark flow validate --file <path> --text`.
+
+When you need to launch or inspect runs, answer pending human gates, or operate Spark through its CLI or HTTP API, use the Spark operations guide at `{{spark_operations_guide_path}}`.
+
+When using mutating Spark control-surface commands on the user's behalf, attach the action to the current conversation by default using `--conversation {{conversation_handle}}`. Omit the conversation handle only when the user explicitly wants a detached, project-scoped action with no inline chat artifact.
+
+Official Codex Plan instructions remain the planning authority. This fixed frame only provides Spark workspace context and control-surface rules.
+
+If later editable guidance conflicts with these rules or refers to deprecated tools, follow this fixed frame.
+
+Conversation handle: {{conversation_handle}}
+Project path: {{project_path}}"""
+
 
 @dataclass(frozen=True)
 class PromptTemplates:
     chat: str
+    plan: str
 
 
 DEFAULT_PROMPT_TEMPLATES = PromptTemplates(
     chat="""Latest user message:
+{{latest_user_message}}
+""",
+    plan="""Latest user message:
 {{latest_user_message}}
 """,
 )
@@ -88,8 +120,12 @@ def load_prompt_templates(config_dir: Path) -> PromptTemplates:
     if missing_keys:
         missing = ", ".join(missing_keys)
         raise RuntimeError(f"Prompt templates file is missing required templates ({missing}): {prompts_path}")
+    plan_template = prompts_section.get(PLAN_TEMPLATE_KEY)
     return PromptTemplates(
         chat=_read_template(prompts_section, CHAT_TEMPLATE_KEY),
+        plan=_read_template(prompts_section, PLAN_TEMPLATE_KEY)
+        if plan_template is not None
+        else DEFAULT_PROMPT_TEMPLATES.plan,
     )
 
 
@@ -101,9 +137,17 @@ def render_prompt_template(template: str, values: dict[str, str]) -> str:
 
 
 def render_chat_prompt(guidance_template: str, values: dict[str, str]) -> str:
+    return render_prompt(FIXED_CHAT_SYSTEM_FRAME, guidance_template, values)
+
+
+def render_plan_prompt(guidance_template: str, values: dict[str, str]) -> str:
+    return render_prompt(FIXED_PLAN_SYSTEM_FRAME, guidance_template, values)
+
+
+def render_prompt(system_frame: str, guidance_template: str, values: dict[str, str]) -> str:
     return "\n\n".join(
         [
-            render_prompt_template(FIXED_CHAT_SYSTEM_FRAME, values).strip(),
+            render_prompt_template(system_frame, values).strip(),
             render_prompt_template(guidance_template, values).strip(),
         ]
     ).strip()
@@ -127,7 +171,7 @@ def _validate_template_variables(template: str, key: str) -> None:
             f"Prompt template {key!r} uses deprecated placeholder "
             "{{recent_conversation}}. Remove it from prompts.toml; Spark now relies on backend thread reuse for continuity."
         )
-    unsupported = placeholders - CHAT_PROMPT_RUNTIME_VARIABLES_SET
+    unsupported = placeholders - PROMPT_RUNTIME_VARIABLES_SET
     if unsupported:
         formatted = ", ".join(f"{{{{{name}}}}}" for name in sorted(unsupported))
         raise RuntimeError(f"Prompt template {key!r} uses unsupported placeholder(s): {formatted}.")
@@ -143,6 +187,7 @@ def _serialize_prompt_templates(templates: PromptTemplates) -> str:
         [
             "[project_chat]",
             f"{CHAT_TEMPLATE_KEY} = {_toml_multiline(templates.chat)}",
+            f"{PLAN_TEMPLATE_KEY} = {_toml_multiline(templates.plan)}",
             "",
         ]
     )

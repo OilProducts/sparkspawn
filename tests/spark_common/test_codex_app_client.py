@@ -9,7 +9,7 @@ from spark_common.codex_app_client import CodexAppServerClient
 import spark_common.codex_app_server as codex_app_server
 
 
-def test_shared_client_ensure_process_initializes_with_stable_api_surface() -> None:
+def test_shared_client_ensure_process_initializes_with_experimental_api_opt_in() -> None:
     client = CodexAppServerClient("/tmp/project")
     requests: list[tuple[str, dict[str, object] | None]] = []
     notifications: list[dict[str, object]] = []
@@ -44,6 +44,7 @@ def test_shared_client_ensure_process_initializes_with_stable_api_surface() -> N
             "initialize",
             {
                 "clientInfo": {"name": "spark", "version": "0.1"},
+                "experimentalApi": True,
             },
         )
     ]
@@ -373,6 +374,50 @@ def test_shared_client_run_turn_counts_unparsed_lines_as_activity() -> None:
     )
 
     assert result.assistant_message == "Ack"
+
+
+def test_shared_client_run_turn_tracks_plan_items_without_assistant_message() -> None:
+    client = CodexAppServerClient("/tmp/project")
+    lines = iter(
+        [
+            '{"jsonrpc":"2.0","id":1,"result":{"turn":{"id":"turn-123","status":"inProgress","items":[]}}}',
+            '{"jsonrpc":"2.0","method":"item/plan/delta","params":{"itemId":"plan-1","delta":"1. Patch the real path.\\n"}}',
+            '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"Plan","id":"plan-1","text":"1. Patch the real path.\\n2. Add the regression."}}}',
+            '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-123","status":"completed"}}}',
+        ]
+    )
+    emitted_events: list[codex_app_server.CodexAppServerTurnEvent] = []
+
+    class DummyStdin:
+        def write(self, text: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class DummyProc:
+        stdin = DummyStdin()
+
+        def poll(self) -> int | None:
+            return None
+
+    client.proc = DummyProc()  # type: ignore[assignment]
+    client.read_line = lambda wait: next(lines, None)  # type: ignore[method-assign]
+
+    result = client.run_turn(
+        thread_id="thread-123",
+        prompt="hello",
+        model="gpt-test",
+        on_event=emitted_events.append,
+    )
+
+    assert result.assistant_message == ""
+    assert result.plan_message == "1. Patch the real path.\n2. Add the regression."
+    assert [event.kind for event in emitted_events] == [
+        "plan_delta",
+        "plan_completed",
+        "turn_completed",
+    ]
 
 
 def test_shared_client_run_turn_ignores_non_matching_turn_completed() -> None:
