@@ -129,10 +129,11 @@ describe('Graph and settings behavior', () => {
     const user = userEvent.setup()
     render(<SettingsPanel />)
 
+    expect(document.querySelector('#settings-llm-model-options option[value="gpt-5.4"]')).toBeTruthy()
     await user.clear(screen.getByPlaceholderText('openai'))
     await user.type(screen.getByPlaceholderText('openai'), 'anthropic')
-    await user.clear(screen.getByPlaceholderText('gpt-5.2'))
-    await user.type(screen.getByPlaceholderText('gpt-5.2'), 'claude-3.7-sonnet')
+    await user.clear(screen.getByPlaceholderText('gpt-5.4'))
+    await user.type(screen.getByPlaceholderText('gpt-5.4'), 'claude-3.7-sonnet')
     const reasoningSelect = screen
       .getAllByRole('combobox')
       .find((element) => element.tagName === 'SELECT')

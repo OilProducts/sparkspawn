@@ -10,7 +10,7 @@ import type {
 import { isAbsoluteProjectPath, normalizeProjectPath } from '@/lib/projectPaths'
 
 export const DEFAULT_UI_DEFAULTS: UiDefaults = {
-    llm_model: '',
+    llm_model: 'gpt-5.4',
     llm_provider: '',
     reasoning_effort: '',
 }
