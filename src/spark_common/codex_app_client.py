@@ -154,7 +154,7 @@ class CodexAppServerClient:
             "initialize",
             {
                 "clientInfo": {"name": "spark", "version": "0.1"},
-                "experimentalApi": True,
+                "capabilities": {"experimentalApi": True},
             },
         )
         if init_response.get("error"):
@@ -408,6 +408,9 @@ class CodexAppServerClient:
             params["model"] = effective_model
         response = request("turn/start", params)
         if response.get("error"):
+            message = codex_app_server.as_non_empty_string((response.get("error") or {}).get("message"))
+            if message:
+                raise RuntimeError(f"codex app-server turn/start failed: {message}")
             raise RuntimeError("codex app-server turn/start failed")
         turn = (response.get("result") or {}).get("turn") or {}
         expected_turn_id = codex_app_server.as_non_empty_string(turn.get("id"))

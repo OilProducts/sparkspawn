@@ -44,7 +44,7 @@ def test_shared_client_ensure_process_initializes_with_experimental_api_opt_in()
             "initialize",
             {
                 "clientInfo": {"name": "spark", "version": "0.1"},
-                "experimentalApi": True,
+                "capabilities": {"experimentalApi": True},
             },
         )
     ]
@@ -500,4 +500,26 @@ def test_shared_client_run_turn_raises_when_process_exits_before_completion() ->
             thread_id="thread-123",
             prompt="hello",
             model="gpt-test",
+        )
+
+
+def test_shared_client_run_turn_surfaces_turn_start_error_message() -> None:
+    client = CodexAppServerClient("/tmp/project")
+
+    with pytest.raises(
+        RuntimeError,
+        match="turn/start failed: turn/start.collaborationMode requires experimentalApi capability",
+    ):
+        client.run_turn(
+            thread_id="thread-123",
+            prompt="hello",
+            model="gpt-test",
+            chat_mode="plan",
+            send_request=lambda method, params: {
+                "error": {
+                    "code": -32600,
+                    "message": "turn/start.collaborationMode requires experimentalApi capability",
+                }
+            },
+            next_message=lambda wait: None,
         )
