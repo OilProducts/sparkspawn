@@ -24,6 +24,12 @@ def _attr(node_id: str, attr_name: str) -> str:
     return str(attr.value)
 
 
+def test_implement_from_plan_flow_defaults_to_gpt_54_mini() -> None:
+    graph = parse_dot(FLOW_PATH.read_text(encoding="utf-8"))
+
+    assert str(graph.graph_attrs["ui_default_llm_model"].value) == "gpt-5.4-mini"
+
+
 def test_prepare_plan_workspace_uses_project_local_planflows_workspace() -> None:
     prompt = _prompt("prepare_plan_workspace")
 
