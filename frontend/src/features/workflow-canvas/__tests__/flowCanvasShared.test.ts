@@ -251,7 +251,7 @@ describe('flowCanvasShared', () => {
             },
         }
 
-        const hydrated = buildHydratedFlowGraph('implement-from-plan.dot', preview, {
+        const hydrated = buildHydratedFlowGraph('software-development/implement-change-request.dot', preview, {
             llm_model: '',
             llm_provider: '',
             reasoning_effort: '',
@@ -410,25 +410,25 @@ describe('flowCanvasShared', () => {
     it.each([
         {
             flowName: 'implement-spec.dot',
-            flowRelativePath: 'src/spark/flows/spec-implementation/implement-spec.dot',
+            flowRelativePath: 'src/spark/flows/software-development/spec-implementation/implement-spec.dot',
             expandChildren: false,
             expectedDerivedNodeId: null,
         },
         {
             flowName: 'implement-spec.dot',
-            flowRelativePath: 'src/spark/flows/spec-implementation/implement-spec.dot',
+            flowRelativePath: 'src/spark/flows/software-development/spec-implementation/implement-spec.dot',
             expandChildren: true,
             expectedDerivedNodeId: '__child_preview_cluster__run_milestone',
         },
         {
             flowName: 'implement-milestone.dot',
-            flowRelativePath: 'src/spark/flows/spec-implementation/implement-milestone.dot',
+            flowRelativePath: 'src/spark/flows/software-development/spec-implementation/implement-milestone.dot',
             expandChildren: false,
             expectedDerivedNodeId: null,
         },
         {
             flowName: 'implement-milestone.dot',
-            flowRelativePath: 'src/spark/flows/spec-implementation/implement-milestone.dot',
+            flowRelativePath: 'src/spark/flows/software-development/spec-implementation/implement-milestone.dot',
             expandChildren: true,
             expectedDerivedNodeId: null,
         },

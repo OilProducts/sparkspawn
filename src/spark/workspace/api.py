@@ -15,7 +15,7 @@ from attractor.api.flow_sources import resolve_flow_path
 from spark.chat.response_parsing import normalize_flow_run_request_payload
 from spark.chat.service import ProjectChatService, TurnInProgressError
 from spark.workspace.attractor_client import AttractorApiClient, AttractorApiError
-from spark.workspace.conversations.artifacts import IMPLEMENT_FROM_PLAN_FLOW
+from spark.workspace.conversations.artifacts import IMPLEMENT_CHANGE_REQUEST_FLOW
 from spark.workspace.flow_catalog import (
     ALLOWED_LAUNCH_POLICIES,
     LAUNCH_POLICY_AGENT_REQUESTABLE,
@@ -915,7 +915,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
             raise HTTPException(status_code=400, detail="Proposed plan disposition must be approved or rejected.")
         normalized_project_path = _normalize_project_path_or_400(req.project_path)
         if req.disposition == "approved":
-            await _ensure_flow_exists(IMPLEMENT_FROM_PLAN_FLOW)
+            await _ensure_flow_exists(IMPLEMENT_CHANGE_REQUEST_FLOW)
         try:
             snapshot, proposed_plan, flow_launch = await asyncio.to_thread(
                 deps.get_project_chat().review_proposed_plan,

@@ -41,7 +41,7 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     run_request.add_argument(
         "--flow",
         required=True,
-        help="Flow name, for example 'spec-implementation/implement-spec.dot'.",
+        help="Flow name, for example 'software-development/spec-implementation/implement-spec.dot'.",
     )
     run_request.add_argument("--summary", required=True, help="Short explanation for the requested run.")
     goal_group = run_request.add_mutually_exclusive_group()
@@ -63,7 +63,7 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     launch.add_argument(
         "--flow",
         required=True,
-        help="Flow name, for example 'spec-implementation/implement-spec.dot'.",
+        help="Flow name, for example 'software-development/spec-implementation/implement-spec.dot'.",
     )
     launch.add_argument("--summary", required=True, help="Short explanation for the launch.")
     launch.add_argument("--conversation", help="Conversation handle in adjective-noun form.")

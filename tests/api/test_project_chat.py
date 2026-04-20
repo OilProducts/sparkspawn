@@ -2642,14 +2642,20 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
     ]
 
 
-def test_review_proposed_plan_writes_slugged_markdown_and_creates_launch_artifact(tmp_path: Path) -> None:
+def test_review_proposed_plan_writes_change_request_and_creates_launch_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     project_dir = tmp_path / "project"
     project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / "reviewable-proposed-plan-artifacts-in-project-chat.md").write_text(
+    existing_change_dir = project_dir / "changes" / "CR-2026-0001-reviewable-proposed-plan-artifacts-in-project-chat"
+    existing_change_dir.mkdir(parents=True, exist_ok=True)
+    (existing_change_dir / "request.md").write_text(
         "# Existing plan\n",
         encoding="utf-8",
     )
+    monkeypatch.setattr("spark.workspace.conversations.artifacts.iso_now", lambda: "2026-03-13T10:02:00Z")
 
     assistant_turn = project_chat.ConversationTurn(
         id="turn-assistant-plan",
@@ -2716,17 +2722,22 @@ def test_review_proposed_plan_writes_slugged_markdown_and_creates_launch_artifac
     assert snapshot["chat_mode"] == "plan"
     assert proposed_plan.status == "approved"
     assert proposed_plan.review_note == "Ready to implement."
-    assert proposed_plan.written_plan_path is not None
-    assert proposed_plan.written_plan_path.endswith("reviewable-proposed-plan-artifacts-in-project-chat-2.md")
-    written_plan_path = Path(proposed_plan.written_plan_path)
-    assert written_plan_path.read_text(encoding="utf-8") == (
+    assert proposed_plan.written_change_request_path is not None
+    assert proposed_plan.written_change_request_path.endswith(
+        "changes/CR-2026-0002-reviewable-proposed-plan-artifacts-in-project-chat/request.md"
+    )
+    request_path = Path(proposed_plan.written_change_request_path)
+    assert request_path.read_text(encoding="utf-8") == (
         "# Reviewable Proposed Plan Artifacts in Project Chat\n\n"
         "1. Add the backend artifact.\n2. Wire the review UI.\n"
     )
     assert flow_launch is not None
-    assert flow_launch.flow_name == "implement-from-plan.dot"
+    assert flow_launch.flow_name == "software-development/implement-change-request.dot"
     assert flow_launch.launch_context == {
-        "context.request.plan_path": "reviewable-proposed-plan-artifacts-in-project-chat-2.md",
+        "context.request.change_request_id": "CR-2026-0002-reviewable-proposed-plan-artifacts-in-project-chat",
+        "context.request.change_request_path": (
+            "changes/CR-2026-0002-reviewable-proposed-plan-artifacts-in-project-chat/request.md"
+        ),
     }
     launch_segment = next(
         entry for entry in snapshot["segments"] if entry["artifact_id"] == flow_launch.id
@@ -2847,6 +2858,7 @@ def test_proposed_plan_review_route_launches_in_owner_conversation_and_records_r
         source=project_chat.ConversationSegmentSource(),
     )
     service = _project_chat_service()
+    monkeypatch.setattr("spark.workspace.conversations.artifacts.iso_now", lambda: "2026-03-13T10:02:00Z")
     service._write_state(
         project_chat.ConversationState(
             conversation_id=owner_conversation_id,
@@ -2905,7 +2917,7 @@ def test_proposed_plan_review_route_launches_in_owner_conversation_and_records_r
         )
     )
 
-    _seed_flow("implement-from-plan.dot")
+    _seed_flow("software-development/implement-change-request.dot")
     start_calls: list[dict[str, object | None]] = []
 
     async def fake_start_pipeline(
@@ -2954,7 +2966,9 @@ def test_proposed_plan_review_route_launches_in_owner_conversation_and_records_r
     assert approved_plan["status"] == "approved"
     assert approved_plan["review_note"] == "Ready to implement."
     assert approved_plan["run_id"] == "run-plan-123"
-    assert approved_plan["written_plan_path"].endswith("reviewable-proposed-plan-artifacts-in-project-chat.md")
+    assert approved_plan["written_change_request_path"].endswith(
+        "changes/CR-2026-0001-reviewable-proposed-plan-artifacts-in-project-chat/request.md"
+    )
     flow_launch = next(
         entry for entry in approved_snapshot["flow_launches"] if entry["id"] == approved_plan["flow_launch_id"]
     )
@@ -2967,12 +2981,20 @@ def test_proposed_plan_review_route_launches_in_owner_conversation_and_records_r
     assert start_calls == [
         {
             "run_id": None,
-            "flow_name": "implement-from-plan.dot",
+            "flow_name": "software-development/implement-change-request.dot",
             "working_directory": str(project_dir),
             "model": None,
-            "goal": "Implement the approved plan written to reviewable-proposed-plan-artifacts-in-project-chat.md.",
+            "goal": (
+                "Implement the approved change request written to "
+                "changes/CR-2026-0001-reviewable-proposed-plan-artifacts-in-project-chat/request.md."
+            ),
             "launch_context": {
-                "context.request.plan_path": "reviewable-proposed-plan-artifacts-in-project-chat.md",
+                "context.request.change_request_id": (
+                    "CR-2026-0001-reviewable-proposed-plan-artifacts-in-project-chat"
+                ),
+                "context.request.change_request_path": (
+                    "changes/CR-2026-0001-reviewable-proposed-plan-artifacts-in-project-chat/request.md"
+                ),
             },
             "spec_id": None,
             "plan_id": None,

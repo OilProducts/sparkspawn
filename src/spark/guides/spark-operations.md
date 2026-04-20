@@ -146,7 +146,7 @@ Create a pending run request inside a conversation:
 ```bash
 spark convo run-request \
   --conversation amber-otter \
-  --flow spec-implementation/implement-spec.dot \
+  --flow software-development/spec-implementation/implement-spec.dot \
   --summary "Draft the implementation flow for the approved spec."
 ```
 
@@ -155,7 +155,7 @@ curl -X POST \
   http://127.0.0.1:8000/workspace/api/conversations/by-handle/amber-otter/flow-run-requests \
   -H 'Content-Type: application/json' \
   -d '{
-    "flow_name": "spec-implementation/implement-spec.dot",
+    "flow_name": "software-development/spec-implementation/implement-spec.dot",
     "summary": "Draft the implementation flow for the approved spec."
   }'
 ```

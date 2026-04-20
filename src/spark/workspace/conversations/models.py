@@ -582,7 +582,7 @@ class ProposedPlanArtifact:
     status: str = "pending_review"
     source_segment_id: Optional[str] = None
     review_note: Optional[str] = None
-    written_plan_path: Optional[str] = None
+    written_change_request_path: Optional[str] = None
     flow_launch_id: Optional[str] = None
     run_id: Optional[str] = None
     launch_error: Optional[str] = None
@@ -603,8 +603,8 @@ class ProposedPlanArtifact:
             payload["source_segment_id"] = self.source_segment_id
         if self.review_note:
             payload["review_note"] = self.review_note
-        if self.written_plan_path:
-            payload["written_plan_path"] = self.written_plan_path
+        if self.written_change_request_path:
+            payload["written_change_request_path"] = self.written_change_request_path
         if self.flow_launch_id:
             payload["flow_launch_id"] = self.flow_launch_id
         if self.run_id:
@@ -627,7 +627,11 @@ class ProposedPlanArtifact:
             status=str(payload.get("status", "pending_review") or "pending_review"),
             source_segment_id=str(payload.get("source_segment_id")) if payload.get("source_segment_id") is not None else None,
             review_note=str(payload.get("review_note")) if payload.get("review_note") is not None else None,
-            written_plan_path=str(payload.get("written_plan_path")) if payload.get("written_plan_path") is not None else None,
+            written_change_request_path=(
+                str(payload.get("written_change_request_path"))
+                if payload.get("written_change_request_path") is not None
+                else None
+            ),
             flow_launch_id=str(payload.get("flow_launch_id")) if payload.get("flow_launch_id") is not None else None,
             run_id=str(payload.get("run_id")) if payload.get("run_id") is not None else None,
             launch_error=str(payload.get("launch_error")) if payload.get("launch_error") is not None else None,

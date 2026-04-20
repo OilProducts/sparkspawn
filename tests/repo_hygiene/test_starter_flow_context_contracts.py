@@ -45,7 +45,7 @@ def test_supervised_implementation_summaries_read_child_runtime_telemetry() -> N
 
 
 def test_spec_implementation_item_state_nodes_read_active_item_binding() -> None:
-    graph = _load_graph("spec-implementation/implement-milestone.dot")
+    graph = _load_graph("software-development/spec-implementation/implement-milestone.dot")
 
     for node_id in ("mark_current_done", "validate_item_plan"):
         assert "context.item.id" in _reads_context(graph, node_id)

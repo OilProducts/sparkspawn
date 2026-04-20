@@ -360,7 +360,7 @@ def test_packaged_starter_flows_exist_in_single_source_tree() -> None:
     }
 
     assert "examples/simple-linear.dot" in packaged_payload
-    assert "spec-implementation/implement-spec.dot" in packaged_payload
+    assert "software-development/spec-implementation/implement-spec.dot" in packaged_payload
 
 
 def test_packaged_guides_are_available_and_repo_only_specs_are_not_packaged() -> None:
@@ -380,8 +380,8 @@ def test_packaged_starter_flows_are_loadable_without_repo_checkout(tmp_path: Pat
     payload = {asset.name: asset.content for asset in assets}
 
     assert "examples/simple-linear.dot" in payload
-    assert "spec-implementation/implement-spec.dot" in payload
-    assert payload["spec-implementation/implement-spec.dot"]
+    assert "software-development/spec-implementation/implement-spec.dot" in payload
+    assert payload["software-development/spec-implementation/implement-spec.dot"]
 
 
 def test_resolve_default_ui_dir_prefers_repo_frontend_dist(tmp_path: Path) -> None:

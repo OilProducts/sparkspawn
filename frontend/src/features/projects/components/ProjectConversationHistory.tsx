@@ -332,7 +332,7 @@ export function ProjectConversationHistory({
                                 ? (planReviewNotes[proposedPlan.id] ?? proposedPlan.review_note ?? '')
                                 : ''
                             const launchRunId = proposedPlan?.run_id ?? planLaunch?.run_id ?? null
-                            const launchFlowName = planLaunch?.flow_name || 'implement-from-plan.dot'
+                            const launchFlowName = planLaunch?.flow_name || 'software-development/implement-change-request.dot'
                             return (
                                 <li key={key} className="flex justify-start">
                                     <div
@@ -361,9 +361,9 @@ export function ProjectConversationHistory({
                                                         Review note: <span className="text-foreground">{proposedPlan.review_note}</span>
                                                     </p>
                                                 ) : null}
-                                                {proposedPlan.written_plan_path ? (
+                                                {proposedPlan.written_change_request_path ? (
                                                     <p className="break-all font-mono text-[10px] text-emerald-950/70">
-                                                        {proposedPlan.written_plan_path}
+                                                        {proposedPlan.written_change_request_path}
                                                     </p>
                                                 ) : null}
                                                 {proposedPlan.launch_error ? (

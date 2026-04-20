@@ -22,11 +22,12 @@ from spark.workspace.conversations.utils import (
     normalize_project_path_value,
 )
 
-IMPLEMENT_FROM_PLAN_FLOW = "implement-from-plan.dot"
+IMPLEMENT_CHANGE_REQUEST_FLOW = "software-development/implement-change-request.dot"
 _PLAN_HEADING_PATTERN = re.compile(r"(?m)^\s*#\s+(.+?)\s*$")
 _MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 _MARKDOWN_DECORATION_PATTERN = re.compile(r"[*_~`#>\[\]()!]")
 _NON_SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+_CHANGE_REQUEST_DIR_PATTERN = re.compile(r"^CR-(\d{4})-(\d{4})(?:-.+)?$")
 
 
 def _strip_markdown_text(value: str) -> str:
@@ -46,17 +47,30 @@ def _proposed_plan_title(content: str) -> str:
 def _slugify_filename_base(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").lower()
     collapsed = _NON_SLUG_PATTERN.sub("-", normalized).strip("-")
-    return collapsed or "proposed-plan"
+    return collapsed or "change-request"
 
 
-def _unique_plan_path(project_root: Path, title: str) -> Path:
+def _allocate_change_request_dir(project_root: Path, title: str, *, created_at: str) -> tuple[str, Path]:
+    changes_dir = project_root / "changes"
+    changes_dir.mkdir(parents=True, exist_ok=True)
+    year = created_at[:4] if len(created_at) >= 4 and created_at[:4].isdigit() else "0000"
+    max_sequence = 0
+    for child in changes_dir.iterdir():
+        if not child.is_dir():
+            continue
+        match = _CHANGE_REQUEST_DIR_PATTERN.match(child.name)
+        if match is None or match.group(1) != year:
+            continue
+        max_sequence = max(max_sequence, int(match.group(2)))
     base_name = _slugify_filename_base(title)
-    candidate = project_root / f"{base_name}.md"
-    suffix = 2
-    while candidate.exists():
-        candidate = project_root / f"{base_name}-{suffix}.md"
-        suffix += 1
-    return candidate
+    sequence = max_sequence + 1
+    while True:
+        change_request_id = f"CR-{year}-{sequence:04d}-{base_name}"
+        candidate = changes_dir / change_request_id
+        if not candidate.exists():
+            candidate.mkdir(parents=True, exist_ok=False)
+            return change_request_id, candidate
+        sequence += 1
 
 
 class ProjectChatReviewService:
@@ -372,32 +386,38 @@ class ProjectChatReviewService:
             if not project_root.exists() or not project_root.is_dir():
                 raise ValueError("Project path is not available for writing the approved plan.")
 
-            written_path = _unique_plan_path(project_root, proposed_plan.title)
-            written_path.write_text(proposed_plan.content.rstrip() + "\n", encoding="utf-8")
-            relative_plan_path = written_path.relative_to(project_root).as_posix()
+            change_request_id, change_request_dir = _allocate_change_request_dir(
+                project_root,
+                proposed_plan.title,
+                created_at=now,
+            )
+            request_path = change_request_dir / "request.md"
+            request_path.write_text(proposed_plan.content.rstrip() + "\n", encoding="utf-8")
+            relative_request_path = request_path.relative_to(project_root).as_posix()
 
             launch, _ = self.persist_flow_launch(
                 state,
                 source_turn,
                 {
-                    "flow_name": IMPLEMENT_FROM_PLAN_FLOW,
-                    "summary": f"Implement approved plan: {proposed_plan.title}",
-                    "goal": f"Implement the approved plan written to {relative_plan_path}.",
+                    "flow_name": IMPLEMENT_CHANGE_REQUEST_FLOW,
+                    "summary": f"Implement approved change request: {proposed_plan.title}",
+                    "goal": f"Implement the approved change request written to {relative_request_path}.",
                     "launch_context": {
-                        "context.request.plan_path": relative_plan_path,
+                        "context.request.change_request_id": change_request_id,
+                        "context.request.change_request_path": relative_request_path,
                     },
                 },
             )
 
             proposed_plan.status = "approved"
-            proposed_plan.written_plan_path = str(written_path.resolve(strict=False))
+            proposed_plan.written_change_request_path = str(request_path.resolve(strict=False))
             proposed_plan.flow_launch_id = launch.id
             proposed_plan.run_id = None
             proposed_plan.launch_error = None
             proposed_plan.updated_at = iso_now()
             self._repository.append_event(
                 state,
-                f"Approved proposed plan {proposed_plan.id} and wrote {relative_plan_path}.",
+                f"Approved proposed plan {proposed_plan.id} and wrote {relative_request_path}.",
             )
             self._repository.touch_conversation_state(state)
             self._repository.write_state(state)

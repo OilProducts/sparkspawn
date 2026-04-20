@@ -289,7 +289,7 @@ describe('ProjectConversationHistory', () => {
                     source_segment_id: 'plan-1',
                     status: 'pending_review',
                     review_note: null,
-                    written_plan_path: null,
+                    written_change_request_path: null,
                     flow_launch_id: null,
                     run_id: null,
                     launch_error: null,
@@ -320,8 +320,8 @@ describe('ProjectConversationHistory', () => {
                     id: 'flow-launch-1',
                     created_at: '2026-04-16T15:27:47Z',
                     updated_at: '2026-04-16T15:28:10Z',
-                    flow_name: 'implement-from-plan.dot',
-                    summary: 'Implement approved plan',
+                    flow_name: 'software-development/implement-change-request.dot',
+                    summary: 'Implement approved change request',
                     project_path: '/tmp/project',
                     conversation_id: 'conversation-1',
                     source_turn_id: 'turn-assistant-1',
@@ -347,7 +347,7 @@ describe('ProjectConversationHistory', () => {
                     source_segment_id: 'plan-1',
                     status: 'approved',
                     review_note: 'Approved for implementation.',
-                    written_plan_path: '/tmp/project/ship-the-regression.md',
+                    written_change_request_path: '/tmp/project/changes/CR-2026-0007-ship-the-regression/request.md',
                     flow_launch_id: 'flow-launch-1',
                     run_id: 'run-123',
                     launch_error: null,
@@ -357,7 +357,7 @@ describe('ProjectConversationHistory', () => {
 
         const planCard = screen.getByTestId('project-plan-card-plan-1')
         expect(within(planCard).getByText('Approved')).toBeVisible()
-        expect(within(planCard).getByText('/tmp/project/ship-the-regression.md')).toBeVisible()
+        expect(within(planCard).getByText('/tmp/project/changes/CR-2026-0007-ship-the-regression/request.md')).toBeVisible()
         expect(within(planCard).getByText('run-123')).toBeVisible()
         expect(within(planCard).queryByTestId('project-proposed-plan-approve-button-proposed-plan-1')).not.toBeInTheDocument()
     })
@@ -381,7 +381,7 @@ describe('ProjectConversationHistory', () => {
                     source_segment_id: 'plan-1',
                     status: 'rejected',
                     review_note: 'Needs a rollback plan first.',
-                    written_plan_path: null,
+                    written_change_request_path: null,
                     flow_launch_id: null,
                     run_id: null,
                     launch_error: null,

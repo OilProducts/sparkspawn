@@ -125,7 +125,7 @@ export interface ProposedPlanArtifactResponse {
     status: 'pending_review' | 'approved' | 'rejected' | 'launch_failed'
     source_segment_id?: string | null
     review_note?: string | null
-    written_plan_path?: string | null
+    written_change_request_path?: string | null
     flow_launch_id?: string | null
     run_id?: string | null
     launch_error?: string | null
@@ -471,7 +471,7 @@ function parseProposedPlanArtifactResponse(value: unknown): ProposedPlanArtifact
         status,
         source_segment_id: asOptionalNullableString(record.source_segment_id),
         review_note: asOptionalNullableString(record.review_note),
-        written_plan_path: asOptionalNullableString(record.written_plan_path),
+        written_change_request_path: asOptionalNullableString(record.written_change_request_path),
         flow_launch_id: asOptionalNullableString(record.flow_launch_id),
         run_id: asOptionalNullableString(record.run_id),
         launch_error: asOptionalNullableString(record.launch_error),

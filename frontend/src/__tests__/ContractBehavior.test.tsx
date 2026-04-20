@@ -577,7 +577,7 @@ describe('Frontend contract behavior', () => {
         if (url === '/workspace/api/flows?surface=human') {
           return jsonResponse([
             {
-              name: 'implement-from-plan.dot',
+              name: 'software-development/implement-change-request.dot',
               title: 'Implement From Plan',
               description: 'Snapshot a plan file, implement it, and iterate until complete.',
               launch_policy: null,
@@ -630,7 +630,7 @@ describe('Frontend contract behavior', () => {
       content: 'digraph G {}',
     })
     await expect(fetchWorkspaceFlowListValidated()).resolves.toMatchObject([
-      expect.objectContaining({ name: 'implement-from-plan.dot' }),
+      expect.objectContaining({ name: 'software-development/implement-change-request.dot' }),
     ])
     await expect(fetchWorkspaceFlowValidated('alpha flow.dot')).resolves.toMatchObject({
       name: 'alpha flow.dot',

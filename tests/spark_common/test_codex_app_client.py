@@ -338,7 +338,7 @@ def test_shared_client_run_turn_counts_unparsed_lines_as_activity() -> None:
     client = CodexAppServerClient("/tmp/project")
     lines = iter(
         [
-            "Reading .specflow/spec-source.md",
+            "Reading specs/unified-llm/source.md",
             None,
             "Reading README.md",
             '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Ack"}}',

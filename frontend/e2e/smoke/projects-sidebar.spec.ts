@@ -101,7 +101,7 @@ const stubSidebarApis = async (page: Page) => {
           {
             conversation_id: 'conversation-thread-c',
             project_path: SIDEBAR_PROJECT_PATH,
-            title: 'Can you run the implement-from-plan flow with the latest sidebar layout fix applied',
+            title: 'Can you run the implement-change-request flow with the latest sidebar layout fix applied',
             created_at: '2026-04-16T09:00:00Z',
             updated_at: '2026-04-16T12:00:00Z',
             last_message_preview: 'Implementation flow check.',

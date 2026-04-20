@@ -254,8 +254,8 @@ When a run behaves unexpectedly, check these first:
 
 After this tutorial, the next useful flows are:
 
-- [src/spark/flows/implement-from-plan.dot](../src/spark/flows/implement-from-plan.dot) for implementing an existing plan document from per-run `.spark/planflows/<run>/plan-source.md` and `.spark/planflows/<run>/state.json` snapshots, with `context.planflow.*` carrying the workspace paths through evaluation
-- [src/spark/flows/spec-implementation/implement-spec.dot](../src/spark/flows/spec-implementation/implement-spec.dot) for long-running greenfield spec implementation with repo-local state under `.specflow/`
+- [src/spark/flows/software-development/implement-change-request.dot](../src/spark/flows/software-development/implement-change-request.dot) for implementing an approved durable change request from `changes/<CR-id>/request.md`, with runtime state kept under `.spark/change-requests/<CR-id>/` and the active workspace carried through `context.change_request.*`
+- [src/spark/flows/software-development/spec-implementation/implement-spec.dot](../src/spark/flows/software-development/spec-implementation/implement-spec.dot) for long-running software-development spec implementation with committed artifacts under `specs/<slug>/` and runtime state under `.spark/spec-implementation/<slug>/`
 - [src/spark/flows/examples/human-review-loop.dot](../src/spark/flows/examples/human-review-loop.dot) for explicit human approval
 - [src/spark/flows/examples/parallel-review.dot](../src/spark/flows/examples/parallel-review.dot) for fan-out and fan-in
 - [src/spark/flows/examples/supervision/supervised-implementation.dot](../src/spark/flows/examples/supervision/supervised-implementation.dot) for parent/child supervision with `stack.manager_loop`

@@ -15,13 +15,20 @@ from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
 BRANCHING_CONDITION_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "branching_condition_workflow.dot"
 REFERENCE_WORKFLOW_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "flows" / "parallel-review-reference.dot"
 STARTER_SPEC_IMPLEMENTATION_FIXTURE = (
-    Path(__file__).resolve().parents[2] / "src" / "spark" / "flows" / "spec-implementation" / "implement-spec.dot"
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "spark"
+    / "flows"
+    / "software-development"
+    / "spec-implementation"
+    / "implement-spec.dot"
 )
 STARTER_SPEC_IMPLEMENTATION_MILESTONE_FIXTURE = (
     Path(__file__).resolve().parents[2]
     / "src"
     / "spark"
     / "flows"
+    / "software-development"
     / "spec-implementation"
     / "implement-milestone.dot"
 )
@@ -1780,7 +1787,7 @@ class TestExecutor:
                 del runtime
                 return Outcome(
                     status=OutcomeStatus.SUCCESS,
-                    context_updates={".specflow/state.json": "/tmp/out"},
+                    context_updates={"runtime/state.json": "/tmp/out"},
                 )
 
         registry = build_default_registry(
@@ -1792,10 +1799,10 @@ class TestExecutor:
 
         assert result.status == "failed"
         assert result.current_node == "writer"
-        assert result.context.get(".specflow/state.json") is None
+        assert result.context.get("runtime/state.json") is None
         assert result.node_outcomes["writer"].failure_kind is FailureKind.CONTRACT
         assert "invalid context_updates keys" in result.node_outcomes["writer"].failure_reason
-        assert ".specflow/state.json" in result.node_outcomes["writer"].failure_reason
+        assert "runtime/state.json" in result.node_outcomes["writer"].failure_reason
 
     def test_custom_handler_cannot_write_context_stack_child_prefix_without_declaration(self):
         graph = parse_dot(

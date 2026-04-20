@@ -15,7 +15,7 @@ REQUIRED_WHEEL_ENTRIES = (
     "spark/guides/dot-authoring.md",
     "spark/guides/spark-operations.md",
     "spark/flows/examples/simple-linear.dot",
-    "spark/flows/spec-implementation/implement-spec.dot",
+    "spark/flows/software-development/spec-implementation/implement-spec.dot",
 )
 FORBIDDEN_WHEEL_ENTRIES = (
     "spark/guides/attractor-spec.md",

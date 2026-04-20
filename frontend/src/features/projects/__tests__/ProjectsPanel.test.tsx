@@ -1746,7 +1746,7 @@ describe('ProjectsPanel', () => {
           source_segment_id: 'segment-plan-inline',
           status: 'pending_review',
           review_note: null,
-          written_plan_path: null,
+          written_change_request_path: null,
           flow_launch_id: null,
           run_id: null,
           launch_error: null,
@@ -1781,8 +1781,8 @@ describe('ProjectsPanel', () => {
           id: 'flow-launch-1',
           created_at: '2026-03-09T21:00:05Z',
           updated_at: '2026-03-09T21:00:05Z',
-          flow_name: 'implement-from-plan.dot',
-          summary: 'Implement approved plan: Proposed steps',
+          flow_name: 'software-development/implement-change-request.dot',
+          summary: 'Implement approved change request: Proposed steps',
           project_path: '/tmp/chat-project',
           conversation_id: 'conversation-proposed-plan',
           source_turn_id: 'turn-assistant-plan',
@@ -1801,7 +1801,7 @@ describe('ProjectsPanel', () => {
           updated_at: '2026-03-09T21:00:05Z',
           status: 'approved',
           review_note: 'Ready to implement.',
-          written_plan_path: '/tmp/chat-project/proposed-steps.md',
+          written_change_request_path: '/tmp/chat-project/changes/CR-2026-0007-proposed-steps/request.md',
           flow_launch_id: 'flow-launch-1',
           run_id: 'run-plan-123',
         },
@@ -1884,7 +1884,7 @@ describe('ProjectsPanel', () => {
 
     await waitFor(() => {
       expect(useStore.getState().selectedRunId).toBe('run-plan-123')
-      expect(useStore.getState().executionFlow).toBe('implement-from-plan.dot')
+      expect(useStore.getState().executionFlow).toBe('software-development/implement-change-request.dot')
       expect(useStore.getState().viewMode).toBe('runs')
     })
   })
@@ -1983,7 +1983,7 @@ describe('ProjectsPanel', () => {
           source_segment_id: 'segment-plan-inline',
           status: 'pending_review',
           review_note: null,
-          written_plan_path: null,
+          written_change_request_path: null,
           flow_launch_id: null,
           run_id: null,
           launch_error: null,

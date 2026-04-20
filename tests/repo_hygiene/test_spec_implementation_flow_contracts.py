@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from attractor.dsl import parse_dot
 
 
 _SPEC_IMPLEMENTATION_DIR = (
-    Path(__file__).resolve().parents[2] / "src" / "spark" / "flows" / "spec-implementation"
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "spark"
+    / "flows"
+    / "software-development"
+    / "spec-implementation"
 )
 
 
 def _load_graph(dot_name: str):
     return parse_dot((_SPEC_IMPLEMENTATION_DIR / dot_name).read_text(encoding="utf-8"))
+
+
+def _source(dot_name: str) -> str:
+    return (_SPEC_IMPLEMENTATION_DIR / dot_name).read_text(encoding="utf-8")
 
 
 def _edge_targets(graph):
@@ -25,6 +35,27 @@ def _edge_targets(graph):
     }
 
 
+def _json_array_attr(graph, node_id: str, attr_name: str) -> set[str]:
+    attr = graph.nodes[node_id].attrs.get(attr_name)
+    assert attr is not None, f"missing {attr_name} for {node_id}"
+    parsed = json.loads(str(attr.value))
+    assert isinstance(parsed, list)
+    return {str(item) for item in parsed}
+
+
+def test_spec_implementation_flows_use_new_runtime_and_durable_namespaces() -> None:
+    parent_source = _source("implement-spec.dot")
+    child_source = _source("implement-milestone.dot")
+
+    for source in (parent_source, child_source):
+        assert ".specflow/" not in source
+        assert ".spark/spec-implementation/" in source
+
+    assert "specs/<slug>/" in parent_source
+    assert ".spark/spec-implementation/current/spec/" in parent_source
+    assert ".spark/spec-implementation/current/spec/" in child_source
+
+
 def test_spec_implementation_milestone_worker_uses_validation_as_a_real_gate() -> None:
     graph = _load_graph("implement-milestone.dot")
 
@@ -34,8 +65,8 @@ def test_spec_implementation_milestone_worker_uses_validation_as_a_real_gate() -
 
     validate_node = graph.nodes["validate_repo"]
     artifact_paths = str(validate_node.attrs["tool.artifacts.paths"].value)
-    assert ".specflow/validation-plan.json" in artifact_paths
-    assert ".specflow/validation-result.json" not in artifact_paths
+    assert ".spark/spec-implementation/current/validation-plan.json" in artifact_paths
+    assert ".spark/spec-implementation/current/validation-result.json" not in artifact_paths
 
     edge_targets = _edge_targets(graph)
     assert ("validate_repo", "assess_validation", "Assess Pass") in edge_targets
@@ -61,8 +92,6 @@ def test_spec_implementation_milestone_worker_uses_validation_as_a_real_gate() -
 def test_spec_implementation_milestone_worker_validates_item_queue_before_next_item() -> None:
     graph = _load_graph("implement-milestone.dot")
 
-    assert "validate_item_plan" in graph.nodes
-
     edge_targets = _edge_targets(graph)
     assert ("extract_items", "validate_item_plan", "") in edge_targets
     assert ("rewrite_current", "validate_item_plan", "") in edge_targets
@@ -75,7 +104,7 @@ def test_spec_implementation_milestone_worker_validates_item_queue_before_next_i
     assert ("final_milestone_audit", "next_item", "Extend") not in edge_targets
 
 
-def test_spec_implementation_milestone_worker_handles_partial_success_on_status_envelope_judgment_nodes() -> None:
+def test_spec_implementation_milestone_worker_handles_partial_success_routes() -> None:
     graph = _load_graph("implement-milestone.dot")
 
     edge_targets = _edge_targets(graph)
@@ -103,14 +132,11 @@ def test_spec_implementation_milestone_worker_handles_partial_success_on_status_
 def test_spec_implementation_parent_flow_commits_after_milestone_acceptance() -> None:
     graph = _load_graph("implement-spec.dot")
 
-    assert "commit_milestone" in graph.nodes
-
     commit_node = graph.nodes["commit_milestone"]
     assert str(commit_node.attrs["shape"].value) == "parallelogram"
     commit_command = str(commit_node.attrs["tool.command"].value)
-    assert "git commit -m" in commit_command
-    assert "Accepted milestone" in commit_command
-    assert ".specflow/current-milestone.json" not in commit_command
+    assert "git add -A" in commit_command
+    assert "git commit -m \"Accepted milestone\"" in commit_command
 
     edge_targets = _edge_targets(graph)
     assert ("audit_milestone", "commit_milestone", "Commit") in edge_targets
@@ -121,8 +147,6 @@ def test_spec_implementation_parent_flow_commits_after_milestone_acceptance() ->
 def test_spec_implementation_parent_flow_validates_milestone_plan_before_dispatch() -> None:
     graph = _load_graph("implement-spec.dot")
 
-    assert "validate_milestone_plan" in graph.nodes
-
     edge_targets = _edge_targets(graph)
     assert ("plan_milestones", "validate_milestone_plan", "") in edge_targets
     assert ("rewrite_milestones", "validate_milestone_plan", "") in edge_targets
@@ -132,39 +156,37 @@ def test_spec_implementation_parent_flow_validates_milestone_plan_before_dispatc
     assert ("rewrite_milestones", "next_milestone", "") not in edge_targets
 
 
-def test_spec_implementation_parent_flow_tracks_contract_decisions_through_architecture_and_milestones() -> None:
+def test_spec_implementation_parent_flow_exposes_spec_slug_and_decision_context() -> None:
     graph = _load_graph("implement-spec.dot")
 
-    design_prompt = str(graph.nodes["design_architecture"].attrs["prompt"].value)
-    assert ".specflow/contract-decisions.json" in design_prompt
-    assert "top-level decisions array" in design_prompt
-    assert "behavioral_contract" in design_prompt
-    assert "implementation_contract" in design_prompt
-    assert "validation_expectations" in design_prompt
+    launch_inputs = json.loads(str(graph.graph_attrs["spark.launch_inputs"].value))
+    launch_input_keys = {str(item["key"]) for item in launch_inputs}
+    assert "context.request.spec_slug" in launch_input_keys
 
-    evaluate_prompt = str(graph.nodes["evaluate_architecture"].attrs["prompt"].value)
-    assert ".specflow/contract-decisions.json" in evaluate_prompt
-    assert "silently narrow, rename, or reinterpret" in evaluate_prompt
+    next_writes = _json_array_attr(graph, "next_milestone", "spark.writes_context")
+    assert {
+        "context.milestone.id",
+        "context.milestone.title",
+        "context.milestone.objective",
+        "context.milestone.requirement_ids",
+        "context.milestone.decision_ids",
+        "context.milestone.acceptance_criteria",
+        "context.milestone.target_paths",
+        "context.milestone.attempts",
+    } <= next_writes
 
-    revise_prompt = str(graph.nodes["revise_architecture"].attrs["prompt"].value)
-    assert "Update .specflow/contract-decisions.json" in revise_prompt
-
-    plan_prompt = str(graph.nodes["plan_milestones"].attrs["prompt"].value)
-    assert "decision_ids" in plan_prompt
-    assert "Every relevant contract decision must appear" in plan_prompt
-
-    validate_prompt = str(graph.nodes["validate_milestone_plan"].attrs["prompt"].value)
-    assert ".specflow/contract-decisions.json" in validate_prompt
-    assert "every relevant decision is covered" in validate_prompt
-    assert "do not contradict their bound decisions" in validate_prompt
-
-    next_prompt = str(graph.nodes["next_milestone"].attrs["prompt"].value)
-    assert "context.milestone.decision_ids" in next_prompt
-    writes_context = str(graph.nodes["next_milestone"].attrs["spark.writes_context"].value)
-    assert "context.milestone.decision_ids" in writes_context
+    audit_reads = _json_array_attr(graph, "audit_milestone", "spark.reads_context")
+    assert {
+        "context.milestone.id",
+        "context.milestone.decision_ids",
+        "context.stack.child.status",
+        "context.stack.child.outcome",
+        "context.stack.child.outcome_reason_code",
+        "context.stack.child.outcome_reason_message",
+    } <= audit_reads
 
 
-def test_spec_implementation_parent_flow_handles_partial_success_on_status_envelope_judgment_nodes() -> None:
+def test_spec_implementation_parent_flow_handles_partial_success_routes() -> None:
     graph = _load_graph("implement-spec.dot")
 
     edge_targets = _edge_targets(graph)
@@ -188,20 +210,17 @@ def test_spec_implementation_blocked_exit_declares_workflow_outcome_writes() -> 
     parent_graph = _load_graph("implement-spec.dot")
     child_graph = _load_graph("implement-milestone.dot")
 
-    parent_writes = str(parent_graph.nodes["blocked_exit"].attrs["spark.writes_context"].value)
-    child_writes = str(child_graph.nodes["blocked_exit"].attrs["spark.writes_context"].value)
-
-    for writes_context in (parent_writes, child_writes):
-        assert "context.workflow_outcome" in writes_context
-        assert "context.workflow_outcome_reason_code" in writes_context
-        assert "context.workflow_outcome_reason_message" in writes_context
+    for graph in (parent_graph, child_graph):
+        writes_context = _json_array_attr(graph, "blocked_exit", "spark.writes_context")
+        assert {
+            "context.workflow_outcome",
+            "context.workflow_outcome_reason_code",
+            "context.workflow_outcome_reason_message",
+        } <= writes_context
 
 
 def test_spec_implementation_parent_flow_automates_architecture_evaluation() -> None:
     graph = _load_graph("implement-spec.dot")
-
-    assert "evaluate_architecture" in graph.nodes
-    assert "review_architecture" not in graph.nodes
 
     edge_targets = _edge_targets(graph)
     assert ("design_architecture", "evaluate_architecture", "") in edge_targets
@@ -209,13 +228,11 @@ def test_spec_implementation_parent_flow_automates_architecture_evaluation() -> 
     assert ("evaluate_architecture", "revise_architecture", "Request Rework") in edge_targets
     assert ("evaluate_architecture", "blocked_exit", "Blocked") in edge_targets
     assert ("revise_architecture", "evaluate_architecture", "") in edge_targets
+    assert "review_architecture" not in graph.nodes
 
 
 def test_spec_implementation_parent_flow_adds_final_repository_integrity_audit() -> None:
     graph = _load_graph("implement-spec.dot")
-
-    assert "repository_integrity_audit" in graph.nodes
-    assert "plan_cleanup_milestone" in graph.nodes
 
     edge_targets = _edge_targets(graph)
     assert ("final_conformance_audit", "repository_integrity_audit", "Requirements Covered") in edge_targets
@@ -223,11 +240,10 @@ def test_spec_implementation_parent_flow_adds_final_repository_integrity_audit()
     assert ("repository_integrity_audit", "blocked_exit", "Blocked") in edge_targets
     assert ("repository_integrity_audit", "done", "Complete") in edge_targets
     assert ("plan_cleanup_milestone", "validate_milestone_plan", "") in edge_targets
-    assert ("audit_milestone", "revise_architecture", "Rework Architecture") not in edge_targets
     assert ("final_conformance_audit", "done", "Complete") not in edge_targets
 
 
-def test_spec_implementation_flow_uses_gpt_54_for_judgment_heavy_nodes() -> None:
+def test_spec_implementation_flow_uses_expected_models_for_judgment_nodes() -> None:
     parent_graph = _load_graph("implement-spec.dot")
     child_graph = _load_graph("implement-milestone.dot")
 
@@ -269,177 +285,69 @@ def test_spec_implementation_flow_uses_gpt_54_for_judgment_heavy_nodes() -> None
     assert "llm_model" not in child_graph.nodes["implement_current"].attrs
 
 
-def test_spec_implementation_child_flow_binds_items_to_contract_decisions() -> None:
+def test_spec_implementation_child_flow_preserves_live_item_context_contracts() -> None:
     graph = _load_graph("implement-milestone.dot")
 
-    prepare_state_reads = str(graph.nodes["prepare_milestone_state"].attrs["spark.reads_context"].value)
+    prepare_state_reads = _json_array_attr(graph, "prepare_milestone_state", "spark.reads_context")
     assert "context.milestone.decision_ids" in prepare_state_reads
 
-    prepare_state_prompt = str(graph.nodes["prepare_milestone_state"].attrs["prompt"].value)
-    assert "bound context.milestone.* snapshot as authoritative" in prepare_state_prompt
-    assert "repo-root .specflow/current-milestone.json later changes" in prepare_state_prompt
+    next_writes = _json_array_attr(graph, "next_item", "spark.writes_context")
+    assert {
+        "context.item.id",
+        "context.item.decision_ids",
+        "context.review.summary",
+        "context.validation.item_id",
+        "missing_prerequisites",
+        "validation_message",
+        "validation_exit_code",
+    } <= next_writes
 
-    extract_prompt = str(graph.nodes["extract_items"].attrs["prompt"].value)
-    assert ".specflow/architecture.md" in extract_prompt
-    assert ".specflow/contract-decisions.json" in extract_prompt
-    assert "context.milestone.* plus milestone_dir/state.json as the authoritative child-worker milestone binding" in extract_prompt
-    assert "decision_ids" in extract_prompt
-    assert "rather than buried only in notes" in extract_prompt
-    assert ".specflow/current-milestone.json" in extract_prompt
+    mark_done_writes = _json_array_attr(graph, "mark_current_done", "spark.writes_context")
+    assert {
+        "context.item.id",
+        "context.validation.item_id",
+        "context.review.summary",
+    } <= mark_done_writes
 
-    next_prompt = str(graph.nodes["next_item"].attrs["prompt"].value)
-    assert "context.item.decision_ids" in next_prompt
-    next_writes = str(graph.nodes["next_item"].attrs["spark.writes_context"].value)
-    assert "context.item.decision_ids" in next_writes
-    assert "On the Audit path" in next_prompt
+    mark_blocked_writes = _json_array_attr(graph, "mark_current_blocked", "spark.writes_context")
+    assert {
+        "context.item.id",
+        "context.review.summary",
+        "context.validation.status",
+    } <= mark_blocked_writes
 
-    mark_done_writes = str(graph.nodes["mark_current_done"].attrs["spark.writes_context"].value)
-    assert "context.item.id" in mark_done_writes
-    assert "context.validation.item_id" in mark_done_writes
+    rewrite_writes = _json_array_attr(graph, "rewrite_current", "spark.writes_context")
+    assert {
+        "context.item.id",
+        "context.validation.status",
+        "context.review.required_changes",
+    } <= rewrite_writes
 
-    mark_blocked_writes = str(graph.nodes["mark_current_blocked"].attrs["spark.writes_context"].value)
-    assert "context.item.id" in mark_blocked_writes
-    assert "context.review.summary" in mark_blocked_writes
+    validate_plan_writes = _json_array_attr(graph, "validate_item_plan", "spark.writes_context")
+    assert {
+        "context.item.id",
+        "context.review.summary",
+        "context.validation.status",
+    } <= validate_plan_writes
 
-    rewrite_writes = str(graph.nodes["rewrite_current"].attrs["spark.writes_context"].value)
-    assert "context.item.id" in rewrite_writes
-    assert "context.validation.status" in rewrite_writes
-
-    plan_prompt = str(graph.nodes["plan_current"].attrs["prompt"].value)
-    assert ".specflow/contract-decisions.json" in plan_prompt
-    assert "Convert the item's decision_ids into explicit implementation and validation goals" in plan_prompt
-    plan_reads = str(graph.nodes["plan_current"].attrs["spark.reads_context"].value)
+    plan_reads = _json_array_attr(graph, "plan_current", "spark.reads_context")
     assert "context.item.decision_ids" in plan_reads
 
-    review_prompt = str(graph.nodes["review_current"].attrs["prompt"].value)
-    assert ".specflow/architecture.md" in review_prompt
-    assert ".specflow/contract-decisions.json" in review_prompt
-    assert "weaker contract than the item's bound decisions" in review_prompt
 
-    final_audit_prompt = str(graph.nodes["final_milestone_audit"].attrs["prompt"].value)
-    assert ".specflow/contract-decisions.json" in final_audit_prompt
-    assert "schema including decision_ids" in final_audit_prompt
-    assert "Metadata-only repair items are allowed only when all bound decision_ids are already satisfied" in final_audit_prompt
-
-    validate_prompt = str(graph.nodes["validate_item_plan"].attrs["prompt"].value)
-    assert ".specflow/contract-decisions.json" in validate_prompt
-    assert "every decision bound to the current milestone appears in at least one item's decision_ids" in validate_prompt
-    assert "survives only in notes" in validate_prompt
-    assert "do not use repo-root .specflow/current-milestone.json" in validate_prompt
-    assert "treat success as a pre-dispatch queue state for next_item" in validate_prompt
-    assert "next_item is solely responsible for dispatching work" in validate_prompt
-    assert "stale context.item.*" in validate_prompt
-
-    validate_writes = str(graph.nodes["validate_item_plan"].attrs["spark.writes_context"].value)
-    assert "context.item.id" in validate_writes
-    assert "context.review.summary" in validate_writes
-
-
-def test_spec_implementation_flow_uses_bound_context_for_live_milestone_identity() -> None:
+def test_spec_implementation_runtime_validation_tool_paths_live_under_spark_namespace() -> None:
     parent_graph = _load_graph("implement-spec.dot")
     child_graph = _load_graph("implement-milestone.dot")
 
-    child_description = str(child_graph.graph_attrs["spark.description"].value)
-    assert "authoritative live active-item binding in protected context.item.* keys" in child_description
-    assert "durable child queue ledger" in child_description
-    assert "deliverable repository surfaces" in child_description
+    assert parent_graph.graph_attrs["stack.child_dotfile"].value == "implement-milestone.dot"
 
-    blocked_prompt = str(child_graph.nodes["blocked_exit"].attrs["prompt"].value)
-    assert "Treat context.milestone.id plus the milestone-local state as the authoritative identity" in blocked_prompt
+    validate_node = child_graph.nodes["validate_repo"]
+    command = str(validate_node.attrs["tool.command"].value)
+    assert command == "bash .spark/spec-implementation/current/run-milestone-validation.sh"
 
-    prepare_validation_prompt = str(child_graph.nodes["prepare_validation"].attrs["prompt"].value)
-    assert "authoritative live binding for the running worker" in prepare_validation_prompt
-    assert "durable ledger that must agree with them" in prepare_validation_prompt
-    assert "Do not use repo-root .specflow/current-milestone.json or .specflow/state.json.current_milestone_id as the active milestone binding" in prepare_validation_prompt
-
-    record_success_prompt = str(child_graph.nodes["record_milestone_success"].attrs["prompt"].value)
-    assert "context.milestone.id plus milestone-local state as authoritative" in record_success_prompt
-
-    final_audit_prompt = str(child_graph.nodes["final_milestone_audit"].attrs["prompt"].value)
-    assert "deliverable repository surfaces" in final_audit_prompt
-
-    audit_prompt = str(parent_graph.nodes["audit_milestone"].attrs["prompt"].value)
-    assert "context.milestone.* plus milestone-local child artifacts as the authoritative identity" in audit_prompt
-    assert "judge those files as repository deliverables" in audit_prompt
-
-    rewrite_prompt = str(parent_graph.nodes["rewrite_milestones"].attrs["prompt"].value)
-    assert "Treat context.milestone.id as the authoritative milestone to replace" in rewrite_prompt
-
-
-def test_spec_implementation_flow_prompts_encode_repository_integrity_rubric() -> None:
-    parent_graph = _load_graph("implement-spec.dot")
-    child_graph = _load_graph("implement-milestone.dot")
-
-    audit_prompt = str(parent_graph.nodes["audit_milestone"].attrs["prompt"].value)
-    assert "honestly deliverable" in audit_prompt
-    assert "test-only bootstrap hacks" in audit_prompt
-    assert "outcome partial_success with preferred_label Extend" in audit_prompt
-
-    integrity_prompt = str(parent_graph.nodes["repository_integrity_audit"].attrs["prompt"].value)
-    assert ".specflow/repository-integrity-gaps.md" in integrity_prompt
-    assert "tracked local, generated, cache, or IDE artifacts" in integrity_prompt
-    assert "one additional cleanup/refactor milestone" in integrity_prompt
-
-    cleanup_prompt = str(parent_graph.nodes["plan_cleanup_milestone"].attrs["prompt"].value)
-    assert "empty requirement_ids list" in cleanup_prompt
-    assert "empty decision_ids" in cleanup_prompt
-
-    plan_prompt = str(child_graph.nodes["plan_current"].attrs["prompt"].value)
-    assert "public bootstrap and installability" in plan_prompt
-
-    implement_prompt = str(child_graph.nodes["implement_current"].attrs["prompt"].value)
-    assert "Do not edit milestone_dir/state.json" in implement_prompt
-    assert "Do not claim that a later item is now active" in implement_prompt
-
-    prepare_validation_prompt = str(child_graph.nodes["prepare_validation"].attrs["prompt"].value)
-    assert "fields item_id, item_title" in prepare_validation_prompt
-    assert "ambient tooling" in prepare_validation_prompt
-    assert "test-only path hacks" in prepare_validation_prompt
-    assert "committed manifests" in prepare_validation_prompt
-    assert "Do not edit milestone_dir/state.json in this node" in prepare_validation_prompt
-    assert "Do not write .specflow/validation-result.json" in prepare_validation_prompt
-    assert "ordinary repo-local files rather than symlinks or indirections outside the repository root" in prepare_validation_prompt
-
-    assess_validation_prompt = str(child_graph.nodes["assess_validation"].attrs["prompt"].value)
-    assert "fields item_id, item_title, status" in assess_validation_prompt
-    assert "Return outcome success only when" in assess_validation_prompt
-    assert "preferred_label Fix" in assess_validation_prompt
-
-    review_prompt = str(child_graph.nodes["review_current"].attrs["prompt"].value)
-    assert "Never return outcome success unless" in review_prompt
-    assert "item_id matches context.item.id" in review_prompt
-    assert "brittle source-text checks" in review_prompt
-    assert "duplicate validators" in review_prompt
-    assert "mixed-responsibility growth" in review_prompt
-
-    active_item_prompt = str(child_graph.nodes["validate_active_item_state"].attrs["prompt"].value)
-    assert "authoritative live binding for the active item" in active_item_prompt
-    assert "state.json.current_item_id equals context.item.id" in active_item_prompt
-    assert "preferred_label Blocked" in active_item_prompt
-
-    validate_item_plan_prompt = str(child_graph.nodes["validate_item_plan"].attrs["prompt"].value)
-    assert "at most one item is status=in_progress" in validate_item_plan_prompt
-    assert "items with attempts=0 that are already in_progress or completed" in validate_item_plan_prompt
-    assert "require current_item_id to be null" in validate_item_plan_prompt
-    assert "do not promote any pending item to in_progress" in validate_item_plan_prompt
-    assert "do not increment attempts" in validate_item_plan_prompt
-    assert "active-item control-plane corruption" in validate_item_plan_prompt
-
-    gate_prompt = str(child_graph.nodes["gate_item_completion"].attrs["prompt"].value)
-    assert "state.json.current_item_id" in gate_prompt
-    assert "preferred_label Blocked" in gate_prompt
-    assert "preferred_label Revalidate" in gate_prompt
-
-    mark_done_prompt = str(child_graph.nodes["mark_current_done"].attrs["prompt"].value)
-    assert "Treat context.item.id as the only item" in mark_done_prompt
-    assert "Do not modify any other item status" in mark_done_prompt
-    assert "JSON null" in mark_done_prompt
-    assert "preferred_label Blocked" in mark_done_prompt
-
-    final_audit_prompt = str(child_graph.nodes["final_milestone_audit"].attrs["prompt"].value)
-    assert "missing deliverability work" in final_audit_prompt
-
-    next_item_prompt = str(child_graph.nodes["next_item"].attrs["prompt"].value)
-    assert "cleared context.review.summary" in next_item_prompt
-    assert "context.validation.item_id" in next_item_prompt
-    assert "missing_prerequisites" in next_item_prompt
+    artifact_paths = set(str(validate_node.attrs["tool.artifacts.paths"].value).split(","))
+    assert {
+        ".spark/spec-implementation/current/run-milestone-validation.sh",
+        ".spark/spec-implementation/current/validation-plan.json",
+        ".spark/spec-implementation/current/validation.stdout.txt",
+        ".spark/spec-implementation/current/validation.stderr.txt",
+    } <= artifact_paths

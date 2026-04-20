@@ -46,8 +46,8 @@ Examples:
 
 Packaged workflows:
 
-- [src/spark/flows/implement-from-plan.dot](src/spark/flows/implement-from-plan.dot): snapshot a plan file into `.spark/planflows/<run>/plan-source.md` plus `.spark/planflows/<run>/state.json`, expose that workspace via `context.planflow.*`, implement it, evaluate completion, and iterate
-- [src/spark/flows/spec-implementation/implement-spec.dot](src/spark/flows/spec-implementation/implement-spec.dot): greenfield spec-implementation program flow that keeps repo-local state under `.specflow/` and dispatches milestone workers
+- [src/spark/flows/software-development/implement-change-request.dot](src/spark/flows/software-development/implement-change-request.dot): read a durable change request from `changes/<CR-id>/request.md`, keep runtime state under `.spark/change-requests/<CR-id>/`, implement it, evaluate completion, and write `changes/<CR-id>/result.md`
+- [src/spark/flows/software-development/spec-implementation/implement-spec.dot](src/spark/flows/software-development/spec-implementation/implement-spec.dot): software-development program flow that keeps committed spec artifacts under `specs/<slug>/`, keeps runtime state under `.spark/spec-implementation/<slug>/`, and dispatches milestone workers from the stable `.spark/.../current/` alias
 
 Use the flow `goal` as the user-facing stated goal for the run:
 
@@ -368,7 +368,7 @@ spark-server service install
 - The editor supports both structured editing and raw DOT editing, including semantic-equivalence safety checks during handoff.
 - The Runs view is intended for historical inspection, diagnostics, artifact browsing, and replaying execution context.
 - Packaged example flows live in [src/spark/flows/examples/simple-linear.dot](src/spark/flows/examples/simple-linear.dot), [src/spark/flows/examples/implement-review-loop.dot](src/spark/flows/examples/implement-review-loop.dot), [src/spark/flows/examples/human-review-loop.dot](src/spark/flows/examples/human-review-loop.dot), [src/spark/flows/examples/parallel-review.dot](src/spark/flows/examples/parallel-review.dot), [src/spark/flows/examples/supervision/implementation-worker.dot](src/spark/flows/examples/supervision/implementation-worker.dot), and [src/spark/flows/examples/supervision/supervised-implementation.dot](src/spark/flows/examples/supervision/supervised-implementation.dot).
-- Packaged workflows live in [src/spark/flows/implement-from-plan.dot](src/spark/flows/implement-from-plan.dot), [src/spark/flows/spec-implementation/implement-spec.dot](src/spark/flows/spec-implementation/implement-spec.dot), and [src/spark/flows/spec-implementation/implement-milestone.dot](src/spark/flows/spec-implementation/implement-milestone.dot).
+- Packaged workflows live in [src/spark/flows/software-development/implement-change-request.dot](src/spark/flows/software-development/implement-change-request.dot), [src/spark/flows/software-development/spec-implementation/implement-spec.dot](src/spark/flows/software-development/spec-implementation/implement-spec.dot), and [src/spark/flows/software-development/spec-implementation/implement-milestone.dot](src/spark/flows/software-development/spec-implementation/implement-milestone.dot).
 - Repo-only advanced/test fixtures live under [tests/fixtures/flows/](tests/fixtures/flows).
 
 ## Project Status

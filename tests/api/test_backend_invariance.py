@@ -1230,7 +1230,7 @@ def test_codex_app_server_backend_repairs_invalid_context_update_keys_on_same_th
             prompts.append(kwargs)
             if len(prompts) == 1:
                 return FakeResult(
-                    '{"outcome":"success","context_updates":{".specflow/state.json":"nope"}}'
+                    '{"outcome":"success","context_updates":{"runtime/state.json":"nope"}}'
                 )
             return FakeResult('{"outcome":"success","context_updates":{"context.review.summary":"ready"}}')
 
@@ -1255,7 +1255,7 @@ def test_codex_app_server_backend_repairs_invalid_context_update_keys_on_same_th
     assert prompts[0]["thread_id"] == "thread-123"
     assert prompts[1]["thread_id"] == "thread-123"
     assert "invalid context_updates keys" in str(prompts[1]["prompt"])
-    assert ".specflow/state.json" in str(prompts[1]["prompt"])
+    assert "runtime/state.json" in str(prompts[1]["prompt"])
 
 
 def test_codex_app_server_backend_returns_contract_failure_when_repair_exhausted(
