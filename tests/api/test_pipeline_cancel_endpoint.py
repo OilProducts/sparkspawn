@@ -132,13 +132,27 @@ def test_cancel_pipeline_stops_nested_manager_loop_child_execution(
     )
     run_id = str(start_payload["pipeline_id"])
 
+    child_run_id = ""
     for _ in range(200):
         events = server._read_persisted_run_events(run_id)
+        child_started = next(
+            (event for event in events if event.get("type") == "ChildRunStarted"),
+            None,
+        )
+        if child_started is not None:
+            child_run_id = str(child_started.get("child_run_id") or "")
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("timed out waiting for child run start before cancel")
+
+    for _ in range(200):
+        child_events = server._read_persisted_run_events(child_run_id)
         if any(
             event.get("type") == "StageStarted"
-            and event.get("source_scope") == "child"
+            and event.get("source_scope") == "root"
             and event.get("node_id") == "first"
-            for event in events
+            for event in child_events
         ):
             break
         time.sleep(0.01)
@@ -153,15 +167,121 @@ def test_cancel_pipeline_stops_nested_manager_loop_child_execution(
 
     assert final_payload["status"] == "canceled"
 
-    events = server._read_persisted_run_events(run_id)
+    child_events = server._read_persisted_run_events(child_run_id)
     child_started_nodes = [
         str(event.get("node_id"))
-        for event in events
-        if event.get("type") == "StageStarted" and event.get("source_scope") == "child"
+        for event in child_events
+        if event.get("type") == "StageStarted" and event.get("source_scope") == "root"
     ]
     assert "first" in child_started_nodes
     assert "second" not in child_started_nodes
+    events = server._read_persisted_run_events(run_id)
     assert any(
         event.get("type") == "runtime" and event.get("status") == "canceled"
         for event in events
     )
+
+
+def test_cancel_pipeline_stops_first_class_child_run_by_child_run_id(
+    attractor_api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+
+    child_dot_path = tmp_path / "child.dot"
+    child_dot_path.write_text(
+        """
+        digraph Child {
+            start [shape=Mdiamond]
+            first [shape=parallelogram, tool.command="sleep 0.5"]
+            second [shape=parallelogram, tool.command="sleep 0.5"]
+            done [shape=Msquare]
+
+            start -> first -> second -> done
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    start_payload = _start_pipeline(
+        attractor_api_client,
+        tmp_path / "work",
+        flow_content=f"""
+        digraph Parent {{
+            graph [stack.child_dotfile="{child_dot_path}"]
+            start [shape=Mdiamond]
+            manager [shape=house, manager.poll_interval=0ms, manager.max_cycles=1, manager.actions=""]
+            done [shape=Msquare]
+
+            start -> manager
+            manager -> done [condition="outcome=success"]
+        }}
+        """,
+    )
+    parent_run_id = str(start_payload["pipeline_id"])
+
+    child_run_id = ""
+    for _ in range(200):
+        events = server._read_persisted_run_events(parent_run_id)
+        child_started = next(
+            (event for event in events if event.get("type") == "ChildRunStarted"),
+            None,
+        )
+        if child_started is not None:
+            child_run_id = str(child_started.get("child_run_id") or "")
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("timed out waiting for child run start before cancel")
+
+    for _ in range(200):
+        child_events = server._read_persisted_run_events(child_run_id)
+        if any(
+            event.get("type") == "StageStarted"
+            and event.get("source_scope") == "root"
+            and event.get("node_id") == "first"
+            for event in child_events
+        ):
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("timed out waiting for child stage start before cancel")
+
+    cancel_response = attractor_api_client.post(f"/pipelines/{child_run_id}/cancel")
+    assert cancel_response.status_code == 200
+    assert cancel_response.json() == {"status": "cancel_requested", "pipeline_id": child_run_id}
+
+    child_final_payload = _wait_for_pipeline_completion(attractor_api_client, child_run_id, attempts=800)
+    parent_final_payload = _wait_for_pipeline_completion(attractor_api_client, parent_run_id, attempts=800)
+
+    assert child_final_payload["status"] == "canceled"
+    assert "second" not in child_final_payload["completed_nodes"]
+    assert parent_final_payload["status"] == "failed"
+    assert parent_final_payload["last_error"] == "aborted_by_user"
+
+    child_events = server._read_persisted_run_events(child_run_id)
+    child_started_nodes = [
+        str(event.get("node_id"))
+        for event in child_events
+        if event.get("type") == "StageStarted" and event.get("source_scope") == "root"
+    ]
+    assert "first" in child_started_nodes
+    assert "second" not in child_started_nodes
+
+    parent_context = attractor_api_client.get(f"/pipelines/{parent_run_id}/context").json()["context"]
+    assert parent_context["context.stack.child.run_id"] == child_run_id
+    assert parent_context["context.stack.child.status"] == "canceled"
+
+    parent_events = server._read_persisted_run_events(parent_run_id)
+    assert any(
+        event.get("type") == "ChildRunCompleted"
+        and event.get("child_run_id") == child_run_id
+        and event.get("status") == "canceled"
+        for event in parent_events
+    )
+
+    runs = attractor_api_client.get("/runs").json()["runs"]
+    child_row = next(run for run in runs if run["run_id"] == child_run_id)
+    parent_row = next(run for run in runs if run["run_id"] == parent_run_id)
+    assert child_row["status"] == "canceled"
+    assert parent_row["status"] == "failed"

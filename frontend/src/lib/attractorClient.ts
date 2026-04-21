@@ -40,6 +40,7 @@ export {
     fetchPipelineGraphPreviewValidated,
     fetchPipelineJournalValidated,
     fetchPipelineQuestionsValidated,
+    fetchPipelineRetryValidated,
     fetchPipelineStartValidated,
     fetchPipelineStatusValidated,
     fetchPreviewValidated,

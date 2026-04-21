@@ -15,6 +15,8 @@ from attractor.engine.outcome import Outcome
 from attractor.engine.outcome import OutcomeStatus
 
 from .base import HandlerRuntime
+from .base import ChildRunRequest
+from .base import ChildRunResult
 from .registry import HandlerRegistry
 
 
@@ -38,6 +40,8 @@ class HandlerRunner:
     logs_root: Path | None = None
     artifact_store: ArtifactStore | None = None
     control: Callable[[], str | None] | None = None
+    child_run_launcher: Callable[[ChildRunRequest], ChildRunResult] | None = None
+    child_status_resolver: Callable[[str], ChildRunResult | None] | None = None
     _concurrency_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _active_calls: int = field(default=0, init=False, repr=False)
     _concurrency_overrides: int = field(default=0, init=False, repr=False)
@@ -90,6 +94,8 @@ class HandlerRunner:
                 runner=self,
                 event_emitter=emit_event,
                 control=self.control,
+                child_run_launcher=self.child_run_launcher,
+                child_status_resolver=self.child_status_resolver,
             )
             timeout = _to_seconds(node.attrs.get("timeout"))
             if timeout is None or timeout <= 0:

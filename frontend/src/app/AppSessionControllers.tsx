@@ -59,6 +59,10 @@ const runRecordsMatch = (
         'continued_from_node',
         'continued_from_flow_mode',
         'continued_from_flow_name',
+        'parent_run_id',
+        'parent_node_id',
+        'root_run_id',
+        'child_invocation_index',
     ].every((key) => left[key as keyof RunRecord] === right[key as keyof RunRecord])
 }
 

@@ -211,6 +211,10 @@ def record_run_start(
     continued_from_node: Optional[str] = None,
     continued_from_flow_mode: Optional[str] = None,
     continued_from_flow_name: Optional[str] = None,
+    parent_run_id: Optional[str] = None,
+    parent_node_id: Optional[str] = None,
+    root_run_id: Optional[str] = None,
+    child_invocation_index: Optional[int] = None,
 ) -> None:
     project_path, git_branch, git_commit = resolve_run_project_git_metadata(
         working_directory,
@@ -235,6 +239,10 @@ def record_run_start(
         continued_from_node=continued_from_node,
         continued_from_flow_mode=continued_from_flow_mode,
         continued_from_flow_name=continued_from_flow_name,
+        parent_run_id=parent_run_id,
+        parent_node_id=parent_node_id,
+        root_run_id=root_run_id,
+        child_invocation_index=child_invocation_index,
     )
     with run_history_lock:
         write_run_meta(get_runtime_paths, record)

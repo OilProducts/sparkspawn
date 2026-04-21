@@ -148,10 +148,12 @@ export function RunList({
                     <div className="space-y-3">
                         {runs.map((run) => {
                             const shortRunId = run.run_id.slice(0, 8)
+                            const shortParentRunId = run.parent_run_id ? run.parent_run_id.slice(0, 8) : null
                             const projectLabel = scopeMode === 'all' ? compactProjectLabel(run.project_path) : null
                             const metaParts = [
                                 formatDuration(run.started_at, run.ended_at, run.status),
                                 shortRunId,
+                                shortParentRunId ? `child of ${shortParentRunId}` : null,
                             ].filter((value) => Boolean(value) && value !== '—')
 
                             return (
@@ -188,9 +190,19 @@ export function RunList({
                                                             {projectLabel}
                                                         </span>
                                                     ) : null}
+                                                    {run.root_run_id && run.root_run_id !== run.run_id ? (
+                                                        <span className="truncate" title={run.root_run_id}>
+                                                            root {run.root_run_id.slice(0, 8)}
+                                                        </span>
+                                                    ) : null}
                                                 </div>
                                             </div>
                                             <div className="flex shrink-0 flex-wrap items-center gap-2">
+                                                {run.parent_run_id ? (
+                                                    <span className="inline-flex h-6 items-center justify-center rounded-md border border-border/70 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                        Child
+                                                    </span>
+                                                ) : null}
                                                 <span
                                                     className={`inline-flex h-6 items-center justify-center rounded-md px-2 text-[11px] font-semibold uppercase tracking-wide ${
                                                         STATUS_STYLES[run.status] || 'bg-muted text-muted-foreground'

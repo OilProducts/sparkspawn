@@ -52,6 +52,10 @@ const runRecordsMatch = (left: RunRecord | null, right: RunRecord | null) => {
         'continued_from_node',
         'continued_from_flow_mode',
         'continued_from_flow_name',
+        'parent_run_id',
+        'parent_node_id',
+        'root_run_id',
+        'child_invocation_index',
     ].every((key) => {
         const leftValue = left[key as keyof RunRecord]
         const rightValue = right[key as keyof RunRecord]
@@ -109,7 +113,7 @@ export function RunsPanel() {
         selectedRunId,
         manageSync: false,
     })
-    const { requestCancel } = useRunActions({ setRuns })
+    const { requestCancel, requestRetry } = useRunActions({ setRuns })
     const selectedRunDetailSession = useStore((state) => (
         selectedRunId ? state.runDetailSessionsByRunId[selectedRunId] ?? null : null
     ))
@@ -453,6 +457,9 @@ export function RunsPanel() {
                                 onContinueFromRun={beginContinuation}
                                 onRequestCancel={(runId, currentStatus) => {
                                     void requestCancel(runId, currentStatus)
+                                }}
+                                onRequestRetry={(runId, currentStatus) => {
+                                    void requestRetry(runId, currentStatus)
                                 }}
                                 run={selectedRun}
                             />

@@ -551,7 +551,7 @@ def test_publish_run_event_persists_sequence_and_timestamp(tmp_path: Path) -> No
     assert all(isinstance(event["emitted_at"], str) and event["emitted_at"].endswith("Z") for event in events)
 
 
-def test_pipeline_persists_forwarded_child_stage_events_through_broadcasting_runner(
+def test_pipeline_persists_first_class_child_stage_events_on_child_run(
     attractor_api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -614,15 +614,27 @@ def test_pipeline_persists_forwarded_child_stage_events_through_broadcasting_run
     assert final_payload["status"] == "completed"
 
     events = server._read_persisted_run_events(run_id)
-    child_stage_events = [
+    child_lifecycle_events = [
         event
         for event in events
-        if event.get("source_scope") == "child" and event.get("type") in {"StageStarted", "StageCompleted"}
+        if event.get("type") in {"ChildRunStarted", "ChildRunCompleted"}
+    ]
+    assert [event["type"] for event in child_lifecycle_events] == ["ChildRunStarted", "ChildRunCompleted"]
+    child_run_id = str(child_lifecycle_events[0]["child_run_id"])
+    assert child_run_id != run_id
+
+    child_events = server._read_persisted_run_events(child_run_id)
+    child_stage_events = [
+        event
+        for event in child_events
+        if event.get("source_scope") == "root" and event.get("type") in {"StageStarted", "StageCompleted"}
     ]
 
     assert [event["node_id"] for event in child_stage_events] == ["start", "start", "task", "task"]
-    assert all(event.get("source_parent_node_id") == "manager" for event in child_stage_events)
-    assert all(event.get("source_flow_name") == "child.dot" for event in child_stage_events)
+    child_record = server._read_run_meta(server._run_meta_path(child_run_id))
+    assert child_record is not None
+    assert child_record.parent_run_id == run_id
+    assert child_record.parent_node_id == "manager"
 
 
 def test_pipeline_events_drop_oldest_events_under_sustained_throughput(

@@ -76,7 +76,12 @@ from attractor.api.pipeline_runtime import (
 )
 from attractor.api.token_usage import TokenUsageBreakdown, estimate_model_cost
 from attractor.handlers import HandlerRunner, build_default_registry
-from attractor.handlers.base import CodergenBackend
+from attractor.handlers.base import (
+    ChildRunRequest,
+    ChildRunResult,
+    CodergenBackend,
+    PIPELINE_RETRY_RUN_ID_CONTEXT_KEY,
+)
 from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, AnswerValue, Question
@@ -160,6 +165,7 @@ RUN_EVENT_SEQUENCES: Dict[str, int] = {}
 ATTRACTOR_RUNTIME_LOCK = threading.Lock()
 ATTRACTOR_RUNTIME_INITIALIZED = False
 ORPHANED_ACTIVE_STATUSES = {"running", "cancel_requested", "pause_requested"}
+TERMINAL_RUN_STATUSES = {"completed", "failed", "validation_error", "paused", "canceled"}
 
 
 RUN_HISTORY_LOCK = threading.Lock()
@@ -460,7 +466,16 @@ def _journal_kind(raw_type: str) -> str:
         return raw_type
     if raw_type == "run_meta":
         return "metadata"
-    if raw_type in {"PipelineStarted", "PipelineCompleted", "PipelineFailed", "lifecycle"}:
+    if raw_type in {
+        "PipelineStarted",
+        "PipelineCompleted",
+        "PipelineFailed",
+        "PipelineRetryStarted",
+        "PipelineRetryCompleted",
+        "ChildRunStarted",
+        "ChildRunCompleted",
+        "lifecycle",
+    }:
         return "lifecycle"
     if raw_type.startswith("Stage"):
         return "stage"
@@ -585,6 +600,27 @@ def _journal_summary(
     if raw_type == "PipelineFailed":
         error = _as_trimmed_string(payload.get("error"))
         return f"{source_prefix}Pipeline failed: {error}" if error else f"{source_prefix}Pipeline failed"
+    if raw_type == "PipelineRetryStarted":
+        retry_node = _as_trimmed_string(payload.get("current_node")) or node_id or "checkpoint"
+        return f"{source_prefix}Retry started from {retry_node}"
+    if raw_type == "PipelineRetryCompleted":
+        retry_status = _as_trimmed_string(payload.get("status"))
+        return (
+            f"{source_prefix}Retry completed ({retry_status})"
+            if retry_status
+            else f"{source_prefix}Retry completed"
+        )
+    if raw_type == "ChildRunStarted":
+        child_run_id = _as_trimmed_string(payload.get("child_run_id"))
+        child_flow_name = _as_trimmed_string(payload.get("child_flow_name"))
+        label = child_flow_name or child_run_id or "child run"
+        return f"{source_prefix}Child run started: {label}"
+    if raw_type == "ChildRunCompleted":
+        child_run_id = _as_trimmed_string(payload.get("child_run_id"))
+        child_flow_name = _as_trimmed_string(payload.get("child_flow_name"))
+        status = _as_trimmed_string(payload.get("status"))
+        label = child_flow_name or child_run_id or "child run"
+        return f"{source_prefix}Child run completed: {label} ({status})" if status else f"{source_prefix}Child run completed: {label}"
     if raw_type == "StageStarted":
         return f"{source_prefix}Stage {node_id or 'unknown'} started"
     if raw_type == "StageCompleted":
@@ -752,6 +788,10 @@ def _record_run_start(
     continued_from_node: Optional[str] = None,
     continued_from_flow_mode: Optional[str] = None,
     continued_from_flow_name: Optional[str] = None,
+    parent_run_id: Optional[str] = None,
+    parent_node_id: Optional[str] = None,
+    root_run_id: Optional[str] = None,
+    child_invocation_index: Optional[int] = None,
 ) -> None:
     pipeline_runs.record_run_start(
         get_runtime_paths,
@@ -767,6 +807,10 @@ def _record_run_start(
         continued_from_node=continued_from_node,
         continued_from_flow_mode=continued_from_flow_mode,
         continued_from_flow_name=continued_from_flow_name,
+        parent_run_id=parent_run_id,
+        parent_node_id=parent_node_id,
+        root_run_id=root_run_id,
+        child_invocation_index=child_invocation_index,
     )
 
 
@@ -867,6 +911,22 @@ async def _publish_lifecycle_phase(run_id: str, phase: str) -> None:
     await _publish_run_event(run_id, {"type": "lifecycle", "phase": phase})
 
 
+def _publish_run_event_sync(loop: asyncio.AbstractEventLoop, run_id: str, message: dict) -> None:
+    future = asyncio.run_coroutine_threadsafe(_publish_run_event(run_id, message), loop)
+    try:
+        future.result(timeout=10)
+    except Exception:  # noqa: BLE001
+        LOGGER.exception("failed to publish run event for run %s", run_id)
+
+
+def _publish_run_list_upsert_sync(loop: asyncio.AbstractEventLoop, run_id: str) -> None:
+    future = asyncio.run_coroutine_threadsafe(_publish_run_list_upsert(run_id), loop)
+    try:
+        future.result(timeout=10)
+    except Exception:  # noqa: BLE001
+        LOGGER.exception("failed to publish run list upsert for run %s", run_id)
+
+
 def _set_active_run_status(run_id: str, status: str, *, last_error: Optional[str] = None) -> None:
     with ACTIVE_RUNS_LOCK:
         run = ACTIVE_RUNS.get(run_id)
@@ -959,6 +1019,25 @@ def _read_hydrated_run_record(run_id: str) -> Optional[RunRecord]:
     return record
 
 
+def _apply_active_run_to_record(record: RunRecord, active: Optional[ActiveRun]) -> RunRecord:
+    if active is None:
+        return record
+    active_status = normalize_run_status(active.status)
+    record.status = active_status
+    record.outcome = active.outcome
+    record.outcome_reason_code = active.outcome_reason_code
+    record.outcome_reason_message = active.outcome_reason_message
+    record.last_error = active.last_error
+    if active_status not in TERMINAL_RUN_STATUSES:
+        record.ended_at = None
+    if active.token_usage is not None:
+        record.token_usage = active.token_usage
+    if active.token_usage_breakdown is not None:
+        record.token_usage_breakdown = active.token_usage_breakdown
+        record.estimated_model_cost = active.estimated_model_cost
+    return record
+
+
 def _pipeline_status_payload(run_id: str) -> Dict[str, object]:
     checkpoint_current_node, checkpoint_completed_nodes = _read_checkpoint_progress(run_id)
     active = _get_active_run(run_id)
@@ -994,6 +1073,10 @@ def _pipeline_status_payload(run_id: str) -> Dict[str, object]:
             "continued_from_node": None,
             "continued_from_flow_mode": None,
             "continued_from_flow_name": None,
+            "parent_run_id": None,
+            "parent_node_id": None,
+            "root_run_id": None,
+            "child_invocation_index": None,
         }
 
     completed_nodes = list(active.completed_nodes) if active and active.completed_nodes else checkpoint_completed_nodes
@@ -1026,6 +1109,7 @@ def _list_run_records(project_path: Optional[str] = None) -> List[RunRecord]:
         record = _read_run_meta(meta_path)
         if record:
             hydrate_run_record_from_log(record, run_dir)
+            _apply_active_run_to_record(record, _get_active_run(record.run_id))
             records.append(record)
             continue
 
@@ -1042,6 +1126,7 @@ def _list_run_records(project_path: Optional[str] = None) -> List[RunRecord]:
             started_at="",
         )
         hydrate_run_record_from_log(record, run_dir)
+        _apply_active_run_to_record(record, _get_active_run(record.run_id))
         records.append(record)
 
     def _sort_key(item: RunRecord) -> str:
@@ -1058,6 +1143,7 @@ async def _publish_run_list_upsert(run_id: str) -> None:
     record = _read_hydrated_run_record(run_id)
     if record is None:
         return
+    _apply_active_run_to_record(record, _get_active_run(run_id))
     await RUNS_EVENT_HUB.publish(
         {
             "type": "run_upsert",
@@ -1603,6 +1689,688 @@ def _resolve_continue_flow_source(
     )
 
 
+def _run_executor_in_workdir(executor: PipelineExecutor, context: Context, workdir: Path, *, resume: bool) -> object:
+    original_cwd = Path.cwd()
+    os.chdir(workdir)
+    try:
+        return executor.run(context, resume=resume)
+    finally:
+        os.chdir(original_cwd)
+
+
+def _clear_child_runtime_snapshot(context: Context) -> None:
+    context.apply_updates(
+        {
+            "context.stack.child.run_id": "",
+            "context.stack.child.status": "",
+            "context.stack.child.outcome": "",
+            "context.stack.child.outcome_reason_code": "",
+            "context.stack.child.outcome_reason_message": "",
+            "context.stack.child.active_stage": "",
+            "context.stack.child.completed_nodes": [],
+            "context.stack.child.route_trace": [],
+            "context.stack.child.failure_reason": "",
+            "context.stack.child.retry_count": "",
+            "context.stack.child.intervention": "",
+        }
+    )
+
+
+def _child_run_result_from_pipeline_result(run_id: str, result) -> ChildRunResult:
+    final_status = normalize_run_status(result.status)
+    if final_status == "aborted":
+        final_status = "canceled"
+    return ChildRunResult(
+        run_id=run_id,
+        status=final_status,
+        outcome=result.outcome,
+        outcome_reason_code=result.outcome_reason_code,
+        outcome_reason_message=result.outcome_reason_message,
+        current_node=result.current_node,
+        completed_nodes=list(result.completed_nodes),
+        route_trace=list(result.route_trace),
+        failure_reason=result.failure_reason or "",
+    )
+
+
+def _child_run_result_from_record(run_id: str) -> ChildRunResult | None:
+    active = _get_active_run(run_id)
+    record = _read_hydrated_run_record(run_id)
+    if active is None and record is None:
+        return None
+    checkpoint = load_checkpoint(_run_root(run_id) / "state.json")
+    current_node = checkpoint.current_node if checkpoint is not None else ""
+    completed_nodes = list(checkpoint.completed_nodes) if checkpoint is not None else []
+    checkpoint_context = checkpoint.context if checkpoint is not None else {}
+    route_trace = checkpoint_context.get("context.stack.child.route_trace", [])
+    if not isinstance(route_trace, list):
+        route_trace = []
+
+    if active is not None:
+        return ChildRunResult(
+            run_id=run_id,
+            status=normalize_run_status(active.status),
+            outcome=active.outcome,
+            outcome_reason_code=active.outcome_reason_code,
+            outcome_reason_message=active.outcome_reason_message,
+            current_node=current_node,
+            completed_nodes=list(active.completed_nodes or completed_nodes),
+            route_trace=list(route_trace),
+            failure_reason=active.last_error or "",
+        )
+
+    assert record is not None
+    return ChildRunResult(
+        run_id=run_id,
+        status=normalize_run_status(record.status),
+        outcome=record.outcome,
+        outcome_reason_code=record.outcome_reason_code,
+        outcome_reason_message=record.outcome_reason_message,
+        current_node=current_node,
+        completed_nodes=completed_nodes,
+        route_trace=list(route_trace),
+        failure_reason=record.last_error or "",
+    )
+
+
+def _next_child_invocation_index(parent_run_id: str, parent_node_id: str) -> int:
+    max_index = 0
+    for run_root in _iter_run_roots():
+        record = _read_run_meta(run_root / "run.json")
+        if record is None:
+            continue
+        if record.parent_run_id != parent_run_id or record.parent_node_id != parent_node_id:
+            continue
+        if record.child_invocation_index is not None:
+            max_index = max(max_index, record.child_invocation_index)
+    return max_index + 1
+
+
+def _combined_execution_control(
+    *controls: Callable[[], Optional[str]] | None,
+) -> Callable[[], Optional[str]]:
+    def poll() -> Optional[str]:
+        deferred_action: str | None = None
+        for control in controls:
+            if control is None:
+                continue
+            try:
+                action = control()
+            except Exception:  # noqa: BLE001
+                continue
+            if action == "abort":
+                return "abort"
+            if action and deferred_action is None:
+                deferred_action = action
+        return deferred_action
+
+    return poll
+
+
+def _run_first_class_child_pipeline(
+    request: ChildRunRequest,
+    *,
+    backend_name: str,
+    model: Optional[str],
+    loop: asyncio.AbstractEventLoop,
+) -> ChildRunResult:
+    child_run_id = request.child_run_id.strip() or uuid.uuid4().hex
+    working_dir = str(request.child_workdir.expanduser().resolve())
+    os.makedirs(working_dir, exist_ok=True)
+    run_root = _ensure_run_root_for_project(child_run_id, working_dir)
+    logs_root = str(run_root / "logs")
+    checkpoint_file = str(run_root / "state.json")
+    Path(logs_root).mkdir(parents=True, exist_ok=True)
+    selected_model, display_model = _resolve_launch_model(request.child_graph, model)
+    root_run_id = (request.root_run_id or request.parent_run_id or child_run_id).strip() or child_run_id
+    child_invocation_index = _next_child_invocation_index(request.parent_run_id, request.parent_node_id)
+
+    try:
+        flow_content = request.child_flow_path.read_text(encoding="utf-8")
+    except OSError:
+        flow_content = f"digraph {request.child_graph.graph_id or 'child'} {{}}"
+    graphviz_export = export_graphviz_artifact(flow_content, run_root)
+
+    _record_run_start(
+        child_run_id,
+        request.child_flow_name,
+        working_dir,
+        display_model,
+        parent_run_id=request.parent_run_id,
+        parent_node_id=request.parent_node_id,
+        root_run_id=root_run_id,
+        child_invocation_index=child_invocation_index,
+    )
+    control = ExecutionControl()
+    with ACTIVE_RUNS_LOCK:
+        ACTIVE_RUNS[child_run_id] = ActiveRun(
+            run_id=child_run_id,
+            flow_name=request.child_flow_name,
+            working_directory=working_dir,
+            model=display_model,
+            status="running",
+            control=control,
+        )
+    _publish_run_list_upsert_sync(loop, child_run_id)
+
+    def emit(message: dict):
+        _publish_run_event_sync(loop, child_run_id, message)
+
+    def handle_usage_update(token_usage_breakdown: TokenUsageBreakdown) -> None:
+        _record_run_usage(child_run_id, token_usage_breakdown)
+        _set_active_run_usage(child_run_id, token_usage_breakdown)
+        _publish_run_list_upsert_sync(loop, child_run_id)
+
+    backend_kwargs: dict[str, object] = {"model": selected_model}
+    try:
+        backend_signature = inspect.signature(_build_codergen_backend)
+    except (TypeError, ValueError):
+        backend_signature = None
+    if backend_signature is None or "on_usage_update" in backend_signature.parameters:
+        backend_kwargs["on_usage_update"] = handle_usage_update
+    try:
+        backend = _build_codergen_backend(
+            backend_name,
+            working_dir,
+            emit,
+            **backend_kwargs,
+        )
+    except ValueError as exc:
+        _set_active_run_status(child_run_id, "failed", last_error=str(exc))
+        _record_run_end(child_run_id, working_dir, "failed", str(exc), outcome=None)
+        _publish_run_list_upsert_sync(loop, child_run_id)
+        _pop_active_run(child_run_id)
+        return ChildRunResult(run_id=child_run_id, status="failed", failure_reason=str(exc))
+    interviewer: Interviewer = WebInterviewer(HUMAN_BROKER, emit, request.child_flow_name, child_run_id)
+    registry = build_default_registry(
+        codergen_backend=backend,
+        interviewer=interviewer,
+    )
+
+    def launch_nested_child(nested_request: ChildRunRequest) -> ChildRunResult:
+        return _run_first_class_child_pipeline(
+            nested_request,
+            backend_name=backend_name,
+            model=model,
+            loop=loop,
+        )
+
+    runner = BroadcastingRunner(
+        HandlerRunner(
+            request.child_graph,
+            registry,
+            child_run_launcher=launch_nested_child,
+            child_status_resolver=_child_run_result_from_record,
+        ),
+        emit,
+    )
+    context = request.parent_context.clone()
+    _clear_child_runtime_snapshot(context)
+    context.apply_updates(_graph_attr_context_seed(request.child_graph))
+    start_node = _resolve_start_node_id(request.child_graph)
+    context.set("current_node", start_node)
+    context.set("outcome", "")
+    context.set("preferred_label", "")
+    context.set(RUNTIME_LAUNCH_MODEL_KEY, selected_model or "")
+    context.set("internal.run_id", child_run_id)
+    context.set("internal.parent_run_id", request.parent_run_id)
+    context.set("internal.parent_node_id", request.parent_node_id)
+    context.set("internal.root_run_id", root_run_id)
+    context.set("internal.run_workdir", working_dir)
+    context.set("internal.flow_source_dir", str(request.child_flow_path.parent.resolve()))
+
+    save_checkpoint(
+        Path(checkpoint_file),
+        Checkpoint(
+            current_node=start_node,
+            completed_nodes=[],
+            context=dict(context.values),
+            retry_counts={},
+        ),
+    )
+
+    executor = PipelineExecutor(
+        request.child_graph,
+        runner,
+        logs_root=logs_root,
+        checkpoint_file=checkpoint_file,
+        control=_combined_execution_control(control.poll, request.control),
+        on_event=emit,
+    )
+    emit(
+        {
+            "type": "graph",
+            **_graph_payload(request.child_graph),
+        }
+    )
+    emit(
+        {
+            "type": "run_meta",
+            "working_directory": working_dir,
+            "model": display_model,
+            "flow_name": request.child_flow_name,
+            "run_id": child_run_id,
+            "parent_run_id": request.parent_run_id,
+            "parent_node_id": request.parent_node_id,
+            "root_run_id": root_run_id,
+            "child_invocation_index": child_invocation_index,
+            "graph_source_path": str(graphviz_export.source_path),
+            "graph_dot_path": str(graphviz_export.dot_path),
+            "graph_render_path": str(graphviz_export.rendered_path) if graphviz_export.rendered_path else None,
+        }
+    )
+    emit(
+        {
+            "type": "log",
+            "msg": f"[System] Launching child run {child_run_id} in {working_dir} with model: {display_model}",
+        }
+    )
+    if graphviz_export.error:
+        emit({"type": "log", "msg": f"[System] Graph render unavailable: {graphviz_export.error}"})
+
+    final_status = "failed"
+    child_result = ChildRunResult(run_id=child_run_id, status="failed")
+    try:
+        _publish_run_event_sync(loop, child_run_id, {"type": "lifecycle", "phase": PIPELINE_LIFECYCLE_PHASES[4]})
+        result = _run_executor_in_workdir(executor, context, request.child_workdir, resume=False)
+        child_result = _child_run_result_from_pipeline_result(child_run_id, result)
+        final_status = child_result.status
+        final_last_error = ""
+        if final_status in {"failed", "validation_error"}:
+            final_last_error = (
+                str(child_result.failure_reason or "").strip()
+                or str(child_result.outcome_reason_message or "").strip()
+                or str(child_result.outcome_reason_code or "").strip()
+            )
+        _set_active_run_status(
+            child_run_id,
+            final_status,
+            last_error=final_last_error if final_last_error else None,
+        )
+        _set_active_run_outcome(
+            child_run_id,
+            outcome=child_result.outcome,
+            outcome_reason_code=child_result.outcome_reason_code,
+            outcome_reason_message=child_result.outcome_reason_message,
+        )
+        _set_active_run_completed_nodes(child_run_id, child_result.completed_nodes)
+        emit(
+            {
+                "type": "runtime",
+                "status": final_status,
+                "outcome": child_result.outcome,
+                "outcome_reason_code": child_result.outcome_reason_code,
+                "outcome_reason_message": child_result.outcome_reason_message,
+                "last_error": final_last_error or None,
+            }
+        )
+        _record_run_end(
+            child_run_id,
+            working_dir,
+            final_status,
+            final_last_error,
+            outcome=child_result.outcome,
+            outcome_reason_code=child_result.outcome_reason_code,
+            outcome_reason_message=child_result.outcome_reason_message,
+        )
+        _publish_run_list_upsert_sync(loop, child_run_id)
+        emit(
+            {
+                "type": "log",
+                "msg": _terminal_status_summary(
+                    status=final_status,
+                    outcome=child_result.outcome,
+                    outcome_reason_code=child_result.outcome_reason_code,
+                    outcome_reason_message=child_result.outcome_reason_message,
+                    last_error=final_last_error,
+                ),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        final_status = "failed"
+        child_result = ChildRunResult(run_id=child_run_id, status="failed", failure_reason=str(exc))
+        _set_active_run_status(child_run_id, "failed", last_error=str(exc))
+        _set_active_run_outcome(
+            child_run_id,
+            outcome=None,
+            outcome_reason_code=None,
+            outcome_reason_message=None,
+        )
+        emit(
+            {
+                "type": "runtime",
+                "status": "failed",
+                "outcome": None,
+                "outcome_reason_code": None,
+                "outcome_reason_message": None,
+                "last_error": str(exc),
+            }
+        )
+        _record_run_end(child_run_id, working_dir, "failed", str(exc), outcome=None)
+        _publish_run_list_upsert_sync(loop, child_run_id)
+        emit({"type": "log", "msg": f"Pipeline Failed: {exc}"})
+    finally:
+        _publish_run_event_sync(loop, child_run_id, {"type": "lifecycle", "phase": PIPELINE_LIFECYCLE_PHASES[5]})
+        _pop_active_run(child_run_id)
+        _publish_run_list_upsert_sync(loop, child_run_id)
+    return child_result
+
+
+def _record_run_retry_start(run_id: str) -> None:
+    with RUN_HISTORY_LOCK:
+        record = _read_run_meta(_run_meta_path(run_id))
+        if record is None:
+            return
+        record.status = "running"
+        record.outcome = None
+        record.outcome_reason_code = None
+        record.outcome_reason_message = None
+        record.ended_at = None
+        record.last_error = ""
+        _write_run_meta(record)
+
+
+def _prepare_checkpoint_for_retry(run_id: str, checkpoint: Checkpoint) -> Checkpoint:
+    current_node = checkpoint.current_node
+    completed_nodes = list(checkpoint.completed_nodes)
+    checkpoint_context = dict(checkpoint.context)
+    checkpoint_context[PIPELINE_RETRY_RUN_ID_CONTEXT_KEY] = run_id
+    node_outcomes = checkpoint.context.get("_attractor.node_outcomes", {})
+    current_outcome = node_outcomes.get(current_node) if isinstance(node_outcomes, dict) else None
+    if current_node and current_outcome == "fail" and current_node in completed_nodes:
+        completed_nodes = [node_id for node_id in completed_nodes if node_id != current_node]
+    prepared = Checkpoint(
+        current_node=current_node,
+        completed_nodes=completed_nodes,
+        context=checkpoint_context,
+        retry_counts=dict(checkpoint.retry_counts),
+        logs=list(checkpoint.logs),
+    )
+
+    return prepared
+
+
+def _save_retry_checkpoint(run_id: str, checkpoint: Checkpoint) -> None:
+    save_checkpoint(_run_root(run_id) / "state.json", checkpoint)
+    checkpoint_json_path = _run_root(run_id) / "checkpoint.json"
+    if checkpoint_json_path.exists():
+        save_checkpoint(checkpoint_json_path, checkpoint)
+
+
+def _build_pipeline_runner_for_run(
+    *,
+    graph,
+    run_id: str,
+    flow_name: str,
+    working_dir: str,
+    backend_name: str,
+    model: Optional[str],
+    loop: asyncio.AbstractEventLoop,
+    on_usage_update: Optional[Callable[[TokenUsageBreakdown], None]] = None,
+) -> tuple[PipelineExecutor, Context, str]:
+    selected_model, display_model = _resolve_launch_model(graph, model)
+
+    def emit(message: dict):
+        _publish_run_event_sync(loop, run_id, message)
+
+    backend_kwargs: dict[str, object] = {"model": selected_model}
+    if on_usage_update is not None:
+        try:
+            backend_signature = inspect.signature(_build_codergen_backend)
+        except (TypeError, ValueError):
+            backend_signature = None
+        if backend_signature is None or "on_usage_update" in backend_signature.parameters:
+            backend_kwargs["on_usage_update"] = on_usage_update
+    backend = _build_codergen_backend(
+        backend_name,
+        working_dir,
+        emit,
+        **backend_kwargs,
+    )
+    interviewer: Interviewer = WebInterviewer(HUMAN_BROKER, emit, flow_name, run_id)
+    registry = build_default_registry(
+        codergen_backend=backend,
+        interviewer=interviewer,
+    )
+
+    def launch_child_run(child_request: ChildRunRequest) -> ChildRunResult:
+        return _run_first_class_child_pipeline(
+            child_request,
+            backend_name=backend_name,
+            model=model,
+            loop=loop,
+        )
+
+    runner = BroadcastingRunner(
+        HandlerRunner(
+            graph,
+            registry,
+            child_run_launcher=launch_child_run,
+            child_status_resolver=_child_run_result_from_record,
+        ),
+        emit,
+    )
+    control = ExecutionControl()
+    executor = PipelineExecutor(
+        graph,
+        runner,
+        logs_root=str(_run_root(run_id) / "logs"),
+        checkpoint_file=str(_run_root(run_id) / "state.json"),
+        control=control.poll,
+        on_event=emit,
+    )
+    context = Context()
+    with ACTIVE_RUNS_LOCK:
+        ACTIVE_RUNS[run_id] = ActiveRun(
+            run_id=run_id,
+            flow_name=flow_name,
+            working_directory=working_dir,
+            model=display_model,
+            status="running",
+            control=control,
+        )
+    return executor, context, display_model
+
+
+async def _retry_pipeline_run(pipeline_id: str) -> dict:
+    if _get_active_run(pipeline_id) is not None:
+        raise HTTPException(status_code=409, detail="Pipeline is already running")
+    record = _read_hydrated_run_record(pipeline_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Unknown pipeline")
+    if normalize_run_status(record.status) != "failed":
+        raise HTTPException(status_code=409, detail="Retry requires a failed pipeline")
+    checkpoint = load_checkpoint(_run_root(pipeline_id) / "state.json")
+    if checkpoint is None:
+        raise HTTPException(status_code=409, detail="Retry requires an available checkpoint")
+    try:
+        graph_source_path = _resolve_run_graph_source_path(pipeline_id)
+    except HTTPException as exc:
+        raise HTTPException(status_code=409, detail="Retry requires an available graph snapshot") from exc
+
+    flow_content = graph_source_path.read_text(encoding="utf-8")
+    try:
+        graph = parse_dot(flow_content)
+    except DotParseError as exc:
+        raise HTTPException(status_code=409, detail=f"Stored graph snapshot is invalid: {exc}") from exc
+    graph, diagnostics = _prepare_graph_for_server(graph)
+    errors = [diag for diag in diagnostics if diag.severity == DiagnosticSeverity.ERROR]
+    if errors:
+        raise HTTPException(status_code=409, detail=f"Stored graph snapshot failed validation: {errors[0].message}")
+
+    raw_working_dir = str(record.working_directory or record.project_path or "").strip()
+    if not raw_working_dir:
+        raise HTTPException(status_code=409, detail="Retry requires a working directory")
+    working_dir = str(Path(raw_working_dir).expanduser().resolve())
+    os.makedirs(working_dir, exist_ok=True)
+    loop = asyncio.get_running_loop()
+
+    def handle_usage_update(token_usage_breakdown: TokenUsageBreakdown) -> None:
+        _record_run_usage(pipeline_id, token_usage_breakdown)
+        _set_active_run_usage(pipeline_id, token_usage_breakdown)
+        _publish_run_list_upsert_sync(loop, pipeline_id)
+
+    try:
+        executor, context, display_model = _build_pipeline_runner_for_run(
+            graph=graph,
+            run_id=pipeline_id,
+            flow_name=record.flow_name,
+            working_dir=working_dir,
+            backend_name="codex-app-server",
+            model=record.model,
+            loop=loop,
+            on_usage_update=handle_usage_update,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    checkpoint = _prepare_checkpoint_for_retry(pipeline_id, checkpoint)
+    _save_retry_checkpoint(pipeline_id, checkpoint)
+    _record_run_retry_start(pipeline_id)
+    await _publish_run_list_upsert(pipeline_id)
+    await _publish_run_event(
+        pipeline_id,
+        {
+            "type": "PipelineRetryStarted",
+            "current_node": checkpoint.current_node,
+            "completed_nodes": list(checkpoint.completed_nodes),
+        },
+    )
+    await _publish_run_event(
+        pipeline_id,
+        {
+            "type": "runtime",
+            "status": "running",
+            "outcome": None,
+            "outcome_reason_code": None,
+            "outcome_reason_message": None,
+            "last_error": None,
+        },
+    )
+
+    async def _run_retry():
+        final_status = "failed"
+        try:
+            await _publish_lifecycle_phase(pipeline_id, PIPELINE_LIFECYCLE_PHASES[4])
+            result = await asyncio.to_thread(
+                _run_executor_in_workdir,
+                executor,
+                context,
+                Path(working_dir),
+                resume=True,
+            )
+            final_status = normalize_run_status(result.status)
+            final_outcome = result.outcome
+            final_outcome_reason_code = result.outcome_reason_code
+            final_outcome_reason_message = result.outcome_reason_message
+            final_last_error = ""
+            if final_status in {"failed", "validation_error"}:
+                final_last_error = (
+                    str(result.failure_reason or "").strip()
+                    or str(final_outcome_reason_message or "").strip()
+                    or str(final_outcome_reason_code or "").strip()
+                )
+            _set_active_run_status(
+                pipeline_id,
+                final_status,
+                last_error=final_last_error if final_last_error else None,
+            )
+            _set_active_run_outcome(
+                pipeline_id,
+                outcome=final_outcome,
+                outcome_reason_code=final_outcome_reason_code,
+                outcome_reason_message=final_outcome_reason_message,
+            )
+            _set_active_run_completed_nodes(pipeline_id, result.completed_nodes)
+            await _publish_run_event(
+                pipeline_id,
+                {
+                    "type": "runtime",
+                    "status": final_status,
+                    "outcome": final_outcome,
+                    "outcome_reason_code": final_outcome_reason_code,
+                    "outcome_reason_message": final_outcome_reason_message,
+                    "last_error": final_last_error or None,
+                },
+            )
+            _record_run_end(
+                pipeline_id,
+                working_dir,
+                final_status,
+                final_last_error,
+                outcome=final_outcome,
+                outcome_reason_code=final_outcome_reason_code,
+                outcome_reason_message=final_outcome_reason_message,
+            )
+            await _publish_run_list_upsert(pipeline_id)
+            await _publish_run_event(
+                pipeline_id,
+                {
+                    "type": "PipelineRetryCompleted",
+                    "status": final_status,
+                    "outcome": final_outcome,
+                    "outcome_reason_code": final_outcome_reason_code,
+                    "outcome_reason_message": final_outcome_reason_message,
+                    "last_error": final_last_error or None,
+                },
+            )
+            await _publish_run_event(
+                pipeline_id,
+                {
+                    "type": "log",
+                    "msg": _terminal_status_summary(
+                        status=final_status,
+                        outcome=final_outcome,
+                        outcome_reason_code=final_outcome_reason_code,
+                        outcome_reason_message=final_outcome_reason_message,
+                        last_error=final_last_error,
+                    ),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            final_status = "failed"
+            _set_active_run_status(pipeline_id, "failed", last_error=str(exc))
+            _set_active_run_outcome(
+                pipeline_id,
+                outcome=None,
+                outcome_reason_code=None,
+                outcome_reason_message=None,
+            )
+            await _publish_run_event(
+                pipeline_id,
+                {
+                    "type": "runtime",
+                    "status": "failed",
+                    "outcome": None,
+                    "outcome_reason_code": None,
+                    "outcome_reason_message": None,
+                    "last_error": str(exc),
+                },
+            )
+            _record_run_end(pipeline_id, working_dir, "failed", str(exc), outcome=None)
+            await _publish_run_list_upsert(pipeline_id)
+            await _publish_run_event(
+                pipeline_id,
+                {"type": "PipelineRetryCompleted", "status": "failed", "last_error": str(exc)},
+            )
+            await _publish_run_event(pipeline_id, {"type": "log", "msg": f"Pipeline Failed: {exc}"})
+        finally:
+            await _publish_lifecycle_phase(pipeline_id, PIPELINE_LIFECYCLE_PHASES[5])
+            _pop_active_run(pipeline_id)
+            await _publish_run_list_upsert(pipeline_id)
+
+    asyncio.create_task(_run_retry())
+    return {
+        "status": "started",
+        "pipeline_id": pipeline_id,
+        "run_id": pipeline_id,
+        "working_directory": working_dir,
+        "model": display_model,
+        "diagnostics": [_diagnostic_payload(diagnostic) for diagnostic in diagnostics],
+        "errors": [],
+    }
+
+
 async def _launch_pipeline_run(
     *,
     run_id: Optional[str],
@@ -1737,7 +2505,24 @@ async def _launch_pipeline_run(
         codergen_backend=backend,
         interviewer=interviewer,
     )
-    runner = BroadcastingRunner(HandlerRunner(graph, registry), emit)
+
+    def launch_child_run(child_request: ChildRunRequest) -> ChildRunResult:
+        return _run_first_class_child_pipeline(
+            child_request,
+            backend_name=backend_name,
+            model=model,
+            loop=loop,
+        )
+
+    runner = BroadcastingRunner(
+        HandlerRunner(
+            graph,
+            registry,
+            child_run_launcher=launch_child_run,
+            child_status_resolver=_child_run_result_from_record,
+        ),
+        emit,
+    )
 
     checkpoint_file = str(run_root / "state.json")
     logs_root = str(run_root / "logs")
@@ -1754,6 +2539,8 @@ async def _launch_pipeline_run(
     context.set("outcome", "")
     context.set("preferred_label", "")
     context.set(RUNTIME_LAUNCH_MODEL_KEY, selected_model or "")
+    context.set("internal.run_id", resolved_run_id)
+    context.set("internal.root_run_id", resolved_run_id)
     context.set("internal.run_workdir", working_dir)
     if flow_source_dir is not None:
         context.set("internal.flow_source_dir", str(flow_source_dir))
@@ -1812,6 +2599,7 @@ async def _launch_pipeline_run(
         continued_from_node=continued_from_node,
         continued_from_flow_mode=continued_from_flow_mode,
         continued_from_flow_name=continued_from_flow_name,
+        root_run_id=resolved_run_id,
     )
     await _publish_run_list_upsert(resolved_run_id)
 
@@ -1841,6 +2629,7 @@ async def _launch_pipeline_run(
             "continued_from_node": continued_from_node,
             "continued_from_flow_mode": continued_from_flow_mode,
             "continued_from_flow_name": continued_from_flow_name,
+            "root_run_id": resolved_run_id,
         },
     )
     if graphviz_export.error:
@@ -2108,6 +2897,11 @@ async def continue_pipeline(pipeline_id: str, req: PipelineContinueRequest):
         continued_from_flow_mode=req.flow_source_mode.strip().lower(),
         continued_from_flow_name=(req.flow_name or "").strip() or None,
     )
+
+
+@attractor_router.post("/pipelines/{pipeline_id}/retry")
+async def retry_pipeline(pipeline_id: str):
+    return await _retry_pipeline_run(pipeline_id)
 
 
 @attractor_router.get("/pipelines/{pipeline_id}")

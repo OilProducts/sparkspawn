@@ -4,6 +4,7 @@ import {
     STATUS_LABELS,
     canCancelRun,
     canContinueRun,
+    canRetryRun,
     cancelRunActionLabel,
     cancelRunDisabledReason,
     formatDuration,
@@ -70,6 +71,7 @@ interface RunSummaryCardProps {
     }>
     monitoringHeadline: string
     onRequestCancel: (runId: string, currentStatus: string) => void
+    onRequestRetry: (runId: string, currentStatus: string) => void
     onContinueFromRun: (run: RunRecord) => void
     onCollapsedChange: (collapsed: boolean) => void
 }
@@ -82,11 +84,13 @@ export function RunSummaryCard({
     monitoringFacts,
     monitoringHeadline,
     onRequestCancel,
+    onRequestRetry,
     onContinueFromRun,
     onCollapsedChange,
 }: RunSummaryCardProps) {
     const cancelAvailable = canCancelRun(run.status)
     const continueAvailable = canContinueRun(run.status)
+    const retryAvailable = canRetryRun(run.status)
     const usageBreakdown = run.token_usage_breakdown
     const modelUsageEntries = Object.entries(usageBreakdown?.by_model ?? {})
     return (
@@ -144,6 +148,17 @@ export function RunSummaryCard({
                                     Continue from node
                                 </Button>
                             ) : null}
+                            {retryAvailable ? (
+                                <Button
+                                    type="button"
+                                    data-testid="run-summary-retry-button"
+                                    onClick={() => onRequestRetry(run.run_id, run.status)}
+                                    variant="secondary"
+                                    size="xs"
+                                >
+                                    Retry run
+                                </Button>
+                            ) : null}
                             <Button
                                 type="button"
                                 data-testid="run-summary-cancel-button"
@@ -188,6 +203,9 @@ export function RunSummaryCard({
                 <div data-testid="run-summary-git-branch"><span className="font-medium">Git Branch:</span> {run.git_branch || '—'}</div>
                 <div data-testid="run-summary-git-commit"><span className="font-medium">Git Commit:</span> {run.git_commit || '—'}</div>
                 <div data-testid="run-summary-continued-from"><span className="font-medium">Continued From:</span> {run.continued_from_run_id ? `${run.continued_from_run_id} @ ${run.continued_from_node || '—'}` : '—'}</div>
+                <div data-testid="run-summary-parent-run"><span className="font-medium">Parent Run:</span> {run.parent_run_id ? `${run.parent_run_id} @ ${run.parent_node_id || '—'}` : '—'}</div>
+                <div data-testid="run-summary-root-run"><span className="font-medium">Root Run:</span> {run.root_run_id || '—'}</div>
+                <div data-testid="run-summary-child-invocation"><span className="font-medium">Child Invocation:</span> {run.child_invocation_index ?? '—'}</div>
                 <div data-testid="run-summary-last-error" className="break-all"><span className="font-medium">Last Error:</span> {run.last_error || '—'}</div>
                 <div data-testid="run-summary-estimated-model-cost"><span className="font-medium">Estimated model cost:</span> {formatEstimatedModelCostLabel(run)}</div>
                 <div data-testid="run-summary-token-usage"><span className="font-medium">Total tokens:</span> {formatTokenCount(usageBreakdown?.total_tokens ?? run.token_usage)}</div>

@@ -33,6 +33,10 @@ class RunRecord:
     continued_from_node: Optional[str] = None
     continued_from_flow_mode: Optional[str] = None
     continued_from_flow_name: Optional[str] = None
+    parent_run_id: Optional[str] = None
+    parent_node_id: Optional[str] = None
+    root_run_id: Optional[str] = None
+    child_invocation_index: Optional[int] = None
     last_error: str = ""
     token_usage: Optional[int] = None
     token_usage_breakdown: Optional[TokenUsageBreakdown] = None
@@ -59,6 +63,10 @@ class RunRecord:
             "continued_from_node": self.continued_from_node,
             "continued_from_flow_mode": self.continued_from_flow_mode,
             "continued_from_flow_name": self.continued_from_flow_name,
+            "parent_run_id": self.parent_run_id,
+            "parent_node_id": self.parent_node_id,
+            "root_run_id": self.root_run_id,
+            "child_invocation_index": self.child_invocation_index,
             "last_error": self.last_error,
             "token_usage": self.token_usage,
             "token_usage_breakdown": (
@@ -114,6 +122,20 @@ class RunRecord:
             ),
             continued_from_flow_name=(
                 str(data.get("continued_from_flow_name")) if data.get("continued_from_flow_name") is not None else None
+            ),
+            parent_run_id=(
+                str(data.get("parent_run_id")) if data.get("parent_run_id") is not None else None
+            ),
+            parent_node_id=(
+                str(data.get("parent_node_id")) if data.get("parent_node_id") is not None else None
+            ),
+            root_run_id=(
+                str(data.get("root_run_id")) if data.get("root_run_id") is not None else None
+            ),
+            child_invocation_index=(
+                int(data["child_invocation_index"])
+                if data.get("child_invocation_index") is not None
+                else None
             ),
             last_error=str(data.get("last_error", "")),
             token_usage=(

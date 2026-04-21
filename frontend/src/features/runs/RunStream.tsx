@@ -86,6 +86,10 @@ function toRunRecord(status: PipelineStatusResponse): RunRecord {
         continued_from_node: status.continued_from_node ?? null,
         continued_from_flow_mode: status.continued_from_flow_mode ?? null,
         continued_from_flow_name: status.continued_from_flow_name ?? null,
+        parent_run_id: status.parent_run_id ?? null,
+        parent_node_id: status.parent_node_id ?? null,
+        root_run_id: status.root_run_id ?? null,
+        child_invocation_index: status.child_invocation_index ?? null,
     }
 }
 

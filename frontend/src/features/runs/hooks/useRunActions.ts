@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 
-import { ApiHttpError, fetchPipelineCancelValidated } from '@/lib/attractorClient'
+import { ApiHttpError, fetchPipelineCancelValidated, fetchPipelineRetryValidated } from '@/lib/attractorClient'
 import { useDialogController } from '@/components/app/dialog-controller'
 import type { RunRecord } from '../model/shared'
 
@@ -57,7 +57,46 @@ export function useRunActions({ setRuns }: UseRunActionsArgs) {
         }
     }, [alert, confirm, setRuns])
 
+    const requestRetry = useCallback(async (runId: string, currentStatus: string) => {
+        if (currentStatus !== 'failed') {
+            return
+        }
+        const confirmed = await confirm({
+            title: 'Retry run?',
+            description: 'It will resume this run from its checkpoint using the same run id.',
+            confirmLabel: 'Retry run',
+            cancelLabel: 'Keep failed',
+        })
+        if (!confirmed) {
+            return
+        }
+        setRuns((current) =>
+            current.map((run) => (
+                run.run_id === runId
+                    ? { ...run, status: 'running', last_error: '' }
+                    : run
+            )),
+        )
+        try {
+            await fetchPipelineRetryValidated(runId)
+        } catch (err) {
+            logUnexpectedRunError(err)
+            setRuns((current) =>
+                current.map((run) => (
+                    run.run_id === runId
+                        ? { ...run, status: currentStatus }
+                        : run
+                )),
+            )
+            await alert({
+                title: 'Retry failed',
+                description: 'Failed to retry run.',
+            })
+        }
+    }, [alert, confirm, setRuns])
+
     return {
         requestCancel,
+        requestRetry,
     }
 }

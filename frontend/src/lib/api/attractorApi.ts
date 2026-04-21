@@ -147,6 +147,10 @@ export interface PipelineStatusResponse {
     continued_from_node?: string | null
     continued_from_flow_mode?: string | null
     continued_from_flow_name?: string | null
+    parent_run_id?: string | null
+    parent_node_id?: string | null
+    root_run_id?: string | null
+    child_invocation_index?: number | null
 }
 
 export interface PipelineCancelResponse {
@@ -227,6 +231,10 @@ export interface RunRecordResponse {
     continued_from_node?: string | null
     continued_from_flow_mode?: string | null
     continued_from_flow_name?: string | null
+    parent_run_id?: string | null
+    parent_node_id?: string | null
+    root_run_id?: string | null
+    child_invocation_index?: number | null
 }
 
 export interface PreviewRequestOptions {
@@ -629,6 +637,14 @@ function parseRunRecord(payload: unknown): RunRecordResponse | null {
         continued_from_node: asOptionalNullableString(record.continued_from_node),
         continued_from_flow_mode: asOptionalNullableString(record.continued_from_flow_mode),
         continued_from_flow_name: asOptionalNullableString(record.continued_from_flow_name),
+        parent_run_id: asOptionalNullableString(record.parent_run_id),
+        parent_node_id: asOptionalNullableString(record.parent_node_id),
+        root_run_id: asOptionalNullableString(record.root_run_id),
+        child_invocation_index: typeof record.child_invocation_index === 'number'
+            ? record.child_invocation_index
+            : record.child_invocation_index === null
+                ? null
+                : undefined,
     }
 }
 
@@ -759,6 +775,16 @@ export async function fetchPipelineContinueValidated(
             body: JSON.stringify(payload),
         },
         '/attractor/pipelines/{id}/continue',
+        parsePipelineStartResponse,
+    )
+}
+
+export async function fetchPipelineRetryValidated(pipelineId: string): Promise<PipelineStartResponse> {
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/retry`)
+    return fetchJsonWithValidation(
+        url,
+        { method: 'POST' },
+        '/attractor/pipelines/{id}/retry',
         parsePipelineStartResponse,
     )
 }

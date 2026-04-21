@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import time
 from typing import Any
+import uuid
 
 from attractor.dsl import DiagnosticSeverity, DotParseError, parse_dot
 from attractor.dsl.models import DotAttribute, Duration
@@ -14,6 +15,7 @@ from attractor.engine.context import Context
 from attractor.engine.executor import PipelineExecutor
 from attractor.engine.outcome import Outcome, OutcomeStatus
 from attractor.graph_prep import prepare_graph
+from attractor.handlers.base import ChildRunRequest, ChildRunResult, PIPELINE_RETRY_RUN_ID_CONTEXT_KEY
 from attractor.handlers.runner import HandlerRunner
 
 from ..base import HandlerRuntime
@@ -80,6 +82,17 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
     if not _child_autostart_enabled(runtime.node_attrs.get("stack.child_autostart")):
         return None
 
+    linked_child_run_id = str(runtime.context.get("context.stack.child.run_id", "")).strip()
+    if linked_child_run_id:
+        if _is_pipeline_retry_resume(runtime):
+            if _refresh_linked_child_snapshot(runtime, linked_child_run_id):
+                return None
+            current_status = str(runtime.context.get("context.stack.child.status", "")).strip().lower()
+            if current_status in {"running", "completed", "failed", "aborted", "canceled"}:
+                return None
+        elif _refresh_linked_running_child_snapshot(runtime, linked_child_run_id):
+            return None
+
     current_status = str(runtime.context.get("context.stack.child.status", "")).strip().lower()
     if current_status == "running":
         return None
@@ -122,6 +135,15 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
             failure_reason=f"Child DOT graph failed validation: {child_errors[0].message}",
         )
 
+    if runtime.child_run_launcher is not None:
+        return _autostart_first_class_child_pipeline(
+            runtime,
+            child_graph=child_graph,
+            child_flow_name=child_dot_path.name or child_graph.graph_id or "child",
+            child_dot_path=child_dot_path,
+            child_workdir_path=child_workdir_path,
+        )
+
     registry = getattr(runtime.runner, "registry", None)
     if registry is None:
         return Outcome(
@@ -161,21 +183,128 @@ def _autostart_child_pipeline(runtime: HandlerRuntime) -> Outcome | None:
         child_status = "aborted"
     else:
         child_status = "failed"
-    runtime.context.set("context.stack.child.status", child_status)
-    runtime.context.set("context.stack.child.outcome", child_result.outcome or "")
-    runtime.context.set("context.stack.child.outcome_reason_code", child_result.outcome_reason_code or "")
-    runtime.context.set("context.stack.child.outcome_reason_message", child_result.outcome_reason_message or "")
-    runtime.context.set("context.stack.child.active_stage", child_result.current_node)
-    runtime.context.set("context.stack.child.completed_nodes", list(child_result.completed_nodes))
-    runtime.context.set("context.stack.child.route_trace", list(child_result.route_trace))
-    runtime.context.set("context.stack.child.failure_reason", child_result.failure_reason or "")
+    _apply_child_run_result(
+        runtime.context,
+        ChildRunResult(
+            run_id="",
+            status=child_status,
+            outcome=child_result.outcome,
+            outcome_reason_code=child_result.outcome_reason_code,
+            outcome_reason_message=child_result.outcome_reason_message,
+            current_node=child_result.current_node,
+            completed_nodes=list(child_result.completed_nodes),
+            route_trace=list(child_result.route_trace),
+            failure_reason=child_result.failure_reason,
+        ),
+    )
 
     return None
+
+
+def _refresh_linked_child_snapshot(runtime: HandlerRuntime, child_run_id: str) -> bool:
+    if runtime.child_status_resolver is None:
+        return False
+    child_result = runtime.child_status_resolver(child_run_id)
+    if child_result is None:
+        return False
+    _apply_child_run_result(runtime.context, child_result)
+    return True
+
+
+def _refresh_linked_running_child_snapshot(runtime: HandlerRuntime, child_run_id: str) -> bool:
+    if runtime.child_status_resolver is None:
+        return False
+    child_result = runtime.child_status_resolver(child_run_id)
+    if child_result is None:
+        return False
+    _apply_child_run_result(runtime.context, child_result)
+    return child_result.status.strip().lower() == "running"
+
+
+def _is_pipeline_retry_resume(runtime: HandlerRuntime) -> bool:
+    retry_run_id = str(runtime.context.get(PIPELINE_RETRY_RUN_ID_CONTEXT_KEY, "")).strip()
+    current_run_id = str(runtime.context.get("internal.run_id", "")).strip()
+    return bool(retry_run_id and current_run_id and retry_run_id == current_run_id)
+
+
+def _autostart_first_class_child_pipeline(
+    runtime: HandlerRuntime,
+    *,
+    child_graph,
+    child_flow_name: str,
+    child_dot_path: Path,
+    child_workdir_path: Path,
+) -> Outcome | None:
+    assert runtime.child_run_launcher is not None
+    child_run_id = uuid.uuid4().hex
+    parent_run_id = str(runtime.context.get("internal.run_id", "")).strip()
+    root_run_id = str(runtime.context.get("internal.root_run_id", "")).strip() or parent_run_id
+    child_context = runtime.context.clone()
+    runtime.context.set("context.stack.child.run_id", child_run_id)
+    runtime.context.set("context.stack.child.status", "running")
+    runtime.emit(
+        "ChildRunStarted",
+        child_run_id=child_run_id,
+        parent_run_id=parent_run_id,
+        parent_node_id=runtime.node_id,
+        root_run_id=root_run_id,
+        child_flow_name=child_flow_name,
+    )
+    try:
+        child_result = runtime.child_run_launcher(
+            ChildRunRequest(
+                child_run_id=child_run_id,
+                child_graph=child_graph,
+                child_flow_name=child_flow_name,
+                child_flow_path=child_dot_path,
+                child_workdir=child_workdir_path,
+                parent_context=child_context,
+                parent_run_id=parent_run_id,
+                parent_node_id=runtime.node_id,
+                root_run_id=root_run_id,
+                control=runtime.control,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        child_result = ChildRunResult(
+            run_id=child_run_id,
+            status="failed",
+            failure_reason=f"Unable to run child pipeline from {child_workdir_path}: {exc}",
+        )
+    _apply_child_run_result(runtime.context, child_result)
+    runtime.emit(
+        "ChildRunCompleted",
+        child_run_id=child_result.run_id or child_run_id,
+        parent_run_id=parent_run_id,
+        parent_node_id=runtime.node_id,
+        root_run_id=root_run_id,
+        child_flow_name=child_flow_name,
+        status=child_result.status,
+        outcome=child_result.outcome,
+        outcome_reason_code=child_result.outcome_reason_code,
+        outcome_reason_message=child_result.outcome_reason_message,
+        failure_reason=child_result.failure_reason or None,
+    )
+    return None
+
+
+def _apply_child_run_result(context: Context, child_result: ChildRunResult) -> None:
+    if child_result.run_id:
+        context.set("context.stack.child.run_id", child_result.run_id)
+    context.set("context.stack.child.status", child_result.status)
+    context.set("context.stack.child.outcome", child_result.outcome or "")
+    context.set("context.stack.child.outcome_reason_code", child_result.outcome_reason_code or "")
+    context.set("context.stack.child.outcome_reason_message", child_result.outcome_reason_message or "")
+    context.set("context.stack.child.active_stage", child_result.current_node)
+    context.set("context.stack.child.completed_nodes", list(child_result.completed_nodes))
+    context.set("context.stack.child.route_trace", list(child_result.route_trace))
+    context.set("context.stack.child.failure_reason", child_result.failure_reason or "")
 
 
 def _clear_child_snapshot(context: Context) -> None:
     context.apply_updates(
         {
+            "context.stack.child.run_id": "",
             "context.stack.child.status": "",
             "context.stack.child.outcome": "",
             "context.stack.child.outcome_reason_code": "",
@@ -348,7 +477,7 @@ def _stop_condition_met(stop_condition: str, context: Context) -> bool:
 
 def _resolve_child_status(context: Context) -> Outcome | None:
     child_status = str(context.get("context.stack.child.status", "")).strip().lower()
-    if child_status not in {"completed", "failed", "aborted"}:
+    if child_status not in {"completed", "failed", "aborted", "canceled"}:
         return None
 
     child_outcome = str(context.get("context.stack.child.outcome", "")).strip().lower()
@@ -362,7 +491,7 @@ def _resolve_child_status(context: Context) -> Outcome | None:
         )
     if child_status == "failed":
         return Outcome(status=OutcomeStatus.FAIL, failure_reason="Child failed")
-    if child_status == "aborted":
+    if child_status in {"aborted", "canceled"}:
         return Outcome(status=OutcomeStatus.FAIL, failure_reason="aborted_by_user")
     return None
 
