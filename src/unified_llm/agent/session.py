@@ -7,9 +7,11 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from ..client import Client
+from .context import check_context_usage
+from .environment import ExecutionEnvironment
 from .events import EventKind, SessionEvent, _SessionEventStream
+from .local_environment import LocalExecutionEnvironment
 from .types import (
-    ExecutionEnvironment,
     ProviderProfile,
     SessionClosedError,
     SessionConfig,
@@ -52,7 +54,7 @@ class Session:
     id: UUID | str = field(default_factory=uuid4)
     provider_profile: ProviderProfile = field(default_factory=ProviderProfile)
     execution_environment: ExecutionEnvironment = field(
-        default_factory=ExecutionEnvironment
+        default_factory=LocalExecutionEnvironment
     )
     history: list[Any] = field(default_factory=list)
     event_queue: asyncio.Queue[SessionEvent] = field(default_factory=asyncio.Queue)
@@ -96,7 +98,9 @@ class Session:
             provider_profile if provider_profile is not None else ProviderProfile()
         )
         self.execution_environment = (
-            execution_environment if execution_environment is not None else ExecutionEnvironment()
+            execution_environment
+            if execution_environment is not None
+            else LocalExecutionEnvironment()
         )
         self.history = list(history or [])
         self.event_queue = event_queue if event_queue is not None else asyncio.Queue()
@@ -284,6 +288,7 @@ class Session:
         self.history.append(user_turn)
         self.state = SessionState.PROCESSING
         self._emit_event(EventKind.USER_INPUT, {"content": user_turn.content})
+        check_context_usage(self)
 
     async def submit(self, user_input: str | Iterable[Any]) -> None:
         await self.process_input(user_input)

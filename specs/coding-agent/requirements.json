@@ -171,7 +171,7 @@
         "tests/agent/test_tool_registry.py",
         "tests/agent/test_tool_execution.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Use jsonschema already present in the project for deterministic argument validation where practical."
     },
@@ -250,7 +250,7 @@
         "tests/agent/test_environment.py",
         "tests/agent/test_local_environment.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Docker, Kubernetes, WASM, and SSH environments are extension examples, not required concrete implementations for this run."
     },
@@ -293,7 +293,7 @@
         "tests/agent/test_truncation.py",
         "tests/agent/test_context_usage.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Tests should include pathological long-line output and verify the event stream remains untruncated."
     },
@@ -326,7 +326,7 @@
         "src/unified_llm/agent/profiles/__init__.py",
         "tests/agent/test_provider_profiles.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Exact native prompt/tool byte-for-byte fidelity may depend on externally maintained reference agents; tests should verify required observable profile behavior and included tool names."
     },

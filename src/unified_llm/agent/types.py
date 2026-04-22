@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import logging
-from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass, field, replace
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -10,8 +9,9 @@ from typing import Any
 from uuid import UUID
 
 from ..types import ContentKind, ContentPart, FinishReason, ToolCallData, ToolResultData, Usage
-
-logger = logging.getLogger(__name__)
+from .environment import ExecutionEnvironment
+from .profiles.base import ProviderProfile
+from .tools import RegisteredTool, ToolDefinition, ToolRegistry
 
 
 def _utcnow() -> datetime:
@@ -55,12 +55,6 @@ def _content_text(content: str | Iterable[ContentPart]) -> str:
         for part in parts
         if part.kind == ContentKind.TEXT
     )
-
-
-def _copy_mapping(mapping: Mapping[str, Any] | None) -> dict[str, Any]:
-    if mapping is None:
-        return {}
-    return dict(mapping)
 
 
 @dataclass
@@ -180,144 +174,6 @@ class ToolResultsTurn:
     @results.setter
     def results(self, value: Iterable[ToolResultData]) -> None:
         self.result_list = list(value)
-
-
-@dataclass
-class ToolDefinition:
-    name: str
-    description: str | None = None
-    parameters: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.parameters = dict(self.parameters)
-        self.metadata = dict(self.metadata)
-
-
-@dataclass
-class RegisteredTool:
-    definition: ToolDefinition
-    executor: Callable[..., Any] | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    enabled: bool = True
-
-    def __post_init__(self) -> None:
-        self.metadata = dict(self.metadata)
-
-
-class ToolRegistry:
-    def __init__(
-        self,
-        tools: Mapping[str, RegisteredTool | ToolDefinition] | None = None,
-    ) -> None:
-        self._tools: dict[str, RegisteredTool] = {}
-        for name, tool in dict(tools or {}).items():
-            self.register(tool, name=name)
-
-    def register(
-        self,
-        tool: RegisteredTool | ToolDefinition,
-        *,
-        name: str | None = None,
-        executor: Callable[..., Any] | None = None,
-        metadata: Mapping[str, Any] | None = None,
-        enabled: bool | None = None,
-    ) -> RegisteredTool:
-        if isinstance(tool, ToolDefinition):
-            registered = RegisteredTool(
-                definition=tool,
-                executor=executor,
-                metadata=_copy_mapping(metadata),
-                enabled=True if enabled is None else enabled,
-            )
-        else:
-            registered = tool
-            if executor is not None:
-                registered.executor = executor
-            if metadata is not None:
-                registered.metadata = dict(metadata)
-            if enabled is not None:
-                registered.enabled = enabled
-
-        tool_name = name or registered.definition.name
-        if tool_name != registered.definition.name:
-            registered.definition = replace(registered.definition, name=tool_name)
-
-        self._tools[tool_name] = registered
-        return registered
-
-    def unregister(self, name: str) -> RegisteredTool | None:
-        return self._tools.pop(name, None)
-
-    def get(self, name: str) -> RegisteredTool | None:
-        return self._tools.get(name)
-
-    def definitions(self) -> list[ToolDefinition]:
-        return [tool.definition for tool in self._tools.values()]
-
-    def names(self) -> list[str]:
-        return list(self._tools)
-
-    def items(self) -> list[tuple[str, RegisteredTool]]:
-        return list(self._tools.items())
-
-    def __contains__(self, name: object) -> bool:
-        return isinstance(name, str) and name in self._tools
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._tools)
-
-    def __len__(self) -> int:
-        return len(self._tools)
-
-
-@dataclass
-class ExecutionEnvironment:
-    working_directory: Path | str | None = None
-    platform: str | None = None
-    os_version: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if self.working_directory is not None and not isinstance(self.working_directory, Path):
-            self.working_directory = Path(self.working_directory)
-        self.metadata = dict(self.metadata)
-
-
-@dataclass
-class ProviderProfile:
-    id: str = ""
-    model: str = ""
-    tool_registry: ToolRegistry | Mapping[str, RegisteredTool | ToolDefinition] = field(
-        default_factory=ToolRegistry
-    )
-    capabilities: dict[str, bool] = field(default_factory=dict)
-    provider_options_map: dict[str, Any] = field(default_factory=dict)
-    context_window_size: int | None = None
-    display_name: str | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.tool_registry, ToolRegistry):
-            self.tool_registry = ToolRegistry(self.tool_registry)
-        self.capabilities = dict(self.capabilities)
-        self.provider_options_map = dict(self.provider_options_map)
-
-    def tools(self) -> list[ToolDefinition]:
-        return self.tool_registry.definitions()
-
-    def provider_options(self) -> dict[str, Any]:
-        return dict(self.provider_options_map)
-
-    def supports(self, capability: str) -> bool:
-        return bool(self.capabilities.get(capability))
-
-    @property
-    def capability_flags(self) -> dict[str, bool]:
-        return self.capabilities
-
-    @capability_flags.setter
-    def capability_flags(self, value: Mapping[str, bool]) -> None:
-        self.capabilities = dict(value)
 
 
 class SubAgentStatus(StrEnum):

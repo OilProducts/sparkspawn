@@ -23,7 +23,12 @@ def test_agent_package_re_exports_the_public_foundation_types() -> None:
     expected_names = {
         "AgentError",
         "AssistantTurn",
+        "DirEntry",
         "ExecutionEnvironment",
+        "EnvironmentInheritancePolicy",
+        "ExecResult",
+        "GrepOptions",
+        "LocalExecutionEnvironment",
         "ProviderProfile",
         "RegisteredTool",
         "Session",
@@ -52,7 +57,7 @@ def test_agent_package_re_exports_the_public_foundation_types() -> None:
 
 def test_session_construction_exposes_public_state_and_queues() -> None:
     profile = agent.ProviderProfile(id="fake-provider", model="fake-model")
-    environment = agent.ExecutionEnvironment(working_directory=".")
+    environment = agent.LocalExecutionEnvironment(working_dir=".")
     client = Client()
     session = agent.Session(
         profile=profile,
@@ -244,15 +249,11 @@ def test_turn_and_foundation_records_are_constructible_through_public_imports() 
     )
     registered_tool = agent.RegisteredTool(
         definition=tool_definition,
+        executor=lambda arguments, execution_environment: "done",
         metadata={"kind": "builtin"},
     )
     registry = agent.ToolRegistry({"lookup": registered_tool})
-    environment = agent.ExecutionEnvironment(
-        working_directory=".",
-        platform="posix",
-        os_version="1.0",
-        metadata={"shell": "bash"},
-    )
+    environment = agent.LocalExecutionEnvironment(working_dir=".")
     profile = agent.ProviderProfile(
         id="provider-id",
         model="model-name",
@@ -297,7 +298,7 @@ def test_turn_and_foundation_records_are_constructible_through_public_imports() 
 
     assert registry.get("lookup") is registered_tool
     assert registry.definitions() == [tool_definition]
-    assert environment.working_directory == Path(".")
+    assert environment.working_directory() == "."
     assert profile.tools() == [tool_definition]
     assert profile.provider_options() == {"temperature": 0.2}
     assert profile.supports("tool_calls") is True
