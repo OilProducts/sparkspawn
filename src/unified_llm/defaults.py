@@ -12,8 +12,8 @@ _default_client: Client | None = None
 def get_default_client() -> Client:
     global _default_client
     if _default_client is None:
-        logger.debug("Creating placeholder default Client")
-        _default_client = Client()
+        logger.debug("Initializing default Client from environment")
+        _default_client = Client.from_env()
     return _default_client
 
 

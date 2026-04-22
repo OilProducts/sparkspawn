@@ -159,7 +159,7 @@
         "src/unified_llm/adapters/__init__.py",
         "tests/test_adapter_contract.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Use Python typing protocols or abstract base classes consistent with the rest of the package."
     },
@@ -195,7 +195,7 @@
         "src/unified_llm/defaults.py",
         "tests/test_client.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Default-provider selection should be deterministic based on registration order."
     },
@@ -223,7 +223,7 @@
         "src/unified_llm/middleware.py",
         "tests/test_middleware.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Logging middleware should be possible without built-in logging side effects beyond normal logger usage."
     },
@@ -255,7 +255,7 @@
         "src/unified_llm/data/models.json",
         "tests/test_models.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "The current-date-sensitive model list comes from the frozen spec snapshot for this run."
     },
@@ -290,7 +290,7 @@
         "src/unified_llm/provider_utils/",
         "tests/test_provider_utils.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Provider adapters should use these utilities rather than duplicating status, usage, and media handling logic."
     },
@@ -321,7 +321,7 @@
         "tests/test_sse.py",
         "tests/test_streaming.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M2",
       "notes": "Provider-specific mapping tables are implemented in adapters, but common parsing and accumulation belongs in shared utilities."
     },

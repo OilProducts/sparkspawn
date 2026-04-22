@@ -88,10 +88,16 @@ def test_root_import_surface_exposes_async_first_placeholders() -> None:
     assert not inspect.iscoroutinefunction(unified_llm.Client.stream)
 
 
-def test_catalog_helpers_are_import_safe_placeholders() -> None:
-    assert unified_llm.get_model_info("gpt-5.2") is None
-    assert unified_llm.get_latest_model("openai") is None
-    assert unified_llm.list_models() == []
+def test_catalog_helpers_are_import_safe_and_advisory() -> None:
+    assert unified_llm.get_model_info("gpt-5.2").provider == "openai"
+    assert unified_llm.get_model_info("sonnet").id == "claude-sonnet-4-5"
+    assert [model.id for model in unified_llm.list_models("gemini")] == [
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+    ]
+    assert unified_llm.get_latest_model("openai").id == "gpt-5.2"
+    assert unified_llm.get_model_info("missing-model") is None
+    assert unified_llm.get_latest_model("missing-provider") is None
 
 
 def test_stream_placeholders_are_async_iterables() -> None:
@@ -134,28 +140,62 @@ def test_default_client_round_trip() -> None:
         unified_llm.set_default_client(previous)
 
 
-def test_provider_adapter_protocol_accepts_fake_async_adapter() -> None:
+@pytest.mark.asyncio
+async def test_provider_adapter_protocol_accepts_fake_async_adapter() -> None:
     class _FakeStream:
+        def __init__(self) -> None:
+            self._yielded = False
+
         def __aiter__(self) -> _FakeStream:
             return self
 
-        async def __anext__(self) -> object:
-            raise StopAsyncIteration
+        async def __anext__(self) -> unified_llm.StreamEvent:
+            if self._yielded:
+                raise StopAsyncIteration
+            self._yielded = True
+            return unified_llm.StreamEvent(
+                type=unified_llm.StreamEventType.PROVIDER_EVENT,
+                raw={"kind": "fake"},
+            )
 
     class _FakeAdapter:
         name = "fake"
 
-        async def complete(self, request: object) -> object:
+        async def complete(self, request: object) -> unified_llm.Response:
             return unified_llm.Response()
 
         def stream(self, request: object) -> _FakeStream:
             return _FakeStream()
 
     adapter = _FakeAdapter()
+    events = [event async for event in adapter.stream(object())]
 
     assert isinstance(adapter, unified_llm.ProviderAdapter)
-    assert isinstance(adapter.stream(object()), AsyncIterable)
+    assert not isinstance(adapter, unified_llm.SupportsInitialize)
+    assert not isinstance(adapter, unified_llm.SupportsClose)
+    assert not isinstance(adapter, unified_llm.SupportsToolChoice)
+    assert isinstance(_FakeAdapter().stream(object()), AsyncIterable)
+    assert events == [
+        unified_llm.StreamEvent(
+            type=unified_llm.StreamEventType.PROVIDER_EVENT,
+            raw={"kind": "fake"},
+        )
+    ]
     assert not hasattr(unified_llm.ProviderAdapter, "send_tool_outputs")
+    assert not hasattr(unified_llm.ProviderAdapter, "initialize")
+    assert not hasattr(unified_llm.ProviderAdapter, "supports_tool_choice")
+
+
+def test_client_does_not_accumulate_per_request_state() -> None:
+    client = unified_llm.Client(
+        providers={"fake": unified_llm.OpenAIAdapter()},
+        default_provider="fake",
+    )
+    snapshot = dict(client.__dict__)
+
+    stream = client.stream()
+    assert dict(client.__dict__) == snapshot
+    assert isinstance(stream, AsyncIterable)
 
 
 def test_adapter_protocols_are_publicly_exported_from_adapter_namespace() -> None:
@@ -274,12 +314,17 @@ def test_adapter_protocol_imports_do_not_pull_high_level_apis() -> None:
     assert "unified_llm.tools" not in loaded_modules
 
 
-def test_placeholder_apis_log_through_module_loggers_without_printing(
+def test_catalog_and_placeholder_apis_log_through_module_loggers_without_printing(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with caplog.at_level(logging.DEBUG):
-        assert unified_llm.get_model_info("gpt-5.2") is None
+        assert unified_llm.get_model_info("gpt-5.2").id == "gpt-5.2"
+        assert [model.id for model in unified_llm.list_models("openai")] == [
+            "gpt-5.2",
+            "gpt-5.2-mini",
+            "gpt-5.2-codex",
+        ]
         assert unified_llm.stream()
         unified_llm.Client.from_env()
 
