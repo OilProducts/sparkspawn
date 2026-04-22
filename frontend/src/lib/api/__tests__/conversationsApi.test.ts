@@ -10,6 +10,8 @@ describe('conversationsApi parsing', () => {
             conversation_handle: 'steady-harbor',
             project_path: '/tmp/project-plan',
             chat_mode: 'plan',
+            model: 'gpt-5.4',
+            reasoning_effort: 'high',
             title: 'Planning thread',
             created_at: '2026-04-16T18:00:00Z',
             updated_at: '2026-04-16T18:00:10Z',
@@ -30,6 +32,8 @@ describe('conversationsApi parsing', () => {
         })
 
         expect(snapshot.chat_mode).toBe('plan')
+        expect(snapshot.model).toBe('gpt-5.4')
+        expect(snapshot.reasoning_effort).toBe('high')
         expect(snapshot.turns[0]).toMatchObject({
             kind: 'mode_change',
             role: 'system',

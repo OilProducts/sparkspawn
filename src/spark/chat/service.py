@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
 import threading
 import uuid
 from pathlib import Path
@@ -46,6 +47,7 @@ from spark.workspace.conversations.models import (
     normalize_chat_mode,
     TURN_KIND_MODE_CHANGE,
     validate_chat_mode,
+    validate_reasoning_effort,
 )
 from spark.workspace.conversations.repository import ProjectChatRepository
 from spark.workspace.conversations.utils import (
@@ -54,6 +56,11 @@ from spark.workspace.conversations.utils import (
     normalize_project_path_value as _normalize_project_path,
 )
 from spark.workspace.storage import ProjectPaths
+from spark_common.codex_app_client import (
+    APP_SERVER_REQUEST_TIMEOUT_SECONDS,
+    CodexAppServerClient,
+)
+from spark_common.runtime_path import resolve_runtime_workspace_path
 
 
 CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
@@ -301,6 +308,23 @@ class ProjectChatService:
 
     def get_snapshot(self, conversation_id: str, project_path: Optional[str] = None) -> dict[str, Any]:
         return self._repository.get_snapshot(conversation_id, project_path)
+
+    def list_chat_models(self, project_path: str) -> dict[str, Any]:
+        normalized_project_path = _normalize_project_path(project_path)
+        if not normalized_project_path:
+            raise ValueError("Project path is required.")
+        runtime_project_path = str(_normalize_project_path(resolve_runtime_workspace_path(normalized_project_path)))
+        client = CodexAppServerClient(
+            runtime_project_path,
+            requested_working_dir=normalized_project_path,
+            request_timeout_seconds=APP_SERVER_REQUEST_TIMEOUT_SECONDS,
+        )
+        try:
+            client.ensure_process(popen_factory=subprocess.Popen)
+            models = client.list_models()
+            return {"models": [model.to_dict() for model in models]}
+        finally:
+            client.close()
 
     def get_snapshot_by_handle(self, conversation_handle: str) -> dict[str, Any]:
         conversation_id, project_path = self._repository.resolve_conversation_handle(conversation_handle)
@@ -760,12 +784,20 @@ class ProjectChatService:
         self,
         conversation_id: str,
         project_path: str,
-        chat_mode: str,
+        chat_mode: Optional[str] = None,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> dict[str, Any]:
         normalized_project_path = _normalize_project_path(project_path)
         if not normalized_project_path:
             raise ValueError("Project path is required.")
-        normalized_chat_mode = validate_chat_mode(chat_mode)
+        normalized_chat_mode = validate_chat_mode(chat_mode) if chat_mode is not None else None
+        normalized_model = _as_non_empty_string(model) if model is not None else None
+        normalized_reasoning_effort = (
+            validate_reasoning_effort(reasoning_effort)
+            if reasoning_effort is not None
+            else None
+        )
         with self._lock:
             state = self._read_state(conversation_id)
             if state is None:
@@ -776,9 +808,15 @@ class ProjectChatService:
             elif state.project_path != normalized_project_path:
                 raise ValueError("Conversation is already bound to a different project path.")
             current_chat_mode = normalize_chat_mode(state.chat_mode)
-            if normalized_chat_mode != current_chat_mode:
+            if normalized_chat_mode is not None and normalized_chat_mode != current_chat_mode:
                 state.turns.append(_build_mode_change_turn(normalized_chat_mode))
-            state.chat_mode = normalized_chat_mode
+                state.chat_mode = normalized_chat_mode
+            else:
+                state.chat_mode = current_chat_mode
+            if model is not None:
+                state.model = normalized_model
+            if reasoning_effort is not None:
+                state.reasoning_effort = normalized_reasoning_effort
             self._touch_conversation_state(state)
             self._write_state(state)
             return state.to_dict()
@@ -790,6 +828,7 @@ class ProjectChatService:
         message: str,
         model: Optional[str],
         chat_mode: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
         progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> tuple[PreparedChatTurn, dict[str, Any]]:
         normalized_project_path = _normalize_project_path(project_path)
@@ -811,6 +850,12 @@ class ProjectChatService:
                 mode_change_turn = _build_mode_change_turn(effective_chat_mode)
                 state.turns.append(mode_change_turn)
             state.chat_mode = effective_chat_mode
+            if model is not None:
+                state.model = _as_non_empty_string(model)
+            if reasoning_effort is not None:
+                state.reasoning_effort = validate_reasoning_effort(reasoning_effort)
+            effective_model = state.model
+            effective_reasoning_effort = state.reasoning_effort
             active_assistant_turn = next(
                 (
                     turn
@@ -854,14 +899,14 @@ class ProjectChatService:
                 self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, mode_change_turn))
             self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, user_turn))
             self._publish_progress_payload(progress_callback, self._build_turn_upsert_payload(state, assistant_turn))
-        normalized_model = model.strip() if model else None
         return (
             PreparedChatTurn(
                 conversation_id=conversation_id,
                 project_path=normalized_project_path,
                 chat_mode=effective_chat_mode,
                 prompt=prompt,
-                model=normalized_model,
+                model=effective_model,
+                reasoning_effort=effective_reasoning_effort,
                 user_turn=user_turn,
                 assistant_turn=assistant_turn,
             ),
@@ -945,6 +990,7 @@ class ProjectChatService:
                     prepared.prompt,
                     prepared.model,
                     chat_mode=prepared.chat_mode,
+                    reasoning_effort=prepared.reasoning_effort,
                     on_event=persist_live_event,
                 )
             finally:
@@ -1227,6 +1273,7 @@ class ProjectChatService:
         message: str,
         model: Optional[str],
         chat_mode: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
         progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> dict[str, Any]:
         prepared, snapshot = self._prepare_turn(
@@ -1235,6 +1282,7 @@ class ProjectChatService:
             message,
             model,
             chat_mode,
+            reasoning_effort,
             progress_callback,
         )
         worker = threading.Thread(
@@ -1253,6 +1301,7 @@ class ProjectChatService:
         message: str,
         model: Optional[str],
         chat_mode: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
         progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> dict[str, Any]:
         prepared, _ = self._prepare_turn(
@@ -1261,6 +1310,7 @@ class ProjectChatService:
             message,
             model,
             chat_mode,
+            reasoning_effort,
             progress_callback,
         )
         return self._run_prepared_turn(prepared, progress_callback)

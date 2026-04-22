@@ -184,6 +184,8 @@ class ProjectChatRepository:
             "conversation_handle": state.conversation_handle,
             "project_path": state.project_path,
             "chat_mode": state.chat_mode,
+            "model": state.model,
+            "reasoning_effort": state.reasoning_effort,
             "title": state.title,
             "created_at": state.created_at,
             "updated_at": state.updated_at,

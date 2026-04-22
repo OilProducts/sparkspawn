@@ -26,6 +26,18 @@ export interface ProjectMetadataResponse {
     commit?: string | null
 }
 
+export interface ProjectChatModelMetadataResponse {
+    id: string
+    display: string
+    is_default: boolean
+    supported_reasoning_efforts: string[]
+    default_reasoning_effort?: string | null
+}
+
+export interface ProjectChatModelsResponse {
+    models: ProjectChatModelMetadataResponse[]
+}
+
 export interface ProjectDeleteResponse {
     status: 'deleted'
     project_id: string
@@ -146,6 +158,46 @@ export function parseProjectMetadataResponse(
     }
 }
 
+function parseProjectChatModelMetadataResponse(
+    payload: unknown,
+    _endpoint: string,
+): ProjectChatModelMetadataResponse | null {
+    const record = payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : null
+    if (!record || typeof record.id !== 'string') {
+        return null
+    }
+    return {
+        id: record.id,
+        display: typeof record.display === 'string' && record.display.trim().length > 0
+            ? record.display
+            : record.id,
+        is_default: record.is_default === true,
+        supported_reasoning_efforts: Array.isArray(record.supported_reasoning_efforts)
+            ? record.supported_reasoning_efforts
+                .filter((entry): entry is string => typeof entry === 'string')
+                .filter((entry) => ['low', 'medium', 'high', 'xhigh'].includes(entry))
+            : [],
+        default_reasoning_effort: asOptionalNullableString(record.default_reasoning_effort),
+    }
+}
+
+export function parseProjectChatModelsResponse(
+    payload: unknown,
+    endpoint = '/workspace/api/projects/chat-models',
+): ProjectChatModelsResponse {
+    const record = expectObjectRecord(payload, endpoint)
+    if (!Array.isArray(record.models)) {
+        throw new ApiSchemaError(endpoint, 'Expected "models" to be an array.')
+    }
+    return {
+        models: record.models
+            .map((entry) => parseProjectChatModelMetadataResponse(entry, endpoint))
+            .filter((entry): entry is ProjectChatModelMetadataResponse => entry !== null),
+    }
+}
+
 export async function deleteProjectValidated(projectPath: string): Promise<ProjectDeleteResponse> {
     return fetchWorkspaceJsonValidated(
         `/projects?project_path=${encodeURIComponent(projectPath)}`,
@@ -208,5 +260,14 @@ export async function fetchProjectMetadataValidated(directory: string): Promise<
         undefined,
         '/workspace/api/projects/metadata',
         parseProjectMetadataResponse,
+    )
+}
+
+export async function fetchProjectChatModelsValidated(projectPath: string): Promise<ProjectChatModelsResponse> {
+    return fetchWorkspaceJsonValidated(
+        `/projects/chat-models?project_path=${encodeURIComponent(projectPath)}`,
+        undefined,
+        '/workspace/api/projects/chat-models',
+        parseProjectChatModelsResponse,
     )
 }

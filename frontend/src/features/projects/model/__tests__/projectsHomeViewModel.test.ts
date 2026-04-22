@@ -122,10 +122,17 @@ describe('buildProjectsHomeViewModel', () => {
           commit: 'abc123',
         },
       },
+      uiDefaults: {
+        llm_model: 'gpt-5.4',
+        llm_provider: 'openai',
+        reasoning_effort: '',
+      },
     })
 
     expect(viewModel.activeProjectLabel).toBe('project-alpha')
     expect(viewModel.activeChatMode).toBe('chat')
+    expect(viewModel.activeProjectChatModel).toBe('gpt-5.4')
+    expect(viewModel.activeProjectChatReasoningEffort).toBe('')
     expect(viewModel.activeProjectGitMetadata).toEqual({
       branch: 'main',
       commit: 'abc123',

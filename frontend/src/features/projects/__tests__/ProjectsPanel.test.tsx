@@ -138,6 +138,11 @@ const resetProjectScopeState = () => {
     homeProjectSessionsByPath: {},
     homeConversationSessionsById: {},
     homeProjectGitMetadataByPath: {},
+    uiDefaults: {
+      llm_model: 'gpt-5.4',
+      llm_provider: '',
+      reasoning_effort: '',
+    },
   }))
 }
 
@@ -4749,6 +4754,418 @@ describe('ProjectsPanel', () => {
     expect((history.textContent || '').indexOf('Switched to Plan mode')).toBeLessThan(
       (history.textContent || '').indexOf('Draft the settings endpoint.'),
     )
+  })
+
+  it('seeds project chat controls from global defaults and sends them with a turn', async () => {
+    const user = userEvent.setup()
+    const turnRequests: Array<Record<string, unknown>> = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects/chat-models')) {
+          return new Response(JSON.stringify({
+            models: [
+              {
+                id: 'gpt-5.4-mini',
+                display: 'GPT-5.4 Mini',
+                is_default: false,
+                supported_reasoning_efforts: ['low', 'high'],
+                default_reasoning_effort: 'low',
+              },
+            ],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        const conversationIdMatch = url.match(/\/api\/conversations\/([^/?]+)/)
+        const conversationId = conversationIdMatch ? decodeURIComponent(conversationIdMatch[1]!) : null
+        if (conversationId && init?.method === 'POST' && url.includes('/turns')) {
+          const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
+          turnRequests.push(body)
+          return new Response(JSON.stringify(withSnapshotSchema({
+            conversation_id: conversationId,
+            conversation_handle: '',
+            project_path: '/tmp/model-project',
+            chat_mode: 'chat',
+            model: body.model,
+            reasoning_effort: body.reasoning_effort,
+            title: 'New thread',
+            created_at: '2026-04-16T18:10:00Z',
+            updated_at: '2026-04-16T18:10:01Z',
+            turns: [
+              {
+                id: 'turn-user-1',
+                role: 'user',
+                content: body.message,
+                timestamp: '2026-04-16T18:10:00Z',
+                status: 'complete',
+                kind: 'message',
+              },
+              {
+                id: 'turn-assistant-1',
+                role: 'assistant',
+                content: '',
+                timestamp: '2026-04-16T18:10:01Z',
+                status: 'pending',
+                kind: 'message',
+              },
+            ],
+            segments: [],
+            event_log: [],
+            flow_run_requests: [],
+            flow_launches: [],
+          })), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (conversationId && !url.includes('/turns')) {
+          return new Response(JSON.stringify({ detail: 'Unknown conversation' }), { status: 404 })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    act(() => {
+      useStore.setState((state) => ({
+        ...state,
+        uiDefaults: {
+          llm_model: 'gpt-5.4-mini',
+          llm_provider: 'openai',
+          reasoning_effort: 'high',
+        },
+      }))
+      useStore.getState().registerProject('/tmp/model-project')
+      useStore.getState().setActiveProjectPath('/tmp/model-project')
+    })
+
+    renderProjectsPanel()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-model-select')).toHaveValue('gpt-5.4-mini')
+      expect(screen.getByTestId('project-ai-conversation-reasoning-effort-select')).toHaveValue('high')
+    })
+
+    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Use the default chat controls.')
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+
+    await waitFor(() => {
+      expect(turnRequests).toHaveLength(1)
+    })
+    expect(turnRequests[0]).toMatchObject({
+      project_path: '/tmp/model-project',
+      message: 'Use the default chat controls.',
+      model: 'gpt-5.4-mini',
+      reasoning_effort: 'high',
+    })
+  })
+
+  it('updates project chat settings from the composer controls and sends the selected values later', async () => {
+    const user = userEvent.setup()
+    const settingsRequests: Array<Record<string, unknown>> = []
+    const turnRequests: Array<Record<string, unknown>> = []
+    const conversationSnapshots: Record<string, Record<string, unknown>> = {}
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects/chat-models')) {
+          return new Response(JSON.stringify({
+            models: [
+              {
+                id: 'gpt-5.4',
+                display: 'GPT-5.4',
+                is_default: true,
+                supported_reasoning_efforts: ['low', 'high'],
+                default_reasoning_effort: 'low',
+              },
+              {
+                id: 'gpt-5.4-mini',
+                display: 'GPT-5.4 Mini',
+                is_default: false,
+                supported_reasoning_efforts: ['low', 'medium'],
+                default_reasoning_effort: 'medium',
+              },
+            ],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        const conversationIdMatch = url.match(/\/api\/conversations\/([^/?]+)/)
+        const conversationId = conversationIdMatch ? decodeURIComponent(conversationIdMatch[1]!) : null
+        if (conversationId && init?.method === 'PUT' && url.includes('/settings')) {
+          const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
+          settingsRequests.push(body)
+          const updateIndex = settingsRequests.length
+          const snapshot = withSnapshotSchema({
+            conversation_id: conversationId,
+            conversation_handle: '',
+            project_path: '/tmp/model-project',
+            chat_mode: 'chat',
+            model: body.model,
+            reasoning_effort: body.reasoning_effort,
+            title: 'New thread',
+            created_at: '2026-04-16T18:10:00Z',
+            updated_at: `2026-04-16T18:10:0${updateIndex}Z`,
+            turns: [],
+            segments: [],
+            event_log: [],
+            flow_run_requests: [],
+            flow_launches: [],
+          })
+          conversationSnapshots[conversationId] = snapshot
+          return new Response(JSON.stringify(snapshot), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (conversationId && init?.method === 'POST' && url.includes('/turns')) {
+          const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
+          turnRequests.push(body)
+          return new Response(JSON.stringify(withSnapshotSchema({
+            conversation_id: conversationId,
+            conversation_handle: '',
+            project_path: '/tmp/model-project',
+            chat_mode: 'chat',
+            model: body.model,
+            reasoning_effort: body.reasoning_effort,
+            title: 'New thread',
+            created_at: '2026-04-16T18:10:00Z',
+            updated_at: '2026-04-16T18:10:01Z',
+            turns: [],
+            segments: [],
+            event_log: [],
+            flow_run_requests: [],
+            flow_launches: [],
+          })), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (conversationId && !url.includes('/turns')) {
+          const snapshot = conversationSnapshots[conversationId]
+          if (!snapshot) {
+            return new Response(JSON.stringify({ detail: 'Unknown conversation' }), { status: 404 })
+          }
+          return new Response(JSON.stringify(snapshot), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/model-project')
+      useStore.getState().setActiveProjectPath('/tmp/model-project')
+    })
+
+    renderProjectsPanel()
+
+    const modelSelect = await screen.findByTestId('project-ai-conversation-model-select')
+    await waitFor(() => {
+      expect(within(modelSelect).getByRole('option', { name: 'GPT-5.4 Mini' })).toBeInTheDocument()
+    })
+    await user.selectOptions(modelSelect, 'gpt-5.4-mini')
+
+    await waitFor(() => {
+      expect(settingsRequests).toHaveLength(1)
+      expect(modelSelect).toHaveValue('gpt-5.4-mini')
+    })
+
+    const updatedEffortSelect = screen.getByTestId('project-ai-conversation-reasoning-effort-select')
+    expect(within(updatedEffortSelect).getByRole('option', { name: 'Medium' })).toBeInTheDocument()
+    expect(within(updatedEffortSelect).queryByRole('option', { name: 'High' })).not.toBeInTheDocument()
+    await user.selectOptions(updatedEffortSelect, 'medium')
+
+    await waitFor(() => {
+      expect(settingsRequests).toHaveLength(2)
+      expect(screen.getByTestId('project-ai-conversation-reasoning-effort-select')).toHaveValue('medium')
+    })
+
+    await user.type(screen.getByTestId('project-ai-conversation-input'), 'Continue with selected settings.')
+    await user.click(screen.getByTestId('project-ai-conversation-send-button'))
+
+    await waitFor(() => {
+      expect(turnRequests).toHaveLength(1)
+    })
+    expect(settingsRequests[0]).toMatchObject({
+      project_path: '/tmp/model-project',
+      model: 'gpt-5.4-mini',
+    })
+    expect(settingsRequests[1]).toMatchObject({
+      project_path: '/tmp/model-project',
+      model: 'gpt-5.4-mini',
+      reasoning_effort: 'medium',
+    })
+    expect(turnRequests[0]).toMatchObject({
+      project_path: '/tmp/model-project',
+      message: 'Continue with selected settings.',
+      model: 'gpt-5.4-mini',
+      reasoning_effort: 'medium',
+    })
+  })
+
+  it('shows each thread’s own project chat model and effort when switching threads', async () => {
+    const user = userEvent.setup()
+    const conversationSummaries = [
+      {
+        conversation_id: 'conversation-thread-a',
+        project_path: '/tmp/model-project',
+        title: 'Full model thread',
+        created_at: '2026-04-16T18:00:00Z',
+        updated_at: '2026-04-16T18:10:00Z',
+      },
+      {
+        conversation_id: 'conversation-thread-b',
+        project_path: '/tmp/model-project',
+        title: 'Mini model thread',
+        created_at: '2026-04-16T18:11:00Z',
+        updated_at: '2026-04-16T18:20:00Z',
+      },
+    ]
+    const conversationSnapshots = {
+      'conversation-thread-a': withSnapshotSchema({
+        conversation_id: 'conversation-thread-a',
+        project_path: '/tmp/model-project',
+        chat_mode: 'chat',
+        model: 'gpt-5.4',
+        reasoning_effort: 'high',
+        title: 'Full model thread',
+        created_at: '2026-04-16T18:00:00Z',
+        updated_at: '2026-04-16T18:10:00Z',
+        turns: [],
+        segments: [],
+        event_log: [],
+        flow_run_requests: [],
+        flow_launches: [],
+      }),
+      'conversation-thread-b': withSnapshotSchema({
+        conversation_id: 'conversation-thread-b',
+        project_path: '/tmp/model-project',
+        chat_mode: 'chat',
+        model: 'gpt-5.4-mini',
+        reasoning_effort: 'low',
+        title: 'Mini model thread',
+        created_at: '2026-04-16T18:11:00Z',
+        updated_at: '2026-04-16T18:20:00Z',
+        turns: [],
+        segments: [],
+        event_log: [],
+        flow_run_requests: [],
+        flow_launches: [],
+      }),
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = resolveRequestUrl(input)
+        if (url.includes('/workspace/api/projects/chat-models')) {
+          return new Response(JSON.stringify({
+            models: [
+              {
+                id: 'gpt-5.4',
+                display: 'GPT-5.4',
+                is_default: true,
+                supported_reasoning_efforts: ['high'],
+                default_reasoning_effort: 'high',
+              },
+              {
+                id: 'gpt-5.4-mini',
+                display: 'GPT-5.4 Mini',
+                is_default: false,
+                supported_reasoning_efforts: ['low'],
+                default_reasoning_effort: 'low',
+              },
+            ],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/metadata')) {
+          return new Response(JSON.stringify({ branch: 'main', commit: 'abc123def456' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/workspace/api/projects/conversations')) {
+          return new Response(JSON.stringify(conversationSummaries), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        const conversationIdMatch = url.match(/\/api\/conversations\/([^/?]+)/)
+        const conversationId = conversationIdMatch ? decodeURIComponent(conversationIdMatch[1]!) : null
+        if (conversationId && !url.includes('/turns')) {
+          return new Response(JSON.stringify(conversationSnapshots[conversationId as keyof typeof conversationSnapshots]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+
+    act(() => {
+      useStore.getState().registerProject('/tmp/model-project')
+      useStore.getState().setActiveProjectPath('/tmp/model-project')
+      useStore.getState().setConversationId('conversation-thread-a')
+    })
+
+    renderProjectsPanel()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-model-select')).toHaveValue('gpt-5.4')
+      expect(screen.getByTestId('project-ai-conversation-reasoning-effort-select')).toHaveValue('high')
+    })
+
+    await user.click(await screen.findByRole('button', { name: /Open thread Mini model thread/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-ai-conversation-model-select')).toHaveValue('gpt-5.4-mini')
+      expect(screen.getByTestId('project-ai-conversation-reasoning-effort-select')).toHaveValue('low')
+    })
   })
 
 })

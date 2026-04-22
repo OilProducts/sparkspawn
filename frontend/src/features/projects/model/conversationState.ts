@@ -26,6 +26,8 @@ export function ensureConversationSnapshotShell(
         conversation_handle: '',
         project_path: projectPath,
         chat_mode: 'chat',
+        model: null,
+        reasoning_effort: null,
         title,
         created_at: '',
         updated_at: '',

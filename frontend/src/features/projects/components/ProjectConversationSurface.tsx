@@ -8,12 +8,23 @@ import {
     EmptyDescription,
     EmptyHeader,
 } from '@/components/ui/empty'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import type { ConversationChatMode } from '@/lib/workspaceClient'
+
+export interface ProjectChatSelectOption {
+    value: string
+    label: string
+}
+
 interface ProjectConversationSurfaceProps {
     activeProjectLabel: string | null
     activeProjectPath: string | null
     activeChatMode: ConversationChatMode | null
+    activeChatModel: string
+    activeChatReasoningEffort: string
+    chatModelOptions: ProjectChatSelectOption[]
+    chatReasoningEffortOptions: ProjectChatSelectOption[]
     hasRenderableConversationHistory: boolean
     isConversationPinnedToBottom: boolean
     isNarrowViewport: boolean
@@ -28,12 +39,18 @@ interface ProjectConversationSurfaceProps {
     onChatComposerSubmit: (event: FormEvent<HTMLFormElement>) => void
     onChatComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
     onChatDraftChange: (value: string) => void
+    onChatModelChange: (value: string) => void
+    onChatReasoningEffortChange: (value: string) => void
 }
 
 export function ProjectConversationSurface({
     activeProjectLabel,
     activeProjectPath,
     activeChatMode,
+    activeChatModel,
+    activeChatReasoningEffort,
+    chatModelOptions,
+    chatReasoningEffortOptions,
     hasRenderableConversationHistory,
     isConversationPinnedToBottom,
     isNarrowViewport,
@@ -48,7 +65,11 @@ export function ProjectConversationSurface({
     onChatComposerSubmit,
     onChatComposerKeyDown,
     onChatDraftChange,
+    onChatModelChange,
+    onChatReasoningEffortChange,
 }: ProjectConversationSurfaceProps) {
+    const controlsDisabled = !activeProjectPath || isChatInputDisabled
+
     return (
         <HomeWorkspace className={isNarrowViewport ? 'space-y-4' : 'h-full'}>
             <Card
@@ -125,19 +146,51 @@ export function ProjectConversationSurface({
                                 placeholder="Describe the spec change or requirement you want to work on..."
                                 rows={4}
                             />
-                            <div className="flex items-center justify-between gap-2">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <p className="text-[11px] text-muted-foreground">
                                     Press Enter to send. Use Shift+Enter for a new line.
                                 </p>
-                                <Button
-                                    data-testid="project-ai-conversation-send-button"
-                                    type="submit"
-                                    disabled={chatDraft.trim().length === 0 || isChatInputDisabled}
-                                    size="sm"
-                                    variant="outline"
-                                >
-                                    {chatSendButtonLabel}
-                                </Button>
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                    <NativeSelect
+                                        aria-label="Project chat model"
+                                        data-testid="project-ai-conversation-model-select"
+                                        value={activeChatModel}
+                                        onChange={(event) => onChatModelChange(event.target.value)}
+                                        disabled={controlsDisabled}
+                                        size="sm"
+                                        className="max-w-[13rem] text-xs"
+                                    >
+                                        {chatModelOptions.map((option) => (
+                                            <NativeSelectOption key={option.value} value={option.value}>
+                                                {option.label}
+                                            </NativeSelectOption>
+                                        ))}
+                                    </NativeSelect>
+                                    <NativeSelect
+                                        aria-label="Project chat reasoning effort"
+                                        data-testid="project-ai-conversation-reasoning-effort-select"
+                                        value={activeChatReasoningEffort}
+                                        onChange={(event) => onChatReasoningEffortChange(event.target.value)}
+                                        disabled={controlsDisabled}
+                                        size="sm"
+                                        className="max-w-[9rem] text-xs"
+                                    >
+                                        {chatReasoningEffortOptions.map((option) => (
+                                            <NativeSelectOption key={option.value || 'default'} value={option.value}>
+                                                {option.label}
+                                            </NativeSelectOption>
+                                        ))}
+                                    </NativeSelect>
+                                    <Button
+                                        data-testid="project-ai-conversation-send-button"
+                                        type="submit"
+                                        disabled={chatDraft.trim().length === 0 || isChatInputDisabled}
+                                        size="sm"
+                                        variant="outline"
+                                    >
+                                        {chatSendButtonLabel}
+                                    </Button>
+                                </div>
                             </div>
                         </form>
                     </div>

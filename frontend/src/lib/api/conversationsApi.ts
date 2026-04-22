@@ -137,6 +137,8 @@ export interface ConversationSnapshotResponse {
     conversation_handle?: string | null
     project_path: string
     chat_mode: ConversationChatMode
+    model?: string | null
+    reasoning_effort?: string | null
     title: string
     created_at: string
     updated_at: string
@@ -571,6 +573,8 @@ export function parseConversationSnapshotResponse(
         conversation_handle: asOptionalNullableString(record.conversation_handle),
         project_path: expectString(record.project_path, endpoint, 'project_path'),
         chat_mode: record.chat_mode === 'plan' ? 'plan' : 'chat',
+        model: asOptionalNullableString(record.model),
+        reasoning_effort: asOptionalNullableString(record.reasoning_effort),
         title: asOptionalString(record.title) || 'New thread',
         created_at: asOptionalString(record.created_at) || '',
         updated_at: asOptionalString(record.updated_at) || asOptionalString(record.created_at) || '',
@@ -671,7 +675,13 @@ export async function deleteConversationValidated(
 
 export async function sendConversationTurnValidated(
     conversationId: string,
-    payload: { project_path: string; message: string; model?: string | null; chat_mode?: ConversationChatMode | null },
+    payload: {
+        project_path: string
+        message: string
+        model?: string | null
+        reasoning_effort?: string | null
+        chat_mode?: ConversationChatMode | null
+    },
 ): Promise<ConversationSnapshotResponse> {
     return fetchWorkspaceJsonValidated(
         `/conversations/${encodeURIComponent(conversationId)}/turns`,
@@ -687,7 +697,12 @@ export async function sendConversationTurnValidated(
 
 export async function updateConversationSettingsValidated(
     conversationId: string,
-    payload: { project_path: string; chat_mode: ConversationChatMode },
+    payload: {
+        project_path: string
+        chat_mode?: ConversationChatMode | null
+        model?: string | null
+        reasoning_effort?: string | null
+    },
 ): Promise<ConversationSnapshotResponse> {
     return fetchWorkspaceJsonValidated(
         `/conversations/${encodeURIComponent(conversationId)}/settings`,

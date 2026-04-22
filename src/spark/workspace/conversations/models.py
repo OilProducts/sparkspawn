@@ -13,6 +13,7 @@ CONVERSATION_STATE_SCHEMA_VERSION = 4
 CHAT_MODE_CHAT = "chat"
 CHAT_MODE_PLAN = "plan"
 CHAT_MODES = frozenset({CHAT_MODE_CHAT, CHAT_MODE_PLAN})
+REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
 TURN_KIND_MESSAGE = "message"
 TURN_KIND_MODE_CHANGE = "mode_change"
 REQUEST_USER_INPUT_EXPIRED_ERROR = "The requested input expired before the answer could be used."
@@ -71,6 +72,30 @@ def validate_chat_mode(value: Any) -> str:
     normalized = value.strip().lower()
     if normalized not in CHAT_MODES:
         raise ValueError("Chat mode must be 'chat' or 'plan'.")
+    return normalized
+
+
+def normalize_reasoning_effort(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return ""
+    if normalized in REASONING_EFFORTS:
+        return normalized
+    return None
+
+
+def validate_reasoning_effort(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Reasoning effort must be blank or one of: low, medium, high, xhigh.")
+    normalized = value.strip().lower()
+    if not normalized:
+        return ""
+    if normalized not in REASONING_EFFORTS:
+        raise ValueError("Reasoning effort must be blank or one of: low, medium, high, xhigh.")
     return normalized
 
 
@@ -307,6 +332,7 @@ class PreparedChatTurn:
     chat_mode: str
     prompt: str
     model: Optional[str]
+    reasoning_effort: Optional[str]
     user_turn: "ConversationTurn"
     assistant_turn: "ConversationTurn"
 
@@ -643,6 +669,8 @@ class ConversationState:
     conversation_id: str
     project_path: str
     chat_mode: str = CHAT_MODE_CHAT
+    model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
     conversation_handle: str = ""
     title: str = "New thread"
     created_at: str = ""
@@ -693,6 +721,8 @@ class ConversationState:
             "conversation_handle": self.conversation_handle,
             "project_path": self.project_path,
             "chat_mode": self.chat_mode,
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
             "title": self.title,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -737,6 +767,8 @@ class ConversationState:
             conversation_handle=str(payload.get("conversation_handle", "") or ""),
             project_path=_normalize_project_path(str(payload.get("project_path", ""))),
             chat_mode=normalize_chat_mode(payload.get("chat_mode")),
+            model=_as_non_empty_string(payload.get("model")),
+            reasoning_effort=normalize_reasoning_effort(payload.get("reasoning_effort")),
             title=_as_non_empty_string(payload.get("title")) or _derive_conversation_title(turns),
             created_at=created_at or _iso_now(),
             updated_at=updated_at or created_at or _iso_now(),

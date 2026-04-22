@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
-import { submitConversationRequestUserInputValidated } from '@/lib/workspaceClient'
+import { getModelSuggestions } from '@/lib/llmSuggestions'
+import {
+    fetchProjectChatModelsValidated,
+    submitConversationRequestUserInputValidated,
+    updateConversationSettingsValidated,
+    type ProjectChatModelMetadataResponse,
+} from '@/lib/workspaceClient'
 import { useHomeSidebarLayout } from './useHomeSidebarLayout'
 import { useConversationComposer } from './useConversationComposer'
 import { useConversationReviews } from './useConversationReviews'
@@ -43,6 +49,69 @@ function buildConversationHistoryRevisionKey(history: ConversationTimelineEntry[
     }
 }
 
+const FALLBACK_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh']
+const REASONING_EFFORT_LABELS: Record<string, string> = {
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+    xhigh: 'XHigh',
+}
+
+function dedupeOptions(options: Array<{ value: string; label: string }>) {
+    const seen = new Set<string>()
+    return options.filter((option) => {
+        if (seen.has(option.value)) {
+            return false
+        }
+        seen.add(option.value)
+        return true
+    })
+}
+
+function buildModelOptions(
+    models: ProjectChatModelMetadataResponse[],
+    selectedModel: string,
+    provider: string,
+) {
+    const metadataOptions = models.map((model) => ({
+        value: model.id,
+        label: model.display || model.id,
+    }))
+    const fallbackOptions = getModelSuggestions(provider).map((model) => ({
+        value: model,
+        label: model,
+    }))
+    const baseOptions = metadataOptions.length > 0 ? metadataOptions : fallbackOptions
+    if (selectedModel && !baseOptions.some((option) => option.value === selectedModel)) {
+        return [{ value: selectedModel, label: selectedModel }, ...baseOptions]
+    }
+    return baseOptions.length > 0 ? dedupeOptions(baseOptions) : [{ value: '', label: 'Default model' }]
+}
+
+function buildReasoningEffortOptions(
+    models: ProjectChatModelMetadataResponse[],
+    selectedModel: string,
+    selectedEffort: string,
+) {
+    const selectedModelMetadata = models.find((model) => model.id === selectedModel)
+    const metadataEfforts = selectedModelMetadata?.supported_reasoning_efforts || []
+    const effortValues = metadataEfforts.length > 0 ? metadataEfforts : FALLBACK_REASONING_EFFORTS
+    const defaultLabel = selectedModelMetadata?.default_reasoning_effort
+        ? `Default (${REASONING_EFFORT_LABELS[selectedModelMetadata.default_reasoning_effort] || selectedModelMetadata.default_reasoning_effort})`
+        : 'Default'
+    return dedupeOptions([
+        { value: '', label: defaultLabel },
+        ...effortValues.map((effort) => ({
+            value: effort,
+            label: REASONING_EFFORT_LABELS[effort] || effort,
+        })),
+        selectedEffort ? {
+            value: selectedEffort,
+            label: REASONING_EFFORT_LABELS[selectedEffort] || selectedEffort,
+        } : { value: '', label: defaultLabel },
+    ])
+}
+
 export function useProjectsHomeController() {
     const upsertProjectRegistryEntry = useStore((state) => state.upsertProjectRegistryEntry)
     const activeProjectPath = useStore((state) => state.activeProjectPath)
@@ -54,6 +123,7 @@ export function useProjectsHomeController() {
     const updateProjectSessionState = useStore((state) => state.updateProjectSessionState)
     const projectGitMetadata = useStore((state) => state.homeProjectGitMetadataByPath)
     const model = useStore((state) => state.model)
+    const uiDefaults = useStore((state) => state.uiDefaults)
     const setExecutionFlow = useStore((state) => state.setExecutionFlow)
     const setSelectedRunId = useStore((state) => state.setSelectedRunId)
     const setViewMode = useStore((state) => state.setViewMode)
@@ -98,6 +168,7 @@ export function useProjectsHomeController() {
     })
     const [requestUserInputActionError, setRequestUserInputActionError] = useState<string | null>(null)
     const [submittingRequestUserInputIds, setSubmittingRequestUserInputIds] = useState<Record<string, boolean>>({})
+    const [chatModelMetadataByProjectPath, setChatModelMetadataByProjectPath] = useState<Record<string, ProjectChatModelMetadataResponse[]>>({})
     const {
         conversationBodyRef,
         homeSidebarRef,
@@ -116,6 +187,8 @@ export function useProjectsHomeController() {
     const {
         activeConversationHistory,
         activeChatMode,
+        activeProjectChatModel,
+        activeProjectChatReasoningEffort,
         activeFlowLaunchesById,
         activeFlowRunRequestsById,
         activeProposedPlansById,
@@ -135,6 +208,7 @@ export function useProjectsHomeController() {
         conversationCache,
         optimisticSend,
         projectGitMetadata,
+        uiDefaults,
     }), [
         activeConversationId,
         activeConversationSnapshot,
@@ -143,7 +217,23 @@ export function useProjectsHomeController() {
         conversationCache,
         optimisticSend,
         projectGitMetadata,
+        uiDefaults,
     ])
+    const activeProjectChatModels = activeProjectPath
+        ? chatModelMetadataByProjectPath[activeProjectPath] || []
+        : []
+    const chatModelOptions = useMemo(
+        () => buildModelOptions(activeProjectChatModels, activeProjectChatModel, uiDefaults.llm_provider),
+        [activeProjectChatModel, activeProjectChatModels, uiDefaults.llm_provider],
+    )
+    const chatReasoningEffortOptions = useMemo(
+        () => buildReasoningEffortOptions(
+            activeProjectChatModels,
+            activeProjectChatModel,
+            activeProjectChatReasoningEffort,
+        ),
+        [activeProjectChatModel, activeProjectChatModels, activeProjectChatReasoningEffort],
+    )
     const conversationHistoryRevisionKey = useMemo(
         () => buildConversationHistoryRevisionKey(activeConversationHistory),
         [activeConversationHistory],
@@ -207,6 +297,35 @@ export function useProjectsHomeController() {
         node.scrollTop = node.scrollHeight
     }, [activeProjectPath, conversationBodyRef, conversationHistoryRevisionKey])
 
+    useEffect(() => {
+        if (!activeProjectPath || activeProjectPath in chatModelMetadataByProjectPath) {
+            return
+        }
+        let isCancelled = false
+        const loadChatModels = async () => {
+            try {
+                const payload = await fetchProjectChatModelsValidated(activeProjectPath)
+                if (!isCancelled) {
+                    setChatModelMetadataByProjectPath((current) => ({
+                        ...current,
+                        [activeProjectPath]: payload.models,
+                    }))
+                }
+            } catch {
+                if (!isCancelled) {
+                    setChatModelMetadataByProjectPath((current) => ({
+                        ...current,
+                        [activeProjectPath]: [],
+                    }))
+                }
+            }
+        }
+        void loadChatModels()
+        return () => {
+            isCancelled = true
+        }
+    }, [activeProjectPath, chatModelMetadataByProjectPath])
+
     const {
         onChatComposerKeyDown,
         onChatComposerSubmit,
@@ -215,7 +334,8 @@ export function useProjectsHomeController() {
         activeProjectPath,
         chatDraft,
         isChatInputDisabled,
-        model,
+        model: activeProjectChatModel,
+        reasoningEffort: activeProjectChatReasoningEffort,
         ensureConversationId,
         getCurrentConversationId: (projectPath) => (
             useStore.getState().projectSessionsByPath[projectPath]?.conversationId ?? null
@@ -231,6 +351,45 @@ export function useProjectsHomeController() {
     useEffect(() => {
         resetComposerRef.current = resetComposer
     }, [resetComposer])
+
+    const persistChatSettings = useCallback(async (values: { model: string; reasoningEffort: string }) => {
+        if (!activeProjectPath) {
+            return
+        }
+        const conversationId = ensureConversationId()
+        if (!conversationId) {
+            return
+        }
+        setPanelError(null)
+        try {
+            const snapshot = await updateConversationSettingsValidated(conversationId, {
+                project_path: activeProjectPath,
+                model: values.model.trim() || null,
+                reasoning_effort: values.reasoningEffort.trim() || '',
+            })
+            applyConversationSnapshot(activeProjectPath, snapshot, 'chat-settings-response', {
+                forceWorkspaceSync: true,
+            })
+        } catch (error) {
+            const message = extractApiErrorMessage(error, 'Unable to update the project chat settings.')
+            setPanelError(message)
+            appendLocalProjectEvent(`Project chat settings update failed: ${message}`)
+        }
+    }, [activeProjectPath, appendLocalProjectEvent, applyConversationSnapshot, ensureConversationId, setPanelError])
+
+    const onChatModelChange = useCallback((value: string) => {
+        void persistChatSettings({
+            model: value,
+            reasoningEffort: activeProjectChatReasoningEffort,
+        })
+    }, [activeProjectChatReasoningEffort, persistChatSettings])
+
+    const onChatReasoningEffortChange = useCallback((value: string) => {
+        void persistChatSettings({
+            model: activeProjectChatModel,
+            reasoningEffort: value,
+        })
+    }, [activeProjectChatModel, persistChatSettings])
 
     const {
         onCreateConversationThread,
@@ -360,6 +519,10 @@ export function useProjectsHomeController() {
             activeProjectLabel,
             activeProjectPath,
             activeChatMode,
+            activeChatModel: activeProjectChatModel,
+            activeChatReasoningEffort: activeProjectChatReasoningEffort,
+            chatModelOptions,
+            chatReasoningEffortOptions,
             hasRenderableConversationHistory,
             isConversationPinnedToBottom,
             isNarrowViewport,
@@ -373,6 +536,8 @@ export function useProjectsHomeController() {
             onChatComposerSubmit,
             onChatComposerKeyDown,
             onChatDraftChange: setChatDraft,
+            onChatModelChange,
+            onChatReasoningEffortChange,
         },
     }
 }

@@ -54,6 +54,7 @@ class ConversationTurnRequest(BaseModel):
     project_path: str
     message: str
     model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
     chat_mode: Optional[str] = None
 
 
@@ -65,7 +66,9 @@ class ConversationRequestUserInputAnswerRequest(BaseModel):
 
 class ConversationSettingsRequest(BaseModel):
     project_path: str
-    chat_mode: str
+    chat_mode: Optional[str] = None
+    model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
 
 
 class ProjectRegistrationRequest(BaseModel):
@@ -370,6 +373,8 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 conversation_id,
                 req.project_path,
                 req.chat_mode,
+                req.model,
+                req.reasoning_effort,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -619,6 +624,16 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @router.get("/api/projects/chat-models")
+    async def get_project_chat_models(project_path: str):
+        normalized_project_path = _normalize_project_path_or_400(project_path)
+        try:
+            return await asyncio.to_thread(deps.get_project_chat().list_chat_models, normalized_project_path)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @router.get("/api/conversations/{conversation_id}/events")
     async def project_conversation_events(conversation_id: str, request: Request, project_path: Optional[str] = None):
         project_chat = deps.get_project_chat()
@@ -669,6 +684,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 req.message,
                 req.model,
                 req.chat_mode,
+                req.reasoning_effort,
                 publish_progress_event,
             )
         except ValueError as exc:

@@ -1,4 +1,5 @@
 import type { ProjectSessionState } from '@/store'
+import type { UiDefaults } from '@/state/store-types'
 import type {
     ConversationChatMode,
     ConversationSnapshotResponse,
@@ -28,10 +29,13 @@ type BuildProjectsHomeViewModelArgs = {
     conversationCache: ProjectConversationCacheState
     optimisticSend: OptimisticSendState | null
     projectGitMetadata: Record<string, ProjectGitMetadata>
+    uiDefaults: UiDefaults
 }
 
 export type ProjectsHomeViewModel = {
     activeChatMode: ConversationChatMode | null
+    activeProjectChatModel: string
+    activeProjectChatReasoningEffort: string
     activeConversationHistory: ConversationTimelineEntry[]
     activeFlowLaunchesById: Map<string, ProjectFlowLaunch>
     activeFlowRunRequestsById: Map<string, ProjectFlowRunRequest>
@@ -64,6 +68,7 @@ export function buildProjectsHomeViewModel({
     conversationCache,
     optimisticSend,
     projectGitMetadata,
+    uiDefaults,
 }: BuildProjectsHomeViewModelArgs): ProjectsHomeViewModel {
     const activeConversationHistory = buildConversationTimelineEntries(
         activeConversationSnapshot,
@@ -90,6 +95,16 @@ export function buildProjectsHomeViewModel({
         activeChatMode: activeConversationId
             ? (activeConversationSnapshot?.chat_mode ?? 'chat')
             : null,
+        activeProjectChatModel: (
+            activeConversationSnapshot?.model
+            ?? uiDefaults.llm_model
+            ?? ''
+        ),
+        activeProjectChatReasoningEffort: (
+            activeConversationSnapshot?.reasoning_effort
+            ?? uiDefaults.reasoning_effort
+            ?? ''
+        ),
         activeConversationHistory,
         activeFlowLaunchesById: buildIdMap(activeFlowLaunches),
         activeFlowRunRequestsById: buildIdMap(activeFlowRunRequests),

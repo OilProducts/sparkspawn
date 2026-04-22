@@ -907,10 +907,11 @@ def test_chat_session_turn_forwards_chat_mode_to_run_turn(monkeypatch) -> None:
     session._client = client
     session._thread_id = "thread-existing"
 
-    result = session.turn("hello", None, chat_mode="plan")
+    result = session.turn("hello", None, chat_mode="plan", reasoning_effort="high")
 
     assert result.assistant_message == "Ack"
     assert client.run_turn_calls[0]["chat_mode"] == "plan"
+    assert client.run_turn_calls[0]["reasoning_effort"] == "high"
 
 
 def test_chat_session_uses_plan_text_when_turn_has_only_plan_item(monkeypatch) -> None:
@@ -1116,6 +1117,7 @@ def test_send_turn_marks_assistant_failed_after_timeout_without_retry(tmp_path: 
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -1237,6 +1239,7 @@ def test_send_turn_accepts_plain_text_final_response(tmp_path: Path, monkeypatch
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -1300,6 +1303,145 @@ def test_update_conversation_settings_does_not_duplicate_mode_change_when_mode_m
     assert second["turns"][0]["content"] == "plan"
 
 
+def test_update_conversation_settings_persists_model_and_reasoning_effort(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+
+    snapshot = service.update_conversation_settings(
+        "conversation-settings",
+        str(tmp_path),
+        model="gpt-5.4",
+        reasoning_effort="HIGH",
+    )
+
+    assert snapshot["chat_mode"] == "chat"
+    assert snapshot["model"] == "gpt-5.4"
+    assert snapshot["reasoning_effort"] == "high"
+    assert snapshot["turns"] == []
+    reloaded = service.get_snapshot("conversation-settings", str(tmp_path))
+    assert reloaded["model"] == "gpt-5.4"
+    assert reloaded["reasoning_effort"] == "high"
+
+
+def test_update_conversation_settings_rejects_invalid_reasoning_effort(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+
+    with pytest.raises(ValueError, match="Reasoning effort"):
+        service.update_conversation_settings(
+            "conversation-settings",
+            str(tmp_path),
+            reasoning_effort="extreme",
+        )
+
+
+def test_send_turn_persists_and_forwards_model_and_reasoning_effort(tmp_path: Path, monkeypatch) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    captured_calls: list[dict[str, str | None]] = []
+
+    class PlainTextSession:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            captured_calls.append(
+                {
+                    "model": model,
+                    "reasoning_effort": reasoning_effort,
+                    "chat_mode": chat_mode,
+                }
+            )
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="Settings acknowledged.",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
+            return project_chat.ChatTurnResult(assistant_message="Settings acknowledged.")
+
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: PlainTextSession())
+
+    snapshot = service.send_turn(
+        "conversation-model-settings",
+        str(tmp_path),
+        "Use these settings.",
+        "gpt-5.4",
+        reasoning_effort="xhigh",
+    )
+
+    assert snapshot["model"] == "gpt-5.4"
+    assert snapshot["reasoning_effort"] == "xhigh"
+    assert captured_calls == [
+        {
+            "model": "gpt-5.4",
+            "reasoning_effort": "xhigh",
+            "chat_mode": "chat",
+        }
+    ]
+    reloaded = service.get_snapshot("conversation-model-settings", str(tmp_path))
+    assert reloaded["model"] == "gpt-5.4"
+    assert reloaded["reasoning_effort"] == "xhigh"
+
+
+def test_send_turn_reuses_persisted_model_and_reasoning_effort_when_omitted(tmp_path: Path, monkeypatch) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    captured_calls: list[dict[str, str | None]] = []
+    service.update_conversation_settings(
+        "conversation-model-settings",
+        str(tmp_path),
+        model="gpt-5.4-mini",
+        reasoning_effort="medium",
+    )
+
+    class PlainTextSession:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            captured_calls.append(
+                {
+                    "model": model,
+                    "reasoning_effort": reasoning_effort,
+                }
+            )
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="Persisted settings used.",
+                        app_turn_id="app-turn-1",
+                        item_id="msg-1",
+                        phase="final_answer",
+                    )
+                )
+            return project_chat.ChatTurnResult(assistant_message="Persisted settings used.")
+
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: PlainTextSession())
+
+    service.send_turn("conversation-model-settings", str(tmp_path), "Continue.", None)
+
+    assert captured_calls == [
+        {
+            "model": "gpt-5.4-mini",
+            "reasoning_effort": "medium",
+        }
+    ]
+
+
 def test_send_turn_persists_mode_change_turn_before_user_turn_when_chat_mode_changes(
     tmp_path: Path,
     monkeypatch,
@@ -1314,6 +1456,7 @@ def test_send_turn_persists_mode_change_turn_before_user_turn_when_chat_mode_cha
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -1363,6 +1506,7 @@ def test_send_turn_uses_persisted_plan_chat_mode_for_execution(tmp_path: Path, m
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -1468,6 +1612,7 @@ def test_send_turn_buffers_plan_mode_assistant_completion_without_leaking_markup
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -1543,6 +1688,7 @@ def test_send_turn_persists_context_compaction_segment_transition(
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -1616,6 +1762,7 @@ def test_send_turn_persists_context_compaction_from_thread_compacted_fallback(
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -1670,6 +1817,7 @@ def test_send_turn_deduplicates_context_compaction_duplicate_completion_signals(
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -1757,6 +1905,7 @@ def test_request_user_input_segments_persist_and_answer_in_place(
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -2237,6 +2386,7 @@ def test_send_turn_persists_plan_mode_assistant_remainder_after_completion(
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -2299,6 +2449,7 @@ def test_send_turn_passes_default_chat_mode_for_execution(tmp_path: Path, monkey
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -3257,6 +3408,7 @@ def test_send_turn_writes_raw_jsonrpc_log(tmp_path: Path, monkeypatch) -> None:
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -3302,6 +3454,7 @@ def test_start_turn_returns_initial_snapshot_before_background_completion(tmp_pa
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -3508,6 +3661,7 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
@@ -3631,12 +3785,78 @@ def test_update_project_conversation_settings_endpoint_upserts_shell_and_rejects
     assert service.get_snapshot("conversation-settings", project_path)["chat_mode"] == "plan"
 
 
+def test_update_project_conversation_settings_endpoint_updates_model_without_message(
+    product_api_client,
+    tmp_path: Path,
+) -> None:
+    project_path = str(tmp_path.resolve())
+    response = product_api_client.put(
+        "/workspace/api/conversations/conversation-settings/settings",
+        json={
+            "project_path": project_path,
+            "model": "gpt-5.4",
+            "reasoning_effort": "high",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["conversation_id"] == "conversation-settings"
+    assert payload["chat_mode"] == "chat"
+    assert payload["model"] == "gpt-5.4"
+    assert payload["reasoning_effort"] == "high"
+    assert payload["turns"] == []
+
+
+def test_project_chat_models_endpoint_returns_normalized_model_metadata(
+    product_api_client,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    service = _project_chat_service()
+
+    def fake_list_chat_models(project_path: str) -> dict[str, Any]:
+        assert project_path == str(tmp_path.resolve())
+        return {
+            "models": [
+                {
+                    "id": "gpt-5.4",
+                    "display": "GPT-5.4",
+                    "is_default": True,
+                    "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+                    "default_reasoning_effort": "medium",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(service, "list_chat_models", fake_list_chat_models)
+
+    response = product_api_client.get(
+        "/workspace/api/projects/chat-models",
+        params={"project_path": str(tmp_path)},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "models": [
+            {
+                "id": "gpt-5.4",
+                "display": "GPT-5.4",
+                "is_default": True,
+                "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+                "default_reasoning_effort": "medium",
+            }
+        ]
+    }
+
+
 def test_send_project_conversation_turn_endpoint_switches_chat_mode_atomically(
     product_api_client,
     monkeypatch,
     tmp_path: Path,
 ) -> None:
     service = _project_chat_service()
+    captured_calls: list[dict[str, str | None]] = []
 
     class PlainTextSession:
         def turn(
@@ -3645,9 +3865,17 @@ def test_send_project_conversation_turn_endpoint_switches_chat_mode_atomically(
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:
+            captured_calls.append(
+                {
+                    "model": model,
+                    "reasoning_effort": reasoning_effort,
+                    "chat_mode": chat_mode,
+                }
+            )
             if on_event is not None:
                 on_event(
                     project_chat.ChatTurnLiveEvent(
@@ -3667,6 +3895,8 @@ def test_send_project_conversation_turn_endpoint_switches_chat_mode_atomically(
         json={
             "project_path": str(tmp_path),
             "message": "Plan the mode switch.",
+            "model": "gpt-5.4",
+            "reasoning_effort": "low",
             "chat_mode": "plan",
         },
     )
@@ -3690,6 +3920,15 @@ def test_send_project_conversation_turn_endpoint_switches_chat_mode_atomically(
     assert final_snapshot["turns"][0]["content"] == "plan"
     assert final_snapshot["turns"][1]["content"] == "Plan the mode switch."
     assert final_snapshot["turns"][-1]["content"] == "Mode switch acknowledged."
+    assert final_snapshot["model"] == "gpt-5.4"
+    assert final_snapshot["reasoning_effort"] == "low"
+    assert captured_calls == [
+        {
+            "model": "gpt-5.4",
+            "reasoning_effort": "low",
+            "chat_mode": "plan",
+        }
+    ]
 
 
 def test_submit_project_conversation_request_user_input_endpoint_updates_existing_segment(
@@ -3720,6 +3959,7 @@ def test_submit_project_conversation_request_user_input_endpoint_updates_existin
             model: str | None,
             *,
             chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
             on_event=None,
             on_dynamic_tool_call=None,
         ) -> project_chat.ChatTurnResult:

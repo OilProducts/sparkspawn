@@ -565,6 +565,7 @@ class CodexAppServerChatSession:
         model: Optional[str],
         *,
         chat_mode: str = "chat",
+        reasoning_effort: Optional[str] = None,
         on_event: Optional[Callable[[ChatTurnLiveEvent], None]] = None,
     ) -> ChatTurnResult:
         with self._lock:
@@ -601,6 +602,7 @@ class CodexAppServerChatSession:
                     thread_id=self._thread_id or "",
                     prompt=prompt,
                     model=effective_model,
+                    reasoning_effort=reasoning_effort,
                     chat_mode=chat_mode,
                     cwd=self.working_dir,
                     on_event=_handle_normalized_event,

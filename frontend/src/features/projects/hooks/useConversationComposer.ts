@@ -44,6 +44,7 @@ type UseConversationComposerArgs = {
     chatDraft: string
     isChatInputDisabled: boolean
     model: string
+    reasoningEffort: string
     ensureConversationId: () => string | null
     getCurrentConversationId: (projectPath: string) => string | null
     applyConversationSnapshot: (
@@ -64,6 +65,7 @@ export function useConversationComposer({
     chatDraft,
     isChatInputDisabled,
     model,
+    reasoningEffort,
     ensureConversationId,
     getCurrentConversationId,
     applyConversationSnapshot,
@@ -123,6 +125,7 @@ export function useConversationComposer({
                 project_path: activeProjectPath,
                 message: messageToSend,
                 model: model.trim() || null,
+                reasoning_effort: reasoningEffort.trim(),
                 chat_mode: chatMode,
             })
             setOptimisticSend(null)
