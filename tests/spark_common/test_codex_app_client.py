@@ -283,6 +283,120 @@ def test_shared_client_default_model_reads_default_entry_from_model_list() -> No
     assert client.default_model() == "gpt-default"
 
 
+def test_shared_client_model_metadata_parses_reasoning_efforts() -> None:
+    client = CodexAppServerClient("/tmp/project")
+
+    client.send_request = lambda method, params, **kwargs: {  # type: ignore[method-assign]
+        "result": {
+            "data": [
+                {
+                    "model": "gpt-5.4",
+                    "displayName": "GPT-5.4",
+                    "isDefault": True,
+                    "supportedReasoningEfforts": [
+                        {"reasoningEffort": "low", "description": "Fast responses with lighter reasoning"},
+                        {"reasoningEffort": "medium", "description": "Balances speed and reasoning depth"},
+                        {"reasoningEffort": "high", "description": "Greater reasoning depth"},
+                        {"reasoningEffort": "xhigh", "description": "Extra high reasoning"},
+                        {"reasoningEffort": "invalid", "description": "Unsupported effort"},
+                    ],
+                    "defaultReasoningEffort": "medium",
+                },
+            ]
+        }
+    }
+
+    assert [model.to_dict() for model in client.list_models()] == [
+        {
+            "id": "gpt-5.4",
+            "display": "GPT-5.4",
+            "is_default": True,
+            "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+            "default_reasoning_effort": "medium",
+        }
+    ]
+
+
+def test_shared_client_run_turn_includes_non_empty_reasoning_effort() -> None:
+    client = CodexAppServerClient("/tmp/project")
+    sent_requests: list[tuple[str, dict[str, object] | None]] = []
+    messages = iter(
+        [
+            {
+                "jsonrpc": "2.0",
+                "method": "item/completed",
+                "params": {
+                    "turnId": "turn-123",
+                    "item": {
+                        "type": "AgentMessage",
+                        "id": "msg-1",
+                        "content": [{"type": "Text", "text": "Ack"}],
+                        "phase": "final_answer",
+                    },
+                },
+            },
+            {
+                "jsonrpc": "2.0",
+                "method": "turn/completed",
+                "params": {"turn": {"id": "turn-123", "status": "completed"}},
+            },
+        ]
+    )
+
+    client.run_turn(
+        thread_id="thread-123",
+        prompt="hello",
+        model="gpt-test",
+        reasoning_effort="high",
+        send_request=lambda method, params: sent_requests.append((method, params))
+        or {"result": {"turn": {"id": "turn-123", "status": "inProgress"}}},
+        next_message=lambda wait: next(messages, None),
+    )
+
+    assert sent_requests[0][1] is not None
+    assert sent_requests[0][1]["reasoningEffort"] == "high"
+
+
+def test_shared_client_run_turn_omits_blank_reasoning_effort() -> None:
+    client = CodexAppServerClient("/tmp/project")
+    sent_requests: list[tuple[str, dict[str, object] | None]] = []
+    messages = iter(
+        [
+            {
+                "jsonrpc": "2.0",
+                "method": "item/completed",
+                "params": {
+                    "turnId": "turn-123",
+                    "item": {
+                        "type": "AgentMessage",
+                        "id": "msg-1",
+                        "content": [{"type": "Text", "text": "Ack"}],
+                        "phase": "final_answer",
+                    },
+                },
+            },
+            {
+                "jsonrpc": "2.0",
+                "method": "turn/completed",
+                "params": {"turn": {"id": "turn-123", "status": "completed"}},
+            },
+        ]
+    )
+
+    client.run_turn(
+        thread_id="thread-123",
+        prompt="hello",
+        model="gpt-test",
+        reasoning_effort="",
+        send_request=lambda method, params: sent_requests.append((method, params))
+        or {"result": {"turn": {"id": "turn-123", "status": "inProgress"}}},
+        next_message=lambda wait: next(messages, None),
+    )
+
+    assert sent_requests[0][1] is not None
+    assert "reasoningEffort" not in sent_requests[0][1]
+
+
 def test_shared_client_run_turn_exposes_structured_token_usage_payload() -> None:
     client = CodexAppServerClient("/tmp/project")
     lines = iter(

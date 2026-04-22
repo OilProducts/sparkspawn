@@ -16,6 +16,7 @@ from spark_common.process_line_reader import ProcessLineReader
 APP_SERVER_REQUEST_TIMEOUT_SECONDS = 15.0
 COLLABORATION_MODE_DEFAULT = "default"
 COLLABORATION_MODE_PLAN = "plan"
+REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
 
 
 def _collaboration_mode_for_chat_mode(chat_mode: Optional[str], model: str) -> dict[str, Any]:
@@ -27,6 +28,72 @@ def _collaboration_mode_for_chat_mode(chat_mode: Optional[str], model: str) -> d
             "model": model,
         },
     }
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return False
+
+
+def _normalize_reasoning_effort(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in REASONING_EFFORTS:
+        return normalized
+    return None
+
+
+def _normalize_reasoning_effort_list(value: Any) -> tuple[str, ...]:
+    raw_values: list[Any]
+    if isinstance(value, list):
+        raw_values = value
+    elif isinstance(value, str):
+        raw_values = [entry.strip() for entry in value.split(",")]
+    else:
+        raw_values = []
+    normalized: list[str] = []
+    for entry in raw_values:
+        if isinstance(entry, dict):
+            effort = _normalize_reasoning_effort(
+                _pick_first_mapping_value(
+                    entry,
+                    ("reasoningEffort", "reasoning_effort", "effort", "value", "id", "name"),
+                )
+            )
+        else:
+            effort = _normalize_reasoning_effort(entry)
+        if effort and effort not in normalized:
+            normalized.append(effort)
+    return tuple(normalized)
+
+
+def _pick_first_mapping_value(payload: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in payload:
+            return payload.get(key)
+    return None
+
+
+@dataclass(frozen=True)
+class CodexModelMetadata:
+    id: str
+    display: str
+    is_default: bool = False
+    supported_reasoning_efforts: tuple[str, ...] = ()
+    default_reasoning_effort: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "display": self.display,
+            "is_default": self.is_default,
+            "supported_reasoning_efforts": list(self.supported_reasoning_efforts),
+            "default_reasoning_effort": self.default_reasoning_effort,
+        }
 
 
 @dataclass
@@ -344,23 +411,80 @@ class CodexAppServerClient:
         thread = (response.get("result") or {}).get("thread") or {}
         return codex_app_server.as_non_empty_string(thread.get("id"))
 
-    def default_model(self) -> Optional[str]:
+    def list_models(self) -> list[CodexModelMetadata]:
         response = self.send_request("model/list", {"limit": 100})
         if response.get("error"):
-            return None
+            return []
         payload = response.get("result") or {}
         data = payload.get("data")
         if not isinstance(data, list):
-            return None
+            data = payload.get("models")
+        if not isinstance(data, list):
+            return []
+        models: list[CodexModelMetadata] = []
         for entry in data:
             if not isinstance(entry, dict):
                 continue
-            if not entry.get("isDefault"):
+            model_id = codex_app_server.as_non_empty_string(
+                _pick_first_mapping_value(entry, ("id", "model", "name"))
+            )
+            if not model_id:
                 continue
-            model = codex_app_server.as_non_empty_string(entry.get("model"))
-            if model:
-                return model
+            display = codex_app_server.as_non_empty_string(
+                _pick_first_mapping_value(entry, ("display", "displayName", "display_name", "label", "name"))
+            ) or model_id
+            reasoning_payload = entry.get("reasoning")
+            reasoning_entry = reasoning_payload if isinstance(reasoning_payload, dict) else {}
+            supported_efforts = _normalize_reasoning_effort_list(
+                _pick_first_mapping_value(
+                    entry,
+                    (
+                        "supportedReasoningEfforts",
+                        "supported_reasoning_efforts",
+                        "reasoningEfforts",
+                        "reasoning_efforts",
+                    ),
+                )
+            ) or _normalize_reasoning_effort_list(
+                _pick_first_mapping_value(reasoning_entry, ("supportedEfforts", "supported_efforts", "efforts"))
+            )
+            default_effort = _normalize_reasoning_effort(
+                _pick_first_mapping_value(
+                    entry,
+                    (
+                        "defaultReasoningEffort",
+                        "default_reasoning_effort",
+                        "reasoningEffort",
+                        "reasoning_effort",
+                    ),
+                )
+            ) or _normalize_reasoning_effort(
+                _pick_first_mapping_value(reasoning_entry, ("defaultEffort", "default_effort", "default"))
+            )
+            models.append(
+                CodexModelMetadata(
+                    id=model_id,
+                    display=display,
+                    is_default=_as_bool(entry.get("isDefault")) or _as_bool(entry.get("is_default")),
+                    supported_reasoning_efforts=supported_efforts,
+                    default_reasoning_effort=default_effort,
+                )
+            )
+        return models
+
+    def default_model(self) -> Optional[str]:
+        for entry in self.list_models():
+            if entry.is_default:
+                return entry.id
         return None
+
+    def _normalize_reasoning_effort_for_turn(self, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        effort = _normalize_reasoning_effort(value)
+        if effort is None and str(value).strip():
+            raise ValueError("reasoning_effort must be blank or one of: low, medium, high, xhigh")
+        return effort
 
     def run_turn(
         self,
@@ -368,6 +492,7 @@ class CodexAppServerClient:
         thread_id: str,
         prompt: str,
         model: Optional[str],
+        reasoning_effort: Optional[str] = None,
         chat_mode: Optional[str] = None,
         cwd: Optional[str] = None,
         on_event: Optional[Callable[[codex_app_server.CodexAppServerTurnEvent], None]] = None,
@@ -387,6 +512,7 @@ class CodexAppServerClient:
             "sandboxPolicy": {"type": "dangerFullAccess"},
             "cwd": cwd or self.working_dir,
         }
+        effective_reasoning_effort = self._normalize_reasoning_effort_for_turn(reasoning_effort)
         effective_model = codex_app_server.as_non_empty_string(model)
         if chat_mode is not None:
             effective_model = effective_model or self.default_model()
@@ -396,6 +522,8 @@ class CodexAppServerClient:
             params["model"] = effective_model
         elif effective_model:
             params["model"] = effective_model
+        if effective_reasoning_effort:
+            params["reasoningEffort"] = effective_reasoning_effort
         response = request("turn/start", params)
         if response.get("error"):
             message = codex_app_server.as_non_empty_string((response.get("error") or {}).get("message"))
