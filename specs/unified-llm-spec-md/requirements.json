@@ -355,7 +355,7 @@
         "tests/test_client.py",
         "tests/test_streaming.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Use fake adapters in tests to verify observable routing and no-retry behavior."
     },
@@ -390,7 +390,7 @@
         "src/unified_llm/timeouts.py",
         "tests/test_generate.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "REQ-018 and REQ-020 define tool and retry mechanics used here."
     },
@@ -430,7 +430,7 @@
         "tests/test_stream_high_level.py",
         "tests/test_structured.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "The spec mentions step_finish in prose even though it is not listed in StreamEventType; implement as an extension string event type."
     },
@@ -461,7 +461,7 @@
         "src/unified_llm/generation.py",
         "tests/test_structured.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Use a maintained JSON Schema validator dependency only if added intentionally to pyproject.toml; otherwise document supported validation subset."
     },
@@ -496,7 +496,7 @@
         "src/unified_llm/tools.py",
         "tests/test_tools.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Provider-specific ToolChoice translation is covered by adapter requirements."
     },
@@ -531,7 +531,7 @@
         "src/unified_llm/generation.py",
         "tests/test_tool_loop.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Use deterministic fake tools with sleeps/events in tests to verify concurrency and ordering without provider calls."
     },
@@ -568,7 +568,7 @@
         "src/unified_llm/retry.py",
         "tests/test_retry.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Delay calculation should be testable without actually sleeping."
     },

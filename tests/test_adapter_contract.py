@@ -120,9 +120,6 @@ def test_stream_placeholders_are_async_iterables() -> None:
 @pytest.mark.asyncio
 async def test_awaitable_placeholders_raise_when_used() -> None:
     with pytest.raises(NotImplementedError):
-        await unified_llm.generate()
-
-    with pytest.raises(NotImplementedError):
         await unified_llm.generate_object()
 
     with pytest.raises(NotImplementedError):

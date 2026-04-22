@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import logging
 from collections.abc import AsyncIterator, Iterable
@@ -28,6 +30,41 @@ def _tool_call_data(tool_call: ToolCall | None) -> dict[str, Any]:
     if tool_call is None:
         return {}
     return dict(getattr(tool_call, "__dict__", {}))
+
+
+def _best_effort_close_awaitable(awaitable: Any) -> None:
+    if not inspect.isawaitable(awaitable):
+        return
+
+    if inspect.iscoroutine(awaitable):
+        coroutine = awaitable
+        try:
+            coroutine.send(None)
+        except StopIteration:
+            return
+        except Exception:
+            logger.exception("Unexpected error closing stream iterator")
+            coroutine.close()
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            coroutine.close()
+            return
+
+        loop.create_task(coroutine)
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _await_close() -> None:
+        await awaitable
+
+    loop.create_task(_await_close())
 
 
 def _serialize_tool_call_arguments(value: Any) -> str | None:
@@ -494,12 +531,115 @@ class StreamAccumulator:
 
 
 class StreamEventIterator(_PlaceholderRecord, AsyncIterator[StreamEvent]):
+    def __init__(
+        self,
+        source: AsyncIterator[StreamEvent] | None = None,
+        response: Response | None = None,
+        **placeholder_fields: Any,
+    ) -> None:
+        super().__init__(source=source, **placeholder_fields)
+        self._source = source
+        self._iterator: AsyncIterator[StreamEvent] | None = None
+        self._accumulator = StreamAccumulator(response=response)
+        self._finished = False
+        self._closed = False
+
     def __aiter__(self) -> StreamEventIterator:
         return self
 
+    def __del__(self) -> None:
+        _best_effort_close_awaitable(self.aclose())
+
     async def __anext__(self) -> StreamEvent:
-        logger.debug("StreamEventIterator placeholder iterated")
-        raise NotImplementedError("StreamEventIterator is not implemented in the M1 scaffold")
+        if self._finished:
+            raise StopAsyncIteration
+
+        if self._source is None:
+            logger.debug("StreamEventIterator placeholder iterated")
+            raise NotImplementedError(
+                "StreamEventIterator is not implemented in the M1 scaffold"
+            )
+
+        if self._iterator is None:
+            self._iterator = self._source.__aiter__()
+
+        try:
+            event = await self._iterator.__anext__()
+        except StopAsyncIteration:
+            self._finished = True
+            terminal_event = self._synthesized_finish_event()
+            await self._finalize_source()
+            if terminal_event is None:
+                raise
+            return terminal_event
+        except SDKError:
+            await self._finalize_source()
+            self._finished = True
+            raise
+        except Exception:
+            await self._finalize_source()
+            self._finished = True
+            raise
+
+        if not isinstance(event, StreamEvent):
+            logger.debug("Unexpected stream event type: %s", type(event).__name__)
+            await self._finalize_source()
+            self._finished = True
+            raise TypeError("event must be a StreamEvent")
+
+        try:
+            self._accumulator.add(event)
+        except Exception:
+            await self._finalize_source()
+            self._finished = True
+            raise
+
+        if event.type in (StreamEventType.FINISH, StreamEventType.ERROR):
+            self._finished = True
+            terminal_event = self._accumulator.finish_event
+            if terminal_event is None:
+                terminal_event = self._synthesized_finish_event()
+            await self._finalize_source()
+            return terminal_event
+
+        return event
+
+    async def close(self) -> None:
+        self._finished = True
+        await self._finalize_source()
+
+    async def aclose(self) -> None:
+        await self.close()
+
+    def _synthesized_finish_event(self) -> StreamEvent:
+        return StreamEvent(
+            type=StreamEventType.FINISH,
+            finish_reason=self._accumulator.finish_reason,
+            usage=self._accumulator.usage,
+            response=self._accumulator.response,
+        )
+
+    async def _finalize_source(self) -> None:
+        if self._closed:
+            return
+
+        self._closed = True
+        target = self._iterator if self._iterator is not None else self._source
+        if target is None:
+            return
+
+        close = getattr(target, "aclose", None)
+        if close is None:
+            close = getattr(target, "close", None)
+        if close is None:
+            return
+
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception("Unexpected error closing stream iterator")
 
 
 __all__ = ["StreamAccumulator", "StreamEventIterator"]

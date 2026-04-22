@@ -16,7 +16,7 @@ from .middleware import (
     complete_with_middleware,
     stream_with_middleware,
 )
-from .types import Request, Response, StreamEvent
+from .types import FinishReason, Request, Response, StreamEvent
 
 logger = logging.getLogger(__name__)
 
@@ -177,19 +177,27 @@ class Client:
         )
 
     def stream(self, request: Request | None = None) -> AsyncIterator[StreamEvent]:
+        from .streaming import StreamEventIterator
+
         if request is None:
             logger.debug("Client.stream placeholder invoked")
-            from .streaming import StreamEventIterator
-
             return StreamEventIterator(client=self, args=(), kwargs={})
         if not isinstance(request, Request):
             raise TypeError("request must be a Request or None")
 
-        _, prepared_request, adapter = self._prepare_request(request)
-        return stream_with_middleware(
+        resolved_provider, prepared_request, adapter = self._prepare_request(request)
+        source = stream_with_middleware(
             adapter.stream,
             prepared_request,
             self.stream_middleware,
+        )
+        return StreamEventIterator(
+            source=source,
+            response=Response(
+                provider=resolved_provider,
+                model=prepared_request.model,
+                finish_reason=FinishReason(reason=FinishReason.STOP),
+            ),
         )
 
     def supports_tool_choice(self, mode: str, provider: str | None = None) -> bool:

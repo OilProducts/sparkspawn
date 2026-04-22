@@ -60,6 +60,24 @@ class _DeferredAsyncIterator(AsyncIterator[StreamEvent]):
             self._iterator = await self._source
         return await self._iterator.__anext__()
 
+    async def aclose(self) -> None:
+        iterator = self._iterator
+        if iterator is None:
+            return
+
+        close = getattr(iterator, "aclose", None)
+        if close is None:
+            close = getattr(iterator, "close", None)
+        if close is None:
+            return
+
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+
+    async def close(self) -> None:
+        await self.aclose()
+
 
 class _StreamMiddlewareIterator(AsyncIterator[StreamEvent]):
     def __init__(
@@ -103,6 +121,24 @@ class _StreamMiddlewareIterator(AsyncIterator[StreamEvent]):
         except Exception:
             logger.exception("Unexpected error iterating stream middleware chain")
             raise
+
+    async def aclose(self) -> None:
+        iterator = self._iterator
+        if iterator is None:
+            return
+
+        close = getattr(iterator, "aclose", None)
+        if close is None:
+            close = getattr(iterator, "close", None)
+        if close is None:
+            return
+
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+
+    async def close(self) -> None:
+        await self.aclose()
 
 
 def build_complete_middleware_chain(

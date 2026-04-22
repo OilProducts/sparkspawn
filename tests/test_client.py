@@ -33,6 +33,92 @@ class _RecordingAdapter:
         return _events()
 
 
+class _FailingCompleteAdapter:
+    def __init__(self) -> None:
+        self.name = "failing"
+        self.complete_requests: list[unified_llm.Request] = []
+
+    async def complete(self, request: unified_llm.Request) -> unified_llm.Response:
+        self.complete_requests.append(request)
+        raise unified_llm.ConfigurationError("bad config")
+
+
+class _ClosingStream:
+    def __init__(
+        self,
+        events: list[unified_llm.StreamEvent],
+        error: BaseException | None = None,
+    ) -> None:
+        self._events = iter(events)
+        self.error = error
+        self.closed = False
+
+    def __aiter__(self) -> _ClosingStream:
+        return self
+
+    async def __anext__(self) -> unified_llm.StreamEvent:
+        try:
+            return next(self._events)
+        except StopIteration:
+            raise StopAsyncIteration from None
+
+    async def aclose(self) -> None:
+        self.closed = True
+        if self.error is not None:
+            raise self.error
+
+
+class _ClosingStreamAdapter:
+    def __init__(self, error: BaseException | None = None) -> None:
+        self.name = "failing"
+        self.error = error
+        self.complete_requests: list[unified_llm.Request] = []
+        self.stream_requests: list[unified_llm.Request] = []
+        self.last_stream: _ClosingStream | None = None
+
+    def stream(self, request: unified_llm.Request) -> _ClosingStream:
+        self.stream_requests.append(request)
+        self.last_stream = _ClosingStream(
+            [
+                unified_llm.StreamEvent(
+                    type=unified_llm.StreamEventType.TEXT_DELTA,
+                    delta="partial",
+                )
+            ],
+            error=self.error,
+        )
+        return self.last_stream
+
+
+class _FailingStream:
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+        self.closed = False
+
+    def __aiter__(self) -> _FailingStream:
+        return self
+
+    async def __anext__(self) -> unified_llm.StreamEvent:
+        raise self.error
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _FailingStreamAdapter:
+    def __init__(self, error: BaseException) -> None:
+        self.name = "failing"
+        self.error = error
+        self.complete_requests: list[unified_llm.Request] = []
+        self.stream_requests: list[unified_llm.Request] = []
+        self.last_stream: _FailingStream | None = None
+
+    def stream(self, request: unified_llm.Request) -> _FailingStream:
+        self.stream_requests.append(request)
+        self.last_stream = _FailingStream(self.error)
+        return self.last_stream
+
+
 class _CloseRecorder:
     def __init__(self, name: str, error: BaseException | None = None) -> None:
         self.name = name
@@ -288,6 +374,40 @@ async def test_client_complete_raises_configuration_error_for_unknown_provider(
     assert openai.complete_requests == []
 
 
+@pytest.mark.asyncio
+async def test_client_complete_propagates_sdk_errors_without_retry() -> None:
+    adapter = _FailingCompleteAdapter()
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    request = unified_llm.Request(
+        model="gpt-5.2",
+        messages=[unified_llm.Message.user("hello")],
+    )
+
+    with pytest.raises(unified_llm.ConfigurationError, match="bad config"):
+        await client.complete(request)
+
+    assert len(adapter.complete_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_client_stream_propagates_sdk_errors_without_retry() -> None:
+    adapter = _FailingStreamAdapter(unified_llm.ConfigurationError("bad config"))
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    request = unified_llm.Request(
+        model="gpt-5.2",
+        messages=[unified_llm.Message.user("hello")],
+    )
+
+    stream = client.stream(request)
+
+    with pytest.raises(unified_llm.ConfigurationError, match="bad config"):
+        await stream.__anext__()
+
+    assert len(adapter.stream_requests) == 1
+    assert adapter.last_stream is not None
+    assert adapter.last_stream.closed is True
+
+
 def test_client_supports_tool_choice_delegates_and_falls_back_when_missing() -> None:
     supported = _ToolChoiceRecorderAdapter("supported")
     unsupported = _RecordingAdapter("unsupported")
@@ -318,7 +438,11 @@ async def test_client_stream_uses_default_provider_and_keeps_request_state_untou
         messages=[unified_llm.Message.user("hello")],
     )
 
-    events = [event async for event in client.stream(request)]
+    stream = client.stream(request)
+
+    assert openai.stream_requests == []
+
+    events = [event async for event in stream]
 
     assert request.provider is None
     assert openai.stream_requests[0].provider == "openai"
@@ -328,8 +452,54 @@ async def test_client_stream_uses_default_provider_and_keeps_request_state_untou
         unified_llm.StreamEvent(
             type=unified_llm.StreamEventType.TEXT_DELTA,
             delta="openai:openai",
-        )
+        ),
+        unified_llm.StreamEvent(
+            type=unified_llm.StreamEventType.FINISH,
+            finish_reason=unified_llm.FinishReason(reason="stop"),
+            usage=unified_llm.Usage(),
+            response=unified_llm.Response(
+                provider="openai",
+                model="claude-opus-4-6",
+                finish_reason=unified_llm.FinishReason(reason="stop"),
+                message=unified_llm.Message.assistant("openai:openai"),
+            ),
+        ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_client_stream_can_be_closed_and_logs_close_failures(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _ClosingStreamAdapter(error=RuntimeError("boom"))
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    request = unified_llm.Request(
+        model="gpt-5.2",
+        messages=[unified_llm.Message.user("hello")],
+    )
+
+    stream = client.stream(request)
+    first_event = await stream.__anext__()
+
+    assert first_event.type == unified_llm.StreamEventType.TEXT_DELTA
+    assert adapter.stream_requests[0].provider == "fake"
+    assert adapter.last_stream is not None
+    assert adapter.last_stream.closed is False
+
+    with caplog.at_level(logging.ERROR, logger="unified_llm.streaming"):
+        await stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert adapter.last_stream.closed is True
+    assert any(
+        record.name == "unified_llm.streaming"
+        and "Unexpected error closing stream iterator" in record.message
+        for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio

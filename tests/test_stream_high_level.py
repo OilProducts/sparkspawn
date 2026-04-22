@@ -1,0 +1,737 @@
+from __future__ import annotations
+
+import asyncio
+import importlib
+import logging
+from contextlib import suppress
+
+import pytest
+
+import unified_llm
+import unified_llm.generation as generation_mod
+from unified_llm.errors import AbortError
+
+retry_mod = importlib.import_module("unified_llm.retry")
+
+
+def _tool_call(
+    call_id: str,
+    name: str,
+    arguments: str | dict[str, object],
+    raw_arguments: str | None = None,
+) -> unified_llm.ToolCall:
+    if raw_arguments is None and isinstance(arguments, str):
+        raw_arguments = arguments
+    return unified_llm.ToolCall(
+        id=call_id,
+        name=name,
+        arguments=arguments,
+        raw_arguments=raw_arguments,
+    )
+
+
+class _SequencedStream:
+    def __init__(
+        self,
+        events: list[object],
+        *,
+        close_error: BaseException | None = None,
+    ) -> None:
+        self._events = iter(events)
+        self.close_error = close_error
+        self.closed = False
+
+    def __aiter__(self) -> _SequencedStream:
+        return self
+
+    async def __anext__(self) -> unified_llm.StreamEvent:
+        try:
+            item = next(self._events)
+        except StopIteration:
+            raise StopAsyncIteration from None
+
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    async def aclose(self) -> None:
+        self.closed = True
+        if self.close_error is not None:
+            raise self.close_error
+
+
+class _SequencedStreamAdapter:
+    def __init__(self, name: str, behaviors: list[object]) -> None:
+        self.name = name
+        self._behaviors = list(behaviors)
+        self.stream_requests: list[unified_llm.Request] = []
+        self.opened_streams: list[_SequencedStream] = []
+
+    def stream(self, request: unified_llm.Request) -> _SequencedStream:
+        self.stream_requests.append(request)
+        if not self._behaviors:
+            raise AssertionError(f"{self.name} received more stream requests than expected")
+
+        behavior = self._behaviors.pop(0)
+        if callable(behavior):
+            behavior = behavior(request)
+        if isinstance(behavior, BaseException):
+            raise behavior
+        if isinstance(behavior, _SequencedStream):
+            self.opened_streams.append(behavior)
+            return behavior
+
+        stream = _SequencedStream(list(behavior))
+        self.opened_streams.append(stream)
+        return stream
+
+
+def _text_delta(text: str) -> unified_llm.StreamEvent:
+    return unified_llm.StreamEvent(
+        type=unified_llm.StreamEventType.TEXT_DELTA,
+        delta=text,
+    )
+
+
+def _provider_event(raw: object) -> unified_llm.StreamEvent:
+    return unified_llm.StreamEvent(
+        type=unified_llm.StreamEventType.PROVIDER_EVENT,
+        raw=raw,
+    )
+
+
+def _tool_call_event(
+    event_type: unified_llm.StreamEventType,
+    call_id: str,
+    name: str,
+    arguments: str | dict[str, object],
+) -> unified_llm.StreamEvent:
+    return unified_llm.StreamEvent(
+        type=event_type,
+        tool_call=_tool_call(call_id, name, arguments),
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_exposes_partial_response_and_response_after_completion(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [
+                _text_delta("Hel"),
+                _text_delta("lo"),
+                _provider_event({"kind": "noise"}),
+            ]
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+    )
+
+    first = await stream.__anext__()
+    assert first.type == unified_llm.StreamEventType.TEXT_DELTA
+    assert first.delta == "Hel"
+    assert stream.partial_response.text == "Hel"
+
+    second = await stream.__anext__()
+    assert second.type == unified_llm.StreamEventType.TEXT_DELTA
+    assert second.delta == "lo"
+    assert stream.partial_response.text == "Hello"
+
+    third = await stream.__anext__()
+    assert third.type == unified_llm.StreamEventType.PROVIDER_EVENT
+
+    response = await stream.response()
+    await stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert response.text == "Hello"
+    assert response.finish_reason.reason == "stop"
+    assert stream.partial_response.text == "Hello"
+    assert adapter.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_text_stream_filters_non_text_events(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [
+                _text_delta("Hel"),
+                _provider_event({"kind": "noise"}),
+                _text_delta("lo"),
+            ]
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+    )
+
+    deltas = [delta async for delta in stream.text_stream]
+    response = await stream.response()
+    await stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert deltas == ["Hel", "lo"]
+    assert response.text == "Hello"
+    assert adapter.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_text_stream_closes_provider_stream_when_iteration_is_abandoned(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [
+                _text_delta("Hel"),
+                _text_delta("lo"),
+                _provider_event({"kind": "noise"}),
+            ]
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+    )
+
+    deltas: list[str] = []
+    async for delta in stream.text_stream:
+        deltas.append(delta)
+        break
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert deltas == ["Hel"]
+    assert stream.partial_response.text == "Hel"
+    assert adapter.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_closes_provider_stream_when_iteration_is_abandoned(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [
+                _text_delta("Hel"),
+                _text_delta("lo"),
+                _provider_event({"kind": "noise"}),
+            ]
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+    )
+
+    events: list[unified_llm.StreamEvent] = []
+    async for event in stream:
+        events.append(event)
+        break
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert [event.delta for event in events] == ["Hel"]
+    assert stream.partial_response.text == "Hel"
+    assert adapter.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_retries_initial_stream_failures_but_not_after_partial_data(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(retry_mod.random, "uniform", lambda a, b: 1.0)
+    monkeypatch.setattr(generation_mod.asyncio, "sleep", fake_sleep)
+
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [unified_llm.RateLimitError("retry later", provider="fake")],
+            [
+                _text_delta("Hello"),
+            ],
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+        max_retries=1,
+    )
+
+    first = await stream.__anext__()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert first.type == unified_llm.StreamEventType.TEXT_DELTA
+    assert first.delta == "Hello"
+    assert sleep_calls == [1.0]
+    assert len(adapter.stream_requests) == 2
+    await stream.close()
+    assert adapter.opened_streams[0].closed is True
+    assert adapter.opened_streams[1].closed is True
+
+    adapter_after_partial = _SequencedStreamAdapter(
+        "fake",
+        [
+            [
+                _text_delta("Hel"),
+                unified_llm.RateLimitError("retry later", provider="fake"),
+            ]
+        ],
+    )
+    partial_client = unified_llm.Client(
+        providers={"fake": adapter_after_partial},
+        default_provider="fake",
+    )
+    partial_stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=partial_client,
+        max_retries=1,
+    )
+
+    first_partial = await partial_stream.__anext__()
+    assert first_partial.delta == "Hel"
+    assert partial_stream.partial_response.text == "Hel"
+
+    second_partial = await partial_stream.__anext__()
+    assert second_partial.type == unified_llm.StreamEventType.ERROR
+    assert isinstance(second_partial.error, unified_llm.RateLimitError)
+    assert second_partial.error.message == "retry later"
+    assert second_partial.response is not None
+    assert second_partial.response.text == "Hel"
+    assert second_partial.response.finish_reason.reason == "error"
+
+    response = await partial_stream.response()
+    assert response.text == "Hel"
+    assert response.finish_reason.reason == "error"
+    assert partial_stream.partial_response.text == "Hel"
+    assert partial_stream.partial_response.finish_reason.reason == "error"
+
+    await partial_stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert len(adapter_after_partial.stream_requests) == 1
+    assert adapter_after_partial.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_retry_sleep_is_cut_off_by_total_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sleep_started = asyncio.Event()
+    sleep_cancelled = asyncio.Event()
+    sleep_calls: list[float] = []
+    blocker = asyncio.Event()
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+        sleep_started.set()
+        try:
+            await blocker.wait()
+        except asyncio.CancelledError:
+            sleep_cancelled.set()
+            raise
+
+    monkeypatch.setattr(retry_mod.random, "uniform", lambda a, b: 1.0)
+    monkeypatch.setattr(generation_mod.asyncio, "sleep", fake_sleep)
+
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [unified_llm.RateLimitError("retry later", provider="fake")],
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+        timeout=unified_llm.TimeoutConfig(total=0.05),
+        max_retries=1,
+    )
+    task = asyncio.create_task(stream.__anext__())
+
+    try:
+        await asyncio.wait_for(sleep_started.wait(), timeout=0.5)
+
+        with pytest.raises(unified_llm.RequestTimeoutError) as excinfo:
+            await asyncio.wait_for(task, timeout=0.5)
+
+        captured = capsys.readouterr()
+
+        assert captured.out == ""
+        assert captured.err == ""
+        assert excinfo.value.scope == "stream"
+        assert sleep_calls == [1.0]
+        assert sleep_cancelled.is_set()
+        assert len(adapter.stream_requests) == 1
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        await stream.close()
+
+
+@pytest.mark.asyncio
+async def test_stream_retry_sleep_is_cut_off_by_abort_signal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sleep_started = asyncio.Event()
+    sleep_cancelled = asyncio.Event()
+    sleep_calls: list[float] = []
+    blocker = asyncio.Event()
+    controller = unified_llm.AbortController()
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+        sleep_started.set()
+        try:
+            await blocker.wait()
+        except asyncio.CancelledError:
+            sleep_cancelled.set()
+            raise
+
+    monkeypatch.setattr(retry_mod.random, "uniform", lambda a, b: 1.0)
+    monkeypatch.setattr(generation_mod.asyncio, "sleep", fake_sleep)
+
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [unified_llm.RateLimitError("retry later", provider="fake")],
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+        abort_signal=controller.signal,
+        max_retries=1,
+    )
+    task = asyncio.create_task(stream.__anext__())
+
+    try:
+        await asyncio.wait_for(sleep_started.wait(), timeout=0.5)
+        controller.abort("stop now")
+
+        with pytest.raises(AbortError) as excinfo:
+            await asyncio.wait_for(task, timeout=0.5)
+
+        captured = capsys.readouterr()
+
+        assert captured.out == ""
+        assert captured.err == ""
+        assert excinfo.value.scope == "stream"
+        assert excinfo.value.reason == "stop now"
+        assert sleep_calls == [1.0]
+        assert sleep_cancelled.is_set()
+        assert len(adapter.stream_requests) == 1
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        await stream.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("timeout", "expected_scope"),
+    [
+        (unified_llm.TimeoutConfig(total=0.0), "stream"),
+        (unified_llm.TimeoutConfig(per_step=0.0), "stream step"),
+        (unified_llm.TimeoutConfig(stream_read=0.0), "stream_read"),
+    ],
+)
+async def test_stream_enforces_total_per_step_and_stream_read_timeouts(
+    timeout: unified_llm.TimeoutConfig,
+    expected_scope: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [
+                _text_delta("Hello"),
+            ]
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+        timeout=timeout,
+    )
+
+    with pytest.raises(unified_llm.RequestTimeoutError) as excinfo:
+        await stream.__anext__()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert excinfo.value.scope == expected_scope
+    if adapter.opened_streams:
+        assert adapter.opened_streams[0].closed is True
+    await stream.close()
+
+
+@pytest.mark.asyncio
+async def test_stream_can_be_closed_and_logs_close_failures(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            _SequencedStream(
+                [_text_delta("partial")],
+                close_error=RuntimeError("boom"),
+            )
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+    )
+
+    first = await stream.__anext__()
+    assert first.delta == "partial"
+
+    with caplog.at_level(logging.ERROR, logger="unified_llm.streaming"):
+        await stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert adapter.opened_streams[0].closed is True
+    assert any(
+        record.name == "unified_llm.streaming"
+        and "Unexpected error closing stream iterator" in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_raises_abort_error_and_closes_provider_stream(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    controller = unified_llm.AbortController()
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [
+                unified_llm.StreamEvent(
+                    type=unified_llm.StreamEventType.TEXT_DELTA,
+                    delta="partial",
+                ),
+                unified_llm.StreamEvent(
+                    type=unified_llm.StreamEventType.TEXT_DELTA,
+                    delta="more",
+                ),
+            ]
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    stream = unified_llm.stream(
+        model="gpt-5.2",
+        prompt="hello",
+        client=client,
+        abort_signal=controller.signal,
+    )
+
+    first = await stream.__anext__()
+    assert first.delta == "partial"
+    controller.abort("stop now")
+
+    with pytest.raises(AbortError):
+        await stream.__anext__()
+
+    await stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert adapter.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("repair_result", "expected_log"),
+    [
+        (None, "Repair hook for tool weather returned no usable repair"),
+        ({"city": 7}, "Invalid repaired arguments for tool weather"),
+        (RuntimeError("repair boom"), "Unexpected error repairing tool weather"),
+    ],
+)
+async def test_stream_logs_repair_failures_without_stdout(
+    repair_result: object,
+    expected_log: str,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    controller = unified_llm.AbortController()
+
+    async def weather(city: str) -> dict[str, str]:
+        return {"tool": "weather", "city": city}
+
+    async def repair_tool_call(
+        *,
+        tool_call: unified_llm.ToolCall,
+        tool: unified_llm.Tool,
+        error: object,
+        messages: object,
+        abort_signal: object,
+        tool_call_id: str,
+    ) -> object:
+        assert tool_call.name == "weather"
+        assert tool.name == "weather"
+        assert tool_call_id == "call_weather"
+        assert [message.role for message in messages] == [unified_llm.Role.USER]
+        assert abort_signal is controller.signal
+        if isinstance(repair_result, BaseException):
+            raise repair_result
+        return repair_result
+
+    weather_tool = unified_llm.Tool.active(
+        name="weather",
+        description="Lookup weather",
+        parameters={
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+        execute_handler=weather,
+    )
+    adapter = _SequencedStreamAdapter(
+        "fake",
+        [
+            [
+                _text_delta("Need tools"),
+                _tool_call_event(
+                    unified_llm.StreamEventType.TOOL_CALL_START,
+                    "call_weather",
+                    "weather",
+                    '{"city": 7}',
+                ),
+                _tool_call_event(
+                    unified_llm.StreamEventType.TOOL_CALL_DELTA,
+                    "call_weather",
+                    "weather",
+                    '{"city": 7}',
+                ),
+                _tool_call_event(
+                    unified_llm.StreamEventType.TOOL_CALL_END,
+                    "call_weather",
+                    "weather",
+                    '{"city": 7}',
+                ),
+                unified_llm.StreamEvent(
+                    type=unified_llm.StreamEventType.FINISH,
+                    finish_reason=unified_llm.FinishReason(
+                        reason=unified_llm.FinishReason.TOOL_CALLS,
+                    ),
+                    usage=unified_llm.Usage(),
+                    response=unified_llm.Response(
+                        model="gpt-5.2",
+                        provider="fake",
+                    ),
+                ),
+            ],
+            [
+                _text_delta("finished"),
+            ],
+        ],
+    )
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+
+    with caplog.at_level(logging.DEBUG, logger="unified_llm.tools"):
+        stream = unified_llm.stream(
+            model="gpt-5.2",
+            prompt="what should I do?",
+            tools=[weather_tool],
+            client=client,
+            abort_signal=controller.signal,
+            repair_tool_call=repair_tool_call,
+        )
+        events = [event async for event in stream]
+        response = await stream.response()
+        await stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert [event.type for event in events] == [
+        unified_llm.StreamEventType.TEXT_DELTA,
+        unified_llm.StreamEventType.TOOL_CALL_START,
+        unified_llm.StreamEventType.TOOL_CALL_DELTA,
+        unified_llm.StreamEventType.TOOL_CALL_END,
+        unified_llm.StreamEventType.FINISH,
+        "step_finish",
+        unified_llm.StreamEventType.TEXT_DELTA,
+        unified_llm.StreamEventType.FINISH,
+    ]
+    assert events[4].response.text == "Need tools"
+    assert events[5].response.text == "Need tools"
+    assert response.text == "finished"
+    assert stream.partial_response.text == "finished"
+    assert len(adapter.stream_requests) == 2
+    assert adapter.stream_requests[1].messages[2].content[0].tool_result is not None
+    assert adapter.stream_requests[1].messages[2].content[0].tool_result.is_error is True
+    assert "Invalid arguments for tool 'weather'" in str(
+        adapter.stream_requests[1].messages[2].content[0].tool_result.content
+    )
+    assert any(
+        record.name == "unified_llm.tools" and expected_log in record.message
+        for record in caplog.records
+    )

@@ -150,10 +150,20 @@ async def test_client_stream_middleware_onion_order_and_event_transforms() -> No
         "inner:response",
         "outer:response",
     ]
-    assert [event.delta for event in events] == [
+    assert [event.type for event in events] == [
+        unified_llm.StreamEventType.TEXT_DELTA,
+        unified_llm.StreamEventType.TEXT_DELTA,
+        unified_llm.StreamEventType.FINISH,
+    ]
+    assert [event.delta for event in events[:2]] == [
         "first|inner|outer",
         "second|inner|outer",
     ]
+    assert events[2].finish_reason.reason == "stop"
+    assert events[2].usage.total_tokens == 0
+    assert events[2].response.provider == "fake"
+    assert events[2].response.model == "gpt-5.2"
+    assert events[2].response.text == "first|inner|outersecond|inner|outer"
     assert adapter.stream_requests[0].provider == "fake"
 
 
