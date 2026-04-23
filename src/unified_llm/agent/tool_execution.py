@@ -123,6 +123,20 @@ def _supports_parallel_tool_calls(session: _ToolExecutionSession) -> bool:
     return False
 
 
+def _executor_accepts_keyword_argument(executor: Any, name: str) -> bool:
+    try:
+        parameters = inspect.signature(executor).parameters.values()
+    except (TypeError, ValueError):
+        return False
+
+    for parameter in parameters:
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == name:
+            return True
+    return False
+
+
 def _normalize_tool_output(
     value: Any,
 ) -> tuple[Any, str | dict[str, Any] | list[Any], bool, bytes | None, str | None]:
@@ -228,9 +242,15 @@ async def execute_tool_call(session: _ToolExecutionSession, tool_call: Any) -> T
         return _recoverable_tool_result(tool_call_id, error_msg)
 
     try:
+        executor_kwargs: dict[str, Any] = {}
+        if _executor_accepts_keyword_argument(executor, "session"):
+            executor_kwargs["session"] = session
+        if _executor_accepts_keyword_argument(executor, "session_config"):
+            executor_kwargs["session_config"] = session.config
         raw_output = executor(
             parsed_arguments,
             getattr(session, "execution_environment", None),
+            **executor_kwargs,
         )
         if inspect.isawaitable(raw_output):
             raw_output = await raw_output

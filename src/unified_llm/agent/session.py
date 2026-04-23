@@ -18,6 +18,7 @@ from .events import EventKind, SessionEvent, _SessionEventStream
 from .history import history_to_messages
 from .local_environment import LocalExecutionEnvironment
 from .loop_detection import LOOP_DETECTION_WARNING, detect_loop
+from .subagents import close_active_subagents
 from .tool_execution import execute_tool_calls
 from .types import (
     AssistantTurn,
@@ -694,10 +695,10 @@ class Session:
         )
 
     async def close(self) -> SessionState:
-        if self._closed_event_emitted:
-            self.state = SessionState.CLOSED
-            return self.state
         self.state = SessionState.CLOSED
+        await close_active_subagents(self)
+        if self._closed_event_emitted:
+            return self.state
         self._emit_session_end()
         self._closed_event_emitted = True
         return self.state

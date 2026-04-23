@@ -207,7 +207,7 @@
         "src/unified_llm/agent/tools.py",
         "tests/agent/test_builtin_tools.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M4",
       "notes": "Provider profiles may expose different schemas while delegating to these shared capabilities."
     },
@@ -595,7 +595,7 @@
         "src/unified_llm/agent/builtin_tools.py",
         "tests/agent/test_subagents.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M4",
       "notes": "Implementation may run child sessions as asyncio tasks as long as public semantics and cleanup behavior are deterministic."
     },

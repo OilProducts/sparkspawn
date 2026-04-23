@@ -4,27 +4,24 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path
 from typing import Any
-from uuid import UUID
 
 from ..types import ContentKind, ContentPart, FinishReason, ToolCallData, ToolResultData, Usage
 from .environment import ExecutionEnvironment
 from .profiles.base import ProviderProfile
+from .subagents import (
+    AgentError,
+    SubAgentError,
+    SubAgentHandle,
+    SubAgentLimitError,
+    SubAgentResult,
+    SubAgentStatus,
+)
 from .tools import RegisteredTool, ToolDefinition, ToolRegistry
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
-
-
-def _coerce_uuid(value: UUID | str | None) -> UUID | str | None:
-    if not isinstance(value, str):
-        return value
-    try:
-        return UUID(value)
-    except ValueError:
-        return value
 
 
 def _normalize_turn_content(content: str | Iterable[ContentPart]) -> str | list[ContentPart]:
@@ -181,64 +178,6 @@ class ToolResultsTurn:
         self.result_list = list(value)
 
 
-class SubAgentStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CLOSED = "closed"
-
-
-@dataclass
-class SubAgentHandle:
-    id: UUID | str
-    status: SubAgentStatus = SubAgentStatus.PENDING
-    session_id: UUID | str | None = None
-    provider_profile: ProviderProfile | None = None
-    working_directory: Path | str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    started_at: datetime = field(default_factory=_utcnow)
-    result: SubAgentResult | None = None
-
-    def __post_init__(self) -> None:
-        self.id = _coerce_uuid(self.id)
-        self.session_id = _coerce_uuid(self.session_id)
-        if self.working_directory is not None and not isinstance(self.working_directory, Path):
-            self.working_directory = Path(self.working_directory)
-        self.metadata = dict(self.metadata)
-
-    @property
-    def profile(self) -> ProviderProfile | None:
-        return self.provider_profile
-
-    @profile.setter
-    def profile(self, value: ProviderProfile | None) -> None:
-        self.provider_profile = value
-
-
-@dataclass
-class SubAgentResult:
-    handle_id: UUID | str
-    status: SubAgentStatus = SubAgentStatus.COMPLETED
-    session_id: UUID | str | None = None
-    turns: list[Any] = field(default_factory=list)
-    response_id: str | None = None
-    summary: str | None = None
-    error: BaseException | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=_utcnow)
-
-    def __post_init__(self) -> None:
-        self.handle_id = _coerce_uuid(self.handle_id)
-        self.session_id = _coerce_uuid(self.session_id)
-        self.turns = list(self.turns)
-        self.metadata = dict(self.metadata)
-
-
-class AgentError(Exception):
-    pass
-
-
 class SessionStateError(AgentError):
     pass
 
@@ -248,14 +187,6 @@ class SessionClosedError(SessionStateError):
 
 
 class SessionAbortedError(SessionStateError):
-    pass
-
-
-class SubAgentError(AgentError):
-    pass
-
-
-class SubAgentLimitError(SubAgentError):
     pass
 
 

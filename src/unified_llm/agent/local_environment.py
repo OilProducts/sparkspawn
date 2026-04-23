@@ -142,6 +142,20 @@ class LocalExecutionEnvironment:
     def working_directory(self) -> str:
         return str(self._configured_working_directory)
 
+    def with_working_directory(
+        self,
+        working_dir: str | Path | None = None,
+    ) -> LocalExecutionEnvironment:
+        configured_working_dir = (
+            self._configured_working_directory if working_dir is None else working_dir
+        )
+        return LocalExecutionEnvironment(
+            working_dir=configured_working_dir,
+            default_command_timeout_ms=self._default_command_timeout_ms,
+            max_command_timeout_ms=self._max_command_timeout_ms,
+            environment_inheritance_policy=self._environment_inheritance_policy,
+        )
+
     def platform(self) -> str:
         if sys.platform.startswith("win"):
             return "windows"
@@ -185,7 +199,7 @@ class LocalExecutionEnvironment:
         path: str | Path,
         offset: int | None = None,
         limit: int | None = None,
-    ) -> str:
+    ) -> str | bytes:
         target = self._resolve_path(path)
         if not target.exists():
             raise FileNotFoundError(target)
@@ -195,7 +209,12 @@ class LocalExecutionEnvironment:
             raise ValueError("offset must be at least 1")
         if limit is not None and limit < 0:
             raise ValueError("limit must be non-negative")
-        content = target.read_text(encoding="utf-8", errors="surrogateescape")
+
+        raw_content = target.read_bytes()
+        try:
+            content = raw_content.decode("utf-8")
+        except UnicodeDecodeError:
+            return raw_content
         if offset is None and limit is None:
             return content
         lines = content.splitlines(keepends=True)
@@ -480,7 +499,8 @@ class LocalExecutionEnvironment:
             raise NotADirectoryError(base)
         try:
             matches = [candidate for candidate in base.glob(pattern) if candidate.is_file()]
-        except ValueError as exc:
+        except (NotImplementedError, ValueError) as exc:
+            # pathlib rejects absolute and otherwise unsupported glob patterns.
             raise ValueError(str(exc)) from exc
         matches.sort(
             key=lambda candidate: (

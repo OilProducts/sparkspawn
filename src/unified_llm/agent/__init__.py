@@ -2,6 +2,20 @@
 
 from __future__ import annotations
 
+from .builtin_tools import (
+    build_builtin_file_tool_registry,
+    build_builtin_tool_registry,
+    build_file_tool_registry,
+    build_subagent_tool_registry,
+    builtin_file_tool_definitions,
+    builtin_tool_definitions,
+    file_tool_definitions,
+    register_builtin_file_tools,
+    register_builtin_tools,
+    register_file_tools,
+    register_subagent_tools,
+    subagent_tool_definitions,
+)
 from .context import check_context_usage
 from .environment import (
     DirEntry,
@@ -57,6 +71,12 @@ __all__ = [
     "EnvironmentInheritancePolicy",
     "ExecResult",
     "ExecutionEnvironment",
+    "builtin_file_tool_definitions",
+    "builtin_tool_definitions",
+    "build_builtin_file_tool_registry",
+    "build_builtin_tool_registry",
+    "build_subagent_tool_registry",
+    "build_file_tool_registry",
     "GrepOptions",
     "DEFAULT_LINE_LIMITS",
     "DEFAULT_TOOL_LIMITS",
@@ -68,6 +88,7 @@ __all__ = [
     "execute_tool_call",
     "execute_tool_calls",
     "detect_loop",
+    "file_tool_definitions",
     "history_to_messages",
     "LocalExecutionEnvironment",
     "ProviderProfile",
@@ -90,6 +111,11 @@ __all__ = [
     "ToolRegistry",
     "ToolResultsTurn",
     "ToolCallSignature",
+    "register_builtin_file_tools",
+    "register_builtin_tools",
+    "register_subagent_tools",
+    "register_file_tools",
+    "subagent_tool_definitions",
     "turn_to_messages",
     "UserTurn",
     "truncate_lines",
