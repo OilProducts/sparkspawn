@@ -589,34 +589,46 @@ def test_anthropic_profile_provider_options_copy_and_beta_header_mapping() -> No
     }
 
 
-def test_anthropic_profile_prompt_surfaces_required_layers_topics_and_edit_file_format(
+@pytest.mark.asyncio
+async def test_anthropic_profile_filters_project_docs_and_builds_requests(
     tmp_path: Path,
 ) -> None:
+    (tmp_path / "AGENTS.md").write_text("Root guidance")
+    (tmp_path / "CLAUDE.md").write_text("Claude guidance")
+    (tmp_path / ".codex/instructions.md").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".codex/instructions.md").write_text("OpenAI guidance")
+    (tmp_path / "GEMINI.md").write_text("Gemini guidance")
+
     profile = profiles.AnthropicProviderProfile(model="claude-sonnet-4-5")
     environment = agent.LocalExecutionEnvironment(working_dir=tmp_path)
-
-    prompt = profile.build_system_prompt(
-        environment,
-        {
-            "AGENTS.md": "Root guidance",
-            "CLAUDE.md": "Claude guidance",
-        },
+    client = _BlockingCompleteClient([_assistant_response("done", "resp-1")])
+    session = agent.Session(
+        profile=profile,
+        execution_env=environment,
+        llm_client=client,
     )
 
-    assert "<provider_base_instructions>" in prompt
-    assert "<environment>" in prompt
-    assert "<tools>" in prompt
-    assert "<project_instructions>" in prompt
-    assert "Tool usage:" in prompt
-    assert "AGENTS.md" in prompt
-    assert "CLAUDE.md" in prompt
-    assert "Project instruction conventions:" in prompt
-    assert "read before edit" in prompt
-    assert "edit_file" in prompt
-    assert "write_file" in prompt
-    assert "old_string is unique" in prompt
-    assert "Coding guidance:" in prompt
-    assert "apply_patch" not in prompt
+    processing_task = asyncio.create_task(session.process_input("Check the workspace"))
+    await asyncio.wait_for(client.started[0].wait(), timeout=1)
+
+    request = client.requests[0]
+    system_prompt = request.messages[0].text
+
+    assert request.provider == "anthropic"
+    assert [tool.name for tool in request.tools] == profile.tool_registry.names()
+    assert request.tool_choice is not None
+    assert request.tool_choice.mode == "auto"
+    assert request.messages[0].role == unified_llm.Role.SYSTEM
+    assert "AGENTS.md" in system_prompt
+    assert "CLAUDE.md" in system_prompt
+    assert ".codex/instructions.md" not in system_prompt
+    assert "GEMINI.md" not in system_prompt
+
+    client.released[0].set()
+    await processing_task
+    assert session.state == agent.SessionState.IDLE
+    await session.close()
+    assert session.state == agent.SessionState.CLOSED
 
 
 @pytest.mark.asyncio

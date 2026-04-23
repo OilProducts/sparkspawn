@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import unified_llm.agent as agent
 import unified_llm.agent.profiles as profiles
 import unified_llm.agent.profiles.anthropic as anthropic_profile_module
@@ -9,6 +11,63 @@ import unified_llm.agent.profiles.openai as openai_profile_module
 
 def _noop_executor(arguments: dict[str, object], execution_environment: object) -> str:
     return "ok"
+
+
+PROVIDER_CASES = [
+    (
+        "openai",
+        agent.create_openai_profile,
+        profiles.OpenAIProviderProfile,
+        [
+            "read_file",
+            "apply_patch",
+            "write_file",
+            "shell",
+            "grep",
+            "glob",
+            "spawn_agent",
+            "send_input",
+            "wait",
+            "close_agent",
+        ],
+    ),
+    (
+        "anthropic",
+        agent.create_anthropic_profile,
+        profiles.AnthropicProviderProfile,
+        [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "shell",
+            "grep",
+            "glob",
+            "spawn_agent",
+            "send_input",
+            "wait",
+            "close_agent",
+        ],
+    ),
+    (
+        "gemini",
+        agent.create_gemini_profile,
+        profiles.GeminiProviderProfile,
+        [
+            "read_file",
+            "read_many_files",
+            "write_file",
+            "edit_file",
+            "shell",
+            "grep",
+            "glob",
+            "list_dir",
+            "spawn_agent",
+            "send_input",
+            "wait",
+            "close_agent",
+        ],
+    ),
+]
 
 
 def test_provider_profile_export_is_shared_between_agent_modules() -> None:
@@ -30,6 +89,60 @@ def test_provider_profile_package_exports_provider_factories_and_registry_builde
     assert profiles.create_gemini_profile is gemini_profile_module.create_gemini_profile
     assert profiles.build_gemini_tool_registry is gemini_profile_module.build_gemini_tool_registry
     assert profiles.register_gemini_tools is gemini_profile_module.register_gemini_tools
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "factory", "profile_type", "expected_tool_names"),
+    PROVIDER_CASES,
+)
+def test_provider_profiles_expose_provider_specific_tools_and_object_root_schemas(
+    provider_name: str,
+    factory,
+    profile_type,
+    expected_tool_names: list[str],
+) -> None:
+    profile = factory(model={
+        "openai": "gpt-5.2",
+        "anthropic": "claude-sonnet-4-5",
+        "gemini": "gemini-3.1-pro-preview",
+    }[provider_name])
+
+    assert isinstance(profile, profile_type)
+    assert profile.id == provider_name
+    assert profile.tool_registry.names() == expected_tool_names
+    for tool_name in profile.tool_registry.names():
+        definition = profile.tool_registry.get(tool_name).definition
+        assert definition.parameters["type"] == "object"
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "factory", "expected_tool_names"),
+    [(name, factory, tool_names) for name, factory, _, tool_names in PROVIDER_CASES],
+)
+def test_provider_profiles_build_requests_through_the_public_session_api(
+    provider_name: str,
+    factory,
+    expected_tool_names: list[str],
+) -> None:
+    profile = factory(
+        model={
+            "openai": "gpt-5.2",
+            "anthropic": "claude-sonnet-4-5",
+            "gemini": "gemini-3.1-pro-preview",
+        }[provider_name],
+    )
+    session = agent.Session(
+        profile=profile,
+        execution_env=agent.LocalExecutionEnvironment(working_dir="."),
+    )
+
+    request = session.build_request("Session system prompt")
+
+    assert request.provider == provider_name
+    assert request.messages[0].text == "Session system prompt"
+    assert [tool.name for tool in request.tools] == expected_tool_names
+    assert request.tool_choice is not None
+    assert request.tool_choice.mode == "auto"
 
 
 def test_provider_profile_exposes_fields_capabilities_and_copying_behavior(
@@ -80,20 +193,14 @@ def test_provider_profile_exposes_fields_capabilities_and_copying_behavior(
     assert profile.supports_streaming is False
     assert profile.supports_parallel_tool_calls is True
     assert profile.context_window_size == 4096
-    prompt = profile.build_system_prompt(environment, {"AGENTS.md": "docs"})
-    assert "<provider_base_instructions>" in prompt
-    assert "<environment>" in prompt
-    assert "<tools>" in prompt
-    assert "<project_instructions>" in prompt
-    assert "Provider identity:" in prompt
-    assert "Tool usage:" in prompt
-    assert "Edit guidance:" in prompt
-    assert "Project instruction conventions:" in prompt
-    assert "Coding guidance:" in prompt
-    assert "Working directory:" in prompt
-    assert "Is git repository: false" in prompt
-    assert "AGENTS.md" in prompt
-    assert "docs" in prompt
+    request = agent.Session(
+        profile=profile,
+        execution_env=environment,
+    ).build_request("System prompt")
+    assert request.provider == "fake-provider"
+    assert request.messages[0].text == "System prompt"
+    assert [tool.name for tool in request.tools] == ["lookup"]
+    assert request.provider_options == {"fake-provider": {"temperature": 0.2}}
 
     returned_options = profile.provider_options()
     returned_options["temperature"] = 0.7

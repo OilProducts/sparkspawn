@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
+from pathlib import Path
 
 import pytest
 
 import unified_llm
 import unified_llm.agent as agent
-from unified_llm.agent import prompts
+from unified_llm.agent import project_docs, prompts
 
 
 class _FakeClient:
@@ -83,118 +84,160 @@ class _MutableEnvironment:
         return "test-os"
 
 
-def _initialize_git_repo(environment: agent.LocalExecutionEnvironment) -> str:
+def _initialize_git_repo(
+    environment: agent.LocalExecutionEnvironment,
+    working_dir: str | object | None = None,
+) -> str:
+    repo_dir = Path(working_dir or environment.working_directory())
     init_result = environment.exec_command(
         "git init",
-        working_dir=environment.working_directory(),
+        working_dir=repo_dir,
     )
     assert init_result.exit_code == 0
     assert (
         environment.exec_command(
             'git config user.name "Test User"',
-            working_dir=environment.working_directory(),
+            working_dir=repo_dir,
         ).exit_code
         == 0
     )
     assert (
         environment.exec_command(
             'git config user.email "test@example.com"',
-            working_dir=environment.working_directory(),
+            working_dir=repo_dir,
         ).exit_code
         == 0
     )
-    environment.write_file("tracked.txt", "tracked\n")
+    environment.write_file(repo_dir / "tracked.txt", "tracked\n")
     assert (
         environment.exec_command(
             "git add tracked.txt",
-            working_dir=environment.working_directory(),
+            working_dir=repo_dir,
         ).exit_code
         == 0
     )
     assert (
         environment.exec_command(
             'git commit -m "Initial commit"',
-            working_dir=environment.working_directory(),
+            working_dir=repo_dir,
         ).exit_code
         == 0
     )
     branch = environment.exec_command(
         "git branch --show-current",
-        working_dir=environment.working_directory(),
+        working_dir=repo_dir,
     ).stdout.strip()
     if not branch:
         branch = environment.exec_command(
             "git rev-parse --abbrev-ref HEAD",
-            working_dir=environment.working_directory(),
+            working_dir=repo_dir,
         ).stdout.strip()
     return branch or "unknown"
 
 
-def test_build_system_prompt_assembles_layers_and_snapshots_environment_at_session_start(
-    tmp_path,
-) -> None:
-    environment = agent.LocalExecutionEnvironment(working_dir=tmp_path)
-    branch = _initialize_git_repo(environment)
-    environment.write_file("tracked.txt", "tracked\nmodified\n")
-    environment.write_file("untracked.txt", "new\n")
-
-    tool_definition = agent.ToolDefinition(
-        name="lookup",
-        description="Lookup values",
-        parameters={"type": "object"},
+def _register_lookup_tool(profile: agent.ProviderProfile) -> None:
+    profile.tool_registry.register(
+        agent.ToolDefinition(
+            name="lookup",
+            description="Lookup values",
+            parameters={"type": "object"},
+        ),
+        executor=lambda arguments, env: "ok",
     )
+
+
+@pytest.mark.parametrize(
+    ("model", "display_name", "included_contents", "excluded_contents"),
+    [
+        (
+            "gpt-5.2",
+            "GPT-5.2",
+            ("root agents", "nested agents", "root openai", "nested openai"),
+            ("root claude", "nested claude", "root gemini", "nested gemini"),
+        ),
+        (
+            "claude-sonnet-4-5",
+            "Claude Sonnet 4.5",
+            ("root agents", "nested agents", "root claude", "nested claude"),
+            ("root openai", "nested openai", "root gemini", "nested gemini"),
+        ),
+        (
+            "gemini-3.1-pro-preview",
+            "Gemini 3.1 Pro",
+            ("root agents", "nested agents", "root gemini", "nested gemini"),
+            ("root openai", "nested openai", "root claude", "nested claude"),
+        ),
+    ],
+)
+def test_build_system_prompt_orders_layers_and_filters_project_documents_by_provider(
+    tmp_path,
+    model: str,
+    display_name: str,
+    included_contents: tuple[str, ...],
+    excluded_contents: tuple[str, ...],
+) -> None:
+    nested_working_dir = tmp_path / "nested"
+    nested_working_dir.mkdir()
+    environment = agent.LocalExecutionEnvironment(working_dir=nested_working_dir)
+    branch = _initialize_git_repo(environment, working_dir=tmp_path)
+    environment.write_file(tmp_path / "tracked.txt", "tracked\nmodified\n")
+    environment.write_file(nested_working_dir / "untracked.txt", "new\n")
+    environment.write_file(tmp_path / "AGENTS.md", "root agents")
+    environment.write_file(tmp_path / ".codex/instructions.md", "root openai")
+    environment.write_file(tmp_path / "CLAUDE.md", "root claude")
+    environment.write_file(tmp_path / "GEMINI.md", "root gemini")
+    environment.write_file(nested_working_dir / "AGENTS.md", "nested agents")
+    environment.write_file(
+        nested_working_dir / ".codex/instructions.md",
+        "nested openai",
+    )
+    environment.write_file(nested_working_dir / "CLAUDE.md", "nested claude")
+    environment.write_file(nested_working_dir / "GEMINI.md", "nested gemini")
+
     profile = agent.ProviderProfile(
         id="openai-profile",
-        model="gpt-5.2",
-        display_name="GPT-5.2",
+        model=model,
+        display_name=display_name,
         knowledge_cutoff="2024-06",
     )
-    profile.tool_registry.register(tool_definition, executor=lambda arguments, env: "ok")
+    _register_lookup_tool(profile)
 
+    context = prompts.snapshot_environment_context(profile, environment)
     prompt = prompts.build_system_prompt(
         profile,
         environment,
-        {
-            "AGENTS.md": "Root guidance",
-            "nested/AGENTS.md": "Nested guidance",
-        },
         user_overrides="User override guidance",
     )
+    provider_block = prompts.build_provider_base_instructions(profile)
+    environment_block = prompts.build_environment_context_block(context)
+    tools_block = prompts.build_tool_descriptions(profile)
+    project_block = project_docs.load_project_documents(environment, profile)
 
-    section_positions = [
-        prompt.index("<provider_base_instructions>"),
-        prompt.index("<environment>"),
-        prompt.index("<tools>"),
-        prompt.index("<project_instructions>"),
-        prompt.index("<user_overrides>"),
-    ]
-    assert section_positions == sorted(section_positions)
+    assert context.working_directory == str(nested_working_dir)
+    assert context.is_git_repository is True
+    assert context.current_branch == branch
+    assert context.modified_count == 1
+    assert context.untracked_count >= 1
+    assert context.recent_commit_messages == ["Initial commit"]
+    assert context.platform == environment.platform()
+    assert context.os_version == environment.os_version()
+    assert context.today == date.today().isoformat()
+    assert context.model_display_name == display_name
+    assert context.knowledge_cutoff == "2024-06"
 
-    assert "Provider identity:" in prompt
-    assert "Tool usage:" in prompt
-    assert "Edit guidance:" in prompt
-    assert "*** Begin Patch / *** End Patch format" in prompt
-    assert "Project instruction conventions:" in prompt
-    assert "Coding guidance:" in prompt
-    assert "apply_patch" in prompt
-    assert "Working directory: " in prompt
-    assert f"Working directory: {tmp_path}" in prompt
-    assert "Is git repository: true" in prompt
-    assert f"Git branch: {branch}" in prompt
-    assert "Modified files: 1" in prompt
-    assert "Untracked files: 1" in prompt
-    assert "Recent commit messages:" in prompt
-    assert "Initial commit" in prompt
-    assert f"Platform: {environment.platform()}" in prompt
-    assert f"OS version: {environment.os_version()}" in prompt
-    assert f"Today's date: {date.today().isoformat()}" in prompt
-    assert "Model: GPT-5.2" in prompt
-    assert "Knowledge cutoff: 2024-06" in prompt
-    assert "lookup" in prompt
-    assert "Lookup values" in prompt
-    assert "Root guidance" in prompt
-    assert "Nested guidance" in prompt
-    assert "User override guidance" in prompt
+    assert prompt.index(provider_block) == 0
+    assert prompt.index(environment_block) > prompt.index(provider_block)
+    assert prompt.index(tools_block) > prompt.index(environment_block)
+    assert prompt.index(project_block) > prompt.index(tools_block)
+    assert prompt.index("User override guidance") > prompt.index(project_block)
+
+    assert "lookup" in tools_block
+    assert "Lookup values" in tools_block
+    assert project_block in prompt
+    for content in included_contents:
+        assert content in project_block
+    for content in excluded_contents:
+        assert content not in project_block
 
 
 @pytest.mark.asyncio
@@ -221,6 +264,10 @@ async def test_session_caches_the_initial_system_prompt_snapshot() -> None:
         execution_environment=environment,
         llm_client=client,
     )
+    expected_prompt = prompts.build_system_prompt(
+        profile,
+        _MutableEnvironment("initial-working-directory"),
+    )
     environment.working_directory_value = "mutated-working-directory"
 
     stream = session.events()
@@ -232,5 +279,6 @@ async def test_session_caches_the_initial_system_prompt_snapshot() -> None:
     request = client.requests[0]
     assert request.messages[0].role == unified_llm.Role.SYSTEM
     system_prompt = request.messages[0].text
-    assert "Working directory: initial-working-directory" in system_prompt
-    assert "Working directory: mutated-working-directory" not in system_prompt
+    assert system_prompt == expected_prompt
+    assert "initial-working-directory" in system_prompt
+    assert "mutated-working-directory" not in system_prompt
