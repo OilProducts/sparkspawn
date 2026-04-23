@@ -52,7 +52,7 @@ export function SettingsPanel() {
                                 onChange={(event) => setUiDefault('llm_model', event.target.value)}
                                 list="settings-llm-model-options"
                                 className="text-xs"
-                                placeholder="gpt-5.4"
+                                placeholder="gpt-5.5"
                             />
                             <datalist id="settings-llm-model-options">
                                 {getModelSuggestions(uiDefaults.llm_provider).map((modelOption) => (

@@ -4,6 +4,7 @@ export const LLM_PROVIDER_OPTIONS: LlmProviderKey[] = ['openai', 'anthropic', 'g
 
 export const LLM_MODELS_BY_PROVIDER: Record<LlmProviderKey, string[]> = {
     openai: [
+        'gpt-5.5',
         'gpt-5.4',
         'gpt-5.2',
         'gpt-5.2-pro',

@@ -2,12 +2,12 @@ import { DEFAULT_UI_DEFAULTS, UI_DEFAULTS_STORAGE_KEY, loadUiDefaults } from '@/
 import { describe, expect, it } from 'vitest'
 
 describe('store helpers', () => {
-  it('loads gpt-5.4 as the default UI model when no saved defaults exist', () => {
+  it('loads gpt-5.5 as the default UI model when no saved defaults exist', () => {
     localStorage.removeItem(UI_DEFAULTS_STORAGE_KEY)
 
     expect(loadUiDefaults()).toEqual(DEFAULT_UI_DEFAULTS)
     expect(loadUiDefaults()).toEqual({
-      llm_model: 'gpt-5.4',
+      llm_model: 'gpt-5.5',
       llm_provider: '',
       reasoning_effort: '',
     })
