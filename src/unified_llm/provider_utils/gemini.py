@@ -7,7 +7,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
 
@@ -102,6 +102,30 @@ def _normalize_model_name(model: str) -> str:
 def _synthetic_tool_call_id(name: str | None) -> str:
     encoded_name = quote(name or "tool", safe="")
     return f"gemini_call_{encoded_name}_{uuid.uuid4().hex}"
+
+
+def _synthetic_tool_call_name(tool_call_id: str) -> str | None:
+    prefix = "gemini_call_"
+    if not tool_call_id.startswith(prefix):
+        return None
+
+    suffix = tool_call_id.removeprefix(prefix)
+    if len(suffix) <= 33:
+        return None
+
+    encoded_name = suffix[:-33]
+    separator = suffix[-33]
+    uuid_text = suffix[-32:]
+    if separator != "_":
+        return None
+
+    try:
+        uuid.UUID(hex=uuid_text)
+    except ValueError:
+        return None
+
+    decoded_name = unquote(encoded_name)
+    return decoded_name or "tool"
 
 
 def _part_thought_signature(part: Mapping[str, Any]) -> str | None:
@@ -487,6 +511,9 @@ def _tool_result_parts(
                 provider="gemini",
             ) from exc
         name = _coerce_text(resolved_name, field_name="tool_result.function_name")
+
+    if name is None:
+        name = _synthetic_tool_call_name(tool_call_id)
 
     if name is None:
         raise InvalidRequestError(

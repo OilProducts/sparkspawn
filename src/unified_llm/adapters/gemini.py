@@ -85,12 +85,12 @@ class GeminiAdapter:
         self.base_url = normalize_gemini_base_url(resolved_base_url)
         self.timeout = timeout
         self.default_headers = dict(default_headers or {})
+        self._tool_call_name_by_id: dict[str, str] = {}
+        self._tool_call_name_lock = threading.RLock()
         self.config = {
             "api_key": self.api_key,
             "base_url": self.base_url,
         }
-        self._tool_name_by_id: dict[str, str] = {}
-        self._tool_name_lock = threading.Lock()
         self._client = client
         self._owns_client = owns_client or client is None
         self._client_closed = False
@@ -103,35 +103,54 @@ class GeminiAdapter:
                 client_kwargs["timeout"] = self.timeout
             self._client = httpx.AsyncClient(**client_kwargs)
 
+    def _tool_name_for_id(self, tool_call_id: str) -> str | None:
+        with self._tool_call_name_lock:
+            return self._tool_call_name_by_id.get(tool_call_id)
+
+    def _remember_tool_call_name(self, tool_call_id: str | None, name: str | None) -> None:
+        if tool_call_id is None or name is None:
+            return
+
+        with self._tool_call_name_lock:
+            existing_name = self._tool_call_name_by_id.get(tool_call_id)
+            if existing_name is None:
+                self._tool_call_name_by_id[tool_call_id] = name
+                return
+            if existing_name != name:
+                logger.debug(
+                    "Ignoring conflicting Gemini tool_call name for %s: %r != %r",
+                    tool_call_id,
+                    existing_name,
+                    name,
+                )
+
+    def _remember_response_tool_calls(self, response: Response | None) -> None:
+        if response is None:
+            return
+
+        for tool_call in response.tool_calls:
+            self._remember_tool_call_name(
+                getattr(tool_call, "id", None),
+                getattr(tool_call, "name", None),
+            )
+
+    def _remember_stream_event_tool_calls(self, event: StreamEvent) -> None:
+        self._remember_response_tool_calls(event.response)
+        if event.tool_call is not None:
+            self._remember_tool_call_name(
+                getattr(event.tool_call, "id", None),
+                getattr(event.tool_call, "name", None),
+            )
+
     def _client_or_error(self) -> httpx.AsyncClient | Any:
         if self._client_closed or self._client is None:
             raise ConfigurationError("Gemini HTTP client is not available")
         return self._client
 
-    def _lookup_tool_name(self, tool_call_id: str) -> str | None:
-        with self._tool_name_lock:
-            return self._tool_name_by_id.get(tool_call_id)
-
-    def _remember_tool_calls(self, response: Response) -> None:
-        with self._tool_name_lock:
-            for tool_call in response.tool_calls:
-                existing_name = self._tool_name_by_id.get(tool_call.id)
-                if existing_name is None or existing_name == tool_call.name:
-                    self._tool_name_by_id[tool_call.id] = tool_call.name
-                    continue
-
-                logger.warning(
-                    "Gemini tool call id %s is already associated with %s; "
-                    "ignoring conflicting name %s",
-                    tool_call.id,
-                    existing_name,
-                    tool_call.name,
-                )
-
     def _request_kwargs(self, request: Any) -> dict[str, Any]:
         body = build_gemini_generate_content_request(
             request,
-            tool_name_lookup=self._lookup_tool_name,
+            tool_name_lookup=self._tool_name_for_id,
         )
         kwargs: dict[str, Any] = {
             "headers": httpx.Headers(self.default_headers),
@@ -171,7 +190,7 @@ class GeminiAdapter:
             headers=response.headers,
             raw=payload,
         )
-        self._remember_tool_calls(normalized)
+        self._remember_response_tool_calls(normalized)
         return normalized
 
     def stream(self, request: Any) -> AsyncIterator[StreamEvent]:
@@ -201,14 +220,7 @@ class GeminiAdapter:
                         response,
                         provider=self.name,
                     ):
-                        if event.type in (
-                            StreamEventType.FINISH,
-                            StreamEventType.ERROR,
-                        ) and event.response is not None:
-                            # Remember streamed tool calls before the terminal event
-                            # is yielded so consumers that stop on FINISH can still
-                            # resolve later continuations.
-                            self._remember_tool_calls(event.response)
+                        self._remember_stream_event_tool_calls(event)
                         yield event
                         if event.type in (
                             StreamEventType.FINISH,

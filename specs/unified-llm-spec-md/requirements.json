@@ -769,7 +769,7 @@
         "tests/adapters/test_anthropic_adapter.py",
         "tests/adapters/test_gemini_adapter.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M7",
       "notes": "Use mocked provider payloads for deterministic parity tests; live API parity belongs in optional integration tests."
     },
@@ -814,7 +814,7 @@
         "tests/",
         "pyproject.toml"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M7",
       "notes": "Repository AGENTS.md requires uv run pytest and full uv run pytest -q before reporting completion of code changes."
     }

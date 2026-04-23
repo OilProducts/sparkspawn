@@ -999,9 +999,7 @@ def test_gemini_adapter_reports_supported_tool_choice_modes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gemini_adapter_uses_adapter_lifetime_tool_name_lookup_for_continuations() -> (
-    None
-):
+async def test_gemini_adapter_uses_adapter_state_for_provider_tool_call_ids() -> None:
     first_response_body = {
         "responseId": "resp_tool_call",
         "modelVersion": "gemini-3.1-pro-preview",
@@ -1012,6 +1010,7 @@ async def test_gemini_adapter_uses_adapter_lifetime_tool_name_lookup_for_continu
                     "parts": [
                         {
                             "functionCall": {
+                                "id": "provider-call-weather-123",
                                 "name": "lookup_weather",
                                 "args": {
                                     "city": "Paris",
@@ -1053,15 +1052,15 @@ async def test_gemini_adapter_uses_adapter_lifetime_tool_name_lookup_for_continu
 
     first_response = await adapter.complete(first_request)
     assert len(first_response.tool_calls) == 1
-    synthetic_tool_call_id = first_response.tool_calls[0].id
+    provider_tool_call_id = first_response.tool_calls[0].id
     assert first_response.tool_calls[0].name == "lookup_weather"
-    assert synthetic_tool_call_id.startswith("gemini_call_lookup_weather_")
+    assert provider_tool_call_id == "provider-call-weather-123"
 
     second_request = unified_llm.Request(
         model="gemini-3.1-pro-preview",
         messages=[
             unified_llm.Message.tool_result(
-                synthetic_tool_call_id,
+                provider_tool_call_id,
                 "72F and sunny",
             )
         ],
@@ -1072,6 +1071,67 @@ async def test_gemini_adapter_uses_adapter_lifetime_tool_name_lookup_for_continu
     assert len(captured_requests) == 2
     second_body = _request_json(captured_requests[1])
     assert second_body == {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "functionResponse": {
+                            "id": provider_tool_call_id,
+                            "name": "lookup_weather",
+                            "response": {
+                                "result": "72F and sunny",
+                            },
+                        }
+                    }
+                ],
+            }
+        ]
+    }
+    assert second_response.text == "done"
+
+
+@pytest.mark.asyncio
+async def test_gemini_adapter_translates_synthetic_tool_call_ids_without_cached_state(
+) -> None:
+    captured_requests, transport = _make_complete_transport(
+        {
+            "responseId": "resp_tool_result",
+            "modelVersion": "gemini-3.1-pro-preview",
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "text": "done",
+                            }
+                        ],
+                    }
+                }
+            ],
+        }
+    )
+    adapter = unified_llm.GeminiAdapter(
+        api_key="translate-key",
+        transport=transport,
+    )
+    synthetic_tool_call_id = "gemini_call_lookup_weather_0123456789abcdef0123456789abcdef"
+    request = unified_llm.Request(
+        model="gemini-3.1-pro-preview",
+        messages=[
+            unified_llm.Message.tool_result(
+                synthetic_tool_call_id,
+                "72F and sunny",
+            )
+        ],
+    )
+
+    response = await adapter.complete(request)
+
+    assert len(captured_requests) == 1
+    body = _request_json(captured_requests[0])
+    assert body == {
         "contents": [
             {
                 "role": "user",
@@ -1089,7 +1149,7 @@ async def test_gemini_adapter_uses_adapter_lifetime_tool_name_lookup_for_continu
             }
         ]
     }
-    assert second_response.text == "done"
+    assert response.text == "done"
 
 
 @pytest.mark.asyncio
