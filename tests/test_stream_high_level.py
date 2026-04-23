@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import logging
 from contextlib import suppress
 
+import httpx
 import pytest
 
 import unified_llm
@@ -112,6 +114,29 @@ def _tool_call_event(
     )
 
 
+def _sse_event(event: str, payload: dict[str, object]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, separators=(',', ':'), sort_keys=True)}\n\n"
+
+
+def _make_anthropic_stream_transport(
+    payload: str,
+    *,
+    headers: dict[str, str] | None = None,
+    status_code: int = 200,
+) -> tuple[list[httpx.Request], httpx.MockTransport]:
+    captured_requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured_requests.append(request)
+        return httpx.Response(
+            status_code,
+            headers={"content-type": "text/event-stream", **dict(headers or {})},
+            content=payload.encode("utf-8"),
+        )
+
+    return captured_requests, httpx.MockTransport(handler)
+
+
 @pytest.mark.asyncio
 async def test_stream_exposes_partial_response_and_response_after_completion(
     capsys: pytest.CaptureFixture[str],
@@ -157,6 +182,178 @@ async def test_stream_exposes_partial_response_and_response_after_completion(
     assert response.finish_reason.reason == "stop"
     assert stream.partial_response.text == "Hello"
     assert adapter.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_response_preserves_anthropic_thinking_metadata(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = "".join(
+        [
+            _sse_event(
+                "message_start",
+                {
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_stream_metadata",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "claude-sonnet-4-5",
+                        "content": [],
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {
+                            "input_tokens": 3,
+                            "output_tokens": 0,
+                        },
+                    },
+                },
+            ),
+            _sse_event(
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {
+                        "type": "thinking",
+                        "thinking": "reasoning ",
+                        "signature": "sig-123",
+                    },
+                },
+            ),
+            _sse_event(
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "thinking_delta",
+                        "thinking": "thou",
+                    },
+                },
+            ),
+            _sse_event(
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "signature_delta",
+                        "signature": "sig-123",
+                    },
+                },
+            ),
+            _sse_event(
+                "content_block_stop",
+                {
+                    "type": "content_block_stop",
+                    "index": 0,
+                },
+            ),
+            _sse_event(
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": 1,
+                    "content_block": {
+                        "type": "redacted_thinking",
+                        "data": "opaque-123",
+                    },
+                },
+            ),
+            _sse_event(
+                "content_block_stop",
+                {
+                    "type": "content_block_stop",
+                    "index": 1,
+                },
+            ),
+            _sse_event(
+                "message_delta",
+                {
+                    "type": "message_delta",
+                    "delta": {
+                        "stop_reason": "end_turn",
+                    },
+                    "usage": {
+                        "output_tokens": 5,
+                        "cache_read_input_tokens": 2,
+                        "cache_creation_input_tokens": 1,
+                    },
+                },
+            ),
+            _sse_event(
+                "message_stop",
+                {
+                    "type": "message_stop",
+                },
+            ),
+        ]
+    )
+    captured_requests, transport = _make_anthropic_stream_transport(
+        payload,
+        headers={
+            "anthropic-ratelimit-requests-remaining": "4",
+        },
+    )
+    adapter = unified_llm.AnthropicAdapter(
+        api_key="stream-key",
+        transport=transport,
+    )
+    client = unified_llm.Client(
+        providers={"anthropic": adapter},
+        default_provider="anthropic",
+    )
+    stream = unified_llm.stream(
+        model="claude-sonnet-4-5",
+        prompt="hello",
+        client=client,
+    )
+
+    response = await stream.response()
+    await stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert len(captured_requests) == 1
+    assert captured_requests[0].method == "POST"
+    assert captured_requests[0].url.path == "/v1/messages"
+    assert response.provider == "anthropic"
+    assert response.model == "claude-sonnet-4-5"
+    assert response.finish_reason.reason == "stop"
+    assert response.text == ""
+    assert response.reasoning == "reasoning thouopaque-123"
+    assert response.usage.input_tokens == 3
+    assert response.usage.output_tokens == 5
+    assert response.usage.total_tokens == 8
+    assert response.usage.cache_read_tokens == 2
+    assert response.usage.cache_write_tokens == 1
+    assert response.rate_limit == unified_llm.RateLimitInfo(
+        requests_remaining=4,
+        requests_limit=None,
+        tokens_remaining=None,
+        tokens_limit=None,
+        reset_at=None,
+    )
+    assert isinstance(response.raw, list)
+    assert response.raw[-1] == {"type": "message_stop"}
+    assert [part.kind for part in response.message.content] == [
+        unified_llm.ContentKind.THINKING,
+        unified_llm.ContentKind.REDACTED_THINKING,
+    ]
+    assert response.message.content[0].thinking is not None
+    assert response.message.content[0].thinking.signature == "sig-123"
+    assert response.message.content[0].thinking.redacted is False
+    assert response.message.content[1].thinking is not None
+    assert response.message.content[1].thinking.redacted is True
+    assert response.message.content[1].thinking.text == "opaque-123"
+    assert stream.partial_response.reasoning == response.reasoning
+    assert stream.partial_response.message.content[0].thinking is not None
+    assert stream.partial_response.message.content[0].thinking.signature == "sig-123"
+    assert stream.partial_response.message.content[1].thinking is not None
+    assert stream.partial_response.message.content[1].thinking.redacted is True
 
 
 @pytest.mark.asyncio

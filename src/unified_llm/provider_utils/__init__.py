@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from .anthropic import (
+    build_anthropic_messages_request,
+    build_anthropic_messages_url,
+    normalize_anthropic_base_url,
+    normalize_anthropic_response,
+    normalize_anthropic_stream_events,
+)
 from .errors import (
     classify_provider_error_message,
     normalize_provider_error,
@@ -46,9 +53,14 @@ from .openai_compatible import (
 from .sse import SSEEvent, aiter_sse_events, iter_sse_events, parse_sse, parse_sse_events
 
 __all__ = [
+    "build_anthropic_messages_request",
+    "build_anthropic_messages_url",
     "classify_provider_error_message",
     "extract_provider_options",
     "is_local_media_path",
+    "normalize_anthropic_base_url",
+    "normalize_anthropic_response",
+    "normalize_anthropic_stream_events",
     "normalize_audio_input",
     "normalize_document_input",
     "normalize_finish_reason",

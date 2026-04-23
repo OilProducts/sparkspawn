@@ -686,7 +686,7 @@
         "src/unified_llm/adapters/anthropic.py",
         "tests/adapters/test_anthropic_adapter.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M5",
       "notes": "Prompt-caching behavior is critical for the spec and should have focused tests around cache_control injection and opt-out."
     },

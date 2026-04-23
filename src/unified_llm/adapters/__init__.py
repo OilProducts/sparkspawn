@@ -43,15 +43,17 @@ class _AdapterPlaceholder:
         return False
 
 
-class AnthropicAdapter(_AdapterPlaceholder):
-    name = "anthropic"
-
-
 class GeminiAdapter(_AdapterPlaceholder):
     name = "gemini"
 
 
 def __getattr__(name: str) -> Any:
+    if name == "AnthropicAdapter":
+        from .anthropic import AnthropicAdapter as _AnthropicAdapter
+
+        globals()["AnthropicAdapter"] = _AnthropicAdapter
+        return _AnthropicAdapter
+
     if name == "OpenAIAdapter":
         from .openai import OpenAIAdapter as _OpenAIAdapter
 

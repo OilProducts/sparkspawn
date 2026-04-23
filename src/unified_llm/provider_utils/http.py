@@ -152,48 +152,49 @@ def parse_retry_after(headers_or_value: Any) -> float | None:
 retry_after_from_headers = parse_retry_after
 
 
-def _coerce_int_header(headers: Any, header_name: str) -> int | None:
-    value = _coerce_header_value(headers, header_name)
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if value.is_integer():
-            return int(value)
-        return None
-    if isinstance(value, (bytes, bytearray)):
-        try:
-            value = bytes(value).decode("utf-8")
-        except UnicodeDecodeError:
-            logger.debug("Unable to decode rate-limit header as UTF-8", exc_info=True)
-            value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        try:
-            return int(text)
-        except ValueError:
+def _coerce_int_header(headers: Any, *header_names: str) -> int | None:
+    for header_name in header_names:
+        value = _coerce_header_value(headers, header_name)
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            if value.is_integer():
+                return int(value)
+            continue
+        if isinstance(value, (bytes, bytearray)):
             try:
-                number = float(text)
+                value = bytes(value).decode("utf-8")
+            except UnicodeDecodeError:
+                logger.debug("Unable to decode rate-limit header as UTF-8", exc_info=True)
+                value = bytes(value).decode("utf-8", errors="replace")
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                continue
+            try:
+                return int(text)
             except ValueError:
-                logger.debug(
-                    "Unable to parse integer rate-limit header %s=%r",
-                    header_name,
-                    value,
-                    exc_info=True,
-                )
-                return None
-            if number.is_integer():
-                return int(number)
-    logger.debug(
-        "Unexpected rate-limit header type for %s: %s",
-        header_name,
-        type(value).__name__,
-    )
+                try:
+                    number = float(text)
+                except ValueError:
+                    logger.debug(
+                        "Unable to parse integer rate-limit header %s=%r",
+                        header_name,
+                        value,
+                        exc_info=True,
+                    )
+                    continue
+                if number.is_integer():
+                    return int(number)
+        logger.debug(
+            "Unexpected rate-limit header type for %s: %s",
+            header_name,
+            type(value).__name__,
+        )
     return None
 
 
@@ -226,16 +227,31 @@ def normalize_rate_limit(headers: Any | None) -> RateLimitInfo | None:
         requests_remaining=_coerce_int_header(
             headers,
             "x-ratelimit-remaining-requests",
+            "anthropic-ratelimit-requests-remaining",
         ),
-        requests_limit=_coerce_int_header(headers, "x-ratelimit-limit-requests"),
-        tokens_remaining=_coerce_int_header(headers, "x-ratelimit-remaining-tokens"),
-        tokens_limit=_coerce_int_header(headers, "x-ratelimit-limit-tokens"),
+        requests_limit=_coerce_int_header(
+            headers,
+            "x-ratelimit-limit-requests",
+            "anthropic-ratelimit-requests-limit",
+        ),
+        tokens_remaining=_coerce_int_header(
+            headers,
+            "x-ratelimit-remaining-tokens",
+            "anthropic-ratelimit-tokens-remaining",
+        ),
+        tokens_limit=_coerce_int_header(
+            headers,
+            "x-ratelimit-limit-tokens",
+            "anthropic-ratelimit-tokens-limit",
+        ),
         reset_at=_coerce_reset_value(
             headers,
             "x-ratelimit-reset",
             "x-ratelimit-reset-requests",
             "x-ratelimit-reset-tokens",
             "ratelimit-reset",
+            "anthropic-ratelimit-requests-reset",
+            "anthropic-ratelimit-tokens-reset",
         ),
     )
 

@@ -178,6 +178,26 @@ def test_rate_limit_and_retry_after_helpers_parse_headers() -> None:
     assert provider_utils.parse_retry_after(headers) == 12.5
     assert provider_utils.parse_retry_after("7") == 7.0
 
+    anthropic_headers = {
+        "anthropic-ratelimit-requests-remaining": "9",
+        "anthropic-ratelimit-requests-limit": "10",
+        "anthropic-ratelimit-tokens-remaining": "100",
+        "anthropic-ratelimit-tokens-limit": "200",
+        "anthropic-ratelimit-requests-reset": "2026-04-21T00:00:00Z",
+        "Retry-After": "12.5",
+    }
+
+    anthropic_rate_limit = provider_utils.normalize_rate_limit(anthropic_headers)
+
+    assert anthropic_rate_limit == unified_llm.RateLimitInfo(
+        requests_remaining=9,
+        requests_limit=10,
+        tokens_remaining=100,
+        tokens_limit=200,
+        reset_at="2026-04-21T00:00:00Z",
+    )
+    assert provider_utils.parse_retry_after(anthropic_headers) == 12.5
+
 
 def test_normalize_provider_error_preserves_raw_error_body_and_retry_metadata() -> None:
     raw_body = b'{"error": {"message": "slow down", "code": "rate_limit"}}'

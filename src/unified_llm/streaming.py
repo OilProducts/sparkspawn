@@ -505,6 +505,17 @@ class StreamAccumulator:
 
         return parts
 
+    def _final_response_and_parts(self) -> tuple[Response, list[ContentPart]]:
+        terminal_event = self._terminal_event
+        if terminal_event is not None and terminal_event.response is not None:
+            terminal_response = terminal_event.response
+            terminal_parts = list(terminal_response.message.content)
+            if terminal_parts:
+                return terminal_response, terminal_parts
+            return terminal_response, self._snapshot_content_parts()
+
+        return self._template_response, self._snapshot_content_parts()
+
     def _resolved_raw(self) -> Any:
         if self._template_response.raw is not None:
             return self._template_response.raw
@@ -515,14 +526,14 @@ class StreamAccumulator:
         return list(self._raw_payloads)
 
     def _build_response(self) -> Response:
-        parts = self._snapshot_content_parts()
+        response, parts = self._final_response_and_parts()
         message = replace(
-            self._template_response.message,
+            response.message,
             role=Role.ASSISTANT,
-            content=parts if parts else list(self._template_response.message.content),
+            content=parts if parts else list(response.message.content),
         )
         return replace(
-            self._template_response,
+            response,
             message=message,
             finish_reason=self.finish_reason,
             usage=self.usage,

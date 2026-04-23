@@ -185,6 +185,9 @@ async def test_generate_object_builds_provider_strategy_metadata_and_returns_out
         "schema-instruction"
     )
     assert request.provider_options["anthropic"]["structured_output"]["fallback"] == "forced-tool"
+    assert request.provider_options["anthropic"]["system_instruction"] == (
+        "Return only valid JSON that matches the provided schema."
+    )
 
 
 @pytest.mark.asyncio
