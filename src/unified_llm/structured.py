@@ -39,53 +39,6 @@ class _StructuredOutputPlan:
     provider_options: dict[str, Any]
 
 
-def _is_placeholder_call(
-    *,
-    model: str | None,
-    prompt: str | None,
-    messages: Any,
-    system: str | None,
-    tools: Any,
-    tool_choice: Any,
-    schema: Mapping[str, Any] | None,
-    max_tool_rounds: int,
-    stop_when: Any,
-    temperature: Any,
-    top_p: Any,
-    max_tokens: Any,
-    stop_sequences: Any,
-    reasoning_effort: Any,
-    provider: str | None,
-    provider_options: Any,
-    max_retries: int,
-    timeout: Any,
-    abort_signal: Any,
-    client: Any,
-) -> bool:
-    return (
-        model is None
-        and prompt is None
-        and messages is None
-        and system is None
-        and tools is None
-        and tool_choice is None
-        and schema is None
-        and max_tool_rounds == 1
-        and stop_when is None
-        and temperature is None
-        and top_p is None
-        and max_tokens is None
-        and stop_sequences is None
-        and reasoning_effort is None
-        and provider is None
-        and provider_options is None
-        and max_retries == 2
-        and timeout is None
-        and abort_signal is None
-        and client is None
-    )
-
-
 def _coerce_schema(schema: Mapping[str, Any] | None) -> dict[str, Any]:
     if schema is None:
         raise TypeError("schema must be provided")
@@ -639,31 +592,6 @@ async def generate_object(
     repair_tool_call: Any = None,
     client: Any = None,
 ) -> GenerateResult:
-    if _is_placeholder_call(
-        model=model,
-        prompt=prompt,
-        messages=messages,
-        system=system,
-        tools=tools,
-        tool_choice=tool_choice,
-        schema=schema,
-        max_tool_rounds=max_tool_rounds,
-        stop_when=stop_when,
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        stop_sequences=stop_sequences,
-        reasoning_effort=reasoning_effort,
-        provider=provider,
-        provider_options=provider_options,
-        max_retries=max_retries,
-        timeout=timeout,
-        abort_signal=abort_signal,
-        client=client,
-    ):
-        logger.debug("generate_object placeholder invoked")
-        raise NotImplementedError("generate_object is not implemented in the M1 scaffold")
-
     plan = _build_structured_output_plan(schema, provider_options=provider_options)
     result = await generate(
         model,
@@ -721,31 +649,6 @@ def stream_object(
     repair_tool_call: Any = None,
     client: Any = None,
 ) -> StreamResult:
-    if _is_placeholder_call(
-        model=model,
-        prompt=prompt,
-        messages=messages,
-        system=system,
-        tools=tools,
-        tool_choice=tool_choice,
-        schema=schema,
-        max_tool_rounds=max_tool_rounds,
-        stop_when=stop_when,
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        stop_sequences=stop_sequences,
-        reasoning_effort=reasoning_effort,
-        provider=provider,
-        provider_options=provider_options,
-        max_retries=max_retries,
-        timeout=timeout,
-        abort_signal=abort_signal,
-        client=client,
-    ):
-        logger.debug("stream_object placeholder invoked")
-        return StreamResult(args=(), kwargs={})
-
     plan = _build_structured_output_plan(schema, provider_options=provider_options)
     raw_stream = stream(
         model,

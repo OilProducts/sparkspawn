@@ -163,11 +163,8 @@ class Client:
         return resolved_provider, prepared_request, adapter
 
     async def complete(self, request: Request | None = None) -> Response:
-        if request is None:
-            logger.debug("Client.complete placeholder invoked")
-            raise NotImplementedError("Client.complete is not implemented in the M1 scaffold")
-        if not isinstance(request, Request):
-            raise TypeError("request must be a Request or None")
+        if request is None or not isinstance(request, Request):
+            raise TypeError("request must be a Request")
 
         _, prepared_request, adapter = self._prepare_request(request)
         return await complete_with_middleware(
@@ -179,11 +176,8 @@ class Client:
     def stream(self, request: Request | None = None) -> AsyncIterator[StreamEvent]:
         from .streaming import StreamEventIterator
 
-        if request is None:
-            logger.debug("Client.stream placeholder invoked")
-            return StreamEventIterator(client=self, args=(), kwargs={})
-        if not isinstance(request, Request):
-            raise TypeError("request must be a Request or None")
+        if request is None or not isinstance(request, Request):
+            raise TypeError("request must be a Request")
 
         resolved_provider, prepared_request, adapter = self._prepare_request(request)
         source = stream_with_middleware(

@@ -566,10 +566,7 @@ class StreamEventIterator(_PlaceholderRecord, AsyncIterator[StreamEvent]):
             raise StopAsyncIteration
 
         if self._source is None:
-            logger.debug("StreamEventIterator placeholder iterated")
-            raise NotImplementedError(
-                "StreamEventIterator is not implemented in the M1 scaffold"
-            )
+            raise TypeError("StreamEventIterator requires a source")
 
         if self._iterator is None:
             self._iterator = self._source.__aiter__()

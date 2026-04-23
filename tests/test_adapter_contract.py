@@ -8,7 +8,6 @@ import re
 import subprocess
 import sys
 from collections.abc import AsyncIterable
-from pathlib import Path
 
 import pytest
 
@@ -19,18 +18,16 @@ def _requirement_name(requirement: str) -> str:
     return re.split(r"[ (<>=;]", requirement, maxsplit=1)[0]
 
 
-def test_distribution_metadata_reflects_the_uv_scaffold_contract() -> None:
+def test_distribution_metadata_reflects_package_metadata() -> None:
     dist = metadata.distribution("unified_llm")
-    package_path = Path(unified_llm.__file__).resolve()
     requirement_names = {_requirement_name(requirement) for requirement in dist.requires or []}
 
     assert dist.metadata["Name"] == "unified_llm"
-    assert package_path.parent.name == "unified_llm"
-    assert package_path.parent.parent.name == "src"
+    assert dist.metadata["Description-Content-Type"] == "text/markdown"
     assert {"httpx", "jsonschema"} <= requirement_names
 
 
-def test_root_import_surface_exposes_async_first_placeholders() -> None:
+def test_root_import_surface_exposes_async_first_public_surface() -> None:
     expected_names = {
         "AnthropicAdapter",
         "AudioData",
@@ -100,30 +97,60 @@ def test_catalog_helpers_are_import_safe_and_advisory() -> None:
     assert unified_llm.get_latest_model("missing-provider") is None
 
 
-def test_stream_placeholders_are_async_iterables() -> None:
-    client = unified_llm.Client()
-    stream = unified_llm.stream()
-    client_stream = client.stream()
-    structured_stream = unified_llm.stream_object()
-    adapter_stream = unified_llm.OpenAIAdapter().stream(object())
+@pytest.mark.asyncio
+async def test_client_complete_requires_a_request() -> None:
+    with pytest.raises(TypeError, match="request must be a Request"):
+        await unified_llm.Client().complete()
 
-    assert isinstance(stream, AsyncIterable)
-    assert isinstance(client_stream, AsyncIterable)
-    assert isinstance(structured_stream, AsyncIterable)
-    assert isinstance(adapter_stream, AsyncIterable)
-    assert isinstance(stream, unified_llm.StreamResult)
-    assert isinstance(structured_stream, unified_llm.StreamResult)
-    assert not isinstance(client_stream, unified_llm.StreamResult)
-    assert not isinstance(adapter_stream, unified_llm.StreamResult)
+
+def test_client_stream_requires_a_request() -> None:
+    with pytest.raises(TypeError, match="request must be a Request"):
+        unified_llm.Client().stream()
+
+
+def test_stream_requires_prompt_or_messages() -> None:
+    with pytest.raises(ValueError, match="either prompt or messages"):
+        unified_llm.stream()
 
 
 @pytest.mark.asyncio
-async def test_awaitable_placeholders_raise_when_used() -> None:
-    with pytest.raises(NotImplementedError):
+async def test_generate_object_requires_a_schema() -> None:
+    with pytest.raises(TypeError, match="schema must be provided"):
         await unified_llm.generate_object()
 
-    with pytest.raises(NotImplementedError):
-        await unified_llm.Client().complete()
+
+def test_stream_object_requires_a_schema() -> None:
+    with pytest.raises(TypeError, match="schema must be provided"):
+        unified_llm.stream_object()
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_surfaces_configuration_and_stream_errors_through_real_interfaces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    adapter = unified_llm.OpenAIAdapter()
+    request = unified_llm.Request(
+        model="gpt-5.2",
+        messages=[unified_llm.Message.user("hello")],
+    )
+
+    with pytest.raises(
+        unified_llm.ConfigurationError,
+        match="OpenAI API key is required",
+    ):
+        await adapter.complete(request)
+
+    stream = adapter.stream(request)
+
+    assert isinstance(stream, AsyncIterable)
+
+    with pytest.raises(
+        unified_llm.ConfigurationError,
+        match="OpenAI API key is required",
+    ):
+        await stream.__anext__()
 
 
 def test_default_client_round_trip() -> None:
@@ -188,9 +215,13 @@ def test_client_does_not_accumulate_per_request_state() -> None:
         providers={"fake": unified_llm.OpenAIAdapter()},
         default_provider="fake",
     )
+    request = unified_llm.Request(
+        model="gpt-5.2",
+        messages=[unified_llm.Message.user("hello")],
+    )
     snapshot = dict(client.__dict__)
 
-    stream = client.stream()
+    stream = client.stream(request)
     assert dict(client.__dict__) == snapshot
     assert isinstance(stream, AsyncIterable)
 
@@ -311,7 +342,7 @@ def test_adapter_protocol_imports_do_not_pull_high_level_apis() -> None:
     assert "unified_llm.tools" not in loaded_modules
 
 
-def test_catalog_and_placeholder_apis_log_through_module_loggers_without_printing(
+def test_catalog_and_configuration_apis_log_through_module_loggers_without_printing(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -322,7 +353,6 @@ def test_catalog_and_placeholder_apis_log_through_module_loggers_without_printin
             "gpt-5.2-mini",
             "gpt-5.2-codex",
         ]
-        assert unified_llm.stream()
         unified_llm.Client.from_env()
 
     captured = capsys.readouterr()
@@ -330,4 +360,4 @@ def test_catalog_and_placeholder_apis_log_through_module_loggers_without_printin
 
     assert captured.out == ""
     assert captured.err == ""
-    assert {"unified_llm.models", "unified_llm.generation", "unified_llm.client"} <= logger_names
+    assert {"unified_llm.models", "unified_llm.client"} <= logger_names

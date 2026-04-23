@@ -431,8 +431,7 @@ class StreamResult(_PlaceholderRecord):
 
     async def __anext__(self) -> StreamEvent:
         if self._config is None:
-            logger.debug("StreamResult placeholder iterated")
-            raise NotImplementedError("StreamResult is not implemented in the M1 scaffold")
+            raise TypeError("StreamResult requires a stream config")
 
         if self._closed or self._finished:
             raise StopAsyncIteration
@@ -467,8 +466,7 @@ class StreamResult(_PlaceholderRecord):
 
     async def response(self) -> Response | Any:
         if self._config is None:
-            logger.debug("StreamResult.response placeholder invoked")
-            raise NotImplementedError("StreamResult.response is not implemented in the M1 scaffold")
+            raise TypeError("StreamResult requires a stream config")
 
         if self._terminal_error is not None:
             raise self._terminal_error
@@ -498,8 +496,7 @@ class StreamResult(_PlaceholderRecord):
     async def _stream_events(self) -> AsyncIterator[StreamEvent]:
         config = self._config
         if config is None:
-            logger.debug("StreamResult placeholder iterated")
-            raise NotImplementedError("StreamResult is not implemented in the M1 scaffold")
+            raise TypeError("StreamResult requires a stream config")
 
         conversation = list(config.conversation)
         steps: list[StepResult] = []
@@ -940,31 +937,6 @@ def stream(
     repair_tool_call: Callable[..., Any] | None = None,
     client: Client | None = None,
 ) -> StreamResult:
-    if (
-        model is None
-        and prompt is None
-        and messages is None
-        and system is None
-        and tools is None
-        and tool_choice is None
-        and max_tool_rounds == 1
-        and stop_when is None
-        and response_format is None
-        and temperature is None
-        and top_p is None
-        and max_tokens is None
-        and stop_sequences is None
-        and reasoning_effort is None
-        and provider is None
-        and provider_options is None
-        and max_retries == 2
-        and timeout is None
-        and abort_signal is None
-        and client is None
-    ):
-        logger.debug("stream placeholder invoked")
-        return StreamResult(args=(), kwargs={})
-
     config = _prepare_generation_config(
         model,
         prompt=prompt,
