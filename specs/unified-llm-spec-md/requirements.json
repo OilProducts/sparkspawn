@@ -817,6 +817,49 @@
       "status": "completed",
       "milestone_id": "M7",
       "notes": "Repository AGENTS.md requires uv run pytest and full uv run pytest -q before reporting completion of code changes."
+    },
+    {
+      "id": "REQ-024",
+      "spec_refs": [
+        ".spark/spec-implementation/current/spec/source.md:116",
+        ".spark/spec-implementation/current/spec/source.md:193",
+        ".spark/spec-implementation/current/spec/source.md:281",
+        ".spark/spec-implementation/current/spec/source.md:320",
+        ".spark/spec-implementation/current/spec/source.md:846",
+        ".spark/spec-implementation/current/spec/source.md:929",
+        ".spark/spec-implementation/current/spec/source.md:961",
+        ".spark/spec-implementation/current/spec/source.md:2111"
+      ],
+      "title": "High-level omitted-model defaulting",
+      "summary": "Repair high-level model selection so supported calls that omit model use the latest catalog model for the explicitly requested provider or the selected client's default_provider.",
+      "acceptance_criteria": [
+        "generate, stream, generate_object, and stream_object accept an omitted or None model when a provider is explicitly provided.",
+        "generate, stream, generate_object, and stream_object accept an omitted or None model when no provider is provided but the selected client has default_provider set.",
+        "When model is omitted and the provider can be resolved, the high-level API calls get_latest_model(provider).id and sends that provider-native model string in every Request passed to Client.complete or Client.stream.",
+        "Explicit model arguments continue to pass through unchanged and are not replaced by catalog values.",
+        "Provider resolution remains explicit: high-level APIs use only the provider argument or selected client default_provider and do not infer providers from model strings.",
+        "If model is omitted and no provider can be resolved, ConfigurationError is raised.",
+        "If model is omitted and get_latest_model(provider) returns None for the resolved provider, ConfigurationError is raised with an actionable message.",
+        "Observable tests cover omitted-model defaulting for generate, stream, generate_object, and stream_object, including explicit-provider and default-provider paths."
+      ],
+      "dependencies": [
+        "REQ-006",
+        "REQ-008",
+        "REQ-012",
+        "REQ-013",
+        "REQ-014"
+      ],
+      "target_paths": [
+        "src/unified_llm/generation.py",
+        "src/unified_llm/structured.py",
+        "src/unified_llm/models.py",
+        "tests/test_generate.py",
+        "tests/test_stream_high_level.py",
+        "tests/test_structured.py"
+      ],
+      "status": "completed",
+      "milestone_id": "M3",
+      "notes": "Post-M7 M3 remediation completed: supported high-level omitted-model calls default through get_latest_model(provider).id for explicit providers and selected client default_provider values."
     }
   ]
 }

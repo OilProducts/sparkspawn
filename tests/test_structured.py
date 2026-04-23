@@ -165,6 +165,7 @@ async def test_generate_object_builds_provider_strategy_metadata_and_returns_out
     assert len(adapter.complete_requests) == 1
 
     request = adapter.complete_requests[0]
+    assert request.model == "gpt-5.2"
     assert request.provider == "openai"
     assert request.response_format == unified_llm.ResponseFormat(
         type="json_schema",
@@ -188,6 +189,64 @@ async def test_generate_object_builds_provider_strategy_metadata_and_returns_out
     assert request.provider_options["anthropic"]["system_instruction"] == (
         "Return only valid JSON that matches the provided schema."
     )
+
+
+@pytest.mark.asyncio
+async def test_generate_object_defaults_omitted_model_from_provider_and_client_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    schema = _structured_schema()
+    explicit_adapter = _SequencedCompleteAdapter(
+        "openai",
+        [
+            lambda request: _text_response(
+                provider="openai",
+                request=request,
+                text='{"name":"Alice","age":30}',
+            )
+        ],
+    )
+    explicit_client = unified_llm.Client(
+        providers={"openai": explicit_adapter},
+        default_provider=None,
+    )
+    default_adapter = _SequencedCompleteAdapter(
+        "gemini",
+        [
+            lambda request: _text_response(
+                provider="gemini",
+                request=request,
+                text='{"name":"Bob","age":31}',
+            )
+        ],
+    )
+    default_client = unified_llm.Client(
+        providers={"gemini": default_adapter},
+        default_provider="gemini",
+    )
+
+    explicit_result = await unified_llm.generate_object(
+        prompt="extract the object",
+        schema=schema,
+        provider="openai",
+        client=explicit_client,
+    )
+    default_result = await unified_llm.generate_object(
+        prompt="extract the object",
+        schema=schema,
+        client=default_client,
+    )
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert explicit_result.output == {"name": "Alice", "age": 30}
+    assert default_result.output == {"name": "Bob", "age": 31}
+    assert explicit_adapter.complete_requests[0].model == "gpt-5.2"
+    assert explicit_adapter.complete_requests[0].provider == "openai"
+    assert default_adapter.complete_requests[0].model == "gemini-3.1-pro-preview"
+    assert default_adapter.complete_requests[0].provider == "gemini"
 
 
 @pytest.mark.asyncio
@@ -283,6 +342,7 @@ async def test_stream_object_yields_partial_objects_and_returns_final_response(
     assert len(adapter.stream_requests) == 1
 
     request = adapter.stream_requests[0]
+    assert request.model == "gpt-5.2"
     assert request.response_format == unified_llm.ResponseFormat(
         type="json_schema",
         json_schema=schema,
@@ -294,6 +354,53 @@ async def test_stream_object_yields_partial_objects_and_returns_final_response(
 
     await stream.close()
     assert adapter.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_object_defaults_omitted_model_from_provider_and_client_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    schema = _structured_schema()
+    explicit_adapter = _SequencedStreamAdapter(
+        "openai",
+        [[_text_delta('{"name":"Alice","age":30}')]],
+    )
+    explicit_client = unified_llm.Client(
+        providers={"openai": explicit_adapter},
+        default_provider=None,
+    )
+    default_adapter = _SequencedStreamAdapter(
+        "anthropic",
+        [[_text_delta('{"name":"Bob","age":31}')]],
+    )
+    default_client = unified_llm.Client(
+        providers={"anthropic": default_adapter},
+        default_provider="anthropic",
+    )
+
+    explicit_stream = unified_llm.stream_object(
+        prompt="extract the object",
+        schema=schema,
+        provider="openai",
+        client=explicit_client,
+    )
+    default_stream = unified_llm.stream_object(
+        prompt="extract the object",
+        schema=schema,
+        client=default_client,
+    )
+
+    assert await explicit_stream.object() == {"name": "Alice", "age": 30}
+    assert await default_stream.object() == {"name": "Bob", "age": 31}
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert explicit_adapter.stream_requests[0].model == "gpt-5.2"
+    assert explicit_adapter.stream_requests[0].provider == "openai"
+    assert default_adapter.stream_requests[0].model == "claude-opus-4-6"
+    assert default_adapter.stream_requests[0].provider == "anthropic"
 
 
 @pytest.mark.asyncio

@@ -503,6 +503,31 @@ async def test_client_stream_can_be_closed_and_logs_close_failures(
 
 
 @pytest.mark.asyncio
+async def test_client_stream_can_be_closed_before_iteration_without_invoking_adapter(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _ClosingStreamAdapter()
+    client = unified_llm.Client(providers={"fake": adapter}, default_provider="fake")
+    request = unified_llm.Request(
+        model="gpt-5.2",
+        messages=[unified_llm.Message.user("hello")],
+    )
+
+    stream = client.stream(request)
+    await stream.close()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert adapter.stream_requests == []
+    assert adapter.last_stream is None
+
+    with pytest.raises(StopAsyncIteration):
+        await stream.__anext__()
+
+
+@pytest.mark.asyncio
 async def test_client_complete_raises_configuration_error_when_no_provider_can_be_resolved(
 ) -> None:
     openai = _RecordingAdapter("openai")

@@ -2,7 +2,7 @@
 
 ## Source of Truth
 
-This architecture implements `.spark/spec-implementation/current/spec/source.md` and the requirement ledger in `.spark/spec-implementation/current/spec/requirements.json`. The current repository is a spec-only workspace, so the implementation will create the package, tests, and project configuration from scratch while preserving the committed spec package under `specs/unified-llm-spec-md/`.
+This architecture implements `.spark/spec-implementation/current/spec/source.md` and the requirement ledger in `.spark/spec-implementation/current/spec/requirements.json`. The current repository is a post-M7 implementation with package code, tests, and spec ledgers already present. This run is a remediation pass for `REQ-024`, which belongs to the already-completed M3 high-level generation, streaming, retry, tools, and structured-output scope. It must not introduce a new M8 milestone.
 
 ## Canonical Repository Topology
 
@@ -30,10 +30,14 @@ src/
     models.py
     provider_utils/
       __init__.py
+      anthropic.py
       errors.py
+      gemini.py
       http.py
       media.py
       normalization.py
+      openai.py
+      openai_compatible.py
       sse.py
     retry.py
     streaming.py
@@ -124,6 +128,8 @@ No synchronous duplicate layer is required for this run. Sync wrappers may be ad
 
 Provider names are normalized to lowercase strings: `openai`, `anthropic`, `gemini`, and `openai_compatible`. Model identifiers are never rewritten and are never used to infer providers. A request resolves only through its explicit `provider` or the client's configured default provider.
 
+High-level operations (`generate`, `stream`, `generate_object`, and `stream_object`) accept `model=None` or an omitted model only after a provider can be resolved from the call's explicit `provider` argument or the selected client's `default_provider`. In that supported omitted-model path, the high-level API calls `get_latest_model(provider).id` and places that provider-native string in every `Request` sent to `Client.complete` or `Client.stream`. Explicit model arguments remain pass-through values and are never replaced by catalog data.
+
 ## Data Model and Validation Rules
 
 The shared model uses dataclasses and `str, Enum` values where enum behavior is needed while still allowing provider-specific string extensions. Constructors validate observable invariants:
@@ -172,6 +178,8 @@ Low-level `Client.complete` and `Client.stream` route to adapters and apply midd
 
 High-level `generate` standardizes prompt/messages input, prepends system messages, applies per-call retries, executes active tools, aggregates usage, and returns detailed steps. Tool loops execute multiple tool calls concurrently, wait for all results, preserve result order, and append one assistant tool-call message plus all tool-result messages before the next LLM call. Tool handler exceptions and unknown tool calls become error `ToolResult` values so the model can recover.
 
+High-level model selection is resolved once during generation configuration. If the caller omits `model`, the implementation first selects the `Client` object, then resolves a provider from the explicit high-level `provider` argument or that client's `default_provider`, and then asks the advisory model catalog for `get_latest_model(provider)`. If no provider can be resolved or the catalog has no latest entry for that provider, generation raises `ConfigurationError` before constructing a provider request. This preserves explicit provider routing while satisfying the spec's latest-model defaulting rule.
+
 High-level `stream` returns a `StreamResult` that is async iterable, exposes `text_stream`, tracks `partial_response`, and returns the final accumulated response after completion. When active tools create multiple model steps, the stream emits the spec extension event type string `step_finish` between steps.
 
 `StreamAccumulator` reconstructs a `Response` from start/delta/end stream events and is shared by provider streaming tests and high-level stream results.
@@ -189,6 +197,8 @@ uv run ruff check .
 
 Tests are behavior-first and avoid assertions against source, prompt, documentation, or spec strings. Coverage is organized by public API behavior, fake adapters, mocked HTTP transports, synthetic provider payloads, filesystem effects for local media preparation, stream event sequences, state transitions, and logging/error outcomes.
 
+REQ-024 remediation tests must cover observable `Request.model` values seen by fake clients or fake adapters for `generate`, `stream`, `generate_object`, and `stream_object`. Each high-level API needs both explicit-provider and default-provider omitted-model coverage, explicit model pass-through coverage, and failure coverage for unresolved provider or absent latest catalog entry.
+
 Provider adapter tests do not require live API keys. They validate outbound native payloads, headers, error translation, streaming normalization, and response normalization with mocked transports.
 
 Optional live smoke tests are marked and skipped unless the matching provider API keys are present. They follow the spec's Definition of Done scenarios for generation, streaming, tools, image input, structured output, errors, reasoning usage, caching usage, and provider option pass-through.
@@ -199,7 +209,7 @@ Failure triage should use:
 uv run pytest -q -x --maxfail=1 <path-or-nodeid>
 ```
 
-Before reporting completion of any code change, run the full deterministic suite with `uv run pytest -q`.
+Before reporting completion of any code change, run the full deterministic suite with `uv run pytest -q` and lint with `uv run ruff check .`.
 
 ## Repository Hygiene Expectations
 
@@ -216,7 +226,7 @@ Milestone M1 creates the package foundation: `REQ-001` scaffold, `REQ-002` messa
 
 Milestone M2 builds reusable infrastructure on M1: `REQ-005` adapter protocol, `REQ-006` client/default client routing, `REQ-007` middleware, `REQ-008` model catalog, `REQ-009` provider utilities, and `REQ-010` SSE/stream accumulation.
 
-Milestone M3 builds high-level behavior. Implement `REQ-015` tools, `REQ-016` tool loop, and `REQ-017` retry before finalizing `REQ-012` generate and `REQ-013` high-level stream. `REQ-011` low-level operations can land after M2 and before high-level orchestration. `REQ-014` structured output depends on `REQ-012`.
+Milestone M3 builds high-level behavior. Implement `REQ-015` tools, `REQ-016` tool loop, and `REQ-017` retry before finalizing `REQ-012` generate and `REQ-013` high-level stream. `REQ-011` low-level operations can land after M2 and before high-level orchestration. `REQ-014` structured output depends on `REQ-012`. `REQ-024` is a post-M7 audit remediation of this same M3 surface: omitted high-level model values must default through `get_latest_model(provider).id` when the provider is explicit or available from the selected client's default provider.
 
 Milestone M4 implements OpenAI: `REQ-018` native Responses adapter, then `REQ-019` OpenAI-compatible Chat Completions adapter.
 

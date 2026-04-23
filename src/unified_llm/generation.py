@@ -10,7 +10,8 @@ from typing import Any
 
 from .client import Client
 from .defaults import get_default_client
-from .errors import AbortError
+from .errors import AbortError, ConfigurationError
+from .models import get_latest_model
 from .retry import RetryPolicy
 from .retry import retry as retry_operation
 from .streaming import StreamAccumulator
@@ -122,6 +123,36 @@ def _sum_usage(values: Iterable[Usage]) -> Usage:
     return total
 
 
+def _resolve_generation_model(
+    model: str | None,
+    *,
+    provider: str | None,
+    client: Client,
+) -> str:
+    if model is not None:
+        if not isinstance(model, str):
+            raise TypeError("model must be a string or None")
+        return model
+
+    if provider is not None and not isinstance(provider, str):
+        raise TypeError("provider must be a string or None")
+
+    resolved_provider = provider if provider is not None else client.default_provider
+    if resolved_provider is None:
+        raise ConfigurationError(
+            "No provider configured for omitted model; pass provider, "
+            "set Client.default_provider, or pass model explicitly"
+        )
+
+    latest_model = get_latest_model(resolved_provider)
+    if latest_model is None:
+        raise ConfigurationError(
+            f"No latest model configured for provider {resolved_provider!r}; "
+            "pass model explicitly"
+        )
+    return latest_model.id
+
+
 @dataclass(slots=True)
 class _GenerationConfig:
     client: Client
@@ -138,7 +169,7 @@ class _GenerationConfig:
 
 
 def _prepare_generation_config(
-    model: str,
+    model: str | None = None,
     *,
     prompt: str | None = None,
     messages: Iterable[Message] | None = None,
@@ -161,8 +192,6 @@ def _prepare_generation_config(
     repair_tool_call: Callable[..., Any] | None = None,
     client: Client | None = None,
 ) -> _GenerationConfig:
-    if not isinstance(model, str):
-        raise TypeError("model must be a string")
     if prompt is not None and not isinstance(prompt, str):
         raise TypeError("prompt must be a string or None")
     if system is not None and not isinstance(system, str):
@@ -209,10 +238,15 @@ def _prepare_generation_config(
 
     check_abort(abort_signal)
     resolved_client = client if client is not None else get_default_client()
+    resolved_model = _resolve_generation_model(
+        model,
+        provider=provider,
+        client=resolved_client,
+    )
     total_deadline = deadline_after(timeout_config.total) if timeout_config is not None else None
 
     base_request = Request(
-        model=model,
+        model=resolved_model,
         messages=list(conversation),
         provider=provider,
         tools=tools_list,
@@ -759,7 +793,7 @@ def _has_passive_tool_call(
 
 
 async def generate(
-    model: str,
+    model: str | None = None,
     *,
     prompt: str | None = None,
     messages: Iterable[Message] | None = None,

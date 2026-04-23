@@ -223,6 +223,92 @@ async def test_generate_uses_default_and_explicit_clients(
 
 
 @pytest.mark.asyncio
+async def test_generate_defaults_omitted_model_from_provider_and_client_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    explicit_adapter = _SequencedCompleteAdapter(
+        "openai",
+        [lambda request: _text_response(provider="openai", request=request, text="explicit")],
+    )
+    explicit_client = unified_llm.Client(
+        providers={"openai": explicit_adapter},
+        default_provider=None,
+    )
+    default_adapter = _SequencedCompleteAdapter(
+        "anthropic",
+        [lambda request: _text_response(provider="anthropic", request=request, text="default")],
+    )
+    default_client = unified_llm.Client(
+        providers={"anthropic": default_adapter},
+        default_provider="anthropic",
+    )
+    pass_through_adapter = _SequencedCompleteAdapter(
+        "openai",
+        [lambda request: _text_response(provider="openai", request=request, text="custom")],
+    )
+    pass_through_client = unified_llm.Client(
+        providers={"openai": pass_through_adapter},
+        default_provider="openai",
+    )
+
+    explicit_result = await unified_llm.generate(
+        prompt="hello",
+        provider="openai",
+        client=explicit_client,
+    )
+    default_result = await unified_llm.generate(
+        prompt="hello",
+        client=default_client,
+    )
+    pass_through_result = await unified_llm.generate(
+        model="custom-model",
+        prompt="hello",
+        provider="openai",
+        client=pass_through_client,
+    )
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert explicit_result.text == "explicit"
+    assert default_result.text == "default"
+    assert pass_through_result.text == "custom"
+    assert explicit_adapter.complete_requests[0].model == "gpt-5.2"
+    assert explicit_adapter.complete_requests[0].provider == "openai"
+    assert default_adapter.complete_requests[0].model == "claude-opus-4-6"
+    assert default_adapter.complete_requests[0].provider == "anthropic"
+    assert pass_through_adapter.complete_requests[0].model == "custom-model"
+
+
+@pytest.mark.asyncio
+async def test_generate_omitted_model_requires_resolvable_provider_and_latest_catalog_model(
+) -> None:
+    unresolved_adapter = _SequencedCompleteAdapter("openai", [])
+    unresolved_client = unified_llm.Client(
+        providers={"openai": unresolved_adapter},
+        default_provider=None,
+    )
+    missing_adapter = _SequencedCompleteAdapter("fake", [])
+    missing_client = unified_llm.Client(
+        providers={"fake": missing_adapter},
+        default_provider="fake",
+    )
+
+    with pytest.raises(unified_llm.ConfigurationError, match="No provider configured"):
+        await unified_llm.generate(prompt="hello", client=unresolved_client)
+
+    with pytest.raises(
+        unified_llm.ConfigurationError,
+        match="No latest model configured for provider 'fake'",
+    ):
+        await unified_llm.generate(prompt="hello", client=missing_client)
+
+    assert unresolved_adapter.complete_requests == []
+    assert missing_adapter.complete_requests == []
+
+
+@pytest.mark.asyncio
 async def test_generate_tool_loop_concurrency_and_usage(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -64,21 +64,22 @@
     {
       "id": "CD-004",
       "title": "Explicit provider routing and advisory catalog",
-      "summary": "Provider resolution is explicit/default-provider based only; the model catalog is advisory and never restricts native model strings.",
-      "requirement_ids": ["REQ-006", "REQ-008"],
+      "summary": "Provider resolution is explicit/default-provider based only; the model catalog is advisory, never restricts native model strings, and supplies defaults only when high-level model selection omits a model.",
+      "requirement_ids": ["REQ-006", "REQ-008", "REQ-024"],
       "spec_refs": [
         ".spark/spec-implementation/current/spec/source.md:96",
         ".spark/spec-implementation/current/spec/source.md:114",
         ".spark/spec-implementation/current/spec/source.md:254",
+        ".spark/spec-implementation/current/spec/source.md:281",
         ".spark/spec-implementation/current/spec/source.md:330"
       ],
       "architecture_refs": [
         "architecture.md#documented-public-interface",
         "architecture.md#requirement-dependencies-and-milestone-flow"
       ],
-      "behavioral_contract": "Requests route to request.provider when set, otherwise to default_provider. The client never infers providers from model names or rewrites model strings. Unknown catalog models remain valid request model strings.",
-      "implementation_contract": "Client stores providers in insertion order. Client.from_env registers available providers in deterministic order openai, anthropic, gemini. models.py loads data/models.json for lookup helpers and latest-model selection.",
-      "validation_expectations": "Tests cover explicit provider routing, default provider selection, ConfigurationError when unresolved, model string pass-through, catalog lookup/list/latest behavior, and unknown-model pass-through."
+      "behavioral_contract": "Requests route to request.provider when set, otherwise to default_provider. The client never infers providers from model names or rewrites explicit model strings. Unknown catalog models remain valid explicit request model strings. When a supported high-level API omits model and provider can be resolved explicitly or from the selected client default_provider, the catalog supplies get_latest_model(provider).id.",
+      "implementation_contract": "Client stores providers in insertion order. Client.from_env registers available providers in deterministic order openai, anthropic, gemini. models.py loads data/models.json for lookup helpers and latest-model selection. generation.py resolves omitted high-level model values before constructing Request instances; low-level Client methods do not apply catalog defaults.",
+      "validation_expectations": "Tests cover explicit provider routing, default provider selection, ConfigurationError when unresolved, explicit model string pass-through, catalog lookup/list/latest behavior, unknown explicit model pass-through, and omitted high-level model defaulting through explicit-provider and default-provider paths."
     },
     {
       "id": "CD-005",
@@ -313,6 +314,30 @@
       "behavioral_contract": "uv run pytest -q runs deterministic tests only. Live provider smoke tests run only when explicitly selected and the required provider API keys are present.",
       "implementation_contract": "Use pytest markers for live tests and skip them by default. Mock HTTP for adapter tests, use fake adapters for core/high-level behavior, and test media filesystem behavior with temporary files.",
       "validation_expectations": "The default suite passes without API keys. Optional live tests document required env vars and cover the Definition of Done scenarios when selected."
+    },
+    {
+      "id": "CD-017",
+      "title": "Omitted high-level model defaults through latest catalog model",
+      "summary": "Treat omitted or None model values in high-level generation and structured-output APIs as a supported selection path only when the provider is explicit or available from the selected client's default_provider.",
+      "requirement_ids": ["REQ-006", "REQ-008", "REQ-012", "REQ-013", "REQ-014", "REQ-024"],
+      "spec_refs": [
+        ".spark/spec-implementation/current/spec/source.md:116",
+        ".spark/spec-implementation/current/spec/source.md:193",
+        ".spark/spec-implementation/current/spec/source.md:281",
+        ".spark/spec-implementation/current/spec/source.md:320",
+        ".spark/spec-implementation/current/spec/source.md:846",
+        ".spark/spec-implementation/current/spec/source.md:929",
+        ".spark/spec-implementation/current/spec/source.md:961",
+        ".spark/spec-implementation/current/spec/source.md:2111"
+      ],
+      "architecture_refs": [
+        "architecture.md#documented-public-interface",
+        "architecture.md#generation-streaming-tools-and-structured-output",
+        "architecture.md#requirement-dependencies-and-milestone-flow"
+      ],
+      "behavioral_contract": "generate, stream, generate_object, and stream_object accept omitted or None model values when provider is supplied or when the selected client has default_provider set. In that case they send get_latest_model(provider).id as Request.model. Explicit model values pass through unchanged. Provider resolution remains explicit/default-provider based and never uses model-name inference.",
+      "implementation_contract": "Centralize omitted-model resolution in the high-level generation configuration path used by generate and stream, and route structured APIs through that same path. Resolve the selected client before model defaulting, use provider argument before client.default_provider, raise ConfigurationError when no provider is resolvable, and raise ConfigurationError when the advisory catalog has no latest model for the resolved provider.",
+      "validation_expectations": "Observable tests inspect Requests received by fake clients or adapters for generate, stream, generate_object, and stream_object. The suite must cover explicit-provider defaulting, selected-client default-provider defaulting, explicit model pass-through, unresolved-provider errors, and missing-latest-model errors without asserting on source or spec text."
     }
   ]
 }

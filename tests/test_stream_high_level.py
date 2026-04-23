@@ -181,7 +181,68 @@ async def test_stream_exposes_partial_response_and_response_after_completion(
     assert response.text == "Hello"
     assert response.finish_reason.reason == "stop"
     assert stream.partial_response.text == "Hello"
+    assert adapter.stream_requests[0].model == "gpt-5.2"
     assert adapter.opened_streams[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_defaults_omitted_model_from_provider_and_client_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    explicit_adapter = _SequencedStreamAdapter(
+        "openai",
+        [[_text_delta("explicit")]],
+    )
+    explicit_client = unified_llm.Client(
+        providers={"openai": explicit_adapter},
+        default_provider=None,
+    )
+    default_adapter = _SequencedStreamAdapter(
+        "gemini",
+        [[_text_delta("default")]],
+    )
+    default_client = unified_llm.Client(
+        providers={"gemini": default_adapter},
+        default_provider="gemini",
+    )
+    pass_through_adapter = _SequencedStreamAdapter(
+        "openai",
+        [[_text_delta("custom")]],
+    )
+    pass_through_client = unified_llm.Client(
+        providers={"openai": pass_through_adapter},
+        default_provider="openai",
+    )
+
+    explicit_stream = unified_llm.stream(
+        prompt="hello",
+        provider="openai",
+        client=explicit_client,
+    )
+    default_stream = unified_llm.stream(
+        prompt="hello",
+        client=default_client,
+    )
+    pass_through_stream = unified_llm.stream(
+        model="custom-model",
+        prompt="hello",
+        provider="openai",
+        client=pass_through_client,
+    )
+
+    assert (await explicit_stream.response()).text == "explicit"
+    assert (await default_stream.response()).text == "default"
+    assert (await pass_through_stream.response()).text == "custom"
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert explicit_adapter.stream_requests[0].model == "gpt-5.2"
+    assert explicit_adapter.stream_requests[0].provider == "openai"
+    assert default_adapter.stream_requests[0].model == "gemini-3.1-pro-preview"
+    assert default_adapter.stream_requests[0].provider == "gemini"
+    assert pass_through_adapter.stream_requests[0].model == "custom-model"
 
 
 @pytest.mark.asyncio
