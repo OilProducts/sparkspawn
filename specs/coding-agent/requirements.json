@@ -667,7 +667,7 @@
         "tests/agent/test_live_smoke.py",
         "tests/agent/"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M6",
       "notes": "Live tests should be opt-in and must not make the default uv run pytest -q depend on network access or API keys."
     }
