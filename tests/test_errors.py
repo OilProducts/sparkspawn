@@ -230,6 +230,20 @@ def test_http_status_code_translation_matches_the_spec(
             None,
         ),
         (
+            429,
+            {
+                "error": {
+                    "message": "slow down",
+                    "status": "RESOURCE_EXHAUSTED",
+                    "code": 429,
+                }
+            },
+            unified_llm.RateLimitError,
+            True,
+            "slow down",
+            "RESOURCE_EXHAUSTED",
+        ),
+        (
             None,
             {"error": {"message": "provider failure"}},
             unified_llm.ProviderError,
@@ -260,6 +274,29 @@ def test_http_status_code_translation_uses_raw_message_classification(
     assert error.retryable is expected_retryable
     assert error.raw == raw
     assert error.error_code == expected_code
+
+
+def test_http_status_code_translation_prefers_grpc_codes_for_ambiguous_http_status() -> None:
+    raw = {
+        "error": {
+            "message": "slow down",
+            "status": "RESOURCE_EXHAUSTED",
+        }
+    }
+
+    error = unified_llm.error_from_status_code(
+        400,
+        provider="gemini",
+        raw=raw,
+    )
+
+    assert isinstance(error, unified_llm.RateLimitError)
+    assert error.message == "slow down"
+    assert error.status_code == 400
+    assert error.provider == "gemini"
+    assert error.retryable is True
+    assert error.raw == raw
+    assert error.error_code == "RESOURCE_EXHAUSTED"
 
 
 @pytest.mark.parametrize(

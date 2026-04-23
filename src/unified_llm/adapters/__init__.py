@@ -1,4 +1,4 @@
-"""Placeholder provider adapters for the unified_llm package."""
+"""Provider adapters for the unified_llm package."""
 
 # ruff: noqa: F401
 
@@ -43,10 +43,6 @@ class _AdapterPlaceholder:
         return False
 
 
-class GeminiAdapter(_AdapterPlaceholder):
-    name = "gemini"
-
-
 def __getattr__(name: str) -> Any:
     if name == "AnthropicAdapter":
         from .anthropic import AnthropicAdapter as _AnthropicAdapter
@@ -65,6 +61,12 @@ def __getattr__(name: str) -> Any:
 
         globals()["OpenAICompatibleAdapter"] = _OpenAICompatibleAdapter
         return _OpenAICompatibleAdapter
+
+    if name == "GeminiAdapter":
+        from .gemini import GeminiAdapter as _GeminiAdapter
+
+        globals()["GeminiAdapter"] = _GeminiAdapter
+        return _GeminiAdapter
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

@@ -147,6 +147,53 @@ def test_stream_accumulator_builds_response_from_text_reasoning_tool_calls_and_f
     assert finish_event.response.text == "Hello world"
 
 
+def test_stream_accumulator_preserves_duplicate_identical_tool_calls() -> None:
+    accumulator = StreamAccumulator()
+
+    for call_id in ("call_123", "call_456"):
+        tool_call = unified_llm.ToolCall(
+            id=call_id,
+            name="lookup_weather",
+            arguments={"city": "Paris"},
+            raw_arguments='{"city":"Paris"}',
+            type="function",
+        )
+        accumulator.add(
+            unified_llm.StreamEvent(
+                type=unified_llm.StreamEventType.TOOL_CALL_START,
+                tool_call=tool_call,
+            )
+        )
+        accumulator.add(
+            unified_llm.StreamEvent(
+                type=unified_llm.StreamEventType.TOOL_CALL_END,
+                tool_call=tool_call,
+            )
+        )
+
+    accumulator.add(
+        unified_llm.StreamEvent(
+            type=unified_llm.StreamEventType.FINISH,
+            finish_reason=unified_llm.FinishReason(
+                reason=unified_llm.FinishReason.TOOL_CALLS,
+                raw="tool_calls",
+            ),
+        )
+    )
+
+    response = accumulator.response
+
+    assert response.finish_reason.reason == "tool_calls"
+    assert [tool_call.id for tool_call in response.tool_calls] == [
+        "call_123",
+        "call_456",
+    ]
+    assert [tool_call.name for tool_call in response.tool_calls] == [
+        "lookup_weather",
+        "lookup_weather",
+    ]
+
+
 def test_stream_accumulator_records_error_state_without_losing_partial_response() -> None:
     accumulator = StreamAccumulator()
     accumulator.add(

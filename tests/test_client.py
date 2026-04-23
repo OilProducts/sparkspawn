@@ -195,7 +195,7 @@ def test_client_from_env_registers_env_providers_in_order_and_passes_optional_co
     }
     assert client.providers["gemini"].config == {
         "api_key": "gemini-google-key",
-        "base_url": "https://gemini.example/v1",
+        "base_url": "https://gemini.example/v1beta",
     }
 
 

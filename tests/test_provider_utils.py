@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,44 @@ def test_extract_provider_options_returns_only_the_selected_provider_copy() -> N
     }
     assert provider_utils.extract_provider_options(request, "missing") == {}
     assert provider_utils.extract_provider_options(None, "openai") == {}
+
+
+@pytest.mark.parametrize(
+    ("provider_options", "selected_provider", "expected_error", "expected_log"),
+    [
+        (
+            ["not", "a", "mapping"],
+            "openai",
+            "provider_options must be a mapping or None",
+            "Unexpected request provider_options type: list",
+        ),
+        (
+            {"openai": ["not", "a", "mapping"]},
+            "openai",
+            "selected provider options must be a mapping or None",
+            "Unexpected provider options type for openai: list",
+        ),
+    ],
+)
+def test_extract_provider_options_rejects_invalid_shapes_and_logs(
+    caplog: pytest.LogCaptureFixture,
+    provider_options: object,
+    selected_provider: str,
+    expected_error: str,
+    expected_log: str,
+) -> None:
+    request = unified_llm.Request(
+        model="gpt-5.2",
+        messages=[unified_llm.Message.user("hello")],
+        provider_options={"openai": {"reasoning": {"effort": "high"}}},
+    )
+    request.provider_options = provider_options
+
+    with caplog.at_level(logging.DEBUG, logger="unified_llm.provider_utils.http"):
+        with pytest.raises(TypeError, match=expected_error):
+            provider_utils.extract_provider_options(request, selected_provider)
+
+    assert any(expected_log in record.message for record in caplog.records)
 
 
 @pytest.mark.parametrize(

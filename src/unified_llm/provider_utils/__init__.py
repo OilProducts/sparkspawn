@@ -13,6 +13,14 @@ from .errors import (
     provider_error_from_response,
     provider_error_from_status_code,
 )
+from .gemini import (
+    build_gemini_generate_content_request,
+    build_gemini_generate_content_url,
+    build_gemini_stream_generate_content_url,
+    normalize_gemini_base_url,
+    normalize_gemini_response,
+    normalize_gemini_stream_events,
+)
 from .http import (
     extract_provider_options,
     normalize_rate_limit,
@@ -55,6 +63,10 @@ from .sse import SSEEvent, aiter_sse_events, iter_sse_events, parse_sse, parse_s
 __all__ = [
     "build_anthropic_messages_request",
     "build_anthropic_messages_url",
+    "build_gemini_generate_content_request",
+    "build_gemini_generate_content_url",
+    "build_gemini_stream_generate_content_url",
+    "build_openai_compatible_chat_completions_url",
     "classify_provider_error_message",
     "extract_provider_options",
     "is_local_media_path",
@@ -73,7 +85,9 @@ __all__ = [
     "normalize_usage",
     "normalize_warning_payload",
     "normalize_warnings",
-    "build_openai_compatible_chat_completions_url",
+    "normalize_gemini_base_url",
+    "normalize_gemini_response",
+    "normalize_gemini_stream_events",
     "normalize_openai_compatible_base_url",
     "normalize_openai_compatible_response",
     "parse_retry_after",

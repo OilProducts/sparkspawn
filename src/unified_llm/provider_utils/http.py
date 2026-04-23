@@ -24,6 +24,10 @@ def _provider_options_source(
     if provider_options is None:
         return None
     if not isinstance(provider_options, Mapping):
+        logger.debug(
+            "Unexpected request provider_options type: %s",
+            type(provider_options).__name__,
+        )
         raise TypeError("provider_options must be a mapping or None")
     return provider_options
 

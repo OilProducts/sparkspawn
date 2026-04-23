@@ -731,7 +731,7 @@
         "src/unified_llm/adapters/gemini.py",
         "tests/adapters/test_gemini_adapter.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M6",
       "notes": "Synthetic tool-call ID mapping must persist across request translation for the relevant conversation turn."
     },

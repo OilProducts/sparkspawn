@@ -176,11 +176,56 @@ def _coerce_text(value: Any, *, field_name: str) -> str | None:
     return None
 
 
+def _coerce_error_code(value: Any, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            text = bytes(value).decode("utf-8")
+        except UnicodeDecodeError:
+            logger.debug(
+                "Unable to decode %s from provider error body as UTF-8",
+                field_name,
+                exc_info=True,
+            )
+            text = bytes(value).decode("utf-8", errors="replace")
+        text = text.strip()
+        return text or None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+    logger.debug(
+        "Unexpected %s type in provider error body: %s",
+        field_name,
+        type(value).__name__,
+    )
+    return None
+
+
 def _first_text_value(mapping: Mapping[str, Any], field_names: tuple[str, ...]) -> str | None:
     for field_name in field_names:
         if field_name not in mapping:
             continue
         value = _coerce_text(mapping[field_name], field_name=field_name)
+        if value is not None:
+            return value
+    return None
+
+
+def _first_error_code_value(
+    mapping: Mapping[str, Any],
+    field_names: tuple[str, ...],
+) -> str | None:
+    for field_name in field_names:
+        if field_name not in mapping:
+            continue
+        value = _coerce_error_code(mapping[field_name], field_name=field_name)
         if value is not None:
             return value
     return None
@@ -210,7 +255,10 @@ def _extract_error_details_from_mapping(
 
     if isinstance(nested_error, Mapping):
         message = _first_text_value(nested_error, ("message", "detail", "description"))
-        error_code = _first_text_value(nested_error, ("code", "type", "error_code"))
+        error_code = _first_error_code_value(
+            nested_error,
+            ("status", "code", "type", "error_code"),
+        )
     elif isinstance(nested_error, str):
         message = _coerce_text(nested_error, field_name="error")
     elif nested_error is not None:
@@ -225,7 +273,10 @@ def _extract_error_details_from_mapping(
             ("message", "detail", "description", "error_description"),
         )
     if error_code is None:
-        error_code = _first_text_value(mapping, ("error_code", "code", "type"))
+        error_code = _first_error_code_value(
+            mapping,
+            ("status", "error_code", "code", "type"),
+        )
 
     return message, error_code
 
@@ -394,12 +445,29 @@ def error_from_status_code(
     cause: BaseException | None = None,
 ) -> ProviderError:
     resolved_message, resolved_error_code = _resolve_error_details(raw, message, error_code)
+    normalized_status_code = _coerce_status_code(status_code)
+
+    if resolved_error_code is not None:
+        grpc_error = error_from_grpc_code(
+            resolved_error_code,
+            message=resolved_message,
+            provider=provider,
+            error_code=resolved_error_code,
+            retry_after=retry_after,
+            raw=raw,
+            cause=cause,
+        )
+        if grpc_error.__class__ is not ProviderError:
+            # Some providers return gRPC-style bodies inside ambiguous HTTP statuses.
+            # Prefer the gRPC classification, but keep the transport status on the error.
+            grpc_error.status_code = normalized_status_code
+            return grpc_error
+
     error_type, overrideable = _classify_http_status_code(status_code)
     message_error_type = classify_provider_error_message(resolved_message, resolved_error_code)
     if message_error_type is not None and overrideable:
         error_type = message_error_type
 
-    normalized_status_code = _coerce_status_code(status_code)
     message_text = (
         resolved_message
         or resolved_error_code
