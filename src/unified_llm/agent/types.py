@@ -146,17 +146,22 @@ class AssistantTurn(_TurnContentMixin):
     response_id: str | None = None
     finish_reason: FinishReason | str | None = None
     raw: Any | None = None
+    warnings: list[Any] = field(default_factory=list)
+    error: BaseException | None = None
     timestamp: datetime = field(default_factory=_utcnow)
 
     def __post_init__(self) -> None:
         self.content = _normalize_turn_content(self.content)
         self.tool_calls = list(self.tool_calls)
+        self.warnings = list(self.warnings or [])
         if self.finish_reason is not None and not isinstance(self.finish_reason, FinishReason):
             self.finish_reason = FinishReason(self.finish_reason)
         if self.reasoning is not None and not isinstance(self.reasoning, str):
             raise TypeError("reasoning must be a string or None")
         if self.response_id is not None and not isinstance(self.response_id, str):
             raise TypeError("response_id must be a string or None")
+        if self.error is not None and not isinstance(self.error, BaseException):
+            raise TypeError("error must be an exception or None")
 
 
 @dataclass

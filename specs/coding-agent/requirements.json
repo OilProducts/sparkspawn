@@ -132,7 +132,7 @@
         "src/unified_llm/agent/history.py",
         "tests/agent/test_agent_loop.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Use fake LLM clients in deterministic tests; live provider behavior belongs to the smoke-test requirement."
     },
@@ -479,7 +479,7 @@
         "tests/agent/test_prompts.py",
         "tests/agent/test_project_docs.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Prompt tests should assert required structural behavior and included data, not brittle full prompt text."
     },
@@ -518,7 +518,7 @@
         "tests/agent/test_steering.py",
         "tests/agent/test_reasoning_effort.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Provider-specific values beyond the core set, such as xhigh, may be accepted only when represented as an explicit extension."
     },
@@ -552,7 +552,7 @@
         "src/unified_llm/agent/session.py",
         "tests/agent/test_loop_detection.py"
       ],
-      "status": "pending",
+      "status": "completed",
       "milestone_id": "M3",
       "notes": "Tests should cover pattern lengths 1, 2, and 3 plus non-repeating near misses."
     },

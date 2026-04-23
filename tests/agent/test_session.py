@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 
+import unified_llm
 import unified_llm.agent as agent
 from unified_llm import (
     Client,
@@ -98,7 +99,71 @@ def test_session_events_is_public_and_queue_backed() -> None:
 
 @pytest.mark.asyncio
 async def test_session_process_input_submit_and_state_helpers_are_public() -> None:
-    session = agent.Session()
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.requests: list[unified_llm.Request] = []
+            self.responses = [
+                unified_llm.Response(
+                    id="resp-1",
+                    model="fake-model",
+                    provider="fake-provider",
+                    message=unified_llm.Message.assistant(
+                        [
+                            unified_llm.ContentPart(
+                                kind=unified_llm.ContentKind.TEXT,
+                                text="Assistant reply",
+                            ),
+                            unified_llm.ContentPart(
+                                kind=unified_llm.ContentKind.THINKING,
+                                thinking=unified_llm.ThinkingData(
+                                    text="Assistant thinking",
+                                ),
+                                text="Assistant thinking",
+                            ),
+                        ]
+                    ),
+                    finish_reason=unified_llm.FinishReason.STOP,
+                    usage=unified_llm.Usage(
+                        input_tokens=3,
+                        output_tokens=5,
+                        total_tokens=8,
+                    ),
+                ),
+                unified_llm.Response(
+                    id="resp-2",
+                    model="fake-model",
+                    provider="fake-provider",
+                    message=unified_llm.Message.assistant(
+                        [
+                            unified_llm.ContentPart(
+                                kind=unified_llm.ContentKind.TEXT,
+                                text="Second reply",
+                            ),
+                            unified_llm.ContentPart(
+                                kind=unified_llm.ContentKind.THINKING,
+                                thinking=unified_llm.ThinkingData(
+                                    text="Second thinking",
+                                ),
+                                text="Second thinking",
+                            ),
+                        ]
+                    ),
+                    finish_reason=unified_llm.FinishReason.STOP,
+                    usage=unified_llm.Usage(
+                        input_tokens=4,
+                        output_tokens=6,
+                        total_tokens=10,
+                    ),
+                ),
+            ]
+
+        async def complete(self, request: unified_llm.Request) -> unified_llm.Response:
+            self.requests.append(request)
+            return self.responses.pop(0)
+
+    client = _FakeClient()
+    profile = agent.ProviderProfile(id="fake-provider", model="fake-model")
+    session = agent.Session(profile=profile, llm_client=client)
     stream = session.events()
 
     start_event = await asyncio.wait_for(anext(stream), timeout=1)
@@ -112,36 +177,86 @@ async def test_session_process_input_submit_and_state_helpers_are_public() -> No
     await session.process_input("Answer one")
     first_user_input = await asyncio.wait_for(anext(stream), timeout=1)
     assert first_user_input.kind == agent.EventKind.USER_INPUT
-    assert first_user_input.data == {"content": "Answer one"}
+    assert first_user_input.data == {
+        "content": "Answer one",
+        "answer_to": "What is the next step?",
+    }
     assert session.pending_question is None
-    assert session.state == agent.SessionState.PROCESSING
-    assert [turn.text for turn in session.history] == ["Answer one"]
-
-    session.mark_natural_completion()
+    assert session.state == agent.SessionState.IDLE
+    first_assistant_start = await asyncio.wait_for(anext(stream), timeout=1)
+    assert first_assistant_start.kind == agent.EventKind.ASSISTANT_TEXT_START
+    assert first_assistant_start.data == {"response_id": "resp-1"}
+    first_assistant_delta = await asyncio.wait_for(anext(stream), timeout=1)
+    assert first_assistant_delta.kind == agent.EventKind.ASSISTANT_TEXT_DELTA
+    assert first_assistant_delta.data == {
+        "response_id": "resp-1",
+        "delta": "Assistant reply",
+    }
+    first_assistant_end = await asyncio.wait_for(anext(stream), timeout=1)
+    assert first_assistant_end.kind == agent.EventKind.ASSISTANT_TEXT_END
+    assert first_assistant_end.data == {
+        "text": "Assistant reply",
+        "reasoning": "Assistant thinking",
+    }
     first_processing_end = await asyncio.wait_for(anext(stream), timeout=1)
     assert first_processing_end.kind == agent.EventKind.PROCESSING_END
     assert first_processing_end.data == {"state": "idle"}
-    assert session.state == agent.SessionState.IDLE
+    assert [turn.text for turn in session.history] == ["Answer one", "Assistant reply"]
+    assert session.history[1].response_id == "resp-1"
+    assert session.history[1].finish_reason.reason == "stop"
+    assert session.history[1].usage == unified_llm.Usage(
+        input_tokens=3,
+        output_tokens=5,
+        total_tokens=8,
+    )
+
+    session.mark_awaiting_input("And then?")
+    assert session.state == agent.SessionState.AWAITING_INPUT
+    assert session.pending_question == "And then?"
 
     await session.submit("Answer two")
     second_user_input = await asyncio.wait_for(anext(stream), timeout=1)
     assert second_user_input.kind == agent.EventKind.USER_INPUT
-    assert second_user_input.data == {"content": "Answer two"}
-    assert [turn.text for turn in session.history] == ["Answer one", "Answer two"]
-    assert session.state == agent.SessionState.PROCESSING
-
-    session.mark_turn_limit(round_count=1, total_turns=2)
-    turn_limit_event = await asyncio.wait_for(anext(stream), timeout=1)
-    assert turn_limit_event.kind == agent.EventKind.TURN_LIMIT
-    assert turn_limit_event.data == {
-        "state": "idle",
-        "round_count": 1,
-        "total_turns": 2,
+    assert second_user_input.data == {
+        "content": "Answer two",
+        "answer_to": "And then?",
+    }
+    assert session.pending_question is None
+    assert session.state == agent.SessionState.IDLE
+    second_assistant_start = await asyncio.wait_for(anext(stream), timeout=1)
+    assert second_assistant_start.kind == agent.EventKind.ASSISTANT_TEXT_START
+    assert second_assistant_start.data == {"response_id": "resp-2"}
+    second_assistant_delta = await asyncio.wait_for(anext(stream), timeout=1)
+    assert second_assistant_delta.kind == agent.EventKind.ASSISTANT_TEXT_DELTA
+    assert second_assistant_delta.data == {
+        "response_id": "resp-2",
+        "delta": "Second reply",
+    }
+    second_assistant_end = await asyncio.wait_for(anext(stream), timeout=1)
+    assert second_assistant_end.kind == agent.EventKind.ASSISTANT_TEXT_END
+    assert second_assistant_end.data == {
+        "text": "Second reply",
+        "reasoning": "Second thinking",
     }
     second_processing_end = await asyncio.wait_for(anext(stream), timeout=1)
     assert second_processing_end.kind == agent.EventKind.PROCESSING_END
     assert second_processing_end.data == {"state": "idle"}
-    assert session.state == agent.SessionState.IDLE
+    assert [turn.text for turn in session.history] == [
+        "Answer one",
+        "Assistant reply",
+        "Answer two",
+        "Second reply",
+    ]
+    assert session.history[3].response_id == "resp-2"
+    assert session.history[3].finish_reason.reason == "stop"
+    assert session.history[3].usage == unified_llm.Usage(
+        input_tokens=4,
+        output_tokens=6,
+        total_tokens=10,
+    )
+    assert len(client.requests) == 2
+    assert client.requests[0].provider == "fake-provider"
+    assert client.requests[1].provider == "fake-provider"
 
 
 @pytest.mark.asyncio

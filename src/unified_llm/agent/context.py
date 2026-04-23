@@ -61,6 +61,9 @@ def check_context_usage(session: _ContextSession) -> bool:
     if not context_window_size or context_window_size <= 0:
         return False
 
+    if getattr(session, "_context_warning_emitted", False):
+        return False
+
     approx_tokens = _estimate_context_tokens(getattr(session, "history", []))
     threshold = context_window_size * 0.8
     if approx_tokens <= threshold:
@@ -72,6 +75,10 @@ def check_context_usage(session: _ContextSession) -> bool:
         session_id=getattr(session, "id", getattr(session, "session_id", None)),
         data={"message": f"Context usage at ~{percent}% of context window"},
     )
+    try:
+        setattr(session, "_context_warning_emitted", True)
+    except (AttributeError, TypeError):
+        pass
     session.emit_event(event)
     return True
 

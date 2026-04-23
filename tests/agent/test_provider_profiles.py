@@ -60,7 +60,20 @@ def test_provider_profile_exposes_fields_capabilities_and_copying_behavior(
     assert profile.supports_streaming is False
     assert profile.supports_parallel_tool_calls is True
     assert profile.context_window_size == 4096
-    assert profile.build_system_prompt(environment, {"AGENTS.md": "docs"}) == ""
+    prompt = profile.build_system_prompt(environment, {"AGENTS.md": "docs"})
+    assert "<provider_base_instructions>" in prompt
+    assert "<environment>" in prompt
+    assert "<tools>" in prompt
+    assert "<project_instructions>" in prompt
+    assert "Provider identity:" in prompt
+    assert "Tool usage:" in prompt
+    assert "Edit guidance:" in prompt
+    assert "Project instruction conventions:" in prompt
+    assert "Coding guidance:" in prompt
+    assert "Working directory:" in prompt
+    assert "Is git repository: false" in prompt
+    assert "AGENTS.md" in prompt
+    assert "docs" in prompt
 
     returned_options = profile.provider_options()
     returned_options["temperature"] = 0.7

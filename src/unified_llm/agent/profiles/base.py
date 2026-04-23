@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..environment import ExecutionEnvironment
+from ..prompts import build_system_prompt as build_layered_system_prompt
 from ..tools import RegisteredTool, ToolDefinition, ToolRegistry
 
 
@@ -29,6 +30,8 @@ class ProviderProfile:
     provider_options_map: dict[str, Any] = field(default_factory=dict)
     context_window_size: int | None = None
     display_name: str | None = None
+    knowledge_cutoff: str | None = None
+    knowledge_cutoff_date: str | None = None
     supports_reasoning: bool = False
     supports_streaming: bool = False
     supports_parallel_tool_calls: bool = False
@@ -48,13 +51,24 @@ class ProviderProfile:
             self.supports_parallel_tool_calls
             or self.capabilities.get("parallel_tool_calls")
         )
+        if self.knowledge_cutoff is not None and not isinstance(self.knowledge_cutoff, str):
+            raise TypeError("knowledge_cutoff must be a string or None")
+        if self.knowledge_cutoff_date is not None and not isinstance(
+            self.knowledge_cutoff_date,
+            str,
+        ):
+            raise TypeError("knowledge_cutoff_date must be a string or None")
+        if self.knowledge_cutoff is None and self.knowledge_cutoff_date is not None:
+            self.knowledge_cutoff = self.knowledge_cutoff_date
+        if self.knowledge_cutoff_date is None and self.knowledge_cutoff is not None:
+            self.knowledge_cutoff_date = self.knowledge_cutoff
 
     def build_system_prompt(
         self,
         environment: ExecutionEnvironment,
         project_docs: Mapping[str, Any] | None = None,
     ) -> str:
-        return ""
+        return build_layered_system_prompt(self, environment, project_docs)
 
     def tools(self) -> list[ToolDefinition]:
         return self.tool_registry.definitions()

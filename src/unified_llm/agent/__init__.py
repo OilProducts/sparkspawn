@@ -11,7 +11,9 @@ from .environment import (
     GrepOptions,
 )
 from .events import EventKind, SessionEvent
+from .history import history_to_messages, turn_to_messages
 from .local_environment import LocalExecutionEnvironment
+from .loop_detection import LOOP_DETECTION_WARNING, ToolCallSignature, detect_loop
 from .session import Session
 from .tool_execution import execute_tool_call, execute_tool_calls
 from .truncation import (
@@ -61,9 +63,12 @@ __all__ = [
     "DEFAULT_TOOL_LINE_LIMITS",
     "DEFAULT_TOOL_OUTPUT_LIMITS",
     "DEFAULT_TRUNCATION_MODES",
+    "LOOP_DETECTION_WARNING",
     "check_context_usage",
     "execute_tool_call",
     "execute_tool_calls",
+    "detect_loop",
+    "history_to_messages",
     "LocalExecutionEnvironment",
     "ProviderProfile",
     "RegisteredTool",
@@ -84,6 +89,8 @@ __all__ = [
     "ToolDefinition",
     "ToolRegistry",
     "ToolResultsTurn",
+    "ToolCallSignature",
+    "turn_to_messages",
     "UserTurn",
     "truncate_lines",
     "truncate_output",
