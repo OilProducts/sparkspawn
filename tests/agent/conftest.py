@@ -63,4 +63,3 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         reason = "missing live smoke credentials: " + ", ".join(missing_credentials)
         for item in live_items:
             item.add_marker(pytest.mark.skip(reason=reason))
-
