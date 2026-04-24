@@ -17,6 +17,16 @@ clean:
   rm -rf dist frontend/dist frontend/node_modules/.tmp
 
 dev-docker:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  spark_home="${SPARK_HOME:-$HOME/.spark-dev}"
+  env_file="${spark_home}/config/provider.env"
+  if [[ -f "${env_file}" ]]; then
+    # shellcheck disable=SC1090
+    set -a
+    source "${env_file}"
+    set +a
+  fi
   docker compose up --build
 
 dev-run: frontend-deps
@@ -26,7 +36,17 @@ dev-run: frontend-deps
   spark_home="${SPARK_HOME:-$HOME/.spark-dev}"
   spark_port="${SPARK_PORT:-8010}"
   backend_url="${VITE_BACKEND_URL:-http://127.0.0.1:${spark_port}}"
-  SPARK_HOME="${spark_home}" uv run spark-server serve --host 127.0.0.1 --port "${spark_port}" --reload &
+  env_file="${spark_home}/config/provider.env"
+  backend() {
+    if [[ -f "${env_file}" ]]; then
+      # shellcheck disable=SC1090
+      set -a
+      source "${env_file}"
+      set +a
+    fi
+    SPARK_HOME="${spark_home}" uv run spark-server serve --host 127.0.0.1 --port "${spark_port}" --reload
+  }
+  backend &
   backend_pid=$!
   VITE_BACKEND_URL="${backend_url}" npm --prefix frontend run dev -- --host 127.0.0.1 &
   frontend_pid=$!

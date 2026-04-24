@@ -325,6 +325,7 @@ def _service_unit_path(env: Mapping[str, str] | None = None) -> Path:
 
 
 def _build_service_unit(*, settings, host: str, port: int) -> str:
+    provider_env_file = settings.config_dir / "provider.env"
     service_environment = [
         _quote_systemd_arg("PYTHONUNBUFFERED=1"),
         _quote_systemd_arg(f"PATH={os.environ.get('PATH', '')}"),
@@ -362,6 +363,7 @@ def _build_service_unit(*, settings, host: str, port: int) -> str:
             "Type=simple",
             "Restart=on-failure",
             "RestartSec=2",
+            f"EnvironmentFile=-{provider_env_file}",
             *(f"Environment={entry}" for entry in service_environment),
             f"ExecStart={exec_start}",
             "",

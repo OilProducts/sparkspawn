@@ -16,8 +16,14 @@ services:
       - ATTRACTOR_HOST_REPO_ROOT=${PWD}
       - ATTRACTOR_CODEX_RUNTIME_ROOT=/codex-runtime
       - OPENAI_API_KEY
-      - OPENAI_ORG
-      - OPENAI_PROJECT
+      - OPENAI_BASE_URL
+      - OPENAI_ORG_ID
+      - OPENAI_PROJECT_ID
+      - ANTHROPIC_API_KEY
+      - ANTHROPIC_BASE_URL
+      - GEMINI_API_KEY
+      - GEMINI_BASE_URL
+      - GOOGLE_API_KEY
     command: uvicorn spark.app:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - .:/app

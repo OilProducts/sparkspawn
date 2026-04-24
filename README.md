@@ -184,6 +184,55 @@ You can also bypass `just` and install the user service directly with an explici
 
 Use `~/.spark/venv/bin/spark-server service status` to inspect it or `~/.spark/venv/bin/spark-server service remove` to stop and unregister it.
 
+### Provider API Keys
+
+Unified provider-backed chat and workflow runs read provider API keys from the Spark server process environment:
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+
+For the Linux user-level systemd service, keep keys outside the project repo and add them through a private environment file under `SPARK_HOME`. For a stable install, that file lives at `~/.spark/config/provider.env`:
+
+```bash
+mkdir -p ~/.spark/config
+chmod 700 ~/.spark/config
+$EDITOR ~/.spark/config/provider.env
+chmod 600 ~/.spark/config/provider.env
+```
+
+Add the key values to `$SPARK_HOME/config/provider.env`:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here
+```
+
+The generated user service now attaches that file automatically with an optional `EnvironmentFile=-$SPARK_HOME/config/provider.env` entry.
+
+If you need an advanced override, you can still attach a drop-in manually:
+
+```bash
+mkdir -p ~/.config/systemd/user/spark.service.d
+$EDITOR ~/.config/systemd/user/spark.service.d/override.conf
+```
+
+Use this override:
+
+```ini
+[Service]
+EnvironmentFile=%h/.spark/config/provider.env
+```
+
+Reload and restart the service:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart spark.service
+systemctl --user status spark.service --no-pager
+```
+
+Do not put API keys in flow DOT, launch context, project files, or checked-in configuration.
+
 Run the full stack locally:
 
 ```bash
@@ -201,6 +250,7 @@ The source-checkout dev wrapper intentionally uses a separate runtime home and p
 
 - `SPARK_HOME` defaults to `~/.spark-dev`
 - backend port defaults to `8010`
+- provider secrets, when present, are read from `~/.spark-dev/config/provider.env` unless `SPARK_HOME` is set
 
 Initialize that dev runtime explicitly with:
 
@@ -215,8 +265,10 @@ just dev-docker
 ```
 
 That starts the backend on port `8000` and the frontend on port `5173` via `docker compose`.
+If `~/.spark-dev/config/provider.env` exists, the wrapper sources it before launching Docker.
 
 The tracked `compose.yaml` is public-safe by default and does not mount personal Codex auth, config, or skills files from your machine.
+It passes through provider environment variables including `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `GEMINI_API_KEY`, `GEMINI_BASE_URL`, and `GOOGLE_API_KEY`.
 If you want containerized Codex auth or custom skills, add them in an untracked `compose.override.yaml`, for example:
 
 ```yaml
