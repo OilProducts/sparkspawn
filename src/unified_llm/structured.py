@@ -98,7 +98,6 @@ def _structured_provider_options(schema: dict[str, Any]) -> dict[str, Any]:
             "structured_output": {
                 "provider": "anthropic",
                 "strategy": "schema-instruction",
-                "fallback": "forced-tool",
                 "schema": schema,
             },
             "system_instruction": (

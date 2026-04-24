@@ -213,11 +213,11 @@ def _content_parts_from_output_item(item: Any) -> list[ContentPart]:
         )
         if text is None:
             return []
+        redacted = item_type == "redacted_thinking"
         return [
             ContentPart(
-                kind=ContentKind.THINKING,
-                text=text,
-                thinking=ThinkingData(text=text, redacted=item_type == "redacted_thinking"),
+                kind=ContentKind.REDACTED_THINKING if redacted else ContentKind.THINKING,
+                thinking=ThinkingData(text=text, redacted=redacted),
             )
         ]
 
@@ -276,6 +276,25 @@ def _content_parts_from_output_item(item: Any) -> list[ContentPart]:
 
 def _response_has_tool_call_parts(content_parts: Sequence[ContentPart]) -> bool:
     return any(part.kind == ContentKind.TOOL_CALL for part in content_parts)
+
+
+def _response_message_from_parts(content_parts: Sequence[ContentPart]) -> Message:
+    if content_parts and all(part.kind == ContentKind.TOOL_RESULT for part in content_parts):
+        tool_call_ids = {
+            part.tool_result.tool_call_id
+            for part in content_parts
+            if part.tool_result is not None
+        }
+        return Message(
+            role=Role.TOOL,
+            content=list(content_parts),
+            tool_call_id=tool_call_ids.pop() if len(tool_call_ids) == 1 else None,
+        )
+
+    assistant_parts = [
+        part for part in content_parts if part.kind != ContentKind.TOOL_RESULT
+    ]
+    return Message(role=Role.ASSISTANT, content=assistant_parts)
 
 
 def _normalize_openai_finish_reason(payload: Mapping[str, Any]) -> FinishReason:
@@ -397,7 +416,7 @@ def normalize_openai_response(
                 id=response_id or "",
                 model=model or "",
                 provider=provider,
-                message=Message(role=Role.ASSISTANT, content=content_parts),
+                message=_response_message_from_parts(content_parts),
                 finish_reason=finish_reason,
                 usage=normalize_usage(usage_payload, provider=provider, raw=usage_payload),
                 raw=raw_payload,

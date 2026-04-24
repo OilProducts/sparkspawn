@@ -154,6 +154,31 @@ def _part_thought_flag(part: Mapping[str, Any]) -> bool:
     return False
 
 
+def _gemini_part_metadata(signature: str | None) -> dict[str, Any] | None:
+    if signature is None:
+        return None
+    return {"gemini": {"thoughtSignature": signature}}
+
+
+def _part_provider_thought_signature(part: ContentPart) -> str | None:
+    metadata = part.provider_metadata
+    if not isinstance(metadata, Mapping):
+        return None
+    gemini_metadata = metadata.get("gemini")
+    if not isinstance(gemini_metadata, Mapping):
+        return None
+    signature = _coerce_text(
+        gemini_metadata.get("thoughtSignature"),
+        field_name="content_part.provider_metadata.gemini.thoughtSignature",
+    )
+    if signature is not None:
+        return signature
+    return _coerce_text(
+        gemini_metadata.get("thought_signature"),
+        field_name="content_part.provider_metadata.gemini.thought_signature",
+    )
+
+
 def _part_payload_thought_metadata(
     payload: dict[str, Any],
     part: ContentPart,
@@ -165,6 +190,10 @@ def _part_payload_thought_metadata(
         payload["thought"] = True
     if thinking is not None and thinking.signature is not None:
         payload["thoughtSignature"] = thinking.signature
+    else:
+        signature = _part_provider_thought_signature(part)
+        if signature is not None:
+            payload["thoughtSignature"] = signature
     return payload
 
 
@@ -562,6 +591,9 @@ def _content_parts_from_mapping(item: Mapping[str, Any]) -> list[ContentPart]:
     if function_call is None:
         function_call = item.get("function_call")
     if isinstance(function_call, Mapping):
+        signature = _part_thought_signature(item) or _part_thought_signature(
+            function_call
+        )
         name = _coerce_text(
             function_call.get("name"),
             field_name="response.function_call.name",
@@ -597,12 +629,6 @@ def _content_parts_from_mapping(item: Mapping[str, Any]) -> list[ContentPart]:
         if call_id is None:
             call_id = _synthetic_tool_call_id(name)
 
-        signature = _part_thought_signature(item) or _part_thought_signature(function_call)
-        thinking = (
-            ThinkingData(text="", signature=signature)
-            if signature is not None
-            else None
-        )
         return [
             ContentPart(
                 kind=ContentKind.TOOL_CALL,
@@ -613,7 +639,7 @@ def _content_parts_from_mapping(item: Mapping[str, Any]) -> list[ContentPart]:
                     raw_arguments=raw_arguments,
                     type="function",
                 ),
-                thinking=thinking,
+                provider_metadata=_gemini_part_metadata(signature),
             )
         ]
 
@@ -634,7 +660,6 @@ def _content_parts_from_mapping(item: Mapping[str, Any]) -> list[ContentPart]:
             return [
                 ContentPart(
                     kind=ContentKind.THINKING,
-                    text="",
                     thinking=thinking,
                 )
             ]
@@ -649,21 +674,15 @@ def _content_parts_from_mapping(item: Mapping[str, Any]) -> list[ContentPart]:
         return [
             ContentPart(
                 kind=ContentKind.THINKING,
-                text=text,
                 thinking=thinking,
             )
         ]
 
-    thinking = (
-        ThinkingData(text=text, signature=signature, redacted=False)
-        if signature is not None
-        else None
-    )
     return [
         ContentPart(
             kind=ContentKind.TEXT,
             text=text,
-            thinking=thinking,
+            provider_metadata=_gemini_part_metadata(signature),
         )
     ]
 

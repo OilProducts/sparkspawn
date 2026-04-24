@@ -115,6 +115,150 @@ def test_content_part_validates_payload_types_while_preserving_custom_kinds() ->
         )
 
 
+def test_content_part_enforces_known_kind_tagged_union_payloads() -> None:
+    payloads = {
+        unified_llm.ContentKind.TEXT: {
+            "text": "hello",
+        },
+        unified_llm.ContentKind.IMAGE: {
+            "image": unified_llm.ImageData(url="https://example.com/image.png"),
+        },
+        unified_llm.ContentKind.AUDIO: {
+            "audio": unified_llm.AudioData(url="https://example.com/audio.mp3"),
+        },
+        unified_llm.ContentKind.DOCUMENT: {
+            "document": unified_llm.DocumentData(url="https://example.com/report.pdf"),
+        },
+        unified_llm.ContentKind.TOOL_CALL: {
+            "tool_call": unified_llm.ToolCallData(
+                id="call_123",
+                name="lookup",
+                arguments={},
+            ),
+        },
+        unified_llm.ContentKind.TOOL_RESULT: {
+            "tool_result": unified_llm.ToolResultData(
+                tool_call_id="call_123",
+                content="ok",
+                is_error=False,
+            ),
+        },
+        unified_llm.ContentKind.THINKING: {
+            "thinking": unified_llm.ThinkingData(text="reasoning"),
+        },
+        unified_llm.ContentKind.REDACTED_THINKING: {
+            "thinking": unified_llm.ThinkingData(text="opaque", redacted=True),
+        },
+    }
+
+    for kind, kwargs in payloads.items():
+        assert unified_llm.ContentPart(kind=kind, **kwargs).kind == kind
+
+        with pytest.raises(ValueError, match=f"{kind.value} content requires"):
+            unified_llm.ContentPart(kind=kind)
+
+        extra_kwargs = dict(kwargs)
+        extra_kwargs["text" if "text" not in kwargs else "thinking"] = (
+            unified_llm.ThinkingData(text="extra")
+            if "text" in kwargs
+            else "extra"
+        )
+        with pytest.raises(ValueError, match=f"{kind.value} content cannot include"):
+            unified_llm.ContentPart(kind=kind, **extra_kwargs)
+
+
+def test_content_part_enforces_thinking_redaction_invariants() -> None:
+    with pytest.raises(ValueError, match="thinking content requires redacted"):
+        unified_llm.ContentPart(
+            kind=unified_llm.ContentKind.THINKING,
+            thinking=unified_llm.ThinkingData(text="opaque", redacted=True),
+        )
+
+    with pytest.raises(ValueError, match="redacted_thinking content requires redacted"):
+        unified_llm.ContentPart(
+            kind=unified_llm.ContentKind.REDACTED_THINKING,
+            thinking=unified_llm.ThinkingData(text="reasoning", redacted=False),
+        )
+
+
+@pytest.mark.parametrize(
+    ("role", "part", "expected_fragment"),
+    [
+        (
+            unified_llm.Role.SYSTEM,
+            unified_llm.ContentPart(
+                kind=unified_llm.ContentKind.IMAGE,
+                image=unified_llm.ImageData(url="https://example.com/image.png"),
+            ),
+            "image content is not allowed for system messages",
+        ),
+        (
+            unified_llm.Role.ASSISTANT,
+            unified_llm.ContentPart(
+                kind=unified_llm.ContentKind.AUDIO,
+                audio=unified_llm.AudioData(url="https://example.com/audio.mp3"),
+            ),
+            "audio content is not allowed for assistant messages",
+        ),
+        (
+            unified_llm.Role.DEVELOPER,
+            unified_llm.ContentPart(
+                kind=unified_llm.ContentKind.DOCUMENT,
+                document=unified_llm.DocumentData(url="https://example.com/report.pdf"),
+            ),
+            "document content is not allowed for developer messages",
+        ),
+        (
+            unified_llm.Role.USER,
+            unified_llm.ContentPart(
+                kind=unified_llm.ContentKind.TOOL_CALL,
+                tool_call=unified_llm.ToolCallData(
+                    id="call_123",
+                    name="lookup",
+                    arguments={},
+                ),
+            ),
+            "tool_call content is not allowed for user messages",
+        ),
+        (
+            unified_llm.Role.ASSISTANT,
+            unified_llm.ContentPart(
+                kind=unified_llm.ContentKind.TOOL_RESULT,
+                tool_result=unified_llm.ToolResultData(
+                    tool_call_id="call_123",
+                    content="ok",
+                    is_error=False,
+                ),
+            ),
+            "tool_result content is not allowed for assistant messages",
+        ),
+        (
+            unified_llm.Role.USER,
+            unified_llm.ContentPart(
+                kind=unified_llm.ContentKind.THINKING,
+                thinking=unified_llm.ThinkingData(text="reasoning"),
+            ),
+            "thinking content is not allowed for user messages",
+        ),
+        (
+            unified_llm.Role.TOOL,
+            unified_llm.ContentPart(
+                kind=unified_llm.ContentKind.REDACTED_THINKING,
+                thinking=unified_llm.ThinkingData(text="opaque", redacted=True),
+            ),
+            "redacted_thinking content is not allowed for tool messages",
+        ),
+    ],
+)
+def test_message_enforces_known_kind_role_constraints(
+    role: unified_llm.Role,
+    part: unified_llm.ContentPart,
+    expected_fragment: str,
+) -> None:
+    with pytest.raises(ValueError, match=expected_fragment):
+        unified_llm.Message(role=role, content=[part])
+
+
 def test_audio_and_document_data_preserve_public_fields() -> None:
     audio = unified_llm.AudioData(
         url="https://example.com/audio.mp3",
@@ -438,20 +582,20 @@ def test_response_tool_call_extraction_parses_string_arguments_with_raw_copy() -
     assert response.tool_calls[0].raw_arguments == '{"location": "Paris"}'
 
 
-def test_response_reasoning_falls_back_to_reasoning_part_text() -> None:
+def test_response_reasoning_reads_thinking_payload_text() -> None:
     message = unified_llm.Message(
         role=unified_llm.Role.ASSISTANT,
         content=[
             unified_llm.ContentPart(
                 kind=unified_llm.ContentKind.THINKING,
-                text="fallback reasoning",
+                thinking=unified_llm.ThinkingData(text="reasoning"),
             )
         ],
     )
 
     response = unified_llm.Response(message=message)
 
-    assert response.reasoning == "fallback reasoning"
+    assert response.reasoning == "reasoning"
 
 
 @pytest.mark.parametrize(

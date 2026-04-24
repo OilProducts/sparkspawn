@@ -236,7 +236,7 @@
         "architecture.md#validation-strategy"
       ],
       "behavioral_contract": "generate_object returns parsed output plus raw text on success. stream_object yields partial JSON objects and validates the final object. Invalid JSON or schema mismatch is not retried as a transient provider failure.",
-      "implementation_contract": "structured.py maps ResponseFormat to OpenAI json_schema, Gemini responseSchema, and Anthropic schema instructions or forced tool extraction. jsonschema validates final objects.",
+      "implementation_contract": "structured.py maps ResponseFormat to OpenAI json_schema, Gemini responseSchema, and Anthropic schema instructions. jsonschema validates final objects.",
       "validation_expectations": "Structured tests cover successful parsing, validation failure, parse failure, stream partials, provider strategy construction, and non-retry behavior for NoObjectGeneratedError."
     },
     {

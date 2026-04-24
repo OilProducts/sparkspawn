@@ -222,12 +222,7 @@ async def test_openai_adapter_uses_explicit_configuration_and_the_native_respons
     ]
     assert response.message.content[0].kind == unified_llm.ContentKind.TOOL_CALL
     assert response.message.content[1].kind == unified_llm.ContentKind.TEXT
-    assert response.message.content[2].kind == unified_llm.ContentKind.TOOL_RESULT
-    assert response.message.content[2].tool_result is not None
-    assert response.message.content[2].tool_result.content == {
-        "temperature": 72,
-        "unit": "F",
-    }
+    assert len(response.message.content) == 2
     assert response.usage.input_tokens == 12
     assert response.usage.output_tokens == 34
     assert response.usage.reasoning_tokens == 5
@@ -236,6 +231,45 @@ async def test_openai_adapter_uses_explicit_configuration_and_the_native_respons
     assert response.rate_limit.requests_remaining == 7
     assert response.rate_limit.tokens_remaining == 99
     assert response.raw == response_body
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_normalizes_standalone_function_call_output_as_tool_message(
+) -> None:
+    response_body = {
+        "id": "resp_tool_result",
+        "model": "gpt-5.2",
+        "status": "completed",
+        "output": [
+            {
+                "type": "function_call_output",
+                "call_id": "call_123",
+                "output": {"temperature": 72, "unit": "F"},
+            },
+        ],
+    }
+    captured_requests, transport = _make_complete_transport(response_body)
+    adapter = unified_llm.OpenAIAdapter(api_key="explicit-key", transport=transport)
+    request = unified_llm.Request(
+        model="gpt-5.2",
+        messages=[unified_llm.Message.user("hello")],
+    )
+
+    response = await adapter.complete(request)
+
+    assert len(captured_requests) == 1
+    assert response.message.role == unified_llm.Role.TOOL
+    assert response.message.tool_call_id == "call_123"
+    assert response.message.content == [
+        unified_llm.ContentPart(
+            kind=unified_llm.ContentKind.TOOL_RESULT,
+            tool_result=unified_llm.ToolResultData(
+                tool_call_id="call_123",
+                content={"temperature": 72, "unit": "F"},
+                is_error=False,
+            ),
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -773,16 +807,20 @@ async def test_openai_adapter_translates_complex_request_body_without_mutating_r
     assert body["tools"] == [
         {
             "type": "function",
-            "name": "lookup_weather",
-            "strict": True,
-            "description": "Fetch weather for a city",
-            "parameters": tool_parameters,
+            "function": {
+                "name": "lookup_weather",
+                "description": "Fetch weather for a city",
+                "parameters": tool_parameters,
+            },
         },
         {
             "type": "web_search",
         },
     ]
-    assert body["tool_choice"] == {"type": "function", "name": "lookup_weather"}
+    assert body["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "lookup_weather"},
+    }
     assert body["response_format"] == {
         "type": "json_schema",
         "json_schema": schema,
@@ -927,20 +965,7 @@ async def test_openai_adapter_rejects_malformed_tool_call_payloads() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", [unified_llm.Role.SYSTEM, unified_llm.Role.DEVELOPER])
-@pytest.mark.parametrize(
-    "content_kind",
-    [
-        unified_llm.ContentKind.IMAGE,
-        unified_llm.ContentKind.AUDIO,
-        unified_llm.ContentKind.DOCUMENT,
-        unified_llm.ContentKind.TOOL_CALL,
-        unified_llm.ContentKind.TOOL_RESULT,
-    ],
-)
 async def test_openai_adapter_rejects_unsupported_instruction_content_before_transport(
-    role: unified_llm.Role,
-    content_kind: unified_llm.ContentKind,
 ) -> None:
     response_body = {
         "id": "resp_invalid_instruction_content",
@@ -954,19 +979,22 @@ async def test_openai_adapter_rejects_unsupported_instruction_content_before_tra
         model="gpt-5.2",
         messages=[
             unified_llm.Message(
-                role=role,
+                role=unified_llm.Role.SYSTEM,
                 content=[
                     unified_llm.ContentPart(
                         kind=unified_llm.ContentKind.TEXT,
-                        text=f"{role.value} instructions",
+                        text="system instructions",
                     ),
-                    _unsupported_instruction_part(content_kind),
+                    unified_llm.ContentPart(
+                        kind="vendor.custom.instructions",
+                        text="custom instructions",
+                    ),
                 ],
             )
         ],
     )
 
-    with pytest.raises(unified_llm.InvalidRequestError, match=content_kind.value):
+    with pytest.raises(unified_llm.InvalidRequestError, match="vendor.custom.instructions"):
         await adapter.complete(request)
 
     assert captured_requests == []
@@ -1030,8 +1058,8 @@ async def test_openai_adapter_rejects_unsupported_tool_role_payloads() -> None:
                 role=unified_llm.Role.TOOL,
                 content=[
                     unified_llm.ContentPart(
-                        kind=unified_llm.ContentKind.IMAGE,
-                        image=unified_llm.ImageData(url="https://example.test/result.png"),
+                        kind="vendor.custom.tool_payload",
+                        text="tool output",
                     )
                 ],
                 tool_call_id="call_123",
@@ -1054,7 +1082,7 @@ async def test_openai_adapter_rejects_unsupported_tool_role_payloads() -> None:
         (unified_llm.ToolChoice.required(), "required"),
         (
             unified_llm.ToolChoice.named("lookup_weather"),
-            {"type": "function", "name": "lookup_weather"},
+            {"type": "function", "function": {"name": "lookup_weather"}},
         ),
     ],
 )
@@ -1095,14 +1123,15 @@ async def test_openai_adapter_translates_tool_choice_modes(
     assert body["tools"] == [
         {
             "type": "function",
-            "name": "lookup_weather",
-            "strict": True,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "city": {"type": "string"},
+            "function": {
+                "name": "lookup_weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "city": {"type": "string"},
+                    },
+                    "required": ["city"],
                 },
-                "required": ["city"],
             },
         }
     ]

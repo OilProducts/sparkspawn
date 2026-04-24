@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -95,6 +95,51 @@ def _validate_optional_instance(
         raise TypeError(
             f"{field_name} must be an instance of {expected_name} or None"
         )
+
+
+def _validate_optional_metadata(value: Any, field_name: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{field_name} must be a mapping or None")
+    for key in value:
+        if not isinstance(key, str):
+            raise TypeError(f"{field_name} keys must be strings")
+
+
+_CONTENT_PART_PAYLOAD_FIELDS = (
+    "text",
+    "image",
+    "audio",
+    "document",
+    "tool_call",
+    "tool_result",
+    "thinking",
+)
+
+_CONTENT_KIND_PAYLOAD_FIELD: dict[ContentKind, str] = {
+    ContentKind.TEXT: "text",
+    ContentKind.IMAGE: "image",
+    ContentKind.AUDIO: "audio",
+    ContentKind.DOCUMENT: "document",
+    ContentKind.TOOL_CALL: "tool_call",
+    ContentKind.TOOL_RESULT: "tool_result",
+    ContentKind.THINKING: "thinking",
+    ContentKind.REDACTED_THINKING: "thinking",
+}
+
+_CONTENT_KIND_ALLOWED_ROLES: dict[ContentKind, frozenset[Role]] = {
+    ContentKind.TEXT: frozenset(
+        {Role.SYSTEM, Role.USER, Role.ASSISTANT, Role.DEVELOPER, Role.TOOL}
+    ),
+    ContentKind.IMAGE: frozenset({Role.USER, Role.ASSISTANT}),
+    ContentKind.AUDIO: frozenset({Role.USER}),
+    ContentKind.DOCUMENT: frozenset({Role.USER}),
+    ContentKind.TOOL_CALL: frozenset({Role.ASSISTANT}),
+    ContentKind.TOOL_RESULT: frozenset({Role.TOOL}),
+    ContentKind.THINKING: frozenset({Role.ASSISTANT}),
+    ContentKind.REDACTED_THINKING: frozenset({Role.ASSISTANT}),
+}
 
 
 @dataclass(slots=True)
@@ -212,6 +257,7 @@ class ContentPart:
     tool_call: ToolCallData | None = None
     tool_result: ToolResultData | None = None
     thinking: ThinkingData | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         from .tools import ToolCall, ToolResult
@@ -232,6 +278,34 @@ class ContentPart:
             (ToolResultData, ToolResult),
         )
         _validate_optional_instance(self.thinking, "thinking", ThinkingData)
+        _validate_optional_metadata(self.provider_metadata, "provider_metadata")
+        self._validate_known_kind_payload()
+
+    def _validate_known_kind_payload(self) -> None:
+        if not isinstance(self.kind, ContentKind):
+            return
+
+        required_field = _CONTENT_KIND_PAYLOAD_FIELD[self.kind]
+        for field_name in _CONTENT_PART_PAYLOAD_FIELDS:
+            value = getattr(self, field_name)
+            if field_name == required_field:
+                if value is None:
+                    raise ValueError(
+                        f"{self.kind.value} content requires {required_field}"
+                    )
+                continue
+            if value is not None:
+                raise ValueError(
+                    f"{self.kind.value} content cannot include {field_name}"
+                )
+
+        if self.kind == ContentKind.THINKING and self.thinking.redacted:
+            raise ValueError("thinking content requires redacted to be False")
+        if (
+            self.kind == ContentKind.REDACTED_THINKING
+            and not self.thinking.redacted
+        ):
+            raise ValueError("redacted_thinking content requires redacted to be True")
 
 
 def _coerce_role(role: Role | str) -> Role:
@@ -368,6 +442,19 @@ class Message:
             raise TypeError("name must be a string or None")
         if self.tool_call_id is not None and not isinstance(self.tool_call_id, str):
             raise TypeError("tool_call_id must be a string or None")
+        self._validate_known_content_roles()
+
+    def _validate_known_content_roles(self) -> None:
+        for part in self.content:
+            if not isinstance(part.kind, ContentKind):
+                continue
+            allowed_roles = _CONTENT_KIND_ALLOWED_ROLES[part.kind]
+            if self.role not in allowed_roles:
+                allowed = ", ".join(sorted(role.value for role in allowed_roles))
+                raise ValueError(
+                    f"{part.kind.value} content is not allowed for "
+                    f"{self.role.value} messages; allowed roles: {allowed}"
+                )
 
     @property
     def text(self) -> str:

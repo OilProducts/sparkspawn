@@ -165,21 +165,22 @@ def _serialize_json_value(value: Any) -> str:
 
 
 def _tool_definition(tool: Tool) -> dict[str, Any]:
-    definition: dict[str, Any] = {
-        "type": "function",
+    function: dict[str, Any] = {
         "name": tool.name,
-        "strict": True,
     }
     if tool.description is not None:
-        definition["description"] = tool.description
+        function["description"] = tool.description
     if tool.parameters is not None:
-        definition["parameters"] = copy.deepcopy(tool.parameters)
-    return definition
+        function["parameters"] = copy.deepcopy(tool.parameters)
+    return {
+        "type": "function",
+        "function": function,
+    }
 
 
 def _tool_choice_value(tool_choice: ToolChoice) -> str | dict[str, Any]:
     if tool_choice.is_named:
-        return {"type": "function", "name": tool_choice.tool_name}
+        return {"type": "function", "function": {"name": tool_choice.tool_name}}
     return tool_choice.mode
 
 

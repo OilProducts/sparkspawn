@@ -184,7 +184,7 @@ High-level `stream` returns a `StreamResult` that is async iterable, exposes `te
 
 `StreamAccumulator` reconstructs a `Response` from start/delta/end stream events and is shared by provider streaming tests and high-level stream results.
 
-`generate_object` uses provider-native structured output where available: OpenAI `json_schema`, Gemini `responseSchema`, and Anthropic schema instructions or forced tool extraction. Final parsing and validation failures raise `NoObjectGeneratedError` and are not treated as transient retryable failures.
+`generate_object` uses provider-native structured output where available: OpenAI `json_schema`, Gemini `responseSchema`, and Anthropic schema instructions. Final parsing and validation failures raise `NoObjectGeneratedError` and are not treated as transient retryable failures.
 
 ## Validation Strategy
 

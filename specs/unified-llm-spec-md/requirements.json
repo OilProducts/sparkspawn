@@ -448,7 +448,7 @@
         "generate_object accepts a JSON Schema and requests structured output from the provider using native mechanisms when available.",
         "OpenAI uses native json_schema response_format with strict mode when requested.",
         "Gemini uses native application/json response mime type with responseSchema.",
-        "Anthropic uses schema instructions or forced tool extraction as a fallback.",
+        "Anthropic uses schema instructions.",
         "Successful calls return GenerateResult with output populated by the parsed and validated object and text preserving the raw model text.",
         "Parsing or schema validation failures raise NoObjectGeneratedError and are not retried as transient provider failures.",
         "Schema validation behavior is covered by tests with successful and failing outputs."

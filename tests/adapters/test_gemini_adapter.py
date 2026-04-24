@@ -305,10 +305,14 @@ async def test_gemini_adapter_parses_thought_parts_tool_calls_and_preserves_sign
     ]
     assert first_response.message.content[0].thinking is not None
     assert first_response.message.content[0].thinking.signature == "sig-think"
-    assert first_response.message.content[1].thinking is not None
-    assert first_response.message.content[1].thinking.signature == "sig-call"
-    assert first_response.message.content[2].thinking is not None
-    assert first_response.message.content[2].thinking.signature == "sig-answer"
+    assert first_response.message.content[1].thinking is None
+    assert first_response.message.content[1].provider_metadata == {
+        "gemini": {"thoughtSignature": "sig-call"}
+    }
+    assert first_response.message.content[2].thinking is None
+    assert first_response.message.content[2].provider_metadata == {
+        "gemini": {"thoughtSignature": "sig-answer"}
+    }
     assert len(first_response.tool_calls) == 1
     synthetic_tool_call_id = first_response.tool_calls[0].id
     assert synthetic_tool_call_id.startswith("gemini_call_lookup_weather_")

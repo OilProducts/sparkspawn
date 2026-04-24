@@ -450,7 +450,6 @@ class StreamAccumulator:
                 ContentPart(
                     kind=ContentKind.THINKING,
                     thinking=ThinkingData(text=reasoning_text),
-                    text=reasoning_text,
                 ),
             )
 
@@ -489,7 +488,6 @@ class StreamAccumulator:
                     ContentPart(
                         kind=ContentKind.THINKING,
                         thinking=ThinkingData(text=reasoning_text),
-                        text=reasoning_text,
                     ),
                 )
 

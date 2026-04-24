@@ -243,7 +243,7 @@ def _structured_output_strategy(structured_output: Mapping[str, Any]) -> str:
         return "schema-instruction"
 
     normalized = strategy.casefold()
-    if normalized in {"schema-instruction", "forced-tool"}:
+    if normalized == "schema-instruction":
         return normalized
 
     logger.warning(
@@ -280,16 +280,7 @@ def _structured_output_instruction(
                 provider="anthropic",
             )
 
-        strategy = _structured_output_strategy(structured_output)
-        if strategy == "forced-tool":
-            logger.warning(
-                "Anthropic structured_output strategy %r is not supported",
-                strategy,
-            )
-            raise InvalidRequestError(
-                f"Anthropic structured_output strategy {strategy!r} is not supported",
-                provider="anthropic",
-            )
+        _structured_output_strategy(structured_output)
 
         schema = structured_output.get("schema")
         if schema is not None:
@@ -980,7 +971,6 @@ def _content_parts_from_block(item: Any) -> list[ContentPart]:
             ContentPart(
                 kind=ContentKind.THINKING,
                 thinking=ThinkingData(text=thinking_text, signature=signature),
-                text=thinking_text,
             )
         ]
 
@@ -995,7 +985,6 @@ def _content_parts_from_block(item: Any) -> list[ContentPart]:
             ContentPart(
                 kind=ContentKind.REDACTED_THINKING,
                 thinking=ThinkingData(text=data, redacted=True),
-                text=data,
             )
         ]
 
@@ -1078,6 +1067,23 @@ def _response_has_tool_call_parts(parts: Sequence[ContentPart]) -> bool:
     return any(part.kind == ContentKind.TOOL_CALL for part in parts)
 
 
+def _response_message_from_parts(parts: Sequence[ContentPart]) -> Message:
+    if parts and all(part.kind == ContentKind.TOOL_RESULT for part in parts):
+        tool_call_ids = {
+            part.tool_result.tool_call_id
+            for part in parts
+            if part.tool_result is not None
+        }
+        return Message(
+            role=Role.TOOL,
+            content=list(parts),
+            tool_call_id=tool_call_ids.pop() if len(tool_call_ids) == 1 else None,
+        )
+
+    assistant_parts = [part for part in parts if part.kind != ContentKind.TOOL_RESULT]
+    return Message(role=Role.ASSISTANT, content=assistant_parts)
+
+
 def _estimate_reasoning_tokens(parts: Sequence[ContentPart]) -> int | None:
     estimated_total = 0
     saw_reasoning = False
@@ -1147,7 +1153,7 @@ def normalize_anthropic_response(
                 id=response_id or "",
                 model=model or "",
                 provider=provider,
-                message=Message(role=Role.ASSISTANT, content=content_parts),
+                message=_response_message_from_parts(content_parts),
                 finish_reason=finish_reason,
                 usage=usage,
                 raw=raw_payload,
@@ -1337,7 +1343,6 @@ class _StreamState:
             redacted = bool(block_state.get("redacted")) or block_kind == "redacted_thinking"
             return ContentPart(
                 kind=ContentKind.REDACTED_THINKING if redacted else ContentKind.THINKING,
-                text=text,
                 thinking=ThinkingData(text=text, signature=signature, redacted=redacted),
             )
 
