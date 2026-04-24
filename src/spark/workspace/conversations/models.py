@@ -130,6 +130,7 @@ class ConversationTurn:
     artifact_id: Optional[str] = None
     parent_turn_id: Optional[str] = None
     error: Optional[str] = None
+    token_usage: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -146,10 +147,13 @@ class ConversationTurn:
             payload["parent_turn_id"] = self.parent_turn_id
         if self.error:
             payload["error"] = self.error
+        if isinstance(self.token_usage, dict):
+            payload["token_usage"] = copy.deepcopy(self.token_usage)
         return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ConversationTurn":
+        token_usage = payload.get("token_usage")
         return cls(
             id=str(payload.get("id", "")),
             role=str(payload.get("role", "assistant")),
@@ -160,6 +164,7 @@ class ConversationTurn:
             artifact_id=str(payload.get("artifact_id")) if payload.get("artifact_id") is not None else None,
             parent_turn_id=str(payload.get("parent_turn_id")) if payload.get("parent_turn_id") is not None else None,
             error=str(payload.get("error")) if payload.get("error") is not None else None,
+            token_usage=copy.deepcopy(token_usage) if isinstance(token_usage, dict) else None,
         )
 
 
@@ -318,11 +323,13 @@ class ChatTurnLiveEvent:
     summary_index: Optional[int] = None
     phase: Optional[str] = None
     request_user_input: Optional[RequestUserInputRecord] = None
+    token_usage: Optional[dict[str, Any]] = None
 
 
 @dataclass
 class ChatTurnResult:
     assistant_message: str
+    token_usage: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -331,6 +338,7 @@ class PreparedChatTurn:
     project_path: str
     chat_mode: str
     prompt: str
+    provider: str
     model: Optional[str]
     reasoning_effort: Optional[str]
     user_turn: "ConversationTurn"
@@ -476,6 +484,8 @@ class FlowRunRequest:
     goal: Optional[str] = None
     launch_context: Optional[dict[str, Any]] = None
     model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    reasoning_effort: Optional[str] = None
     run_id: Optional[str] = None
     launch_error: Optional[str] = None
     review_message: Optional[str] = None
@@ -500,6 +510,10 @@ class FlowRunRequest:
             payload["launch_context"] = copy.deepcopy(self.launch_context)
         if self.model:
             payload["model"] = self.model
+        if self.llm_provider:
+            payload["llm_provider"] = self.llm_provider
+        if self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
         if self.run_id:
             payload["run_id"] = self.run_id
         if self.launch_error:
@@ -524,6 +538,8 @@ class FlowRunRequest:
             goal=str(payload.get("goal")) if payload.get("goal") is not None else None,
             launch_context=copy.deepcopy(payload.get("launch_context")) if isinstance(payload.get("launch_context"), dict) else None,
             model=str(payload.get("model")) if payload.get("model") is not None else None,
+            llm_provider=str(payload.get("llm_provider")) if payload.get("llm_provider") is not None else None,
+            reasoning_effort=str(payload.get("reasoning_effort")) if payload.get("reasoning_effort") is not None else None,
             run_id=str(payload.get("run_id")) if payload.get("run_id") is not None else None,
             launch_error=str(payload.get("launch_error")) if payload.get("launch_error") is not None else None,
             review_message=str(payload.get("review_message")) if payload.get("review_message") is not None else None,
@@ -545,6 +561,8 @@ class FlowLaunch:
     goal: Optional[str] = None
     launch_context: Optional[dict[str, Any]] = None
     model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    reasoning_effort: Optional[str] = None
     run_id: Optional[str] = None
     launch_error: Optional[str] = None
 
@@ -568,6 +586,10 @@ class FlowLaunch:
             payload["launch_context"] = copy.deepcopy(self.launch_context)
         if self.model:
             payload["model"] = self.model
+        if self.llm_provider:
+            payload["llm_provider"] = self.llm_provider
+        if self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
         if self.run_id:
             payload["run_id"] = self.run_id
         if self.launch_error:
@@ -590,6 +612,8 @@ class FlowLaunch:
             goal=str(payload.get("goal")) if payload.get("goal") is not None else None,
             launch_context=copy.deepcopy(payload.get("launch_context")) if isinstance(payload.get("launch_context"), dict) else None,
             model=str(payload.get("model")) if payload.get("model") is not None else None,
+            llm_provider=str(payload.get("llm_provider")) if payload.get("llm_provider") is not None else None,
+            reasoning_effort=str(payload.get("reasoning_effort")) if payload.get("reasoning_effort") is not None else None,
             run_id=str(payload.get("run_id")) if payload.get("run_id") is not None else None,
             launch_error=str(payload.get("launch_error")) if payload.get("launch_error") is not None else None,
         )
@@ -669,6 +693,7 @@ class ConversationState:
     conversation_id: str
     project_path: str
     chat_mode: str = CHAT_MODE_CHAT
+    provider: str = "codex"
     model: Optional[str] = None
     reasoning_effort: Optional[str] = None
     conversation_handle: str = ""
@@ -721,6 +746,7 @@ class ConversationState:
             "conversation_handle": self.conversation_handle,
             "project_path": self.project_path,
             "chat_mode": self.chat_mode,
+            "provider": self.provider,
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
             "title": self.title,
@@ -767,6 +793,7 @@ class ConversationState:
             conversation_handle=str(payload.get("conversation_handle", "") or ""),
             project_path=_normalize_project_path(str(payload.get("project_path", ""))),
             chat_mode=normalize_chat_mode(payload.get("chat_mode")),
+            provider=_as_non_empty_string(payload.get("provider")) or "codex",
             model=_as_non_empty_string(payload.get("model")),
             reasoning_effort=normalize_reasoning_effort(payload.get("reasoning_effort")),
             title=_as_non_empty_string(payload.get("title")) or _derive_conversation_title(turns),
@@ -833,6 +860,7 @@ class ConversationSessionState:
     project_path: str
     runtime_project_path: str
     session_version: int = CHAT_SESSION_VERSION
+    provider: str = "codex"
     thread_id: Optional[str] = None
     model: Optional[str] = None
 
@@ -843,6 +871,7 @@ class ConversationSessionState:
             "project_path": self.project_path,
             "runtime_project_path": self.runtime_project_path,
             "session_version": self.session_version,
+            "provider": self.provider,
         }
         if self.thread_id:
             payload["thread_id"] = self.thread_id
@@ -863,6 +892,7 @@ class ConversationSessionState:
             project_path=_normalize_project_path(str(payload.get("project_path", ""))),
             runtime_project_path=_normalize_project_path(str(payload.get("runtime_project_path", ""))),
             session_version=session_version,
+            provider=_as_non_empty_string(payload.get("provider")) or "codex",
             thread_id=str(payload.get("thread_id")) if payload.get("thread_id") is not None else None,
             model=_as_non_empty_string(payload.get("model")),
         )

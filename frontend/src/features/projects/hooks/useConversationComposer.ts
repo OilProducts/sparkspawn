@@ -43,6 +43,7 @@ type UseConversationComposerArgs = {
     activeProjectPath: string | null
     chatDraft: string
     isChatInputDisabled: boolean
+    provider: string
     model: string
     reasoningEffort: string
     ensureConversationId: () => string | null
@@ -64,6 +65,7 @@ export function useConversationComposer({
     activeProjectPath,
     chatDraft,
     isChatInputDisabled,
+    provider,
     model,
     reasoningEffort,
     ensureConversationId,
@@ -124,6 +126,7 @@ export function useConversationComposer({
             const snapshot = await sendConversationTurnValidated(conversationId, {
                 project_path: activeProjectPath,
                 message: messageToSend,
+                provider: provider.trim() || 'codex',
                 model: model.trim() || null,
                 reasoning_effort: reasoningEffort.trim(),
                 chat_mode: chatMode,

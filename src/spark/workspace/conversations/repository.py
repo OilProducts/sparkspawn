@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import threading
 from pathlib import Path
@@ -96,6 +97,19 @@ class ProjectChatRepository:
     def conversation_session_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         return self.conversation_root(conversation_id, project_path) / "session.json"
 
+    def conversation_keyed_session_path(
+        self,
+        conversation_id: str,
+        project_path: Optional[str] = None,
+        *,
+        provider: str,
+        model: Optional[str],
+    ) -> Path:
+        normalized_provider = as_non_empty_string(provider).lower() if as_non_empty_string(provider) else "codex"
+        normalized_model = as_non_empty_string(model) or ""
+        digest = hashlib.sha256(f"{normalized_provider}\0{normalized_model}".encode("utf-8")).hexdigest()[:24]
+        return self.conversation_root(conversation_id, project_path) / "sessions" / f"{normalized_provider}-{digest}.json"
+
     def conversation_raw_log_path(self, conversation_id: str, project_path: Optional[str] = None) -> Path:
         return self.conversation_root(conversation_id, project_path) / "raw-log.jsonl"
 
@@ -184,6 +198,7 @@ class ProjectChatRepository:
             "conversation_handle": state.conversation_handle,
             "project_path": state.project_path,
             "chat_mode": state.chat_mode,
+            "provider": state.provider,
             "model": state.model,
             "reasoning_effort": state.reasoning_effort,
             "title": state.title,
@@ -251,9 +266,25 @@ class ProjectChatRepository:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, sort_keys=True) + "\n")
 
-    def read_session_state(self, conversation_id: str, project_path: Optional[str] = None) -> Optional[ConversationSessionState]:
+    def read_session_state(
+        self,
+        conversation_id: str,
+        project_path: Optional[str] = None,
+        *,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Optional[ConversationSessionState]:
         try:
-            path = self.conversation_session_path(conversation_id, project_path)
+            path = (
+                self.conversation_keyed_session_path(
+                    conversation_id,
+                    project_path,
+                    provider=provider,
+                    model=model,
+                )
+                if provider is not None or model is not None
+                else self.conversation_session_path(conversation_id, project_path)
+            )
         except (FileNotFoundError, RuntimeError):
             return None
         try:
@@ -268,33 +299,59 @@ class ProjectChatRepository:
             return None
         if not state.conversation_id:
             state.conversation_id = conversation_id
+        if provider is not None and state.provider != (as_non_empty_string(provider).lower() if as_non_empty_string(provider) else "codex"):
+            return None
+        if model is not None and (state.model or "") != (as_non_empty_string(model) or ""):
+            return None
         return state
 
     def write_session_state(self, state: ConversationSessionState) -> None:
-        path = self.conversation_session_path(state.conversation_id, state.project_path)
+        path = self.conversation_keyed_session_path(
+            state.conversation_id,
+            state.project_path,
+            provider=state.provider,
+            model=state.model,
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(state.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+        legacy_path = self.conversation_session_path(state.conversation_id, state.project_path)
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text(json.dumps(state.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
 
     def persist_session_thread(
         self,
         conversation_id: str,
         project_path: str,
         thread_id: str,
+        *,
+        provider: str = "codex",
+        model: Optional[str] = None,
     ) -> None:
         normalized_project_path = normalize_project_path_value(project_path)
         runtime_project_path = resolve_runtime_workspace_path(normalized_project_path)
+        normalized_provider = as_non_empty_string(provider).lower() if as_non_empty_string(provider) else "codex"
+        normalized_model = as_non_empty_string(model)
         with self._lock:
-            session_state = self.read_session_state(conversation_id, normalized_project_path)
+            session_state = self.read_session_state(
+                conversation_id,
+                normalized_project_path,
+                provider=normalized_provider,
+                model=normalized_model,
+            )
             if session_state is None:
                 session_state = ConversationSessionState(
                     conversation_id=conversation_id,
                     updated_at=iso_now(),
                     project_path=normalized_project_path,
                     runtime_project_path=runtime_project_path,
+                    provider=normalized_provider,
+                    model=normalized_model,
                 )
             session_state.thread_id = thread_id
             session_state.project_path = normalized_project_path
             session_state.runtime_project_path = runtime_project_path
+            session_state.provider = normalized_provider
+            session_state.model = normalized_model
             session_state.updated_at = iso_now()
             self.write_session_state(session_state)
 
@@ -303,22 +360,32 @@ class ProjectChatRepository:
         conversation_id: str,
         project_path: str,
         model: str,
+        *,
+        provider: str = "codex",
     ) -> None:
         normalized_project_path = normalize_project_path_value(project_path)
         runtime_project_path = resolve_runtime_workspace_path(normalized_project_path)
         normalized_model = as_non_empty_string(model)
         if not normalized_model:
             return
+        normalized_provider = as_non_empty_string(provider).lower() if as_non_empty_string(provider) else "codex"
         with self._lock:
-            session_state = self.read_session_state(conversation_id, normalized_project_path)
+            session_state = self.read_session_state(
+                conversation_id,
+                normalized_project_path,
+                provider=normalized_provider,
+                model=normalized_model,
+            )
             if session_state is None:
                 session_state = ConversationSessionState(
                     conversation_id=conversation_id,
                     updated_at=iso_now(),
                     project_path=normalized_project_path,
                     runtime_project_path=runtime_project_path,
+                    provider=normalized_provider,
                 )
             session_state.model = normalized_model
+            session_state.provider = normalized_provider
             session_state.project_path = normalized_project_path
             session_state.runtime_project_path = runtime_project_path
             session_state.updated_at = iso_now()

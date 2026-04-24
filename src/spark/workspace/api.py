@@ -53,6 +53,7 @@ from spark_common.runtime_path import resolve_runtime_workspace_path
 class ConversationTurnRequest(BaseModel):
     project_path: str
     message: str
+    provider: Optional[str] = None
     model: Optional[str] = None
     reasoning_effort: Optional[str] = None
     chat_mode: Optional[str] = None
@@ -67,6 +68,7 @@ class ConversationRequestUserInputAnswerRequest(BaseModel):
 class ConversationSettingsRequest(BaseModel):
     project_path: str
     chat_mode: Optional[str] = None
+    provider: Optional[str] = None
     model: Optional[str] = None
     reasoning_effort: Optional[str] = None
 
@@ -88,6 +90,8 @@ class FlowRunRequestCreateByHandleRequest(BaseModel):
     goal: Optional[str] = None
     launch_context: Optional[dict[str, Any]] = None
     model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    reasoning_effort: Optional[str] = None
 
 
 class FlowRunRequestReviewRequest(BaseModel):
@@ -96,6 +100,8 @@ class FlowRunRequestReviewRequest(BaseModel):
     message: str
     flow_name: Optional[str] = None
     model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    reasoning_effort: Optional[str] = None
 
 
 class ProposedPlanReviewRequest(BaseModel):
@@ -105,7 +111,7 @@ class ProposedPlanReviewRequest(BaseModel):
 
 
 class RunLaunchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     flow_name: str
     summary: str
     conversation_handle: Optional[str] = None
@@ -113,6 +119,8 @@ class RunLaunchRequest(BaseModel):
     goal: Optional[str] = None
     launch_context: Optional[dict[str, Any]] = None
     model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    reasoning_effort: Optional[str] = None
 
 
 class FlowLaunchPolicyUpdateRequest(BaseModel):
@@ -260,8 +268,15 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         goal: Optional[str],
         launch_context: Optional[dict[str, Any]],
         model: Optional[str],
+        llm_provider: Optional[str],
+        reasoning_effort: Optional[str],
     ) -> str | None:
         project_chat = deps.get_project_chat()
+        launch_kwargs: dict[str, Any] = {}
+        if llm_provider is not None:
+            launch_kwargs["llm_provider"] = llm_provider
+        if reasoning_effort is not None:
+            launch_kwargs["reasoning_effort"] = reasoning_effort
         try:
             launch_payload = await deps.get_attractor_client().start_pipeline(
                 run_id=None,
@@ -270,6 +285,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 model=model,
                 goal=goal,
                 launch_context=launch_context,
+                **launch_kwargs,
             )
         except AttractorApiError as exc:
             await asyncio.to_thread(
@@ -328,7 +344,14 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
         goal: Optional[str],
         launch_context: Optional[dict[str, Any]],
         model: Optional[str],
+        llm_provider: Optional[str],
+        reasoning_effort: Optional[str],
     ) -> str:
+        launch_kwargs: dict[str, Any] = {}
+        if llm_provider is not None:
+            launch_kwargs["llm_provider"] = llm_provider
+        if reasoning_effort is not None:
+            launch_kwargs["reasoning_effort"] = reasoning_effort
         try:
             launch_payload = await deps.get_attractor_client().start_pipeline(
                 run_id=None,
@@ -337,6 +360,7 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 model=model,
                 goal=goal,
                 launch_context=launch_context,
+                **launch_kwargs,
             )
         except AttractorApiError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -372,9 +396,10 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 deps.get_project_chat().update_conversation_settings,
                 conversation_id,
                 req.project_path,
-                req.chat_mode,
-                req.model,
-                req.reasoning_effort,
+                chat_mode=req.chat_mode,
+                provider=req.provider,
+                model=req.model,
+                reasoning_effort=req.reasoning_effort,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -682,10 +707,11 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 conversation_id,
                 req.project_path,
                 req.message,
-                req.model,
-                req.chat_mode,
-                req.reasoning_effort,
-                publish_progress_event,
+                model=req.model,
+                chat_mode=req.chat_mode,
+                reasoning_effort=req.reasoning_effort,
+                progress_callback=publish_progress_event,
+                provider=req.provider,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -820,6 +846,8 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 goal=normalized_payload.get("goal") if isinstance(normalized_payload.get("goal"), str) else None,
                 launch_context=normalized_payload.get("launch_context") if isinstance(normalized_payload.get("launch_context"), dict) else None,
                 model=normalized_payload.get("model") if isinstance(normalized_payload.get("model"), str) else None,
+                llm_provider=normalized_payload.get("llm_provider") if isinstance(normalized_payload.get("llm_provider"), str) else None,
+                reasoning_effort=normalized_payload.get("reasoning_effort") if isinstance(normalized_payload.get("reasoning_effort"), str) else None,
             )
         except HTTPException as exc:
             if conversation_id and artifact_result and isinstance(artifact_result.get("flow_launch_id"), str):
@@ -898,6 +926,8 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 req.message,
                 effective_flow_name,
                 req.model,
+                req.llm_provider,
+                req.reasoning_effort,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -913,6 +943,12 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                 goal=flow_run_request.goal,
                 launch_context=flow_run_request.launch_context,
                 model=req.model or flow_run_request.model,
+                llm_provider=req.llm_provider if req.llm_provider is not None else flow_run_request.llm_provider,
+                reasoning_effort=(
+                    req.reasoning_effort
+                    if req.reasoning_effort is not None
+                    else flow_run_request.reasoning_effort
+                ),
             )
             return await asyncio.to_thread(
                 deps.get_project_chat().get_snapshot,
@@ -952,6 +988,8 @@ def create_workspace_router(deps: WorkspaceApiDependencies) -> APIRouter:
                     goal=flow_launch.goal,
                     launch_context=flow_launch.launch_context,
                     model=flow_launch.model,
+                    llm_provider=flow_launch.llm_provider,
+                    reasoning_effort=flow_launch.reasoning_effort,
                 )
             except HTTPException as exc:
                 await asyncio.to_thread(

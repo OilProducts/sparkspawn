@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 import pytest
@@ -45,6 +47,7 @@ def _completed_turn_result(
     plan_message: str = "",
     command_text: str = "",
     token_total: Optional[int] = None,
+    token_usage_payload: Optional[dict[str, Any]] = None,
     error: Optional[str] = None,
 ) -> CodexAppServerTurnResult:
     state = codex_app_server.CodexAppServerTurnState()
@@ -55,6 +58,8 @@ def _completed_turn_result(
         state.command_chunks.append(command_text)
     if token_total is not None:
         state.last_token_total = token_total
+    if token_usage_payload is not None:
+        state.last_token_usage_payload = token_usage_payload
     if error:
         state.turn_status = "failed"
         state.turn_error = error
@@ -576,6 +581,60 @@ def test_process_turn_message_retains_full_token_usage_payload() -> None:
     assert events[0].token_usage == payload
     assert state.last_token_total == 244
     assert state.last_token_usage_payload == payload
+
+
+def test_codex_app_server_chat_session_returns_token_usage_payload() -> None:
+    session = project_chat_session.CodexAppServerChatSession("/tmp/project")
+    stub_client = StubChatClient()
+    session._client = stub_client
+    payload = {
+        "last": {
+            "inputTokens": 120,
+            "cachedInputTokens": 20,
+            "outputTokens": 18,
+            "reasoningOutputTokens": 5,
+            "totalTokens": 138,
+        },
+        "total": {
+            "inputTokens": 200,
+            "cachedInputTokens": 30,
+            "outputTokens": 44,
+            "reasoningOutputTokens": 12,
+            "totalTokens": 244,
+        },
+    }
+    events: list[project_chat.ChatTurnLiveEvent] = []
+
+    def run_turn_handler(**kwargs) -> CodexAppServerTurnResult:
+        kwargs["on_event"](
+            codex_app_server.CodexAppServerTurnEvent(
+                kind="token_usage_updated",
+                token_usage=payload,
+            )
+        )
+        kwargs["on_event"](
+            codex_app_server.CodexAppServerTurnEvent(
+                kind="assistant_message_completed",
+                text="ACK",
+                item_id="msg-1",
+                phase="final_answer",
+            )
+        )
+        return _completed_turn_result(
+            thread_id=kwargs["thread_id"],
+            assistant_message="ACK",
+            token_total=244,
+            token_usage_payload=payload,
+        )
+
+    stub_client.run_turn_handler = run_turn_handler
+
+    result = session.turn("hello", "gpt-test", on_event=events.append)
+
+    assert result.assistant_message == "ACK"
+    assert result.token_usage == payload
+    assert [event.kind for event in events] == ["token_usage_updated", "assistant_completed"]
+    assert events[0].token_usage == payload
 
 
 def test_tool_call_from_command_execution_item_uses_completed_payload() -> None:
@@ -1156,6 +1215,35 @@ def test_send_turn_marks_assistant_failed_after_timeout_without_retry(tmp_path: 
     assert assistant_segments[0].content == "hi"
 
 
+def test_send_turn_marks_assistant_failed_after_non_runtime_exception(tmp_path: Path, monkeypatch) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+
+    class FailingSession:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            del prompt, model, chat_mode, reasoning_effort, on_event, on_dynamic_tool_call
+            raise ValueError("provider exploded")
+
+    monkeypatch.setattr(service, "_build_session", lambda conversation_id, project_path: FailingSession())
+
+    with pytest.raises(ValueError, match="provider exploded"):
+        service.send_turn("conversation-test", str(tmp_path), "hi", None)
+
+    state = service._read_state("conversation-test", str(tmp_path))
+    assert state is not None
+    assert state.turns[-1].role == "assistant"
+    assert state.turns[-1].status == "failed"
+    assert state.turns[-1].error == "provider exploded"
+
+
 def test_send_turn_starts_new_thread_cleanly_when_persisted_resume_fails(tmp_path: Path) -> None:
     service = project_chat.ProjectChatService(tmp_path)
     conversation_id = "conversation-test"
@@ -1311,13 +1399,16 @@ def test_update_conversation_settings_persists_model_and_reasoning_effort(tmp_pa
         str(tmp_path),
         model="gpt-5.4",
         reasoning_effort="HIGH",
+        provider="OpenAI",
     )
 
     assert snapshot["chat_mode"] == "chat"
+    assert snapshot["provider"] == "openai"
     assert snapshot["model"] == "gpt-5.4"
     assert snapshot["reasoning_effort"] == "high"
     assert snapshot["turns"] == []
     reloaded = service.get_snapshot("conversation-settings", str(tmp_path))
+    assert reloaded["provider"] == "openai"
     assert reloaded["model"] == "gpt-5.4"
     assert reloaded["reasoning_effort"] == "high"
 
@@ -1438,6 +1529,510 @@ def test_send_turn_reuses_persisted_model_and_reasoning_effort_when_omitted(tmp_
         {
             "model": "gpt-5.4-mini",
             "reasoning_effort": "medium",
+        }
+    ]
+
+
+def test_send_turn_persists_and_forwards_provider(tmp_path: Path, monkeypatch) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    captured_calls: list[dict[str, str | None]] = []
+
+    class PlainTextSession:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            del prompt, chat_mode, reasoning_effort, on_dynamic_tool_call
+            captured_calls[-1]["turn_model"] = model
+            turn_index = len(captured_calls)
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="Provider acknowledged.",
+                        app_turn_id=f"app-turn-{turn_index}",
+                        item_id=f"msg-{turn_index}",
+                        phase="final_answer",
+                    )
+                )
+            return project_chat.ChatTurnResult(assistant_message="Provider acknowledged.")
+
+    def fake_build_session(
+        conversation_id: str,
+        project_path: str,
+        provider: str = "codex",
+        model: str | None = None,
+    ) -> PlainTextSession:
+        captured_calls.append(
+            {
+                "conversation_id": conversation_id,
+                "provider": provider,
+                "model": model,
+            }
+        )
+        return PlainTextSession()
+
+    monkeypatch.setattr(service, "_build_session", fake_build_session)
+
+    first = service.send_turn(
+        "conversation-provider-settings",
+        str(tmp_path),
+        "Use OpenAI.",
+        "gpt-5.4",
+        provider="openai",
+    )
+    second = service.send_turn(
+        "conversation-provider-settings",
+        str(tmp_path),
+        "Continue.",
+        None,
+    )
+
+    assert first["provider"] == "openai"
+    assert second["provider"] == "openai"
+    assert captured_calls == [
+        {
+            "conversation_id": "conversation-provider-settings",
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "turn_model": "gpt-5.4",
+        },
+        {
+            "conversation_id": "conversation-provider-settings",
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "turn_model": "gpt-5.4",
+        },
+    ]
+
+
+def test_build_session_keys_chat_sessions_by_provider_and_model(tmp_path: Path, monkeypatch) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    created: list[dict[str, str | None]] = []
+
+    class FakeCodexSession:
+        def __init__(self, working_dir: str, **kwargs) -> None:
+            del kwargs
+            self.marker = f"codex:{working_dir}"
+            created.append({"provider": "codex", "model": None})
+
+    class FakeUnifiedSession:
+        def __init__(
+            self,
+            working_dir: str,
+            *,
+            provider: str,
+            model: str | None = None,
+            persisted_history: list[project_chat.ConversationTurn] | None = None,
+        ) -> None:
+            del persisted_history
+            self.marker = f"{provider}:{model}:{working_dir}"
+            created.append({"provider": provider, "model": model})
+
+    monkeypatch.setattr(project_chat, "CodexAppServerChatSession", FakeCodexSession)
+    monkeypatch.setattr(project_chat, "UnifiedAgentChatSession", FakeUnifiedSession)
+
+    codex_default = service._build_session("conversation-provider-switch", str(tmp_path))
+    openai = service._build_session("conversation-provider-switch", str(tmp_path), "openai", "gpt-5.4")
+    anthropic = service._build_session("conversation-provider-switch", str(tmp_path), "anthropic", "claude-test")
+    codex_again = service._build_session("conversation-provider-switch", str(tmp_path), "codex", None)
+
+    assert codex_default is codex_again
+    assert openai is not codex_default
+    assert anthropic is not openai
+    assert created == [
+        {"provider": "codex", "model": None},
+        {"provider": "openai", "model": "gpt-5.4"},
+        {"provider": "anthropic", "model": "claude-test"},
+    ]
+    assert sorted(service._sessions) == [
+        "conversation-provider-switch::anthropic::claude-test",
+        "conversation-provider-switch::codex::",
+        "conversation-provider-switch::openai::gpt-5.4",
+    ]
+
+
+def test_delete_conversation_closes_all_provider_model_keyed_sessions(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    project_path = str(tmp_path)
+    conversation_id = "conversation-delete-provider-keyed"
+    other_conversation_id = "conversation-delete-provider-keyed-other"
+    closed: list[str] = []
+
+    class FakeSession:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+        def close(self) -> None:
+            closed.append(self.label)
+
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=conversation_id,
+            project_path=project_path,
+        )
+    )
+
+    with service._sessions_lock:
+        service._sessions[conversation_id] = FakeSession("legacy")
+        service._sessions[service._session_key(conversation_id, "codex", None)] = FakeSession("codex-default")
+        service._sessions[service._session_key(conversation_id, "openai", "gpt-5.4")] = FakeSession("openai")
+        service._sessions[service._session_key(conversation_id, "anthropic", "claude-test")] = FakeSession(
+            "anthropic"
+        )
+        service._sessions[service._session_key(other_conversation_id, "openai", "gpt-5.4")] = FakeSession("other")
+
+    snapshot = service.delete_conversation(conversation_id, project_path)
+
+    assert snapshot["status"] == "deleted"
+    assert sorted(closed) == ["anthropic", "codex-default", "legacy", "openai"]
+    with service._sessions_lock:
+        assert sorted(service._sessions) == [
+            "conversation-delete-provider-keyed-other::openai::gpt-5.4",
+        ]
+
+
+def test_build_session_does_not_restore_codex_thread_from_different_model(tmp_path: Path, monkeypatch) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    service._write_session_state(
+        project_chat.ConversationSessionState(
+            conversation_id="conversation-model-isolated",
+            updated_at="2026-03-06T23:59:00Z",
+            project_path=str(tmp_path),
+            runtime_project_path=str(tmp_path),
+            provider="codex",
+            thread_id="thread-gpt-5-4",
+            model="gpt-5.4",
+        )
+    )
+    captured: dict[str, object] = {}
+
+    class FakeCodexSession:
+        def __init__(
+            self,
+            working_dir: str,
+            *,
+            persisted_thread_id=None,
+            persisted_model=None,
+            on_thread_id_updated=None,
+            on_model_updated=None,
+        ) -> None:
+            del working_dir, on_thread_id_updated, on_model_updated
+            captured["persisted_thread_id"] = persisted_thread_id
+            captured["persisted_model"] = persisted_model
+
+    monkeypatch.setattr(project_chat, "CodexAppServerChatSession", FakeCodexSession)
+
+    service._build_session("conversation-model-isolated", str(tmp_path), "codex", "gpt-5.5")
+
+    assert captured["persisted_thread_id"] is None
+    assert captured["persisted_model"] is None
+
+
+def test_unified_chat_session_applies_reasoning_effort_changes_between_turns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_reasoning_efforts: list[str | None] = []
+
+    class FakeSession:
+        def __init__(self, *, provider_profile, execution_environment, client, config) -> None:
+            del execution_environment, client
+            self.provider_profile = provider_profile
+            self.config = config
+            self.state = project_chat_session.SessionState.IDLE
+            self.history: list[project_chat_session.AssistantTurn] = []
+            self.event_queue = asyncio.Queue()
+
+        async def process_input(self, prompt: str) -> None:
+            observed_reasoning_efforts.append(self.config.reasoning_effort)
+            self.history.append(project_chat_session.AssistantTurn(f"ack {prompt}"))
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        project_chat_session,
+        "_profile_for_provider",
+        lambda provider, model: SimpleNamespace(model=str(model or f"{provider}-default")),
+    )
+    monkeypatch.setattr(project_chat_session, "Session", FakeSession)
+
+    session = project_chat_session.UnifiedAgentChatSession(
+        str(tmp_path),
+        provider="openai",
+        model="gpt-test",
+        client_factory=lambda provider: SimpleNamespace(provider=provider),
+    )
+
+    first = session.turn("first", None, reasoning_effort="high")
+    second = session.turn("second", None, reasoning_effort="low")
+
+    assert first.assistant_message == "ack first"
+    assert second.assistant_message == "ack second"
+    assert observed_reasoning_efforts == ["high", "low"]
+
+
+def test_project_chat_unified_session_hydrates_persisted_history_without_current_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_histories: list[list[project_chat.ConversationTurn]] = []
+
+    class FakeUnifiedSession:
+        def __init__(
+            self,
+            working_dir: str,
+            *,
+            provider: str,
+            model: str | None = None,
+            persisted_history: list[project_chat.ConversationTurn] | None = None,
+        ) -> None:
+            del working_dir, provider, model
+            captured_histories.append(list(persisted_history or []))
+
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
+            on_event=None,
+        ) -> project_chat.ChatTurnResult:
+            del prompt, model, chat_mode, reasoning_effort
+            if on_event is not None:
+                on_event(project_chat.ChatTurnLiveEvent(kind="assistant_completed", content_delta="assistant reply"))
+            return project_chat.ChatTurnResult(assistant_message="assistant reply")
+
+    monkeypatch.setattr(project_chat, "UnifiedAgentChatSession", FakeUnifiedSession)
+
+    first_service = project_chat.ProjectChatService(tmp_path)
+    first_service.send_turn("conversation-history", str(tmp_path), "first question", provider="openai")
+
+    second_service = project_chat.ProjectChatService(tmp_path)
+    second_service.send_turn("conversation-history", str(tmp_path), "second question", provider="openai")
+
+    assert [[turn.role, turn.content] for turn in captured_histories[0]] == []
+    assert [[turn.role, turn.content] for turn in captured_histories[1]] == [
+        ["user", "first question"],
+        ["assistant", "assistant reply"],
+    ]
+    assert "second question" not in [turn.content for turn in captured_histories[1]]
+
+
+def test_unified_chat_session_close_closes_agent_session_and_client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed_sessions: list[str] = []
+    closed_clients: list[str] = []
+
+    class FakeUnifiedClient:
+        def __init__(self, provider: str) -> None:
+            self.provider = provider
+
+        async def close(self) -> None:
+            closed_clients.append(self.provider)
+
+    class FakeSession:
+        def __init__(self, *, provider_profile, execution_environment, client, config) -> None:
+            del execution_environment, config
+            self.provider_profile = provider_profile
+            self.client = client
+            self.state = project_chat_session.SessionState.IDLE
+            self.history: list[project_chat_session.AssistantTurn] = []
+            self.event_queue = asyncio.Queue()
+
+        async def process_input(self, prompt: str) -> None:
+            self.history.append(project_chat_session.AssistantTurn(f"ack {prompt}"))
+
+        async def close(self) -> None:
+            closed_sessions.append(self.provider_profile.model)
+
+    monkeypatch.setattr(
+        project_chat_session,
+        "_profile_for_provider",
+        lambda provider, model: SimpleNamespace(model=str(model or f"{provider}-default")),
+    )
+    monkeypatch.setattr(project_chat_session, "Session", FakeSession)
+
+    session = project_chat_session.UnifiedAgentChatSession(
+        str(tmp_path),
+        provider="openai",
+        model="gpt-test",
+        client_factory=FakeUnifiedClient,
+    )
+
+    assert session.turn("hello", None).assistant_message == "ack hello"
+    session.close()
+
+    assert closed_sessions == ["gpt-test"]
+    assert closed_clients == ["openai"]
+
+
+def test_unified_chat_session_model_switch_closes_replaced_session_and_client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed_sessions: list[str] = []
+    closed_clients: list[str] = []
+
+    class FakeUnifiedClient:
+        def __init__(self, provider: str) -> None:
+            self.provider = provider
+
+        async def close(self) -> None:
+            closed_clients.append(self.provider)
+
+    class FakeSession:
+        def __init__(self, *, provider_profile, execution_environment, client, config) -> None:
+            del execution_environment, client, config
+            self.provider_profile = provider_profile
+            self.state = project_chat_session.SessionState.IDLE
+            self.history: list[project_chat_session.AssistantTurn] = []
+            self.event_queue = asyncio.Queue()
+
+        async def process_input(self, prompt: str) -> None:
+            self.history.append(project_chat_session.AssistantTurn(f"{self.provider_profile.model}:{prompt}"))
+
+        async def close(self) -> None:
+            closed_sessions.append(self.provider_profile.model)
+
+    monkeypatch.setattr(
+        project_chat_session,
+        "_profile_for_provider",
+        lambda provider, model: SimpleNamespace(model=str(model or f"{provider}-default")),
+    )
+    monkeypatch.setattr(project_chat_session, "Session", FakeSession)
+
+    session = project_chat_session.UnifiedAgentChatSession(
+        str(tmp_path),
+        provider="openai",
+        model="gpt-old",
+        client_factory=FakeUnifiedClient,
+    )
+
+    assert session.turn("first", None).assistant_message == "gpt-old:first"
+    assert session.turn("second", "gpt-new").assistant_message == "gpt-new:second"
+
+    assert closed_sessions == ["gpt-old"]
+    assert closed_clients == ["openai"]
+
+
+def test_list_chat_models_combines_codex_and_unified_provider_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+
+    class FakeCodexModel:
+        def to_dict(self) -> dict[str, Any]:
+            return {
+                "id": "gpt-codex",
+                "display": "GPT Codex",
+                "supported_reasoning_efforts": ["low", "high"],
+                "default_reasoning_effort": "high",
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, *, popen_factory) -> None:
+            return None
+
+        def list_models(self) -> list[FakeCodexModel]:
+            return [FakeCodexModel()]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(project_chat, "CodexAppServerClient", FakeClient)
+    monkeypatch.setattr(
+        project_chat,
+        "list_unified_models",
+        lambda: [
+            SimpleNamespace(
+                provider="openai",
+                id="gpt-5.4",
+                display_name="GPT 5.4",
+                supports_reasoning=True,
+            ),
+            SimpleNamespace(
+                provider="local",
+                id="ignored-local",
+                display_name="Ignored",
+                supports_reasoning=False,
+            ),
+        ],
+    )
+
+    payload = service.list_chat_models(str(tmp_path))
+
+    assert payload["models"] == [
+        {
+            "provider": "codex",
+            "id": "gpt-codex",
+            "display": "GPT Codex",
+            "supported_reasoning_efforts": ["low", "high"],
+            "default_reasoning_effort": "high",
+        },
+        {
+            "provider": "openai",
+            "id": "gpt-5.4",
+            "display": "GPT 5.4",
+            "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+            "default_reasoning_effort": "medium",
+        },
+    ]
+
+
+def test_list_chat_models_returns_unified_models_when_codex_discovery_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, *, popen_factory) -> None:
+            raise RuntimeError("codex unavailable")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(project_chat, "CodexAppServerClient", FakeClient)
+    monkeypatch.setattr(
+        project_chat,
+        "list_unified_models",
+        lambda: [
+            SimpleNamespace(
+                provider="openai",
+                id="gpt-5.4",
+                display_name="GPT 5.4",
+                supports_reasoning=True,
+            ),
+        ],
+    )
+
+    payload = service.list_chat_models(str(tmp_path))
+
+    assert payload["models"] == [
+        {
+            "provider": "openai",
+            "id": "gpt-5.4",
+            "display": "GPT 5.4",
+            "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+            "default_reasoning_effort": "medium",
         }
     ]
 
@@ -2009,6 +2604,83 @@ def test_request_user_input_segments_persist_and_answer_in_place(
         if payload.get("type") == "segment_upsert" and payload["segment"]["kind"] == "request_user_input"
     ]
     assert [payload["status"] for payload in request_payloads] == ["pending", "complete"]
+
+
+def test_request_user_input_answers_find_provider_keyed_codex_session(tmp_path: Path) -> None:
+    service = project_chat.ProjectChatService(tmp_path)
+    project_path = str(tmp_path)
+    conversation_id = "conversation-request-provider-keyed"
+
+    class WaitingRequestSession:
+        def __init__(self) -> None:
+            self.answers: dict[str, str] = {}
+
+        def has_pending_request_user_input(self, request_id: str) -> bool:
+            return request_id in {"request-1", "path_choice"}
+
+        def submit_request_user_input_answers(self, request_id: str, answers: dict[str, str]) -> bool:
+            if request_id != "request-1":
+                return False
+            self.answers = dict(answers)
+            return True
+
+    waiting_session = WaitingRequestSession()
+    with service._sessions_lock:
+        service._sessions[service._session_key(conversation_id, "codex", None)] = waiting_session
+    service._write_state(
+        project_chat.ConversationState(
+            conversation_id=conversation_id,
+            project_path=project_path,
+            turns=[
+                project_chat.ConversationTurn(
+                    id="turn-user-1",
+                    role="user",
+                    content="Ask me the missing question.",
+                    timestamp="2026-04-17T12:00:00Z",
+                ),
+                project_chat.ConversationTurn(
+                    id="turn-assistant-1",
+                    role="assistant",
+                    content="",
+                    timestamp="2026-04-17T12:00:01Z",
+                    status="streaming",
+                    parent_turn_id="turn-user-1",
+                ),
+            ],
+            segments=[
+                project_chat.ConversationSegment(
+                    id="segment-request-user-input-app-turn-1-request-1",
+                    turn_id="turn-assistant-1",
+                    order=1,
+                    kind="request_user_input",
+                    role="system",
+                    status="pending",
+                    timestamp="2026-04-17T12:00:02Z",
+                    updated_at="2026-04-17T12:00:02Z",
+                    content="Which path should I take?",
+                    request_user_input=_request_user_input_record(),
+                ),
+            ],
+        )
+    )
+
+    snapshot = service.submit_request_user_input_answer(
+        conversation_id,
+        project_path,
+        "path_choice",
+        {
+            "path_choice": "Inline card",
+            "constraints": "Preserve the inline timeline.",
+        },
+    )
+
+    request_segment = next(segment for segment in snapshot["segments"] if segment["kind"] == "request_user_input")
+    assert request_segment["status"] == "complete"
+    assert request_segment["request_user_input"]["status"] == "answered"
+    assert waiting_session.answers == {
+        "path_choice": "Inline card",
+        "constraints": "Preserve the inline timeline.",
+    }
 
 
 def test_request_user_input_answers_expire_without_live_session(tmp_path: Path) -> None:
@@ -2596,17 +3268,24 @@ def test_flow_run_request_routes_create_and_approve_launch(
         flow_name: str,
         working_directory: str,
         model: str | None,
+        llm_provider: str | None = None,
+        reasoning_effort: str | None = None,
         goal: str | None = None,
         launch_context: dict[str, object] | None = None,
         spec_id: str | None = None,
         plan_id: str | None = None,
+        **unexpected: object,
     ) -> dict[str, object]:
+        assert "backend" not in unexpected
+        assert not unexpected
         start_calls.append(
             {
                 "run_id": run_id,
                 "flow_name": flow_name,
                 "working_directory": working_directory,
                 "model": model,
+                "llm_provider": llm_provider,
+                "reasoning_effort": reasoning_effort,
                 "goal": goal,
                 "launch_context": launch_context,
                 "spec_id": spec_id,
@@ -2631,6 +3310,8 @@ def test_flow_run_request_routes_create_and_approve_launch(
                 ],
             },
             "model": "gpt-5.4",
+            "llm_provider": "openai",
+            "reasoning_effort": "high",
         },
     )
 
@@ -2657,12 +3338,16 @@ def test_flow_run_request_routes_create_and_approve_launch(
     assert request_payload["status"] == "launched"
     assert request_payload["run_id"] == "run-flow-123"
     assert request_payload["review_message"] == "Approved for launch."
+    assert request_payload["llm_provider"] == "openai"
+    assert request_payload["reasoning_effort"] == "high"
     assert start_calls == [
         {
             "run_id": None,
             "flow_name": TEST_DISPATCH_FLOW,
             "working_directory": str(project_dir),
             "model": "gpt-5.4",
+            "llm_provider": "openai",
+            "reasoning_effort": "high",
             "goal": "Implement the approved scope.",
             "launch_context": {
                 "context.request.summary": "Implement the approved scope.",
@@ -2721,17 +3406,24 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
         flow_name: str,
         working_directory: str,
         model: str | None,
+        llm_provider: str | None = None,
+        reasoning_effort: str | None = None,
         goal: str | None = None,
         launch_context: dict[str, object] | None = None,
         spec_id: str | None = None,
         plan_id: str | None = None,
+        **unexpected: object,
     ) -> dict[str, object]:
+        assert "backend" not in unexpected
+        assert not unexpected
         start_calls.append(
             {
                 "run_id": run_id,
                 "flow_name": flow_name,
                 "working_directory": working_directory,
                 "model": model,
+                "llm_provider": llm_provider,
+                "reasoning_effort": reasoning_effort,
                 "goal": goal,
                 "launch_context": launch_context,
                 "spec_id": spec_id,
@@ -2754,6 +3446,9 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
                 "context.request.summary": "Implement the approved scope.",
             },
             "model": "gpt-5.4",
+            "llm_provider": "anthropic",
+            "reasoning_effort": "low",
+            "backend": "codex-app-server",
         },
     )
 
@@ -2772,6 +3467,8 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
     assert flow_launch["status"] == "launched"
     assert flow_launch["run_id"] == "run-launch-123"
     assert flow_launch["goal"] == "Implement the approved scope."
+    assert flow_launch["llm_provider"] == "anthropic"
+    assert flow_launch["reasoning_effort"] == "low"
     segment = next(
         entry for entry in updated_snapshot["segments"] if entry["artifact_id"] == launch_payload["flow_launch_id"]
     )
@@ -2783,6 +3480,8 @@ def test_direct_flow_launch_routes_create_inline_artifact_and_launch(
             "flow_name": TEST_DISPATCH_FLOW,
             "working_directory": str(project_dir),
             "model": "gpt-5.4",
+            "llm_provider": "anthropic",
+            "reasoning_effort": "low",
             "goal": "Implement the approved scope.",
             "launch_context": {
                 "context.request.summary": "Implement the approved scope.",
@@ -3082,7 +3781,10 @@ def test_proposed_plan_review_route_launches_in_owner_conversation_and_records_r
         launch_context: dict[str, object] | None = None,
         spec_id: str | None = None,
         plan_id: str | None = None,
+        **unexpected: object,
     ) -> dict[str, object]:
+        assert "backend" not in unexpected
+        assert not unexpected
         start_calls.append(
             {
                 "run_id": run_id,
@@ -3748,6 +4450,95 @@ def test_send_project_conversation_turn_endpoint_uses_real_service_signature(
         "assistant_message",
         "tool_call",
     ]
+
+
+def test_send_project_conversation_turn_endpoint_persists_token_usage_in_snapshot(
+    product_api_client,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    service = _project_chat_service()
+    entered_turn = threading.Event()
+    finish_turn = threading.Event()
+    token_usage = {
+        "last": {
+            "inputTokens": 120,
+            "cachedInputTokens": 20,
+            "outputTokens": 18,
+            "reasoningOutputTokens": 5,
+            "totalTokens": 138,
+        },
+        "total": {
+            "inputTokens": 200,
+            "cachedInputTokens": 30,
+            "outputTokens": 44,
+            "reasoningOutputTokens": 12,
+            "totalTokens": 244,
+        },
+    }
+
+    class FakeSession:
+        def turn(
+            self,
+            prompt: str,
+            model: str | None,
+            *,
+            chat_mode: str = "chat",
+            reasoning_effort: str | None = None,
+            on_event=None,
+            on_dynamic_tool_call=None,
+        ) -> project_chat.ChatTurnResult:
+            entered_turn.set()
+            assert finish_turn.wait(timeout=2)
+            if on_event is not None:
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="token_usage_updated",
+                        token_usage=token_usage,
+                    )
+                )
+                on_event(
+                    project_chat.ChatTurnLiveEvent(
+                        kind="assistant_completed",
+                        content_delta="Usage captured.",
+                        app_turn_id="app-turn-usage",
+                        item_id="msg-usage",
+                        phase="final_answer",
+                    )
+                )
+            return project_chat.ChatTurnResult(
+                assistant_message='{"assistant_message":"Usage captured."}',
+                token_usage=token_usage,
+            )
+
+    monkeypatch.setattr(service, "_build_session", lambda *args: FakeSession())
+
+    response = product_api_client.post(
+        "/workspace/api/conversations/conversation-token-usage/turns",
+        json={
+            "project_path": str(tmp_path),
+            "message": "show token usage",
+            "model": "gpt-test",
+        },
+    )
+
+    assert response.status_code == 200
+    assert entered_turn.wait(timeout=2)
+
+    finish_turn.set()
+    deadline = time.time() + 2.0
+    final_snapshot: dict[str, Any] | None = None
+    while time.time() < deadline:
+        candidate = service.get_snapshot("conversation-token-usage", str(tmp_path))
+        if candidate["turns"][-1]["status"] == "complete":
+            final_snapshot = candidate
+            break
+        time.sleep(0.02)
+
+    assert final_snapshot is not None
+    assistant_turn = final_snapshot["turns"][-1]
+    assert assistant_turn["content"] == "Usage captured."
+    assert assistant_turn["token_usage"] == token_usage
 
 
 def test_update_project_conversation_settings_endpoint_upserts_shell_and_rejects_project_mismatch(

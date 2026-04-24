@@ -18,6 +18,7 @@ export interface ConversationTurnResponse {
     artifact_id?: string | null
     parent_turn_id?: string | null
     error?: string | null
+    token_usage?: Record<string, unknown> | null
 }
 
 export type ConversationChatMode = 'chat' | 'plan'
@@ -90,6 +91,8 @@ export interface FlowRunRequestResponse {
     goal?: string | null
     launch_context?: Record<string, unknown> | null
     model?: string | null
+    llm_provider?: string | null
+    reasoning_effort?: string | null
     run_id?: string | null
     launch_error?: string | null
     review_message?: string | null
@@ -109,6 +112,8 @@ export interface FlowLaunchResponse {
     goal?: string | null
     launch_context?: Record<string, unknown> | null
     model?: string | null
+    llm_provider?: string | null
+    reasoning_effort?: string | null
     run_id?: string | null
     launch_error?: string | null
 }
@@ -137,6 +142,7 @@ export interface ConversationSnapshotResponse {
     conversation_handle?: string | null
     project_path: string
     chat_mode: ConversationChatMode
+    provider?: string | null
     model?: string | null
     reasoning_effort?: string | null
     title: string
@@ -224,6 +230,7 @@ function parseConversationTurnResponse(value: unknown): ConversationTurnResponse
         artifact_id: asOptionalNullableString(record.artifact_id),
         parent_turn_id: asOptionalNullableString(record.parent_turn_id),
         error: asOptionalNullableString(record.error),
+        token_usage: asUnknownRecord(record.token_usage),
     }
 }
 
@@ -397,6 +404,8 @@ function parseFlowRunRequestResponse(value: unknown): FlowRunRequestResponse | n
         goal: asOptionalNullableString(record.goal),
         launch_context: asUnknownRecord(record.launch_context),
         model: asOptionalNullableString(record.model),
+        llm_provider: asOptionalNullableString(record.llm_provider),
+        reasoning_effort: asOptionalNullableString(record.reasoning_effort),
         run_id: asOptionalNullableString(record.run_id),
         launch_error: asOptionalNullableString(record.launch_error),
         review_message: asOptionalNullableString(record.review_message),
@@ -436,6 +445,8 @@ function parseFlowLaunchResponse(value: unknown): FlowLaunchResponse | null {
         goal: asOptionalNullableString(record.goal),
         launch_context: asUnknownRecord(record.launch_context),
         model: asOptionalNullableString(record.model),
+        llm_provider: asOptionalNullableString(record.llm_provider),
+        reasoning_effort: asOptionalNullableString(record.reasoning_effort),
         run_id: asOptionalNullableString(record.run_id),
         launch_error: asOptionalNullableString(record.launch_error),
     }
@@ -573,6 +584,7 @@ export function parseConversationSnapshotResponse(
         conversation_handle: asOptionalNullableString(record.conversation_handle),
         project_path: expectString(record.project_path, endpoint, 'project_path'),
         chat_mode: record.chat_mode === 'plan' ? 'plan' : 'chat',
+        provider: asOptionalNullableString(record.provider) || 'codex',
         model: asOptionalNullableString(record.model),
         reasoning_effort: asOptionalNullableString(record.reasoning_effort),
         title: asOptionalString(record.title) || 'New thread',
@@ -678,6 +690,7 @@ export async function sendConversationTurnValidated(
     payload: {
         project_path: string
         message: string
+        provider?: string | null
         model?: string | null
         reasoning_effort?: string | null
         chat_mode?: ConversationChatMode | null
@@ -700,6 +713,7 @@ export async function updateConversationSettingsValidated(
     payload: {
         project_path: string
         chat_mode?: ConversationChatMode | null
+        provider?: string | null
         model?: string | null
         reasoning_effort?: string | null
     },
@@ -745,6 +759,8 @@ export async function reviewFlowRunRequestValidated(
         message: string
         flow_name?: string | null
         model?: string | null
+        llm_provider?: string | null
+        reasoning_effort?: string | null
     },
 ): Promise<ConversationSnapshotResponse> {
     return fetchWorkspaceJsonValidated(

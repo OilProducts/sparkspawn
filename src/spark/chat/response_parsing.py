@@ -45,6 +45,12 @@ def normalize_flow_run_request_payload(
     model = as_non_empty_string(arguments.get("model"))
     if model:
         payload["model"] = model
+    llm_provider = as_non_empty_string(arguments.get("llm_provider"))
+    if llm_provider:
+        payload["llm_provider"] = llm_provider.lower()
+    reasoning_effort = as_non_empty_string(arguments.get("reasoning_effort"))
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort.lower()
     return payload
 
 

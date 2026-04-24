@@ -41,6 +41,52 @@ describe('conversationsApi parsing', () => {
         })
     })
 
+    it('parses assistant turn token usage from snapshots', () => {
+        const tokenUsage = {
+            last: {
+                inputTokens: 120,
+                cachedInputTokens: 20,
+                outputTokens: 18,
+                reasoningOutputTokens: 5,
+                totalTokens: 138,
+            },
+            total: {
+                inputTokens: 200,
+                cachedInputTokens: 30,
+                outputTokens: 44,
+                reasoningOutputTokens: 12,
+                totalTokens: 244,
+            },
+        }
+        const snapshot = parseConversationSnapshotResponse({
+            schema_version: 4,
+            conversation_id: 'conversation-usage',
+            conversation_handle: 'steady-harbor',
+            project_path: '/tmp/project-plan',
+            chat_mode: 'chat',
+            title: 'Usage thread',
+            created_at: '2026-04-16T18:00:00Z',
+            updated_at: '2026-04-16T18:00:10Z',
+            turns: [
+                {
+                    id: 'turn-assistant-1',
+                    role: 'assistant',
+                    kind: 'message',
+                    status: 'complete',
+                    content: 'Done.',
+                    timestamp: '2026-04-16T18:00:01Z',
+                    token_usage: tokenUsage,
+                },
+            ],
+            segments: [],
+            event_log: [],
+            flow_run_requests: [],
+            flow_launches: [],
+        })
+
+        expect(snapshot.turns[0].token_usage).toEqual(tokenUsage)
+    })
+
     it('parses plan segments from snapshots', () => {
         const snapshot = parseConversationSnapshotResponse({
             schema_version: 4,

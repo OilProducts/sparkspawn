@@ -34,6 +34,7 @@ type BuildProjectsHomeViewModelArgs = {
 
 export type ProjectsHomeViewModel = {
     activeChatMode: ConversationChatMode | null
+    activeProjectChatProvider: string
     activeProjectChatModel: string
     activeProjectChatReasoningEffort: string
     activeConversationHistory: ConversationTimelineEntry[]
@@ -99,6 +100,11 @@ export function buildProjectsHomeViewModel({
             activeConversationSnapshot?.model
             ?? uiDefaults.llm_model
             ?? ''
+        ),
+        activeProjectChatProvider: (
+            activeConversationSnapshot?.provider
+            ?? uiDefaults.llm_provider
+            ?? 'codex'
         ),
         activeProjectChatReasoningEffort: (
             activeConversationSnapshot?.reasoning_effort

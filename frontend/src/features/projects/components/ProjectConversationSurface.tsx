@@ -21,9 +21,11 @@ interface ProjectConversationSurfaceProps {
     activeProjectLabel: string | null
     activeProjectPath: string | null
     activeChatMode: ConversationChatMode | null
+    activeChatProvider: string
     activeChatModel: string
     activeChatReasoningEffort: string
     chatModelOptions: ProjectChatSelectOption[]
+    chatProviderOptions: ProjectChatSelectOption[]
     chatReasoningEffortOptions: ProjectChatSelectOption[]
     hasRenderableConversationHistory: boolean
     isConversationPinnedToBottom: boolean
@@ -40,6 +42,7 @@ interface ProjectConversationSurfaceProps {
     onChatComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
     onChatDraftChange: (value: string) => void
     onChatModelChange: (value: string) => void
+    onChatProviderChange: (value: string) => void
     onChatReasoningEffortChange: (value: string) => void
 }
 
@@ -47,9 +50,11 @@ export function ProjectConversationSurface({
     activeProjectLabel,
     activeProjectPath,
     activeChatMode,
+    activeChatProvider,
     activeChatModel,
     activeChatReasoningEffort,
     chatModelOptions,
+    chatProviderOptions,
     chatReasoningEffortOptions,
     hasRenderableConversationHistory,
     isConversationPinnedToBottom,
@@ -66,6 +71,7 @@ export function ProjectConversationSurface({
     onChatComposerKeyDown,
     onChatDraftChange,
     onChatModelChange,
+    onChatProviderChange,
     onChatReasoningEffortChange,
 }: ProjectConversationSurfaceProps) {
     const controlsDisabled = !activeProjectPath || isChatInputDisabled
@@ -151,6 +157,21 @@ export function ProjectConversationSurface({
                                     Press Enter to send. Use Shift+Enter for a new line.
                                 </p>
                                 <div className="flex flex-wrap items-center justify-end gap-2">
+                                    <NativeSelect
+                                        aria-label="Project chat provider"
+                                        data-testid="project-ai-conversation-provider-select"
+                                        value={activeChatProvider || 'codex'}
+                                        onChange={(event) => onChatProviderChange(event.target.value)}
+                                        disabled={controlsDisabled}
+                                        size="sm"
+                                        className="max-w-[9rem] text-xs"
+                                    >
+                                        {chatProviderOptions.map((option) => (
+                                            <NativeSelectOption key={option.value} value={option.value}>
+                                                {option.label}
+                                            </NativeSelectOption>
+                                        ))}
+                                    </NativeSelect>
                                     <NativeSelect
                                         aria-label="Project chat model"
                                         data-testid="project-ai-conversation-model-select"

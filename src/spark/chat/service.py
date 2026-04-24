@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
@@ -26,6 +27,7 @@ from spark.chat.response_parsing import (
 )
 from spark.chat.session import (
     CodexAppServerChatSession,
+    UnifiedAgentChatSession,
 )
 from spark.workspace.conversations.artifacts import ProjectChatReviewService
 from spark.workspace.conversations.models import (
@@ -61,6 +63,7 @@ from spark_common.codex_app_client import (
     CodexAppServerClient,
 )
 from spark_common.runtime_path import resolve_runtime_workspace_path
+from unified_llm.models import list_models as list_unified_models
 
 
 CHAT_RUNTIME_THREAD_KEY = "_attractor.runtime.thread_id"
@@ -71,6 +74,18 @@ EXCESS_BLANK_LINES_PATTERN = re.compile(r"\n{3,}")
 
 def _resolve_flow_validation_command() -> str:
     return "spark flow validate --file <path> --text"
+
+
+def _normalize_provider(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized or "codex"
+
+
+def _validate_provider(value: Any) -> str:
+    normalized = _normalize_provider(value)
+    if normalized not in {"codex", "openai", "anthropic", "gemini"}:
+        raise ValueError("Provider must be blank or one of: codex, openai, anthropic, gemini.")
+    return normalized
 
 
 class TurnInProgressError(RuntimeError):
@@ -214,7 +229,7 @@ class ProjectChatService:
         self._reviews = ProjectChatReviewService(self._repository)
         self._event_hub = ConversationEventHub()
         self._sessions_lock = threading.Lock()
-        self._sessions: dict[str, CodexAppServerChatSession] = {}
+        self._sessions: dict[str, Any] = {}
 
     def events(self) -> ConversationEventHub:
         return self._event_hub
@@ -277,8 +292,20 @@ class ProjectChatService:
             line=line,
         )
 
-    def _read_session_state(self, conversation_id: str, project_path: Optional[str] = None) -> Optional[ConversationSessionState]:
-        return self._repository.read_session_state(conversation_id, project_path)
+    def _read_session_state(
+        self,
+        conversation_id: str,
+        project_path: Optional[str] = None,
+        *,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Optional[ConversationSessionState]:
+        return self._repository.read_session_state(
+            conversation_id,
+            project_path,
+            provider=provider,
+            model=model,
+        )
 
     def _write_session_state(self, state: ConversationSessionState) -> None:
         self._repository.write_session_state(state)
@@ -288,16 +315,27 @@ class ProjectChatService:
         conversation_id: str,
         project_path: str,
         thread_id: str,
+        *,
+        provider: str = "codex",
+        model: Optional[str] = None,
     ) -> None:
-        self._repository.persist_session_thread(conversation_id, project_path, thread_id)
+        self._repository.persist_session_thread(
+            conversation_id,
+            project_path,
+            thread_id,
+            provider=provider,
+            model=model,
+        )
 
     def _persist_session_model(
         self,
         conversation_id: str,
         project_path: str,
         model: str,
+        *,
+        provider: str = "codex",
     ) -> None:
-        self._repository.persist_session_model(conversation_id, project_path, model)
+        self._repository.persist_session_model(conversation_id, project_path, model, provider=provider)
 
     async def publish_snapshot(self, conversation_id: str) -> None:
         snapshot = self.get_snapshot(conversation_id)
@@ -313,18 +351,38 @@ class ProjectChatService:
         normalized_project_path = _normalize_project_path(project_path)
         if not normalized_project_path:
             raise ValueError("Project path is required.")
+        unified_models = [
+            {
+                "provider": model.provider,
+                "id": model.id,
+                "display": model.display_name,
+                "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"]
+                if model.supports_reasoning
+                else [],
+                "default_reasoning_effort": "medium" if model.supports_reasoning else None,
+            }
+            for model in list_unified_models()
+            if model.provider in {"openai", "anthropic", "gemini"}
+        ]
         runtime_project_path = str(_normalize_project_path(resolve_runtime_workspace_path(normalized_project_path)))
         client = CodexAppServerClient(
             runtime_project_path,
             requested_working_dir=normalized_project_path,
             request_timeout_seconds=APP_SERVER_REQUEST_TIMEOUT_SECONDS,
         )
+        codex_models: list[dict[str, Any]] = []
         try:
             client.ensure_process(popen_factory=subprocess.Popen)
             models = client.list_models()
-            return {"models": [model.to_dict() for model in models]}
+            codex_models = [
+                {"provider": "codex", **model.to_dict()}
+                for model in models
+            ]
+        except Exception as exc:
+            LOGGER.warning("codex app-server model discovery failed; returning unified models only: %s", exc)
         finally:
             client.close()
+        return {"models": [*codex_models, *unified_models]}
 
     def get_snapshot_by_handle(self, conversation_handle: str) -> dict[str, Any]:
         conversation_id, project_path = self._repository.resolve_conversation_handle(conversation_handle)
@@ -333,8 +391,13 @@ class ProjectChatService:
     def delete_conversation(self, conversation_id: str, project_path: str) -> dict[str, Any]:
         snapshot = self._repository.delete_conversation(conversation_id, project_path)
         with self._sessions_lock:
-            session = self._sessions.pop(conversation_id, None)
-        if session is not None:
+            session_keys = [
+                key
+                for key in self._sessions
+                if key == conversation_id or key.startswith(f"{conversation_id}::")
+            ]
+            sessions = [self._sessions.pop(key) for key in session_keys]
+        for session in sessions:
             session.close()
         return snapshot
 
@@ -453,18 +516,23 @@ class ProjectChatService:
         request_or_question_id: str,
     ) -> Optional[Any]:
         with self._sessions_lock:
-            session = self._sessions.get(conversation_id)
-        if session is None or not hasattr(session, "has_pending_request_user_input"):
-            return None
-        try:
-            if session.has_pending_request_user_input(request_or_question_id):
-                return session
-        except Exception:
-            LOGGER.warning(
-                "project chat could not inspect live request_user_input state for conversation %s",
-                conversation_id,
-                exc_info=True,
-            )
+            sessions = [
+                session
+                for key, session in self._sessions.items()
+                if key == conversation_id or key.startswith(f"{conversation_id}::")
+            ]
+        for session in sessions:
+            if not hasattr(session, "has_pending_request_user_input"):
+                continue
+            try:
+                if session.has_pending_request_user_input(request_or_question_id):
+                    return session
+            except Exception:
+                LOGGER.warning(
+                    "project chat could not inspect live request_user_input state for conversation %s",
+                    conversation_id,
+                    exc_info=True,
+                )
         return None
 
     def _expire_request_user_input_in_state(
@@ -787,11 +855,13 @@ class ProjectChatService:
         chat_mode: Optional[str] = None,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
+        provider: Optional[str] = None,
     ) -> dict[str, Any]:
         normalized_project_path = _normalize_project_path(project_path)
         if not normalized_project_path:
             raise ValueError("Project path is required.")
         normalized_chat_mode = validate_chat_mode(chat_mode) if chat_mode is not None else None
+        normalized_provider = _validate_provider(provider) if provider is not None else None
         normalized_model = _as_non_empty_string(model) if model is not None else None
         normalized_reasoning_effort = (
             validate_reasoning_effort(reasoning_effort)
@@ -815,6 +885,8 @@ class ProjectChatService:
                 state.chat_mode = current_chat_mode
             if model is not None:
                 state.model = normalized_model
+            if provider is not None:
+                state.provider = normalized_provider or "codex"
             if reasoning_effort is not None:
                 state.reasoning_effort = normalized_reasoning_effort
             self._touch_conversation_state(state)
@@ -830,6 +902,7 @@ class ProjectChatService:
         chat_mode: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+        provider: Optional[str] = None,
     ) -> tuple[PreparedChatTurn, dict[str, Any]]:
         normalized_project_path = _normalize_project_path(project_path)
         if not normalized_project_path:
@@ -852,8 +925,11 @@ class ProjectChatService:
             state.chat_mode = effective_chat_mode
             if model is not None:
                 state.model = _as_non_empty_string(model)
+            if provider is not None:
+                state.provider = _validate_provider(provider)
             if reasoning_effort is not None:
                 state.reasoning_effort = validate_reasoning_effort(reasoning_effort)
+            effective_provider = _normalize_provider(state.provider)
             effective_model = state.model
             effective_reasoning_effort = state.reasoning_effort
             active_assistant_turn = next(
@@ -905,6 +981,7 @@ class ProjectChatService:
                 project_path=normalized_project_path,
                 chat_mode=effective_chat_mode,
                 prompt=prompt,
+                provider=effective_provider,
                 model=effective_model,
                 reasoning_effort=effective_reasoning_effort,
                 user_turn=user_turn,
@@ -996,7 +1073,24 @@ class ProjectChatService:
             finally:
                 clear_raw_rpc_logger(target_session)
 
-        session = self._build_session(prepared.conversation_id, prepared.project_path)
+        try:
+            session = self._build_session(
+                prepared.conversation_id,
+                prepared.project_path,
+                prepared.provider,
+                prepared.model,
+                history_exclude_turn_ids={prepared.user_turn.id, prepared.assistant_turn.id},
+            )
+        except TypeError:
+            try:
+                session = self._build_session(
+                    prepared.conversation_id,
+                    prepared.project_path,
+                    prepared.provider,
+                    prepared.model,
+                )
+            except TypeError:
+                session = self._build_session(prepared.conversation_id, prepared.project_path)
         return run_session(session)
 
     def _run_prepared_turn(
@@ -1054,7 +1148,11 @@ class ProjectChatService:
                     self._upsert_turn(current_state, current_assistant_turn)
                     emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
 
-                if event.kind == "assistant_delta":
+                if event.kind == "token_usage_updated" and isinstance(event.token_usage, dict):
+                    current_assistant_turn.token_usage = copy.deepcopy(event.token_usage)
+                    self._upsert_turn(current_state, current_assistant_turn)
+                    emitted_payloads.append(self._build_turn_upsert_payload(current_state, current_assistant_turn))
+                elif event.kind == "assistant_delta":
                     if event.content_delta and chat_mode != "plan":
                         segment = self._materialize_segment_for_live_event(current_state, current_assistant_turn, event)
                         if segment is not None:
@@ -1125,7 +1223,7 @@ class ProjectChatService:
 
         try:
             turn_result = session_runner(persist_live_event, progress_callback)
-        except RuntimeError as exc:
+        except Exception as exc:
             if persist_failure:
                 self._persist_assistant_turn_failure_for_turn(
                     conversation_id,
@@ -1190,10 +1288,16 @@ class ProjectChatService:
                     current_assistant_turn.content != resolved_content
                     or current_assistant_turn.status != "complete"
                     or current_assistant_turn.error is not None
+                    or (
+                        isinstance(turn_result.token_usage, dict)
+                        and current_assistant_turn.token_usage != turn_result.token_usage
+                    )
                 )
                 current_assistant_turn.content = resolved_content or preview_fallback
                 current_assistant_turn.status = "complete"
                 current_assistant_turn.error = None
+                if isinstance(turn_result.token_usage, dict):
+                    current_assistant_turn.token_usage = copy.deepcopy(turn_result.token_usage)
                 self._upsert_turn(state, current_assistant_turn)
                 if turn_changed:
                     emitted_payloads.append(self._build_turn_upsert_payload(state, current_assistant_turn))
@@ -1239,31 +1343,90 @@ class ProjectChatService:
                 prepared.conversation_id,
             )
 
-    def _build_session(self, conversation_id: str, project_path: str) -> CodexAppServerChatSession:
+    def _session_key(
+        self,
+        conversation_id: str,
+        provider: str,
+        model: Optional[str],
+    ) -> str:
+        return f"{conversation_id}::{_normalize_provider(provider)}::{str(model or '').strip()}"
+
+    def _build_session(
+        self,
+        conversation_id: str,
+        project_path: str,
+        provider: str = "codex",
+        model: Optional[str] = None,
+        history_exclude_turn_ids: set[str] | None = None,
+    ) -> Any:
+        normalized_provider = _validate_provider(provider)
+        session_key = self._session_key(conversation_id, normalized_provider, model)
         with self._sessions_lock:
-            session = self._sessions.get(conversation_id)
+            session = self._sessions.get(session_key)
             if session is not None:
                 target_session = session
+            elif normalized_provider != "codex":
+                state = self._read_state(conversation_id, project_path)
+                excluded = history_exclude_turn_ids or set()
+                persisted_history = [
+                    turn
+                    for turn in (state.turns if state is not None else [])
+                    if turn.id not in excluded
+                ]
+                target_session = UnifiedAgentChatSession(
+                    project_path,
+                    provider=normalized_provider,
+                    model=model,
+                    persisted_history=persisted_history,
+                )
+                self._sessions[session_key] = target_session
             else:
-                persisted_session = self._read_session_state(conversation_id, project_path)
-                persisted_thread_id = persisted_session.thread_id if persisted_session is not None else None
-                persisted_model = persisted_session.model if persisted_session is not None else None
+                persisted_session = self._read_session_state(
+                    conversation_id,
+                    project_path,
+                    provider=normalized_provider,
+                    model=model,
+                )
+                if persisted_session is None and model is None:
+                    persisted_session = self._read_session_state(conversation_id, project_path)
+                persisted_thread_id = (
+                    persisted_session.thread_id
+                    if persisted_session is not None and persisted_session.provider == "codex"
+                    else None
+                )
+                persisted_model = (
+                    persisted_session.model
+                    if persisted_session is not None and persisted_session.provider == "codex"
+                    else None
+                )
+                session_identity: dict[str, Optional[str]] = {"model": model}
+
+                def persist_thread(thread_id: str) -> None:
+                    self._persist_session_thread(
+                        conversation_id,
+                        project_path,
+                        thread_id,
+                        provider=normalized_provider,
+                        model=session_identity["model"],
+                    )
+
+                def persist_model(resolved_model: str) -> None:
+                    session_identity["model"] = resolved_model
+                    self._persist_session_model(
+                        conversation_id,
+                        project_path,
+                        resolved_model,
+                        provider=normalized_provider,
+                    )
+
                 target_session = CodexAppServerChatSession(
                     project_path,
                     persisted_thread_id=persisted_thread_id,
                     persisted_model=persisted_model,
-                    on_thread_id_updated=lambda thread_id: self._persist_session_thread(
-                        conversation_id,
-                        project_path,
-                        thread_id,
-                    ),
-                    on_model_updated=lambda model: self._persist_session_model(
-                        conversation_id,
-                        project_path,
-                        model,
-                    ),
+                    on_thread_id_updated=persist_thread,
+                    on_model_updated=persist_model,
                 )
-                self._sessions[conversation_id] = target_session
+                self._sessions[session_key] = target_session
         return target_session
 
     def start_turn(
@@ -1271,10 +1434,11 @@ class ProjectChatService:
         conversation_id: str,
         project_path: str,
         message: str,
-        model: Optional[str],
+        model: Optional[str] = None,
         chat_mode: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+        provider: Optional[str] = None,
     ) -> dict[str, Any]:
         prepared, snapshot = self._prepare_turn(
             conversation_id,
@@ -1284,6 +1448,7 @@ class ProjectChatService:
             chat_mode,
             reasoning_effort,
             progress_callback,
+            provider=provider,
         )
         worker = threading.Thread(
             target=self._run_prepared_turn_background,
@@ -1299,10 +1464,11 @@ class ProjectChatService:
         conversation_id: str,
         project_path: str,
         message: str,
-        model: Optional[str],
+        model: Optional[str] = None,
         chat_mode: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+        provider: Optional[str] = None,
     ) -> dict[str, Any]:
         prepared, _ = self._prepare_turn(
             conversation_id,
@@ -1312,6 +1478,7 @@ class ProjectChatService:
             chat_mode,
             reasoning_effort,
             progress_callback,
+            provider=provider,
         )
         return self._run_prepared_turn(prepared, progress_callback)
 
@@ -1474,6 +1641,8 @@ class ProjectChatService:
         message: str,
         flow_name: Optional[str],
         model: Optional[str],
+        llm_provider: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> tuple[dict[str, Any], "FlowRunRequest"]:
         return self._reviews.review_flow_run_request(
             conversation_id,
@@ -1483,6 +1652,8 @@ class ProjectChatService:
             message,
             flow_name,
             model,
+            llm_provider,
+            reasoning_effort,
         )
 
     def review_proposed_plan(

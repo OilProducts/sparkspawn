@@ -18,6 +18,7 @@ describe('projectsApi parsing', () => {
 
     expect(payload.models).toEqual([
       {
+        provider: 'codex',
         id: 'gpt-5.4',
         display: 'GPT-5.4',
         is_default: true,

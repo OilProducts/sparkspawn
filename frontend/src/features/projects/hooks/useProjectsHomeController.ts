@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@/store'
 import { useNarrowViewport } from '@/lib/useNarrowViewport'
 import { getModelSuggestions } from '@/lib/llmSuggestions'
+import { LLM_PROVIDER_OPTIONS } from '@/lib/llmSuggestions'
 import {
     fetchProjectChatModelsValidated,
     submitConversationRequestUserInputValidated,
@@ -73,7 +74,10 @@ function buildModelOptions(
     selectedModel: string,
     provider: string,
 ) {
-    const metadataOptions = models.map((model) => ({
+    const normalizedProvider = provider || 'codex'
+    const metadataOptions = models
+        .filter((model) => (model.provider || 'codex') === normalizedProvider)
+        .map((model) => ({
         value: model.id,
         label: model.display || model.id,
     }))
@@ -187,6 +191,7 @@ export function useProjectsHomeController() {
     const {
         activeConversationHistory,
         activeChatMode,
+        activeProjectChatProvider,
         activeProjectChatModel,
         activeProjectChatReasoningEffort,
         activeFlowLaunchesById,
@@ -223,8 +228,15 @@ export function useProjectsHomeController() {
         ? chatModelMetadataByProjectPath[activeProjectPath] || []
         : []
     const chatModelOptions = useMemo(
-        () => buildModelOptions(activeProjectChatModels, activeProjectChatModel, uiDefaults.llm_provider),
-        [activeProjectChatModel, activeProjectChatModels, uiDefaults.llm_provider],
+        () => buildModelOptions(activeProjectChatModels, activeProjectChatModel, activeProjectChatProvider),
+        [activeProjectChatModel, activeProjectChatModels, activeProjectChatProvider],
+    )
+    const chatProviderOptions = useMemo(
+        () => LLM_PROVIDER_OPTIONS.map((provider) => ({
+            value: provider,
+            label: provider === 'codex' ? 'Codex' : provider[0].toUpperCase() + provider.slice(1),
+        })),
+        [],
     )
     const chatReasoningEffortOptions = useMemo(
         () => buildReasoningEffortOptions(
@@ -335,6 +347,7 @@ export function useProjectsHomeController() {
         chatDraft,
         isChatInputDisabled,
         model: activeProjectChatModel,
+        provider: activeProjectChatProvider,
         reasoningEffort: activeProjectChatReasoningEffort,
         ensureConversationId,
         getCurrentConversationId: (projectPath) => (
@@ -352,7 +365,7 @@ export function useProjectsHomeController() {
         resetComposerRef.current = resetComposer
     }, [resetComposer])
 
-    const persistChatSettings = useCallback(async (values: { model: string; reasoningEffort: string }) => {
+    const persistChatSettings = useCallback(async (values: { provider: string; model: string; reasoningEffort: string }) => {
         if (!activeProjectPath) {
             return
         }
@@ -364,6 +377,7 @@ export function useProjectsHomeController() {
         try {
             const snapshot = await updateConversationSettingsValidated(conversationId, {
                 project_path: activeProjectPath,
+                provider: values.provider.trim() || 'codex',
                 model: values.model.trim() || null,
                 reasoning_effort: values.reasoningEffort.trim() || '',
             })
@@ -379,17 +393,27 @@ export function useProjectsHomeController() {
 
     const onChatModelChange = useCallback((value: string) => {
         void persistChatSettings({
+            provider: activeProjectChatProvider,
             model: value,
+            reasoningEffort: activeProjectChatReasoningEffort,
+        })
+    }, [activeProjectChatProvider, activeProjectChatReasoningEffort, persistChatSettings])
+
+    const onChatProviderChange = useCallback((value: string) => {
+        void persistChatSettings({
+            provider: value || 'codex',
+            model: '',
             reasoningEffort: activeProjectChatReasoningEffort,
         })
     }, [activeProjectChatReasoningEffort, persistChatSettings])
 
     const onChatReasoningEffortChange = useCallback((value: string) => {
         void persistChatSettings({
+            provider: activeProjectChatProvider,
             model: activeProjectChatModel,
             reasoningEffort: value,
         })
-    }, [activeProjectChatModel, persistChatSettings])
+    }, [activeProjectChatProvider, activeProjectChatModel, persistChatSettings])
 
     const {
         onCreateConversationThread,
@@ -519,9 +543,11 @@ export function useProjectsHomeController() {
             activeProjectLabel,
             activeProjectPath,
             activeChatMode,
+            activeChatProvider: activeProjectChatProvider,
             activeChatModel: activeProjectChatModel,
             activeChatReasoningEffort: activeProjectChatReasoningEffort,
             chatModelOptions,
+            chatProviderOptions,
             chatReasoningEffortOptions,
             hasRenderableConversationHistory,
             isConversationPinnedToBottom,
@@ -537,6 +563,7 @@ export function useProjectsHomeController() {
             onChatComposerKeyDown,
             onChatDraftChange: setChatDraft,
             onChatModelChange,
+            onChatProviderChange,
             onChatReasoningEffortChange,
         },
     }

@@ -87,6 +87,16 @@ export function ProjectFlowRunRequestEntry({
                         Model override: <span className="font-mono text-foreground">{flowRunRequest.model}</span>
                     </p>
                 ) : null}
+                {flowRunRequest.llm_provider ? (
+                    <p>
+                        Provider override: <span className="font-mono text-foreground">{flowRunRequest.llm_provider}</span>
+                    </p>
+                ) : null}
+                {flowRunRequest.reasoning_effort ? (
+                    <p>
+                        Reasoning effort: <span className="font-mono text-foreground">{flowRunRequest.reasoning_effort}</span>
+                    </p>
+                ) : null}
                 {flowRunRequest.review_message ? (
                     <p>
                         Review note: <span className="text-foreground">{flowRunRequest.review_message}</span>
@@ -221,6 +231,16 @@ export function ProjectFlowLaunchEntry({
                 {flowLaunch.model ? (
                     <p>
                         Model override: <span className="font-mono text-foreground">{flowLaunch.model}</span>
+                    </p>
+                ) : null}
+                {flowLaunch.llm_provider ? (
+                    <p>
+                        Provider override: <span className="font-mono text-foreground">{flowLaunch.llm_provider}</span>
+                    </p>
+                ) : null}
+                {flowLaunch.reasoning_effort ? (
+                    <p>
+                        Reasoning effort: <span className="font-mono text-foreground">{flowLaunch.reasoning_effort}</span>
                     </p>
                 ) : null}
                 {flowLaunch.launch_error ? (

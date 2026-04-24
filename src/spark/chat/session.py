@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
@@ -8,6 +10,13 @@ import tomllib
 import uuid
 from typing import Any, Callable, Optional
 
+from agent.events import EventKind, SessionEvent
+from agent.local_environment import LocalExecutionEnvironment
+from agent.profiles.anthropic import AnthropicProviderProfile
+from agent.profiles.gemini import GeminiProviderProfile
+from agent.profiles.openai import OpenAIProviderProfile
+from agent.session import Session
+from agent.types import AssistantTurn, SessionConfig, SessionState, UserTurn
 from spark.workspace.conversations.models import (
     ChatTurnLiveEvent,
     ChatTurnResult,
@@ -27,9 +36,46 @@ from spark_common.codex_app_client import (
 from spark_common import codex_app_server
 from spark_common.codex_runtime import build_codex_runtime_environment
 from spark_common.runtime_path import resolve_runtime_workspace_path
+from unified_llm.client import Client as UnifiedLlmClient
+from unified_llm.models import get_latest_model, get_model_info
 
 
 CHAT_TURN_IDLE_TIMEOUT_SECONDS = codex_app_server.APP_SERVER_TURN_IDLE_TIMEOUT_SECONDS
+
+
+def _normalize_provider(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized or "codex"
+
+
+def _profile_for_provider(provider: str, model: str | None):
+    model_id = as_non_empty_string(model)
+    if model_id is None:
+        latest = get_latest_model(provider, "tools") or get_latest_model(provider)
+        model_id = latest.id if latest is not None else ""
+    model_info = get_model_info(model_id) if model_id else None
+    supports_streaming = bool(model_info.supports_tools) if model_info is not None else False
+    if provider == "openai":
+        return OpenAIProviderProfile(model=model_id, supports_streaming=supports_streaming)
+    if provider == "anthropic":
+        return AnthropicProviderProfile(model=model_id, supports_streaming=supports_streaming)
+    if provider == "gemini":
+        return GeminiProviderProfile(model=model_id, supports_streaming=supports_streaming)
+    raise ValueError("Provider must be blank or one of: codex, openai, anthropic, gemini.")
+
+
+def _tool_record_for_session_event(event: SessionEvent, *, status: str) -> ToolCallRecord:
+    tool_name = str(event.data.get("tool_name") or "tool")
+    tool_call_id = as_non_empty_string(event.data.get("tool_call_id")) or f"tool-{uuid.uuid4().hex}"
+    output = event.data.get("output")
+    error = event.data.get("error")
+    return ToolCallRecord(
+        id=tool_call_id,
+        kind="dynamic_tool",
+        status=status,
+        title=tool_name,
+        output=str(error if error is not None else output) if (error is not None or output is not None) else None,
+    )
 
 
 def _normalize_tool_call_status(value: Any) -> str:
@@ -128,6 +174,43 @@ def _request_user_input_response_payload(answers: dict[str, str]) -> dict[str, A
     }
 
 
+def _token_usage_payload_from_unified_usage(usage: Any) -> Optional[dict[str, Any]]:
+    if usage is None:
+        return None
+    input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+    cached_input_tokens = int(getattr(usage, "cache_read_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+    total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+    if total_tokens <= 0:
+        total_tokens = input_tokens + output_tokens
+    if max(input_tokens, cached_input_tokens, output_tokens, total_tokens) <= 0:
+        return None
+    return {
+        "total": {
+            "inputTokens": max(0, input_tokens),
+            "cachedInputTokens": max(0, min(input_tokens, cached_input_tokens)),
+            "outputTokens": max(0, output_tokens),
+            "totalTokens": max(0, total_tokens),
+        }
+    }
+
+
+def _agent_history_from_persisted_turns(turns: list[Any]) -> list[UserTurn | AssistantTurn]:
+    history: list[UserTurn | AssistantTurn] = []
+    for turn in turns:
+        role = str(getattr(turn, "role", "") or "").strip().lower()
+        status = str(getattr(turn, "status", "") or "").strip().lower()
+        kind = str(getattr(turn, "kind", "message") or "message").strip().lower()
+        content = str(getattr(turn, "content", "") or "")
+        if kind != "message" or status != "complete" or not content:
+            continue
+        if role == "user":
+            history.append(UserTurn(content))
+        elif role == "assistant":
+            history.append(AssistantTurn(content))
+    return history
+
+
 @dataclass
 class _PendingUserInputRequest:
     request_id: str
@@ -145,6 +228,192 @@ class _PendingUserInputRequest:
         with self.condition:
             self.answers = dict(answers)
             self.condition.notify_all()
+
+
+class UnifiedAgentChatSession:
+    def __init__(
+        self,
+        working_dir: str,
+        *,
+        provider: str,
+        model: Optional[str] = None,
+        persisted_history: list[Any] | None = None,
+        client_factory: Callable[[str], UnifiedLlmClient] | None = None,
+    ) -> None:
+        self.requested_working_dir = normalize_project_path_value(working_dir)
+        self.working_dir = resolve_runtime_workspace_path(working_dir)
+        self.provider = _normalize_provider(provider)
+        self.model = as_non_empty_string(model)
+        self._persisted_history = list(persisted_history or [])
+        self._client_factory = client_factory or (
+            lambda effective_provider: UnifiedLlmClient.from_env(default_provider=effective_provider)
+        )
+        self._session: Session | None = None
+        self._client: UnifiedLlmClient | None = None
+        self._runner: asyncio.Runner | None = None
+        self._lock = threading.Lock()
+
+    def _close_session_and_client_unlocked(self, *, close_runner: bool) -> None:
+        session = self._session
+        self._session = None
+        client = self._client
+        self._client = None
+        runner = self._runner
+        if close_runner:
+            self._runner = None
+        if session is not None:
+            try:
+                if runner is not None:
+                    runner.run(session.close())
+                else:
+                    asyncio.run(session.close())
+            except RuntimeError:
+                pass
+        if client is not None:
+            close_client = getattr(client, "close", None)
+            if callable(close_client):
+                try:
+                    result = close_client()
+                    if asyncio.iscoroutine(result):
+                        if runner is not None:
+                            runner.run(result)
+                        else:
+                            asyncio.run(result)
+                except RuntimeError:
+                    pass
+        if close_runner and runner is not None:
+            runner.close()
+
+    def close(self) -> None:
+        with self._lock:
+            self._close_session_and_client_unlocked(close_runner=True)
+
+    def _replace_model_unlocked(self, model: Optional[str]) -> None:
+        next_model = as_non_empty_string(model)
+        if next_model == self.model:
+            return
+        self._close_session_and_client_unlocked(close_runner=False)
+        self.model = next_model
+
+    def _run_async(self, coro):
+        if self._runner is None:
+            self._runner = asyncio.Runner()
+        return self._runner.run(coro)
+
+    def _build_session(self, reasoning_effort: Optional[str]) -> Session:
+        profile = _profile_for_provider(self.provider, self.model)
+        client = self._client_factory(self.provider)
+        self._client = client
+        session = Session(
+            provider_profile=profile,
+            execution_environment=LocalExecutionEnvironment(working_dir=self.working_dir),
+            client=client,
+            config=SessionConfig(reasoning_effort=reasoning_effort),
+        )
+        session.history.extend(_agent_history_from_persisted_turns(self._persisted_history))
+        return session
+
+    def _emit_live_event(
+        self,
+        callback: Optional[Callable[[ChatTurnLiveEvent], None]],
+        event: ChatTurnLiveEvent,
+    ) -> None:
+        if callback is not None:
+            callback(event)
+
+    def _forward_session_event(
+        self,
+        event: SessionEvent,
+        *,
+        on_event: Optional[Callable[[ChatTurnLiveEvent], None]],
+    ) -> None:
+        if event.kind == EventKind.ASSISTANT_TEXT_DELTA:
+            delta = str(event.data.get("delta", ""))
+            if delta:
+                self._emit_live_event(on_event, ChatTurnLiveEvent(kind="assistant_delta", content_delta=delta))
+            return
+        if event.kind == EventKind.ASSISTANT_TEXT_END:
+            text = str(event.data.get("text", ""))
+            self._emit_live_event(on_event, ChatTurnLiveEvent(kind="assistant_completed", content_delta=text))
+            return
+        if event.kind == EventKind.TOOL_CALL_START:
+            tool_call = _tool_record_for_session_event(event, status="running")
+            self._emit_live_event(
+                on_event,
+                ChatTurnLiveEvent(
+                    kind="tool_call_started",
+                    tool_call_id=tool_call.id,
+                    tool_call=tool_call,
+                ),
+            )
+            return
+        if event.kind == EventKind.TOOL_CALL_END:
+            status = "failed" if event.data.get("error") is not None else "completed"
+            tool_call = _tool_record_for_session_event(event, status=status)
+            self._emit_live_event(
+                on_event,
+                ChatTurnLiveEvent(
+                    kind="tool_call_failed" if status == "failed" else "tool_call_completed",
+                    tool_call_id=tool_call.id,
+                    tool_call=tool_call,
+                ),
+            )
+            return
+        if event.kind == EventKind.ERROR:
+            self._emit_live_event(
+                on_event,
+                ChatTurnLiveEvent(kind="assistant_failed", message=str(event.data.get("error", ""))),
+            )
+
+    async def _submit_and_capture(
+        self,
+        session: Session,
+        prompt: str,
+        *,
+        on_event: Optional[Callable[[ChatTurnLiveEvent], None]],
+    ) -> tuple[str, Optional[dict[str, Any]]]:
+        task = asyncio.create_task(session.process_input(prompt))
+        while True:
+            if task.done() and session.event_queue.empty():
+                break
+            try:
+                event = await asyncio.wait_for(session.event_queue.get(), timeout=0.05)
+            except asyncio.TimeoutError:
+                continue
+            self._forward_session_event(event, on_event=on_event)
+        await task
+        if session.state == SessionState.AWAITING_INPUT:
+            raise RuntimeError("unified-agent project chat requested interactive input; this is not supported")
+        for turn in reversed(session.history):
+            if isinstance(turn, AssistantTurn):
+                return turn.text, _token_usage_payload_from_unified_usage(getattr(turn, "usage", None))
+        return "", None
+
+    def turn(
+        self,
+        prompt: str,
+        model: Optional[str],
+        *,
+        chat_mode: str = "chat",
+        reasoning_effort: Optional[str] = None,
+        on_event: Optional[Callable[[ChatTurnLiveEvent], None]] = None,
+    ) -> ChatTurnResult:
+        del chat_mode
+        with self._lock:
+            if model is not None:
+                self._replace_model_unlocked(model)
+            if self._session is None:
+                self._session = self._build_session(reasoning_effort)
+            else:
+                self._session.config.reasoning_effort = reasoning_effort
+            message, token_usage = self._run_async(
+                self._submit_and_capture(
+                    self._session,
+                    prompt,
+                    on_event=on_event,
+                )
+            )
+            return ChatTurnResult(assistant_message=message, token_usage=token_usage)
 
 
 class CodexAppServerChatSession:
@@ -558,6 +827,16 @@ class CodexAppServerChatSession:
                     item_id=normalized_event.item_id or tool_call.id,
                 ),
             )
+            return
+        if normalized_event.kind == "token_usage_updated" and normalized_event.token_usage is not None:
+            self._emit_live_event(
+                on_event,
+                ChatTurnLiveEvent(
+                    kind="token_usage_updated",
+                    app_turn_id=current_app_turn_id,
+                    token_usage=copy.deepcopy(normalized_event.token_usage),
+                ),
+            )
 
     def turn(
         self,
@@ -626,4 +905,7 @@ class CodexAppServerChatSession:
                         ),
                     )
             response_text = result.assistant_message or result.plan_message
-            return ChatTurnResult(assistant_message=response_text or "")
+            return ChatTurnResult(
+                assistant_message=response_text or "",
+                token_usage=copy.deepcopy(result.token_usage_payload) if result.token_usage_payload else None,
+            )

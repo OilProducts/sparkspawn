@@ -27,6 +27,7 @@ export interface ProjectMetadataResponse {
 }
 
 export interface ProjectChatModelMetadataResponse {
+    provider: string
     id: string
     display: string
     is_default: boolean
@@ -170,6 +171,9 @@ function parseProjectChatModelMetadataResponse(
     }
     return {
         id: record.id,
+        provider: typeof record.provider === 'string' && record.provider.trim().length > 0
+            ? record.provider
+            : 'codex',
         display: typeof record.display === 'string' && record.display.trim().length > 0
             ? record.display
             : record.id,
