@@ -8,7 +8,7 @@ from attractor.dsl.models import DotAttribute, DotGraph, DotNode, DotValueType
 
 
 _ALLOWED_PROPERTIES = {"llm_model", "llm_provider", "reasoning_effort"}
-_ALLOWED_REASONING_EFFORTS = {"low", "medium", "high"}
+_ALLOWED_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 _SYSTEM_DEFAULTS = {
     "llm_model": "",
     "llm_provider": "",

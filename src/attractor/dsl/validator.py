@@ -900,12 +900,12 @@ def _lint_stylesheet_syntax(stylesheet: str, line: int) -> List[Diagnostic]:
                     )
                     continue
 
-                if key == "reasoning_effort" and value not in {"low", "medium", "high"}:
+                if key == "reasoning_effort" and value not in {"low", "medium", "high", "xhigh"}:
                     diagnostics.append(
                         Diagnostic(
                             rule_id="stylesheet_syntax",
                             severity=DiagnosticSeverity.ERROR,
-                            message="reasoning_effort must be one of: low, medium, high",
+                            message="reasoning_effort must be one of: low, medium, high, xhigh",
                             line=line,
                         )
                     )

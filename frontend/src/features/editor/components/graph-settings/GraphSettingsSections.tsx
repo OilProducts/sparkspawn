@@ -752,6 +752,7 @@ export function GraphLlmDefaultsSection({
                         <option value="low">Low</option>
                         <option value="medium">Medium</option>
                         <option value="high">High</option>
+                        <option value="xhigh">XHigh</option>
                     </NativeSelect>
                 </GraphSettingsField>
                 <div className="flex items-center justify-between gap-2">

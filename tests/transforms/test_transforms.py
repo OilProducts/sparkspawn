@@ -210,7 +210,7 @@ class TestTransforms:
         graph = parse_dot(
             """
             digraph G {
-                graph [model_stylesheet="* { llm_model: base; llm_provider: generic; } .fast { llm_model: flash; } #review { llm_model: best; llm_provider: openai; reasoning_effort: high; }"]
+                graph [model_stylesheet="* { llm_model: base; llm_provider: generic; } .fast { llm_model: flash; } #review { llm_model: best; llm_provider: openai; reasoning_effort: xhigh; }"]
 
                 start [shape=Mdiamond]
                 plan [shape=box, class="fast"]
@@ -229,7 +229,7 @@ class TestTransforms:
         assert graph.nodes["review"].attrs["llm_model"].value == "explicit"
         # other properties from highest-specific rule can still apply
         assert graph.nodes["review"].attrs["llm_provider"].value == "openai"
-        assert graph.nodes["review"].attrs["reasoning_effort"].value == "high"
+        assert graph.nodes["review"].attrs["reasoning_effort"].value == "xhigh"
 
     def test_stylesheet_class_selector_applies_with_comma_separated_classes_after_defaults(self):
         graph = parse_dot(

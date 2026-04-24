@@ -155,7 +155,7 @@ Documented Attractor node attributes:
 | `timeout` | duration | Max node execution time. |
 | `llm_model` | string | Explicit model override. |
 | `llm_provider` | string | Explicit provider override. |
-| `reasoning_effort` | string | `low`, `medium`, or `high`. |
+| `reasoning_effort` | string | `low`, `medium`, `high`, or `xhigh`. |
 | `codergen.response_contract` | string | Codergen-only shared response-format contract. |
 | `codergen.contract_repair_attempts` | integer | Codergen-only bounded same-thread repair budget for malformed response-contract output and structured write-contract violations. |
 | `auto_status` | boolean | Auto-generate success when the handler writes no status. |

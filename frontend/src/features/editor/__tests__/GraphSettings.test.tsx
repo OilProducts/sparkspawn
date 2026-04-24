@@ -132,18 +132,18 @@ describe('Graph and settings behavior', () => {
     expect(document.querySelector('#settings-llm-model-options option[value="gpt-5.4"]')).toBeTruthy()
     await user.clear(screen.getByPlaceholderText('openai'))
     await user.type(screen.getByPlaceholderText('openai'), 'anthropic')
-    await user.clear(screen.getByPlaceholderText('gpt-5.4'))
-    await user.type(screen.getByPlaceholderText('gpt-5.4'), 'claude-3.7-sonnet')
+    await user.clear(screen.getByLabelText('Default LLM Model'))
+    await user.type(screen.getByLabelText('Default LLM Model'), 'claude-3.7-sonnet')
     const reasoningSelect = screen
       .getAllByRole('combobox')
       .find((element) => element.tagName === 'SELECT')
     expect(reasoningSelect).toBeDefined()
-    await user.selectOptions(reasoningSelect as HTMLSelectElement, 'medium')
+    await user.selectOptions(reasoningSelect as HTMLSelectElement, 'xhigh')
 
     expect(useStore.getState().uiDefaults).toEqual({
       llm_provider: 'anthropic',
       llm_model: 'claude-3.7-sonnet',
-      reasoning_effort: 'medium',
+      reasoning_effort: 'xhigh',
     })
   })
 
@@ -171,6 +171,8 @@ describe('Graph and settings behavior', () => {
     expect(screen.getByTestId('graph-structured-form')).toBeVisible()
     expect(screen.getByTestId('graph-attrs-help')).toHaveTextContent('Graph attributes are baseline defaults')
     expect(screen.getByRole('button', { name: 'Apply To Nodes' })).toBeEnabled()
+    const graphReasoningSelect = screen.getByLabelText('Default Reasoning Effort') as HTMLSelectElement
+    expect(graphReasoningSelect.querySelector('option[value="xhigh"]')).toBeTruthy()
 
     const fidelityInput = screen.getByPlaceholderText('full')
     await user.clear(fidelityInput)

@@ -362,7 +362,7 @@ class TestDotValidator:
     def test_stylesheet_shape_selector_is_allowed(self):
         dot = """
         digraph G {
-            graph [model_stylesheet="box { llm_model: gpt-5; }"]
+            graph [model_stylesheet="box { llm_model: gpt-5; reasoning_effort: xhigh; }"]
             start [shape=Mdiamond]
             task [shape=box]
             done [shape=Msquare]

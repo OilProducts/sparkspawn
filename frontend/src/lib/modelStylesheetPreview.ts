@@ -46,7 +46,7 @@ interface ParsedRule {
 }
 
 const ALLOWED_PROPERTIES = new Set<ModelProperty>(['llm_model', 'llm_provider', 'reasoning_effort'])
-const ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high'])
+const ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh'])
 const CLASS_NAME_RE = /^[a-z0-9-]+$/
 const NODE_ID_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 const SHAPE_SELECTOR_RE = /^[A-Za-z][A-Za-z0-9_]*$/
