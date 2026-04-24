@@ -6,6 +6,8 @@ from attractor.dsl.models import DotAttribute, DotNode
 
 
 RUNTIME_LAUNCH_MODEL_KEY = "_attractor.runtime.launch_model"
+RUNTIME_LAUNCH_PROVIDER_KEY = "_attractor.runtime.launch_provider"
+RUNTIME_LAUNCH_REASONING_EFFORT_KEY = "_attractor.runtime.launch_reasoning_effort"
 
 _NON_LLM_BACKEND_SHAPES = {
     "Mdiamond",
@@ -29,6 +31,10 @@ def _normalize_optional_text(value: object) -> str:
     return str(value).strip()
 
 
+def _is_default_placeholder_attr(attr: DotAttribute | None) -> bool:
+    return attr is not None and attr.line <= 0
+
+
 def resolve_effective_llm_model(
     node_attrs: Dict[str, DotAttribute],
     context: ContextLike,
@@ -46,6 +52,48 @@ def resolve_effective_llm_model(
     normalized_fallback = _normalize_optional_text(fallback_model)
     if normalized_fallback:
         return normalized_fallback
+    return None
+
+
+def resolve_effective_llm_provider(
+    node_attrs: Dict[str, DotAttribute],
+    context: ContextLike,
+    *,
+    fallback_provider: Optional[str] = None,
+) -> str:
+    provider_attr = node_attrs.get("llm_provider")
+    node_provider = _normalize_optional_text(getattr(provider_attr, "value", None))
+    if node_provider:
+        return node_provider.lower()
+
+    runtime_launch_provider = _normalize_optional_text(context.get(RUNTIME_LAUNCH_PROVIDER_KEY, ""))
+    if runtime_launch_provider:
+        return runtime_launch_provider.lower()
+
+    normalized_fallback = _normalize_optional_text(fallback_provider)
+    if normalized_fallback:
+        return normalized_fallback.lower()
+    return "codex"
+
+
+def resolve_effective_reasoning_effort(
+    node_attrs: Dict[str, DotAttribute],
+    context: ContextLike,
+    *,
+    fallback_reasoning_effort: Optional[str] = None,
+) -> Optional[str]:
+    effort_attr = node_attrs.get("reasoning_effort")
+    node_effort = _normalize_optional_text(getattr(effort_attr, "value", None))
+    if node_effort and not _is_default_placeholder_attr(effort_attr):
+        return node_effort.lower()
+
+    runtime_effort = _normalize_optional_text(context.get(RUNTIME_LAUNCH_REASONING_EFFORT_KEY, ""))
+    if runtime_effort:
+        return runtime_effort.lower()
+
+    normalized_fallback = _normalize_optional_text(fallback_reasoning_effort)
+    if normalized_fallback:
+        return normalized_fallback.lower()
     return None
 
 

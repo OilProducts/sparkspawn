@@ -6,6 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 import attractor.api.server as server
+from attractor.llm_runtime import (
+    RUNTIME_LAUNCH_PROVIDER_KEY,
+    RUNTIME_LAUNCH_REASONING_EFFORT_KEY,
+)
 from tests.api._support import (
     close_task_immediately as _close_task_immediately,
     start_pipeline as _start_pipeline,
@@ -98,6 +102,9 @@ def test_continue_pipeline_creates_new_run_with_lineage_and_preserves_source_run
     payload = response.json()
     assert payload["status"] == "started"
     assert payload["run_id"] != source_run_id
+    assert payload["provider"] == "codex"
+    assert payload["llm_provider"] == "codex"
+    assert payload["reasoning_effort"] is None
 
     source_record = server._read_run_meta(server._run_meta_path(source_run_id))
     derived_record = server._read_run_meta(server._run_meta_path(str(payload["run_id"])))
@@ -116,6 +123,9 @@ def test_continue_pipeline_creates_new_run_with_lineage_and_preserves_source_run
     assert detail_payload["continued_from_run_id"] == source_run_id
     assert detail_payload["continued_from_node"] == "midpoint"
     assert detail_payload["continued_from_flow_mode"] == "snapshot"
+    assert detail_payload["provider"] == "codex"
+    assert detail_payload["llm_provider"] == "codex"
+    assert detail_payload["reasoning_effort"] is None
 
     runs_response = attractor_api_client.get("/runs")
     assert runs_response.status_code == 200
@@ -124,6 +134,9 @@ def test_continue_pipeline_creates_new_run_with_lineage_and_preserves_source_run
     )
     assert derived_run_payload["continued_from_run_id"] == source_run_id
     assert derived_run_payload["continued_from_node"] == "midpoint"
+    assert derived_run_payload["provider"] == "codex"
+    assert derived_run_payload["llm_provider"] == "codex"
+    assert derived_run_payload["reasoning_effort"] is None
 
 
 def test_continue_pipeline_snapshot_mode_uses_stored_run_dot_snapshot(
@@ -284,6 +297,86 @@ def test_continue_pipeline_supports_inactive_source_runs_without_mutating_source
 
     assert server._run_meta_path(source_record.run_id).read_text(encoding="utf-8") == source_meta_before
     assert (source_run_root / "state.json").read_text(encoding="utf-8") == source_checkpoint_before
+
+
+def test_continue_pipeline_preserves_source_provider_and_reasoning_when_request_omits_them(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    source_record, _ = _seed_inactive_source_run(
+        tmp_path,
+        run_id="source-provider-reasoning",
+        status="completed",
+    )
+    source_checkpoint = server.load_checkpoint(server._run_root(source_record.run_id) / "state.json")
+    assert source_checkpoint is not None
+    source_checkpoint.context[RUNTIME_LAUNCH_PROVIDER_KEY] = "anthropic"
+    source_checkpoint.context[RUNTIME_LAUNCH_REASONING_EFFORT_KEY] = "medium"
+    server.save_checkpoint(server._run_root(source_record.run_id) / "state.json", source_checkpoint)
+
+    response = attractor_api_client.post(
+        f"/pipelines/{source_record.run_id}/continue",
+        json={
+            "start_node": "checkpoint",
+            "flow_source_mode": "snapshot",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "started"
+    assert payload["provider"] == "anthropic"
+    assert payload["llm_provider"] == "anthropic"
+    assert payload["reasoning_effort"] == "medium"
+    derived_checkpoint = server.load_checkpoint(server._run_root(str(payload["run_id"])) / "state.json")
+    assert derived_checkpoint is not None
+    assert derived_checkpoint.context[RUNTIME_LAUNCH_PROVIDER_KEY] == "anthropic"
+    assert derived_checkpoint.context[RUNTIME_LAUNCH_REASONING_EFFORT_KEY] == "medium"
+    detail_payload = attractor_api_client.get(f"/pipelines/{payload['run_id']}").json()
+    assert detail_payload["provider"] == "anthropic"
+    assert detail_payload["llm_provider"] == "anthropic"
+    assert detail_payload["reasoning_effort"] == "medium"
+
+
+def test_continue_pipeline_response_uses_explicit_request_provider_and_reasoning(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+
+    source_record, _ = _seed_inactive_source_run(
+        tmp_path,
+        run_id="source-request-provider-reasoning",
+        status="completed",
+    )
+
+    response = attractor_api_client.post(
+        f"/pipelines/{source_record.run_id}/continue",
+        json={
+            "start_node": "checkpoint",
+            "flow_source_mode": "snapshot",
+            "llm_provider": "openai",
+            "reasoning_effort": "xhigh",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "started"
+    assert payload["provider"] == "openai"
+    assert payload["llm_provider"] == "openai"
+    assert payload["reasoning_effort"] == "xhigh"
+
+    detail_payload = attractor_api_client.get(f"/pipelines/{payload['run_id']}").json()
+    assert detail_payload["provider"] == "openai"
+    assert detail_payload["llm_provider"] == "openai"
+    assert detail_payload["reasoning_effort"] == "xhigh"
 
 
 def test_continue_pipeline_requires_flow_source_mode(

@@ -82,7 +82,11 @@ from attractor.handlers.base import (
     CodergenBackend,
     PIPELINE_RETRY_RUN_ID_CONTEXT_KEY,
 )
-from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
+from attractor.llm_runtime import (
+    RUNTIME_LAUNCH_MODEL_KEY,
+    RUNTIME_LAUNCH_PROVIDER_KEY,
+    RUNTIME_LAUNCH_REASONING_EFFORT_KEY,
+)
 from attractor.interviewer.base import Interviewer
 from attractor.interviewer.models import Answer, AnswerValue, Question
 from attractor.launch_context import normalize_launch_context
@@ -310,6 +314,21 @@ def _resolve_launch_model(graph, requested_model: Optional[str]) -> tuple[Option
             return normalized_flow_default, normalized_flow_default
 
     return None, "codex default (config/profile)"
+
+
+def _resolve_launch_provider(graph, requested_provider: Optional[str]) -> str:
+    selected_provider = (requested_provider or "").strip().lower()
+    if selected_provider:
+        return selected_provider
+    return "codex"
+
+
+def _resolve_launch_reasoning_effort(graph, requested_reasoning_effort: Optional[str]) -> Optional[str]:
+    del graph
+    selected_reasoning_effort = (requested_reasoning_effort or "").strip().lower()
+    if selected_reasoning_effort:
+        return selected_reasoning_effort
+    return None
 
 
 def _run_meta_path(run_id: str) -> Path:
@@ -782,6 +801,8 @@ def _record_run_start(
     flow_name: str,
     working_directory: str,
     model: str,
+    llm_provider: str = "codex",
+    reasoning_effort: Optional[str] = None,
     spec_id: Optional[str] = None,
     plan_id: Optional[str] = None,
     continued_from_run_id: Optional[str] = None,
@@ -800,6 +821,8 @@ def _record_run_start(
         flow_name=flow_name,
         working_directory=working_directory,
         model=model,
+        llm_provider=llm_provider,
+        reasoning_effort=reasoning_effort,
         resolve_runtime_workspace_path=resolve_runtime_workspace_path,
         spec_id=spec_id,
         plan_id=plan_id,
@@ -1015,8 +1038,20 @@ def _read_hydrated_run_record(run_id: str) -> Optional[RunRecord]:
     record = _read_run_meta(_run_meta_path(run_id))
     if not record:
         return None
+    _hydrate_run_record_launch_options(record, run_id)
     hydrate_run_record_from_log(record, _run_root(run_id))
     return record
+
+
+def _hydrate_run_record_launch_options(record: RunRecord, run_id: str) -> None:
+    checkpoint = load_checkpoint(_run_root(run_id) / "state.json")
+    checkpoint_context = checkpoint.context if checkpoint is not None else {}
+    if not str(record.llm_provider or "").strip():
+        provider = str(checkpoint_context.get(RUNTIME_LAUNCH_PROVIDER_KEY, "")).strip().lower()
+        record.llm_provider = provider or "codex"
+    if record.reasoning_effort is None:
+        reasoning_effort = str(checkpoint_context.get(RUNTIME_LAUNCH_REASONING_EFFORT_KEY, "")).strip().lower()
+        record.reasoning_effort = reasoning_effort or None
 
 
 def _apply_active_run_to_record(record: RunRecord, active: Optional[ActiveRun]) -> RunRecord:
@@ -1028,6 +1063,8 @@ def _apply_active_run_to_record(record: RunRecord, active: Optional[ActiveRun]) 
     record.outcome_reason_code = active.outcome_reason_code
     record.outcome_reason_message = active.outcome_reason_message
     record.last_error = active.last_error
+    record.llm_provider = active.llm_provider or record.llm_provider or "codex"
+    record.reasoning_effort = active.reasoning_effort
     if active_status not in TERMINAL_RUN_STATUSES:
         record.ended_at = None
     if active.token_usage is not None:
@@ -1063,6 +1100,9 @@ def _pipeline_status_payload(run_id: str) -> Dict[str, object]:
             "spec_id": None,
             "plan_id": None,
             "model": active.model if active else "",
+            "provider": active.llm_provider if active else "codex",
+            "llm_provider": active.llm_provider if active else "codex",
+            "reasoning_effort": active.reasoning_effort if active else None,
             "started_at": "",
             "ended_at": None,
             "last_error": active.last_error if active else "",
@@ -1108,6 +1148,7 @@ def _list_run_records(project_path: Optional[str] = None) -> List[RunRecord]:
         meta_path = run_dir / "run.json"
         record = _read_run_meta(meta_path)
         if record:
+            _hydrate_run_record_launch_options(record, record.run_id)
             hydrate_run_record_from_log(record, run_dir)
             _apply_active_run_to_record(record, _get_active_run(record.run_id))
             records.append(record)
@@ -1123,8 +1164,11 @@ def _list_run_records(project_path: Optional[str] = None) -> List[RunRecord]:
             outcome_reason_message=None,
             working_directory="",
             model="",
+            llm_provider="codex",
+            reasoning_effort=None,
             started_at="",
         )
+        _hydrate_run_record_launch_options(record, run_id)
         hydrate_run_record_from_log(record, run_dir)
         _apply_active_run_to_record(record, _get_active_run(record.run_id))
         records.append(record)
@@ -1161,8 +1205,9 @@ class PipelineStartRequest(BaseModel):
     run_id: Optional[str] = None
     flow_content: Optional[str] = None
     working_directory: str = "./workspace"
-    backend: str = "codex-app-server"
     model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    reasoning_effort: Optional[str] = None
     flow_name: Optional[str] = None
     goal: Optional[str] = None
     launch_context: Optional[dict[str, Any]] = None
@@ -1176,6 +1221,8 @@ class PipelineContinueRequest(BaseModel):
     flow_name: Optional[str] = None
     working_directory: Optional[str] = None
     model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    reasoning_effort: Optional[str] = None
 
 
 class PreviewRequest(BaseModel):
@@ -1653,8 +1700,12 @@ def _resolve_continue_source_record(pipeline_id: str) -> tuple[RunRecord, Checkp
             outcome_reason_message=active.outcome_reason_message,
             working_directory=active.working_directory,
             model=active.model,
+            llm_provider=active.llm_provider,
+            reasoning_effort=active.reasoning_effort,
             started_at="",
         )
+    else:
+        _hydrate_run_record_launch_options(record, pipeline_id)
     return record, checkpoint
 
 
@@ -1822,6 +1873,10 @@ def _run_first_class_child_pipeline(
     checkpoint_file = str(run_root / "state.json")
     Path(logs_root).mkdir(parents=True, exist_ok=True)
     selected_model, display_model = _resolve_launch_model(request.child_graph, model)
+    selected_provider = str(request.parent_context.get(RUNTIME_LAUNCH_PROVIDER_KEY, "")).strip().lower() or "codex"
+    selected_reasoning_effort = (
+        str(request.parent_context.get(RUNTIME_LAUNCH_REASONING_EFFORT_KEY, "")).strip().lower() or None
+    )
     root_run_id = (request.root_run_id or request.parent_run_id or child_run_id).strip() or child_run_id
     child_invocation_index = _next_child_invocation_index(request.parent_run_id, request.parent_node_id)
 
@@ -1836,6 +1891,8 @@ def _run_first_class_child_pipeline(
         request.child_flow_name,
         working_dir,
         display_model,
+        llm_provider=selected_provider,
+        reasoning_effort=selected_reasoning_effort,
         parent_run_id=request.parent_run_id,
         parent_node_id=request.parent_node_id,
         root_run_id=root_run_id,
@@ -1848,6 +1905,8 @@ def _run_first_class_child_pipeline(
             flow_name=request.child_flow_name,
             working_directory=working_dir,
             model=display_model,
+            llm_provider=selected_provider,
+            reasoning_effort=selected_reasoning_effort,
             status="running",
             control=control,
         )
@@ -1912,6 +1971,8 @@ def _run_first_class_child_pipeline(
     context.set("outcome", "")
     context.set("preferred_label", "")
     context.set(RUNTIME_LAUNCH_MODEL_KEY, selected_model or "")
+    context.set(RUNTIME_LAUNCH_PROVIDER_KEY, selected_provider)
+    context.set(RUNTIME_LAUNCH_REASONING_EFFORT_KEY, selected_reasoning_effort or "")
     context.set("internal.run_id", child_run_id)
     context.set("internal.parent_run_id", request.parent_run_id)
     context.set("internal.parent_node_id", request.parent_node_id)
@@ -1948,6 +2009,9 @@ def _run_first_class_child_pipeline(
             "type": "run_meta",
             "working_directory": working_dir,
             "model": display_model,
+            "provider": selected_provider,
+            "llm_provider": selected_provider,
+            "reasoning_effort": selected_reasoning_effort,
             "flow_name": request.child_flow_name,
             "run_id": child_run_id,
             "parent_run_id": request.parent_run_id,
@@ -2056,11 +2120,18 @@ def _run_first_class_child_pipeline(
     return child_result
 
 
-def _record_run_retry_start(run_id: str) -> None:
+def _record_run_retry_start(
+    run_id: str,
+    *,
+    llm_provider: str,
+    reasoning_effort: str | None,
+) -> None:
     with RUN_HISTORY_LOCK:
         record = _read_run_meta(_run_meta_path(run_id))
         if record is None:
             return
+        record.llm_provider = llm_provider or record.llm_provider or "codex"
+        record.reasoning_effort = reasoning_effort
         record.status = "running"
         record.outcome = None
         record.outcome_reason_code = None
@@ -2105,10 +2176,14 @@ def _build_pipeline_runner_for_run(
     working_dir: str,
     backend_name: str,
     model: Optional[str],
+    llm_provider: Optional[str],
+    reasoning_effort: Optional[str],
     loop: asyncio.AbstractEventLoop,
     on_usage_update: Optional[Callable[[TokenUsageBreakdown], None]] = None,
 ) -> tuple[PipelineExecutor, Context, str]:
     selected_model, display_model = _resolve_launch_model(graph, model)
+    selected_provider = _resolve_launch_provider(graph, llm_provider)
+    selected_reasoning_effort = _resolve_launch_reasoning_effort(graph, reasoning_effort)
 
     def emit(message: dict):
         _publish_run_event_sync(loop, run_id, message)
@@ -2166,10 +2241,12 @@ def _build_pipeline_runner_for_run(
             flow_name=flow_name,
             working_directory=working_dir,
             model=display_model,
+            llm_provider=selected_provider,
+            reasoning_effort=selected_reasoning_effort,
             status="running",
             control=control,
         )
-    return executor, context, display_model
+    return executor, context, display_model, selected_provider, selected_reasoning_effort
 
 
 async def _retry_pipeline_run(pipeline_id: str) -> dict:
@@ -2211,13 +2288,25 @@ async def _retry_pipeline_run(pipeline_id: str) -> dict:
         _publish_run_list_upsert_sync(loop, pipeline_id)
 
     try:
-        executor, context, display_model = _build_pipeline_runner_for_run(
+        retry_provider = (
+            str(checkpoint.context.get(RUNTIME_LAUNCH_PROVIDER_KEY, "")).strip().lower()
+            or record.llm_provider
+            or "codex"
+        )
+        retry_reasoning_effort = (
+            str(checkpoint.context.get(RUNTIME_LAUNCH_REASONING_EFFORT_KEY, "")).strip().lower()
+            or record.reasoning_effort
+            or None
+        )
+        executor, context, display_model, selected_provider, selected_reasoning_effort = _build_pipeline_runner_for_run(
             graph=graph,
             run_id=pipeline_id,
             flow_name=record.flow_name,
             working_dir=working_dir,
-            backend_name="codex-app-server",
+            backend_name="provider-router",
             model=record.model,
+            llm_provider=retry_provider,
+            reasoning_effort=retry_reasoning_effort,
             loop=loop,
             on_usage_update=handle_usage_update,
         )
@@ -2226,7 +2315,11 @@ async def _retry_pipeline_run(pipeline_id: str) -> dict:
 
     checkpoint = _prepare_checkpoint_for_retry(pipeline_id, checkpoint)
     _save_retry_checkpoint(pipeline_id, checkpoint)
-    _record_run_retry_start(pipeline_id)
+    _record_run_retry_start(
+        pipeline_id,
+        llm_provider=selected_provider,
+        reasoning_effort=selected_reasoning_effort,
+    )
     await _publish_run_list_upsert(pipeline_id)
     await _publish_run_event(
         pipeline_id,
@@ -2366,6 +2459,9 @@ async def _retry_pipeline_run(pipeline_id: str) -> dict:
         "run_id": pipeline_id,
         "working_directory": working_dir,
         "model": display_model,
+        "provider": selected_provider,
+        "llm_provider": selected_provider,
+        "reasoning_effort": selected_reasoning_effort,
         "diagnostics": [_diagnostic_payload(diagnostic) for diagnostic in diagnostics],
         "errors": [],
     }
@@ -2379,7 +2475,9 @@ async def _launch_pipeline_run(
     working_directory: str,
     backend_name: str,
     model: Optional[str],
-    launch_context: Optional[dict[str, Any]],
+    llm_provider: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    launch_context: Optional[dict[str, Any]] = None,
     spec_id: Optional[str] = None,
     plan_id: Optional[str] = None,
     flow_source_dir: Path | None = None,
@@ -2460,6 +2558,8 @@ async def _launch_pipeline_run(
     os.makedirs(working_directory, exist_ok=True)
     working_dir = str(Path(working_directory).resolve())
     selected_model, display_model = _resolve_launch_model(graph, model)
+    selected_provider = _resolve_launch_provider(graph, llm_provider)
+    selected_reasoning_effort = _resolve_launch_reasoning_effort(graph, reasoning_effort)
 
     await _publish_run_event(
         resolved_run_id,
@@ -2539,6 +2639,8 @@ async def _launch_pipeline_run(
     context.set("outcome", "")
     context.set("preferred_label", "")
     context.set(RUNTIME_LAUNCH_MODEL_KEY, selected_model or "")
+    context.set(RUNTIME_LAUNCH_PROVIDER_KEY, selected_provider)
+    context.set(RUNTIME_LAUNCH_REASONING_EFFORT_KEY, selected_reasoning_effort or "")
     context.set("internal.run_id", resolved_run_id)
     context.set("internal.root_run_id", resolved_run_id)
     context.set("internal.run_workdir", working_dir)
@@ -2575,6 +2677,8 @@ async def _launch_pipeline_run(
             flow_name=flow_name,
             working_directory=working_dir,
             model=display_model,
+            llm_provider=selected_provider,
+            reasoning_effort=selected_reasoning_effort,
             status="running",
             control=control,
         )
@@ -2593,6 +2697,8 @@ async def _launch_pipeline_run(
         flow_name,
         working_dir,
         display_model,
+        llm_provider=selected_provider,
+        reasoning_effort=selected_reasoning_effort,
         spec_id=(spec_id or "").strip() or None,
         plan_id=(plan_id or "").strip() or None,
         continued_from_run_id=continued_from_run_id,
@@ -2620,6 +2726,9 @@ async def _launch_pipeline_run(
             "type": "run_meta",
             "working_directory": working_dir,
             "model": display_model,
+            "provider": selected_provider,
+            "llm_provider": selected_provider,
+            "reasoning_effort": selected_reasoning_effort,
             "flow_name": flow_name,
             "run_id": resolved_run_id,
             "graph_source_path": str(graphviz_export.source_path),
@@ -2773,6 +2882,9 @@ async def _launch_pipeline_run(
         "run_id": resolved_run_id,
         "working_directory": working_dir,
         "model": display_model,
+        "provider": selected_provider,
+        "llm_provider": selected_provider,
+        "reasoning_effort": selected_reasoning_effort,
         "diagnostics": diagnostic_payloads,
         "errors": error_payloads,
         "graph_dot_path": str(graphviz_export.dot_path),
@@ -2833,8 +2945,10 @@ async def _start_pipeline(
         flow_name=flow_name,
         flow_content=flow_content,
         working_directory=req.working_directory,
-        backend_name=req.backend,
+        backend_name="provider-router",
         model=req.model,
+        llm_provider=req.llm_provider,
+        reasoning_effort=req.reasoning_effort,
         launch_context=launch_context,
         spec_id=req.spec_id,
         plan_id=req.plan_id,
@@ -2878,16 +2992,27 @@ async def continue_pipeline(pipeline_id: str, req: PipelineContinueRequest):
         }
 
     working_directory = (req.working_directory or "").strip() or source_record.working_directory
-    model = req.model if req.model is not None else source_record.model
+    source_context = dict(source_checkpoint.context)
+    model = req.model if req.model is not None else (
+        str(source_context.get(RUNTIME_LAUNCH_MODEL_KEY, "")).strip() or source_record.model
+    )
+    llm_provider = req.llm_provider
+    if llm_provider is None:
+        llm_provider = str(source_context.get(RUNTIME_LAUNCH_PROVIDER_KEY, "")).strip() or None
+    reasoning_effort = req.reasoning_effort
+    if reasoning_effort is None:
+        reasoning_effort = str(source_context.get(RUNTIME_LAUNCH_REASONING_EFFORT_KEY, "")).strip() or None
 
     return await _launch_pipeline_run(
         run_id=None,
         flow_name=flow_name,
         flow_content=flow_content,
         working_directory=working_directory,
-        backend_name="codex-app-server",
+        backend_name="provider-router",
         model=model,
-        launch_context=dict(source_checkpoint.context),
+        llm_provider=llm_provider,
+        reasoning_effort=reasoning_effort,
+        launch_context=source_context,
         spec_id=source_record.spec_id,
         plan_id=source_record.plan_id,
         flow_source_dir=flow_source_dir,

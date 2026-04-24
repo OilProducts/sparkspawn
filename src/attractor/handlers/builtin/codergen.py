@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import inspect
 import json
 from pathlib import Path
 from typing import Optional
@@ -13,7 +14,11 @@ from attractor.engine.context_contracts import (
 )
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
 from attractor.engine.status_envelope_prompting import build_status_envelope_prompt_appendix
-from attractor.llm_runtime import resolve_effective_llm_model
+from attractor.llm_runtime import (
+    resolve_effective_llm_model,
+    resolve_effective_llm_provider,
+    resolve_effective_reasoning_effort,
+)
 
 from ..base import CodergenBackend, HandlerRuntime
 
@@ -80,14 +85,30 @@ class CodergenHandler:
             runtime.context,
             fallback_model=getattr(self.backend, "model", None) if self.backend is not None else None,
         )
+        effective_provider = resolve_effective_llm_provider(
+            runtime.node_attrs,
+            runtime.context,
+            fallback_provider=getattr(self.backend, "provider", None) if self.backend is not None else None,
+        )
+        effective_reasoning_effort = resolve_effective_reasoning_effort(
+            runtime.node_attrs,
+            runtime.context,
+            fallback_reasoning_effort=getattr(self.backend, "reasoning_effort", None)
+            if self.backend is not None
+            else None,
+        )
         backend_kwargs = {
             "response_contract": response_contract,
             "contract_repair_attempts": contract_repair_attempts,
             "timeout": timeout,
             "write_contract": write_contract,
+            "provider": effective_provider,
         }
         if effective_model is not None:
             backend_kwargs["model"] = effective_model
+        if effective_reasoning_effort is not None:
+            backend_kwargs["reasoning_effort"] = effective_reasoning_effort
+        backend_kwargs = _filter_backend_kwargs(self.backend.run, backend_kwargs)
         with _backend_stage_logging_context(self.backend, runtime.node_id, runtime.logs_root):
             result = self.backend.run(
                 runtime.node_id,
@@ -173,6 +194,16 @@ def _backend_stage_logging_context(backend: object, node_id: str, logs_root: Pat
     if callable(binder):
         return binder(node_id, logs_root)
     return nullcontext()
+
+
+def _filter_backend_kwargs(callable_obj, kwargs: dict) -> dict:
+    try:
+        parameters = inspect.signature(callable_obj).parameters
+    except (TypeError, ValueError):
+        return kwargs
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key in parameters}
 
 
 def _apply_response_contract(prompt: str, node_attrs, write_contract) -> str:

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import inspect
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from attractor.dsl.models import Duration
 from attractor.engine.outcome import Outcome, OutcomeStatus
-from attractor.llm_runtime import resolve_effective_llm_model
+from attractor.llm_runtime import (
+    resolve_effective_llm_model,
+    resolve_effective_llm_provider,
+    resolve_effective_reasoning_effort,
+)
 
 from ..base import CodergenBackend, HandlerRuntime
 
@@ -121,10 +126,23 @@ def _backend_select(
         context,
         fallback_model=getattr(backend, "model", None),
     )
+    effective_provider = resolve_effective_llm_provider(
+        node_attrs,
+        context,
+        fallback_provider=getattr(backend, "provider", None),
+    )
+    effective_reasoning_effort = resolve_effective_reasoning_effort(
+        node_attrs,
+        context,
+        fallback_reasoning_effort=getattr(backend, "reasoning_effort", None),
+    )
     with _backend_stage_logging_context(backend, node_id, logs_root):
-        backend_kwargs = {"timeout": timeout}
+        backend_kwargs = {"timeout": timeout, "provider": effective_provider}
         if effective_model is not None:
             backend_kwargs["model"] = effective_model
+        if effective_reasoning_effort is not None:
+            backend_kwargs["reasoning_effort"] = effective_reasoning_effort
+        backend_kwargs = _filter_backend_kwargs(backend.run, backend_kwargs)
         response = backend.run(node_id, ranking_prompt, context, **backend_kwargs)
     best_id = _extract_best_id(response)
     if not best_id:
@@ -181,6 +199,16 @@ def _backend_stage_logging_context(backend: object, node_id: str, logs_root: Pat
     if callable(binder):
         return binder(node_id, logs_root)
     return nullcontext()
+
+
+def _filter_backend_kwargs(callable_obj, kwargs: dict) -> dict:
+    try:
+        parameters = inspect.signature(callable_obj).parameters
+    except (TypeError, ValueError):
+        return kwargs
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key in parameters}
 
 
 def _to_seconds(attr: Any) -> float | None:

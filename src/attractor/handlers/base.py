@@ -26,6 +26,8 @@ class CodergenBackend(Protocol):
         contract_repair_attempts: int = 0,
         timeout: Optional[float] = None,
         model: Optional[str] = None,
+        provider: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
         write_contract: ContextWriteContract | None = None,
     ) -> str | Outcome:
         ...

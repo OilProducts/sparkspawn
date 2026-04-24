@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 import itertools
 from pathlib import Path
@@ -11,6 +12,8 @@ from fastapi.testclient import TestClient
 
 import attractor.api.codex_backends as codex_backends_module
 import attractor.api.server as server
+from agent.events import EventKind, SessionEvent
+from agent.types import AssistantTurn, SessionState
 from attractor.engine import Context, load_checkpoint
 from attractor.engine.context_contracts import ContextWriteContract
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
@@ -22,6 +25,7 @@ from tests.api._support import (
     close_task_immediately as _close_task_immediately,
     wait_for_pipeline_completion as _wait_for_pipeline_completion,
 )
+from unified_llm.types import Usage
 
 
 def _start_pipeline_via_http(attractor_api_client: TestClient, payload: dict) -> dict:
@@ -498,7 +502,10 @@ def test_backend_factory_builds_multiple_implementations(
 
 @pytest.mark.parametrize("backend_name", ["codex", "codex_app_server", "codex-cli"])
 def test_backend_factory_rejects_non_canonical_backend_names(backend_name: str, tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="Unsupported backend. Supported backends: codex-app-server."):
+    with pytest.raises(
+        ValueError,
+        match="Unsupported backend. Supported backends: provider-router, codex-app-server.",
+    ):
         server._build_codergen_backend(
             backend_name,
             str(tmp_path),
@@ -1606,3 +1613,548 @@ def test_codex_app_server_backend_writes_stage_raw_rpc_log(
         entry["direction"] == "incoming" and json.loads(entry["line"]).get("method") == "turn/completed"
         for entry in entries
     )
+
+
+def test_codex_app_server_backend_forwards_reasoning_effort_to_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backend = server.CodexAppServerBackend(str(tmp_path), lambda event: None, model=None)
+    run_turn_calls: list[dict[str, object]] = []
+
+    class FakeResult:
+        assistant_message = "Ack"
+        command_text = ""
+        token_total = None
+        token_usage_payload = None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def ensure_process(self, **kwargs) -> None:
+            return None
+
+        def start_thread(self, **kwargs) -> str:
+            return "thread-123"
+
+        def run_turn(self, **kwargs) -> FakeResult:
+            run_turn_calls.append(kwargs)
+            return FakeResult()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerClient", FakeClient)
+
+    result = backend.run("plan", "hello", Context(), reasoning_effort="high")
+
+    assert result == "Ack"
+    assert run_turn_calls[0]["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected_backend"),
+    [
+        ("", "codex"),
+        ("codex", "codex"),
+        ("openai", "unified"),
+        ("anthropic", "unified"),
+        ("gemini", "unified"),
+    ],
+)
+def test_provider_router_dispatches_supported_providers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+    expected_backend: str,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeCodexBackend:
+        def __init__(self, *args, **kwargs) -> None:
+            calls.append({"backend": "codex_init", "kwargs": kwargs})
+
+        def bind_stage_raw_rpc_log(self, node_id, logs_root):
+            raise AssertionError("not used")
+
+        def run(self, *args, **kwargs) -> str:
+            calls.append({"backend": "codex", "kwargs": kwargs})
+            return "codex-result"
+
+    class FakeUnifiedBackend:
+        def __init__(self, *args, **kwargs) -> None:
+            calls.append({"backend": "unified_init", "kwargs": kwargs})
+
+        def run(self, *args, **kwargs) -> str:
+            calls.append({"backend": "unified", "kwargs": kwargs})
+            return "unified-result"
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerBackend", FakeCodexBackend)
+    monkeypatch.setattr(codex_backends_module, "UnifiedAgentBackend", FakeUnifiedBackend)
+    backend = codex_backends_module.ProviderRouterBackend(str(tmp_path), lambda event: None, model="fallback-model")
+
+    result = backend.run(
+        "plan",
+        "hello",
+        Context(),
+        provider=provider,
+        model="node-model",
+        reasoning_effort="medium",
+    )
+
+    assert result == f"{expected_backend}-result"
+    run_call = calls[-1]
+    assert run_call["backend"] == expected_backend
+    assert run_call["kwargs"]["model"] == "node-model"
+    assert run_call["kwargs"]["reasoning_effort"] == "medium"
+
+
+def test_provider_router_fails_unknown_provider(tmp_path: Path) -> None:
+    backend = codex_backends_module.ProviderRouterBackend(str(tmp_path), lambda event: None)
+
+    result = backend.run("plan", "hello", Context(), provider="unknown")
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.failure_kind == FailureKind.RUNTIME
+    assert "Unsupported llm_provider" in result.failure_reason
+
+
+def test_pipeline_unified_provider_runtime_failure_writes_codergen_artifacts(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    provider_calls: list[str | None] = []
+
+    class FakeCodexBackend:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def bind_stage_raw_rpc_log(self, node_id, logs_root):
+            del node_id, logs_root
+            return nullcontext()
+
+        def run(self, *args, **kwargs):
+            raise AssertionError("codex backend should not run for unified providers")
+
+    class FakeUnifiedBackend:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def run(self, *args, **kwargs) -> Outcome:
+            del args
+            provider_calls.append(kwargs.get("provider"))
+            return Outcome(
+                status=OutcomeStatus.FAIL,
+                failure_kind=FailureKind.RUNTIME,
+                failure_reason="provider exploded",
+            )
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerBackend", FakeCodexBackend)
+    monkeypatch.setattr(codex_backends_module, "UnifiedAgentBackend", FakeUnifiedBackend)
+
+    payload = _start_pipeline_via_http(
+        attractor_api_client,
+        {
+            "flow_content": """
+            digraph G {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Call provider"]
+                done [shape=Msquare]
+                start -> task
+                task -> done
+            }
+            """,
+            "working_directory": str(tmp_path / "work"),
+            "llm_provider": "openai",
+            "model": "gpt-test",
+        },
+    )
+
+    result = _wait_for_pipeline_completion(attractor_api_client, payload["run_id"])
+
+    assert result["status"] == "failed"
+    assert provider_calls == ["openai"]
+    stage_dir = server._run_root(payload["run_id"]) / "logs" / "task"
+    assert (stage_dir / "response.md").read_text(encoding="utf-8").strip() == "provider exploded"
+    status = json.loads((stage_dir / "status.json").read_text(encoding="utf-8"))
+    assert status["outcome"] == "fail"
+    assert status["failure_kind"] == "runtime"
+    assert status["context_updates"]["last_response"] == "provider exploded"
+
+
+def test_provider_router_reports_cumulative_unified_usage_across_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    usage_updates: list[codex_backends_module.TokenUsageBreakdown] = []
+
+    class FakeCodexBackend:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def bind_stage_raw_rpc_log(self, node_id, logs_root):
+            raise AssertionError("not used")
+
+    class FakeUnifiedBackend:
+        def __init__(self, *args, **kwargs) -> None:
+            del args
+            self._on_usage_update = kwargs["on_usage_update"]
+
+        def run(self, *args, **kwargs) -> str:
+            del args
+            model = str(kwargs["model"])
+            usage_by_model = {
+                "model-a": codex_backends_module.TokenUsageBucket(
+                    input_tokens=3,
+                    output_tokens=4,
+                    total_tokens=7,
+                ),
+                "model-b": codex_backends_module.TokenUsageBucket(
+                    input_tokens=5,
+                    cached_input_tokens=2,
+                    output_tokens=6,
+                    total_tokens=11,
+                ),
+            }
+            snapshot = codex_backends_module.TokenUsageBreakdown()
+            snapshot.add_for_model(model, usage_by_model[model])
+            self._on_usage_update(snapshot)
+            return f"ok-{model}"
+
+    monkeypatch.setattr(codex_backends_module, "CodexAppServerBackend", FakeCodexBackend)
+    monkeypatch.setattr(codex_backends_module, "UnifiedAgentBackend", FakeUnifiedBackend)
+
+    backend = codex_backends_module.ProviderRouterBackend(
+        str(tmp_path),
+        lambda event: None,
+        on_usage_update=usage_updates.append,
+    )
+
+    assert backend.run("first", "hello", Context(), provider="openai", model="model-a") == "ok-model-a"
+    assert backend.run("second", "hello", Context(), provider="anthropic", model="model-b") == "ok-model-b"
+
+    assert len(usage_updates) == 2
+    assert usage_updates[0].to_dict() == {
+        "input_tokens": 3,
+        "cached_input_tokens": 0,
+        "output_tokens": 4,
+        "total_tokens": 7,
+        "by_model": {
+            "model-a": {
+                "input_tokens": 3,
+                "cached_input_tokens": 0,
+                "output_tokens": 4,
+                "total_tokens": 7,
+            },
+        },
+    }
+    assert usage_updates[-1].to_dict() == {
+        "input_tokens": 8,
+        "cached_input_tokens": 2,
+        "output_tokens": 10,
+        "total_tokens": 18,
+        "by_model": {
+            "model-a": {
+                "input_tokens": 3,
+                "cached_input_tokens": 0,
+                "output_tokens": 4,
+                "total_tokens": 7,
+            },
+            "model-b": {
+                "input_tokens": 5,
+                "cached_input_tokens": 2,
+                "output_tokens": 6,
+                "total_tokens": 11,
+            },
+        },
+    }
+
+
+def test_launch_provider_ignores_ui_default_provider_until_materialized() -> None:
+    graph = server.parse_dot(
+        """
+        digraph G {
+            graph [ui_default_llm_provider="openai"]
+            task [shape=box]
+        }
+        """
+    )
+
+    assert server._resolve_launch_provider(graph, None) == "codex"
+
+
+def test_launch_reasoning_ignores_ui_default_reasoning_until_materialized() -> None:
+    graph = server.parse_dot(
+        """
+        digraph G {
+            graph [ui_default_reasoning_effort="high"]
+            task [shape=box]
+        }
+        """
+    )
+
+    assert server._resolve_launch_reasoning_effort(graph, None) is None
+
+
+def _install_fake_unified_session(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    responses: list[str],
+    events: list[SessionEvent] | None = None,
+    usage: Usage | None = None,
+    awaiting_input: bool = False,
+    prompts: list[str] | None = None,
+    configs: list[str | None] | None = None,
+) -> None:
+    class FakeSession:
+        def __init__(self, *, provider_profile, execution_environment, client, config) -> None:
+            del execution_environment, client
+            import asyncio
+
+            self.provider_profile = provider_profile
+            self.config = config
+            self.state = SessionState.IDLE
+            self.history: list[AssistantTurn] = []
+            self.event_queue = asyncio.Queue()
+            if configs is not None:
+                configs.append(config.reasoning_effort)
+
+        async def process_input(self, prompt: str) -> None:
+            if prompts is not None:
+                prompts.append(prompt)
+            for event in events or []:
+                await self.event_queue.put(event)
+            if awaiting_input:
+                self.state = SessionState.AWAITING_INPUT
+                return
+            text = responses.pop(0)
+            self.history.append(AssistantTurn(text, usage=usage))
+            self.state = SessionState.IDLE
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        codex_backends_module,
+        "_profile_for_provider",
+        lambda provider, model: SimpleNamespace(model=str(model or f"{provider}-default")),
+    )
+    monkeypatch.setattr(codex_backends_module, "Session", FakeSession)
+
+
+def test_unified_agent_backend_returns_plain_text_and_records_tool_events(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    emitted: list[dict[str, str]] = []
+    usage_snapshots = []
+    events = [
+        SessionEvent(EventKind.ASSISTANT_TEXT_DELTA, data={"delta": "Hello"}),
+        SessionEvent(EventKind.TOOL_CALL_START, data={"tool_name": "shell"}),
+        SessionEvent(EventKind.TOOL_CALL_END, data={"tool_name": "shell"}),
+    ]
+    configs: list[str | None] = []
+    _install_fake_unified_session(
+        monkeypatch,
+        responses=["Unified reply"],
+        events=events,
+        usage=Usage(input_tokens=3, output_tokens=4, total_tokens=7),
+        configs=configs,
+    )
+    backend = codex_backends_module.UnifiedAgentBackend(
+        str(tmp_path),
+        emitted.append,
+        provider="openai",
+        client_factory=lambda provider: SimpleNamespace(close=lambda: None),
+        on_usage_update=usage_snapshots.append,
+    )
+
+    result = backend.run("plan", "hello", Context(), model="gpt-test", reasoning_effort="high")
+
+    assert result == "Unified reply"
+    assert configs == ["high"]
+    assert [event["msg"] for event in emitted] == [
+        "[plan] Hello",
+        "[plan] tool started: shell",
+        "[plan] tool completed: shell",
+    ]
+    assert usage_snapshots[-1].by_model["gpt-test"].total_tokens == 7
+
+
+def test_unified_agent_backend_coerces_status_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install_fake_unified_session(
+        monkeypatch,
+        responses=['{"outcome":"success","context_updates":{"result":"ok"},"notes":"done"}'],
+    )
+    backend = codex_backends_module.UnifiedAgentBackend(
+        str(tmp_path),
+        lambda event: None,
+        provider="anthropic",
+        client_factory=lambda provider: SimpleNamespace(close=lambda: None),
+    )
+
+    result = backend.run("plan", "hello", Context(), response_contract="status_envelope")
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.SUCCESS
+    assert result.context_updates == {"result": "ok"}
+
+
+def test_unified_agent_backend_repairs_contract_in_same_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    prompts: list[str] = []
+    _install_fake_unified_session(
+        monkeypatch,
+        responses=[
+            '{"outcome":"success","notes":["bad"]}',
+            '{"outcome":"success","notes":"fixed"}',
+        ],
+        prompts=prompts,
+    )
+    backend = codex_backends_module.UnifiedAgentBackend(
+        str(tmp_path),
+        lambda event: None,
+        provider="gemini",
+        client_factory=lambda provider: SimpleNamespace(close=lambda: None),
+    )
+
+    result = backend.run(
+        "plan",
+        "hello",
+        Context(),
+        response_contract="status_envelope",
+        contract_repair_attempts=1,
+    )
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.SUCCESS
+    assert len(prompts) == 2
+    assert "violated the status_envelope response contract" in prompts[1]
+
+
+def test_unified_agent_backend_fails_interactive_input_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install_fake_unified_session(
+        monkeypatch,
+        responses=[],
+        awaiting_input=True,
+    )
+    backend = codex_backends_module.UnifiedAgentBackend(
+        str(tmp_path),
+        lambda event: None,
+        provider="openai",
+        client_factory=lambda provider: SimpleNamespace(close=lambda: None),
+    )
+
+    result = backend.run("plan", "hello", Context())
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.failure_kind == FailureKind.RUNTIME
+    assert "interactive input" in result.failure_reason
+
+
+def test_unified_agent_backend_normalizes_provider_exception_and_closes_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    closed_clients: list[str] = []
+    closed_sessions: list[str] = []
+
+    class FakeClient:
+        def close(self) -> None:
+            closed_clients.append("closed")
+
+    class FakeSession:
+        def __init__(self, *, provider_profile, execution_environment, client, config) -> None:
+            del execution_environment, client, config
+            self.provider_profile = provider_profile
+            self.state = SessionState.IDLE
+            self.history: list[AssistantTurn] = []
+            self.event_queue = codex_backends_module.asyncio.Queue()
+
+        async def process_input(self, prompt: str) -> None:
+            del prompt
+            raise ValueError("provider exploded")
+
+        async def close(self) -> None:
+            closed_sessions.append(self.provider_profile.model)
+
+    monkeypatch.setattr(
+        codex_backends_module,
+        "_profile_for_provider",
+        lambda provider, model: SimpleNamespace(model=str(model or f"{provider}-default")),
+    )
+    monkeypatch.setattr(codex_backends_module, "Session", FakeSession)
+
+    backend = codex_backends_module.UnifiedAgentBackend(
+        str(tmp_path),
+        lambda event: None,
+        provider="openai",
+        client_factory=lambda provider: FakeClient(),
+    )
+
+    result = backend.run("plan", "hello", Context(), model="gpt-test")
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.failure_kind == FailureKind.RUNTIME
+    assert result.failure_reason == "provider exploded"
+    assert closed_sessions == ["gpt-test"]
+    assert closed_clients == ["closed"]
+
+
+def test_unified_agent_backend_enforces_timeout_and_closes_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    closed: list[str] = []
+
+    class FakeSession:
+        def __init__(self, *, provider_profile, execution_environment, client, config) -> None:
+            del execution_environment, client, config
+            self.provider_profile = provider_profile
+            self.state = SessionState.IDLE
+            self.history: list[AssistantTurn] = []
+            self.event_queue = codex_backends_module.asyncio.Queue()
+
+        async def process_input(self, prompt: str) -> None:
+            del prompt
+            await codex_backends_module.asyncio.sleep(1)
+            self.history.append(AssistantTurn("late"))
+
+        async def close(self) -> None:
+            closed.append(self.provider_profile.model)
+
+    monkeypatch.setattr(
+        codex_backends_module,
+        "_profile_for_provider",
+        lambda provider, model: SimpleNamespace(model=str(model or f"{provider}-default")),
+    )
+    monkeypatch.setattr(codex_backends_module, "Session", FakeSession)
+
+    backend = codex_backends_module.UnifiedAgentBackend(
+        str(tmp_path),
+        lambda event: None,
+        provider="openai",
+        client_factory=lambda provider: SimpleNamespace(close=lambda: None),
+    )
+
+    result = backend.run("plan", "hello", Context(), model="gpt-test", timeout=0.01)
+
+    assert isinstance(result, Outcome)
+    assert result.status == OutcomeStatus.FAIL
+    assert result.failure_kind == FailureKind.RUNTIME
+    assert result.failure_reason == "unified-agent backend timed out after 0.01s"
+    assert closed == ["gpt-test"]

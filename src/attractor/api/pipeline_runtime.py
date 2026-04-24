@@ -266,6 +266,8 @@ class ActiveRun:
     flow_name: str
     working_directory: str
     model: str
+    llm_provider: str = "codex"
+    reasoning_effort: str | None = None
     status: str = "running"
     outcome: str | None = None
     outcome_reason_code: str | None = None

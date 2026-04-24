@@ -16,6 +16,7 @@ class _SequenceBackend:
     def __init__(self, outcomes: list[Outcome]):
         self._outcomes = list(outcomes)
         self.calls: list[str] = []
+        self.run_kwargs: list[dict[str, object | None]] = []
 
     def run(
         self,
@@ -27,10 +28,19 @@ class _SequenceBackend:
         contract_repair_attempts: int = 0,
         timeout=None,
         model=None,
+        provider=None,
+        reasoning_effort=None,
         write_contract=None,
     ) -> Outcome:
-        del prompt, context, response_contract, contract_repair_attempts, timeout, model, write_contract
+        del prompt, context, response_contract, contract_repair_attempts, timeout, write_contract
         self.calls.append(node_id)
+        self.run_kwargs.append(
+            {
+                "model": model,
+                "provider": provider,
+                "reasoning_effort": reasoning_effort,
+            }
+        )
         if self._outcomes:
             return self._outcomes.pop(0)
         return Outcome(status=OutcomeStatus.SUCCESS)
@@ -83,6 +93,9 @@ def test_retry_failed_pipeline_reuses_run_id_and_resumes_failed_checkpoint(
     retry_payload = retry_response.json()
     assert retry_payload["status"] == "started"
     assert retry_payload["run_id"] == run_id
+    assert retry_payload["provider"] == "codex"
+    assert retry_payload["llm_provider"] == "codex"
+    assert retry_payload["reasoning_effort"] is None
     running_record = server._read_run_meta(server._run_meta_path(run_id))
     assert running_record is not None
     assert running_record.status == "running"
@@ -91,6 +104,9 @@ def test_retry_failed_pipeline_reuses_run_id_and_resumes_failed_checkpoint(
     final_payload = wait_for_pipeline_completion(attractor_api_client, run_id)
     assert final_payload["status"] == "completed"
     assert final_payload["run_id"] == run_id
+    assert final_payload["provider"] == "codex"
+    assert final_payload["llm_provider"] == "codex"
+    assert final_payload["reasoning_effort"] is None
     assert backend.calls == ["task", "task"]
 
     runs = attractor_api_client.get("/runs").json()["runs"]
@@ -98,6 +114,77 @@ def test_retry_failed_pipeline_reuses_run_id_and_resumes_failed_checkpoint(
     event_types = [event["type"] for event in server._read_persisted_run_events(run_id)]
     assert "PipelineRetryStarted" in event_types
     assert "PipelineRetryCompleted" in event_types
+
+
+def test_retry_failed_pipeline_uses_provider_router_and_launch_reasoning_context(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backend = _SequenceBackend(
+        [
+            Outcome(status=OutcomeStatus.FAIL, failure_reason="first attempt failed"),
+            Outcome(status=OutcomeStatus.SUCCESS),
+        ]
+    )
+    backend_names: list[str] = []
+
+    def fake_build_backend(backend_name, working_dir, emit, *, model, on_usage_update=None):  # type: ignore[no-untyped-def]
+        del working_dir, emit, model, on_usage_update
+        backend_names.append(backend_name)
+        return backend
+
+    monkeypatch.setattr(server, "_build_codergen_backend", fake_build_backend)
+    workdir = tmp_path / "work"
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    start_response = attractor_api_client.post(
+        "/pipelines",
+        json={
+            "flow_content": """
+            digraph RetryProviderFlow {
+                start [shape=Mdiamond]
+                task [shape=box, prompt="Try once"]
+                done [shape=Msquare]
+                start -> task -> done
+            }
+            """,
+            "working_directory": str(workdir),
+            "model": "gpt-test",
+            "llm_provider": "openai",
+            "reasoning_effort": "low",
+        },
+    )
+    assert start_response.status_code == 200
+    assert start_response.json()["provider"] == "openai"
+    assert start_response.json()["llm_provider"] == "openai"
+    assert start_response.json()["reasoning_effort"] == "low"
+    run_id = str(start_response.json()["run_id"])
+    failed_payload = wait_for_pipeline_completion(attractor_api_client, run_id)
+    assert failed_payload["status"] == "failed"
+
+    retry_response = attractor_api_client.post(f"/pipelines/{run_id}/retry")
+
+    assert retry_response.status_code == 200
+    retry_payload = retry_response.json()
+    assert retry_payload["provider"] == "openai"
+    assert retry_payload["llm_provider"] == "openai"
+    assert retry_payload["reasoning_effort"] == "low"
+    final_payload = wait_for_pipeline_completion(attractor_api_client, run_id)
+    assert final_payload["status"] == "completed"
+    assert final_payload["provider"] == "openai"
+    assert final_payload["llm_provider"] == "openai"
+    assert final_payload["reasoning_effort"] == "low"
+    assert backend_names == ["provider-router", "provider-router"]
+    assert backend.calls == ["task", "task"]
+    assert backend.run_kwargs == [
+        {"model": "gpt-test", "provider": "openai", "reasoning_effort": "low"},
+        {"model": "gpt-test", "provider": "openai", "reasoning_effort": "low"},
+    ]
+    listed_run = next(run for run in attractor_api_client.get("/runs").json()["runs"] if run["run_id"] == run_id)
+    assert listed_run["provider"] == "openai"
+    assert listed_run["llm_provider"] == "openai"
+    assert listed_run["reasoning_effort"] == "low"
 
 
 def test_retry_start_publishes_running_run_list_upsert_without_sync_helper(

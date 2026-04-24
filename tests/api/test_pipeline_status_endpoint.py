@@ -56,6 +56,9 @@ def test_get_pipeline_returns_progress_for_active_run(
     assert payload["git_commit"] is None
     assert payload["spec_id"] is None
     assert payload["plan_id"] is None
+    assert payload["provider"] == "codex"
+    assert payload["llm_provider"] == "codex"
+    assert payload["reasoning_effort"] is None
     assert payload["started_at"]
     assert payload["ended_at"] is None
     assert payload["token_usage"] is None
@@ -66,6 +69,54 @@ def test_get_pipeline_returns_progress_for_active_run(
         "current_node": "plan",
         "completed_count": 1,
     }
+
+
+def test_start_status_and_run_list_expose_explicit_provider_and_reasoning(
+    attractor_api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server.configure_runtime_paths(runs_dir=tmp_path / "runs")
+    monkeypatch.setattr(server.asyncio, "create_task", _close_task_immediately)
+    workdir = tmp_path / "work"
+
+    response = attractor_api_client.post(
+        "/pipelines",
+        json={
+            "flow_content": """
+            digraph ExplicitLaunchOptions {
+                start [shape=Mdiamond]
+                done [shape=Msquare]
+                start -> done
+            }
+            """,
+            "working_directory": str(workdir),
+            "model": "gpt-explicit",
+            "llm_provider": "openai",
+            "reasoning_effort": "high",
+        },
+    )
+
+    assert response.status_code == 200
+    start_payload = response.json()
+    run_id = str(start_payload["run_id"])
+    assert start_payload["model"] == "gpt-explicit"
+    assert start_payload["provider"] == "openai"
+    assert start_payload["llm_provider"] == "openai"
+    assert start_payload["reasoning_effort"] == "high"
+
+    status_payload = attractor_api_client.get(f"/pipelines/{run_id}").json()
+    assert status_payload["model"] == "gpt-explicit"
+    assert status_payload["provider"] == "openai"
+    assert status_payload["llm_provider"] == "openai"
+    assert status_payload["reasoning_effort"] == "high"
+
+    runs_payload = attractor_api_client.get("/runs").json()
+    listed_run = next(run for run in runs_payload["runs"] if run["run_id"] == run_id)
+    assert listed_run["model"] == "gpt-explicit"
+    assert listed_run["provider"] == "openai"
+    assert listed_run["llm_provider"] == "openai"
+    assert listed_run["reasoning_effort"] == "high"
 
 
 def test_get_pipeline_uses_checkpoint_progress_for_persisted_run(

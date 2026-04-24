@@ -11,12 +11,13 @@ from attractor.engine.status_envelope_prompting import (
     build_status_envelope_prompt_appendix,
 )
 from attractor.handlers import HandlerRunner, build_default_registry
-from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY
-from attractor.transforms import ModelStylesheetTransform, RuntimePreambleTransform, TransformPipeline
+from attractor.llm_runtime import RUNTIME_LAUNCH_MODEL_KEY, RUNTIME_LAUNCH_REASONING_EFFORT_KEY
+from attractor.transforms import AttributeDefaultsTransform, ModelStylesheetTransform, RuntimePreambleTransform, TransformPipeline
 
 from tests.handlers._support.fakes import (
     _StubBackend,
     _ArtifactProbeBackend,
+    _FanInRankingBackend,
     _TextBackend,
     _OutcomeBackend,
     _StageLoggingBackend,
@@ -440,6 +441,53 @@ class TestCodergenHandler:
 
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0][5] == "gpt-style-override"
+
+    def test_codergen_handler_passes_provider_and_reasoning_overrides(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [
+                    shape=box,
+                    prompt="Plan",
+                    llm_provider="anthropic",
+                    reasoning_effort="medium"
+                ]
+            }
+            """
+        )
+
+        backend = _FanInRankingBackend("")
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner("task", "Plan", Context())
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0]["provider"] == "anthropic"
+        assert backend.calls[0]["reasoning_effort"] == "medium"
+
+    def test_codergen_handler_launch_reasoning_overrides_default_injected_node_reasoning(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                task [shape=box, prompt="Plan"]
+            }
+            """
+        )
+        AttributeDefaultsTransform().apply(graph)
+
+        backend = _FanInRankingBackend("")
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+
+        outcome = runner(
+            "task",
+            "Plan",
+            Context(values={RUNTIME_LAUNCH_REASONING_EFFORT_KEY: "medium"}),
+        )
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0]["reasoning_effort"] == "medium"
 
     def test_codergen_handler_falls_back_to_label_when_prompt_is_empty(self):
         graph = parse_dot(

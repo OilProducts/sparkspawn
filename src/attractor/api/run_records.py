@@ -23,6 +23,8 @@ class RunRecord:
     working_directory: str
     model: str
     started_at: str
+    llm_provider: str = ""
+    reasoning_effort: Optional[str] = None
     ended_at: Optional[str] = None
     project_path: str = ""
     git_branch: Optional[str] = None
@@ -52,6 +54,9 @@ class RunRecord:
             "outcome_reason_message": self.outcome_reason_message,
             "working_directory": self.working_directory,
             "model": self.model,
+            "provider": self.llm_provider or "codex",
+            "llm_provider": self.llm_provider or "codex",
+            "reasoning_effort": self.reasoning_effort,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "project_path": self.project_path,
@@ -105,6 +110,10 @@ class RunRecord:
             working_directory=str(data.get("working_directory", "")),
             model=str(data.get("model", "")),
             started_at=str(data.get("started_at", "")),
+            llm_provider=str(data.get("llm_provider") or data.get("provider") or ""),
+            reasoning_effort=(
+                str(data.get("reasoning_effort")) if data.get("reasoning_effort") is not None else None
+            ),
             ended_at=data.get("ended_at") if data.get("ended_at") is not None else None,
             project_path=str(data.get("project_path", "")),
             git_branch=str(data.get("git_branch")) if data.get("git_branch") is not None else None,

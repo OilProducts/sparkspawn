@@ -147,3 +147,34 @@ class TestFanInHandler:
 
         assert outcome.status == OutcomeStatus.SUCCESS
         assert backend.calls[0]["model"] == "gpt-fan-in"
+
+    def test_fan_in_passes_node_level_provider_and_reasoning(self):
+        graph = parse_dot(
+            """
+            digraph G {
+                fan_in [
+                    shape=tripleoctagon,
+                    prompt="Rank the branch results",
+                    llm_provider="gemini",
+                    reasoning_effort="high"
+                ]
+            }
+            """
+        )
+        backend = _FanInRankingBackend('{"best_id":"branch_b"}')
+        registry = build_default_registry(codergen_backend=backend)
+        runner = HandlerRunner(graph, registry)
+        context = Context(
+            values={
+                "parallel.results": [
+                    {"id": "branch_a", "status": "success"},
+                    {"id": "branch_b", "status": "success"},
+                ],
+            }
+        )
+
+        outcome = runner("fan_in", "Rank the branch results", context)
+
+        assert outcome.status == OutcomeStatus.SUCCESS
+        assert backend.calls[0]["provider"] == "gemini"
+        assert backend.calls[0]["reasoning_effort"] == "high"

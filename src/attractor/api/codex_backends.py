@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
+import asyncio
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -10,54 +10,39 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from agent.events import EventKind, SessionEvent
+from agent.local_environment import LocalExecutionEnvironment
+from agent.profiles.anthropic import AnthropicProviderProfile
+from agent.profiles.gemini import GeminiProviderProfile
+from agent.profiles.openai import OpenAIProviderProfile
+from agent.session import Session
+from agent.types import AssistantTurn, SessionConfig, SessionState
 from attractor.api.token_usage import (
     TokenUsageBreakdown,
     TokenUsageBucket,
     compute_live_usage_delta,
 )
+from attractor.api.codergen_contracts import (
+    ModeledOutcomeParseResult as _ModeledOutcomeParseResult,
+    PlainTextParseResult as _PlainTextParseResult,
+    StructuredContractViolation as _StructuredContractViolation,
+    build_contract_repair_prompt as _build_contract_repair_prompt,
+    coerce_structured_text_outcome as _coerce_structured_text_outcome,
+    contract_failure_outcome as _contract_failure_outcome,
+    has_response_contract as _has_response_contract,
+    validate_write_contract_violation as _validate_write_contract_violation,
+    with_write_contract as _with_write_contract,
+)
 from attractor.engine.context import Context
-from attractor.engine.context_contracts import (
-    ContextWriteContract,
-    validate_context_updates_against_contract,
-)
+from attractor.engine.context_contracts import ContextWriteContract
 from attractor.engine.outcome import FailureKind, Outcome, OutcomeStatus
-from attractor.engine.status_envelope_prompting import (
-    build_status_envelope_context_updates_contract_text,
-    format_status_envelope_allowed_keys,
-)
 from attractor.handlers.base import CodergenBackend
+from unified_llm.client import Client as UnifiedLlmClient
+from unified_llm.models import get_latest_model, get_model_info
+from unified_llm.types import Usage
 from spark_common.codex_app_client import CodexAppServerClient
 from spark_common import codex_app_server
 from spark_common.runtime_path import resolve_runtime_workspace_path
-
-_STRUCTURED_OUTCOME_KEYS = {
-    "outcome",
-    "preferred_label",
-    "suggested_next_ids",
-    "context_updates",
-    "notes",
-    "failure_reason",
-    "retryable",
-}
-
-
-@dataclass(frozen=True)
-class _PlainTextParseResult:
-    raw_text: str
-
-
-@dataclass(frozen=True)
-class _ModeledOutcomeParseResult:
-    outcome: Outcome
-
-
-@dataclass(frozen=True)
-class _StructuredContractViolation:
-    response_contract: str
-    raw_text: str
-    reason: str
-    write_contract: ContextWriteContract | None = None
-
 
 class CodexAppServerBackend(CodergenBackend):
     RUNTIME_THREAD_ID_KEY = "_attractor.runtime.thread_id"
@@ -166,8 +151,11 @@ class CodexAppServerBackend(CodergenBackend):
         contract_repair_attempts: int = 0,
         timeout: Optional[float] = None,
         model: Optional[str] = None,
+        provider: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
         write_contract: ContextWriteContract | None = None,
     ) -> str | Outcome:
+        del provider
         def log_line(message: str) -> None:
             if message:
                 self.emit({"type": "log", "msg": f"[{node_id}] {message}"})
@@ -215,6 +203,7 @@ class CodexAppServerBackend(CodergenBackend):
                 timeout,
                 log_line,
                 model=effective_model,
+                reasoning_effort=reasoning_effort,
             )
             if turn_text is None:
                 return "codex app-server completed successfully"
@@ -228,6 +217,7 @@ class CodexAppServerBackend(CodergenBackend):
                 timeout=timeout,
                 log_line=log_line,
                 model=effective_model,
+                reasoning_effort=reasoning_effort,
                 write_contract=write_contract,
             )
         except RuntimeError as exc:
@@ -246,6 +236,7 @@ class CodexAppServerBackend(CodergenBackend):
         log_line: Callable[[str], None],
         *,
         model: Optional[str],
+        reasoning_effort: Optional[str],
     ) -> str | None:
         previous_total: TokenUsageBucket | None = None
         saw_usage_update = False
@@ -264,6 +255,7 @@ class CodexAppServerBackend(CodergenBackend):
             thread_id=thread_id,
             prompt=prompt,
             model=model,
+            reasoning_effort=reasoning_effort,
             cwd=self.working_dir,
             on_event=handle_turn_event,
             overall_timeout_seconds=timeout,
@@ -295,6 +287,7 @@ class CodexAppServerBackend(CodergenBackend):
         timeout: Optional[float],
         log_line: Callable[[str], None],
         model: Optional[str],
+        reasoning_effort: Optional[str],
         write_contract: ContextWriteContract | None,
     ) -> str | Outcome:
         result = _coerce_structured_text_outcome(response_text, response_contract=response_contract)
@@ -330,6 +323,7 @@ class CodexAppServerBackend(CodergenBackend):
                 timeout,
                 log_line,
                 model=model,
+                reasoning_effort=reasoning_effort,
             )
             if repair_text is None:
                 return _contract_failure_outcome(current_violation)
@@ -354,38 +348,385 @@ class CodexAppServerBackend(CodergenBackend):
         return _contract_failure_outcome(current_violation)
 
 
-def _validate_write_contract_violation(
-    outcome: Outcome,
-    *,
-    write_contract: ContextWriteContract | None,
-    response_contract: str,
-    raw_text: str,
-) -> _StructuredContractViolation | None:
-    if not _has_response_contract(response_contract) or write_contract is None:
-        return None
-    violation = validate_context_updates_against_contract(outcome.context_updates, write_contract)
-    if violation is None:
-        return None
-    return _StructuredContractViolation(
-        response_contract=response_contract,
-        raw_text=raw_text.strip(),
-        reason=violation.format_reason(),
-        write_contract=write_contract,
+def _normalize_provider(value: Optional[str]) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized or "codex"
+
+
+def _usage_to_bucket(usage: Usage | None) -> TokenUsageBucket:
+    if usage is None:
+        return TokenUsageBucket()
+    return TokenUsageBucket(
+        input_tokens=getattr(usage, "input_tokens", 0),
+        cached_input_tokens=getattr(usage, "cache_read_tokens", None) or 0,
+        output_tokens=getattr(usage, "output_tokens", 0),
+        total_tokens=getattr(usage, "total_tokens", 0),
     )
 
 
-def _with_write_contract(
-    violation: _StructuredContractViolation,
-    write_contract: ContextWriteContract | None,
-) -> _StructuredContractViolation:
-    if violation.write_contract is write_contract:
-        return violation
-    return _StructuredContractViolation(
-        response_contract=violation.response_contract,
-        raw_text=violation.raw_text,
-        reason=violation.reason,
-        write_contract=write_contract,
+def _breakdown_delta_from(
+    current: TokenUsageBreakdown,
+    previous: TokenUsageBreakdown | None,
+) -> TokenUsageBreakdown:
+    delta = TokenUsageBreakdown()
+    if current.by_model:
+        for model_id, usage in current.by_model.items():
+            previous_usage = previous.by_model.get(model_id) if previous is not None else None
+            model_delta = usage.delta_from(previous_usage or TokenUsageBucket())
+            if model_delta.has_any_usage():
+                delta.add_for_model(model_id, model_delta)
+        return delta
+
+    current_total = TokenUsageBucket(
+        input_tokens=current.input_tokens,
+        cached_input_tokens=current.cached_input_tokens,
+        output_tokens=current.output_tokens,
+        total_tokens=current.total_tokens,
     )
+    previous_total = TokenUsageBucket(
+        input_tokens=previous.input_tokens,
+        cached_input_tokens=previous.cached_input_tokens,
+        output_tokens=previous.output_tokens,
+        total_tokens=previous.total_tokens,
+    ) if previous is not None else TokenUsageBucket()
+    aggregate_delta = current_total.delta_from(previous_total)
+    if aggregate_delta.has_any_usage():
+        delta.add_for_model("unknown", aggregate_delta)
+    return delta
+
+
+def _profile_for_provider(provider: str, model: Optional[str]):
+    model_id = str(model or "").strip()
+    if not model_id:
+        latest = get_latest_model(provider, "tools") or get_latest_model(provider)
+        model_id = latest.id if latest is not None else ""
+    model_info = get_model_info(model_id) if model_id else None
+    supports_streaming = bool(model_info.supports_tools) if model_info is not None else False
+    if provider == "openai":
+        return OpenAIProviderProfile(model=model_id, supports_streaming=supports_streaming)
+    if provider == "anthropic":
+        return AnthropicProviderProfile(model=model_id, supports_streaming=supports_streaming)
+    if provider == "gemini":
+        return GeminiProviderProfile(model=model_id, supports_streaming=supports_streaming)
+    raise ValueError("Unsupported llm_provider. Supported providers: codex, openai, anthropic, gemini.")
+
+
+class UnifiedAgentBackend(CodergenBackend):
+    def __init__(
+        self,
+        working_dir: str,
+        emit,
+        *,
+        provider: str,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        on_usage_update: Optional[Callable[[TokenUsageBreakdown], None]] = None,
+        client_factory: Callable[[str], UnifiedLlmClient] | None = None,
+    ):
+        self.requested_working_dir = str(Path(working_dir).expanduser().resolve(strict=False))
+        self.working_dir = resolve_runtime_workspace_path(working_dir)
+        self.emit = emit
+        self.provider = _normalize_provider(provider)
+        self.model = model
+        self.reasoning_effort = reasoning_effort
+        self._on_usage_update = on_usage_update
+        self._client_factory = client_factory or (
+            lambda effective_provider: UnifiedLlmClient.from_env(default_provider=effective_provider)
+        )
+        self._token_usage_lock = threading.Lock()
+        self._token_usage_breakdown = TokenUsageBreakdown()
+
+    def _log(self, node_id: str, message: str) -> None:
+        if message:
+            self.emit({"type": "log", "msg": f"[{node_id}] {message}"})
+
+    def _runtime_failure(self, reason: str) -> Outcome:
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=reason,
+            failure_kind=FailureKind.RUNTIME,
+        )
+
+    def _record_usage(self, *, model: Optional[str], usage: Usage | None) -> None:
+        delta = _usage_to_bucket(usage)
+        if not delta.has_any_usage():
+            return
+        normalized_model = str(model or "").strip() or "unified-agent default"
+        with self._token_usage_lock:
+            self._token_usage_breakdown.add_for_model(normalized_model, delta)
+            snapshot = self._token_usage_breakdown.copy()
+        if self._on_usage_update is not None:
+            self._on_usage_update(snapshot)
+
+    def _handle_event(self, node_id: str, event: SessionEvent) -> None:
+        if event.kind == EventKind.ASSISTANT_TEXT_DELTA:
+            delta = str(event.data.get("delta", ""))
+            if delta.strip():
+                self._log(node_id, delta)
+            return
+        if event.kind == EventKind.TOOL_CALL_START:
+            tool_name = str(event.data.get("tool_name", "tool"))
+            self._log(node_id, f"tool started: {tool_name}")
+            return
+        if event.kind == EventKind.TOOL_CALL_END:
+            tool_name = str(event.data.get("tool_name", "tool"))
+            suffix = "failed" if event.data.get("error") is not None else "completed"
+            self._log(node_id, f"tool {suffix}: {tool_name}")
+            return
+        if event.kind == EventKind.ERROR:
+            self._log(node_id, str(event.data.get("error", "")))
+
+    async def _submit_and_capture(self, session: Session, node_id: str, prompt: str) -> str:
+        task = asyncio.create_task(session.process_input(prompt))
+        try:
+            while True:
+                if task.done() and session.event_queue.empty():
+                    break
+                try:
+                    event = await asyncio.wait_for(session.event_queue.get(), timeout=0.05)
+                except asyncio.TimeoutError:
+                    continue
+                self._handle_event(node_id, event)
+            await task
+        except BaseException:
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            raise
+        if session.state == SessionState.AWAITING_INPUT:
+            raise RuntimeError("unified-agent codergen requested interactive input; this is not supported for v1")
+        for turn in reversed(session.history):
+            if isinstance(turn, AssistantTurn):
+                self._record_usage(model=session.provider_profile.model, usage=turn.usage)
+                return turn.text
+        return ""
+
+    async def _run_session(
+        self,
+        node_id: str,
+        prompt: str,
+        *,
+        provider: str,
+        model: Optional[str],
+        reasoning_effort: Optional[str],
+        response_contract: str,
+        contract_repair_attempts: int,
+        write_contract: ContextWriteContract | None,
+    ) -> str | Outcome:
+        profile = _profile_for_provider(provider, model)
+        client = self._client_factory(provider)
+        session = Session(
+            provider_profile=profile,
+            execution_environment=LocalExecutionEnvironment(working_dir=self.working_dir),
+            client=client,
+            config=SessionConfig(reasoning_effort=reasoning_effort),
+        )
+        try:
+            response_text = await self._submit_and_capture(session, node_id, prompt)
+            result = _coerce_structured_text_outcome(response_text, response_contract=response_contract)
+            if isinstance(result, Outcome):
+                return result
+            if isinstance(result, _ModeledOutcomeParseResult):
+                violation = _validate_write_contract_violation(
+                    result.outcome,
+                    write_contract=write_contract,
+                    response_contract=response_contract,
+                    raw_text=response_text,
+                )
+                if violation is None:
+                    return result.outcome
+                result = violation
+            if isinstance(result, _PlainTextParseResult):
+                return result.raw_text
+            if contract_repair_attempts <= 0:
+                return _contract_failure_outcome(result)
+            current_violation = _with_write_contract(result, write_contract)
+            for attempt in range(1, contract_repair_attempts + 1):
+                self._log(
+                    node_id,
+                    f"response contract violation for {node_id}; requesting corrected final answer "
+                    f"(attempt {attempt}/{contract_repair_attempts}): {current_violation.reason}",
+                )
+                repair_text = await self._submit_and_capture(
+                    session,
+                    node_id,
+                    _build_contract_repair_prompt(current_violation),
+                )
+                repaired = _coerce_structured_text_outcome(
+                    repair_text,
+                    response_contract=current_violation.response_contract,
+                )
+                if isinstance(repaired, _ModeledOutcomeParseResult):
+                    repaired_violation = _validate_write_contract_violation(
+                        repaired.outcome,
+                        write_contract=write_contract,
+                        response_contract=current_violation.response_contract,
+                        raw_text=repair_text,
+                    )
+                    if repaired_violation is None:
+                        return repaired.outcome
+                    current_violation = repaired_violation
+                    continue
+                if isinstance(repaired, _PlainTextParseResult):
+                    return repaired.raw_text
+                if isinstance(repaired, Outcome):
+                    return repaired
+                current_violation = _with_write_contract(repaired, write_contract)
+            return _contract_failure_outcome(current_violation)
+        finally:
+            await session.close()
+            close_client = getattr(client, "close", None)
+            if callable(close_client):
+                result = close_client()
+                if asyncio.iscoroutine(result):
+                    await result
+
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout: Optional[float] = None,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        write_contract: ContextWriteContract | None = None,
+    ) -> str | Outcome:
+        del context
+        effective_provider = _normalize_provider(provider or self.provider)
+        if effective_provider not in {"openai", "anthropic", "gemini"}:
+            return self._runtime_failure(
+                "Unsupported llm_provider. Supported providers: codex, openai, anthropic, gemini."
+            )
+        try:
+            session_coro = self._run_session(
+                node_id,
+                prompt,
+                provider=effective_provider,
+                model=model or self.model,
+                reasoning_effort=reasoning_effort or self.reasoning_effort,
+                response_contract=response_contract,
+                contract_repair_attempts=contract_repair_attempts,
+                write_contract=write_contract,
+            )
+            if timeout is not None and timeout > 0:
+                session_coro = asyncio.wait_for(session_coro, timeout=timeout)
+            return asyncio.run(
+                session_coro
+            )
+        except asyncio.TimeoutError:
+            timeout_text = f"{timeout:g}" if timeout is not None else ""
+            return self._runtime_failure(f"unified-agent backend timed out after {timeout_text}s")
+        except RuntimeError as exc:
+            return self._runtime_failure(str(exc))
+        except Exception as exc:
+            return self._runtime_failure(str(exc) or exc.__class__.__name__)
+
+
+class ProviderRouterBackend(CodergenBackend):
+    def __init__(
+        self,
+        working_dir: str,
+        emit,
+        *,
+        model: Optional[str] = None,
+        on_usage_update: Optional[Callable[[TokenUsageBreakdown], None]] = None,
+    ):
+        self.working_dir = working_dir
+        self.emit = emit
+        self.model = model
+        self.provider = "codex"
+        self._on_usage_update = on_usage_update
+        self._token_usage_lock = threading.Lock()
+        self._token_usage_breakdown = TokenUsageBreakdown()
+        self._source_usage_snapshots: dict[object, TokenUsageBreakdown] = {}
+        self._codex_usage_source = object()
+        self._codex = CodexAppServerBackend(
+            working_dir,
+            emit,
+            model=model,
+            on_usage_update=lambda snapshot: self._record_source_usage(
+                self._codex_usage_source,
+                snapshot,
+            ),
+        )
+
+    def bind_stage_raw_rpc_log(self, node_id: str, logs_root: str | Path | None):
+        return self._codex.bind_stage_raw_rpc_log(node_id, logs_root)
+
+    def _record_source_usage(self, source_key: object, source_snapshot: TokenUsageBreakdown) -> None:
+        with self._token_usage_lock:
+            previous_snapshot = self._source_usage_snapshots.get(source_key)
+            source_delta = _breakdown_delta_from(source_snapshot, previous_snapshot)
+            self._source_usage_snapshots[source_key] = source_snapshot.copy()
+            if not source_delta.has_any_usage():
+                return
+            for model_id, usage in source_delta.by_model.items():
+                self._token_usage_breakdown.add_for_model(model_id, usage)
+            snapshot = self._token_usage_breakdown.copy()
+        if self._on_usage_update is not None:
+            self._on_usage_update(snapshot)
+
+    def run(
+        self,
+        node_id: str,
+        prompt: str,
+        context: Context,
+        *,
+        response_contract: str = "",
+        contract_repair_attempts: int = 0,
+        timeout: Optional[float] = None,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        write_contract: ContextWriteContract | None = None,
+    ) -> str | Outcome:
+        effective_provider = _normalize_provider(provider)
+        if effective_provider == "codex":
+            return self._codex.run(
+                node_id,
+                prompt,
+                context,
+                response_contract=response_contract,
+                contract_repair_attempts=contract_repair_attempts,
+                timeout=timeout,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                write_contract=write_contract,
+            )
+        if effective_provider in {"openai", "anthropic", "gemini"}:
+            usage_source = object()
+            backend = UnifiedAgentBackend(
+                self.working_dir,
+                self.emit,
+                provider=effective_provider,
+                model=model or self.model,
+                reasoning_effort=reasoning_effort,
+                on_usage_update=lambda snapshot: self._record_source_usage(usage_source, snapshot),
+            )
+            return backend.run(
+                node_id,
+                prompt,
+                context,
+                response_contract=response_contract,
+                contract_repair_attempts=contract_repair_attempts,
+                timeout=timeout,
+                model=model,
+                provider=effective_provider,
+                reasoning_effort=reasoning_effort,
+                write_contract=write_contract,
+            )
+        return Outcome(
+            status=OutcomeStatus.FAIL,
+            failure_reason=(
+                "Unsupported llm_provider. Supported providers: codex, openai, anthropic, gemini."
+            ),
+            failure_kind=FailureKind.RUNTIME,
+        )
 
 
 def build_codergen_backend(
@@ -397,212 +738,10 @@ def build_codergen_backend(
     on_usage_update: Optional[Callable[[TokenUsageBreakdown], None]] = None,
 ) -> CodergenBackend:
     normalized = backend_name.strip().lower()
+    if normalized in {"", "provider-router"}:
+        return ProviderRouterBackend(working_dir, emit, model=model, on_usage_update=on_usage_update)
     if normalized == "codex-app-server":
         return CodexAppServerBackend(working_dir, emit, model=model, on_usage_update=on_usage_update)
     raise ValueError(
-        "Unsupported backend. Supported backends: codex-app-server."
+        "Unsupported backend. Supported backends: provider-router, codex-app-server."
     )
-
-
-def _coerce_structured_text_outcome(
-    text: str,
-    *,
-    response_contract: str = "",
-) -> _PlainTextParseResult | _ModeledOutcomeParseResult | _StructuredContractViolation:
-    raw_text = text.strip()
-    candidate, envelope_error = _extract_structured_outcome_payload(
-        text,
-        require_contract=_has_response_contract(response_contract),
-    )
-    if envelope_error is not None:
-        return _contract_violation_or_invalid_outcome(raw_text, envelope_error, response_contract)
-    if candidate is None:
-        return _PlainTextParseResult(raw_text=raw_text)
-
-    preferred_label = candidate.get("preferred_label", "")
-    suggested_next_ids = candidate.get("suggested_next_ids", [])
-    context_updates = candidate.get("context_updates", {})
-    notes = candidate.get("notes", "")
-    failure_reason = candidate.get("failure_reason", "")
-    retryable = candidate.get("retryable", None)
-
-    if not isinstance(preferred_label, str):
-        return _contract_violation_or_invalid_outcome(
-            text,
-            "invalid structured status envelope: preferred_label must be a string",
-            response_contract,
-        )
-    if not isinstance(suggested_next_ids, list) or any(not isinstance(item, str) for item in suggested_next_ids):
-        return _contract_violation_or_invalid_outcome(
-            text,
-            "invalid structured status envelope: suggested_next_ids must be a list of strings",
-            response_contract,
-        )
-    if not isinstance(context_updates, dict):
-        return _contract_violation_or_invalid_outcome(
-            text,
-            "invalid structured status envelope: context_updates must be an object",
-            response_contract,
-        )
-    if notes is not None and not isinstance(notes, str):
-        return _contract_violation_or_invalid_outcome(
-            text,
-            "invalid structured status envelope: notes must be a string",
-            response_contract,
-        )
-    if failure_reason is not None and not isinstance(failure_reason, str):
-        return _contract_violation_or_invalid_outcome(
-            text,
-            "invalid structured status envelope: failure_reason must be a string",
-            response_contract,
-        )
-    if retryable is not None and not isinstance(retryable, bool):
-        return _contract_violation_or_invalid_outcome(
-            text,
-            "invalid structured status envelope: retryable must be a boolean",
-            response_contract,
-        )
-
-    outcome_name = str(candidate.get("outcome", "")).strip().lower()
-    try:
-        status = OutcomeStatus(outcome_name)
-    except ValueError:
-        return _contract_violation_or_invalid_outcome(
-            text,
-            f"invalid structured status envelope: unsupported outcome status '{outcome_name or '<empty>'}'",
-            response_contract,
-        )
-
-    if status == OutcomeStatus.SKIPPED:
-        return _contract_violation_or_invalid_outcome(
-            text,
-            "invalid structured status envelope: unsupported outcome status 'skipped'",
-            response_contract,
-        )
-
-    return _ModeledOutcomeParseResult(
-        outcome=Outcome(
-            status=status,
-            preferred_label=preferred_label,
-            suggested_next_ids=list(suggested_next_ids),
-            context_updates=dict(context_updates),
-            notes=notes or "",
-            failure_reason=failure_reason or "",
-            retryable=retryable,
-            failure_kind=FailureKind.BUSINESS
-            if _has_response_contract(response_contract) and status == OutcomeStatus.FAIL
-            else None,
-            raw_response_text=raw_text,
-        )
-    )
-
-
-def _invalid_structured_outcome(text: str, reason: str) -> Outcome:
-    return Outcome(
-        status=OutcomeStatus.FAIL,
-        notes=text.strip(),
-        failure_reason=reason,
-        raw_response_text=text.strip(),
-    )
-
-
-def _contract_violation_or_invalid_outcome(
-    text: str,
-    reason: str,
-    response_contract: str,
-) -> Outcome | _StructuredContractViolation:
-    if _has_response_contract(response_contract):
-        return _StructuredContractViolation(
-            response_contract=response_contract,
-            raw_text=text.strip(),
-            reason=reason,
-        )
-    return _invalid_structured_outcome(text, reason)
-
-
-def _has_response_contract(response_contract: str) -> bool:
-    return bool(str(response_contract).strip())
-
-
-def _build_contract_repair_prompt(violation: _StructuredContractViolation) -> str:
-    lines = [
-        f"Your previous final answer violated the {violation.response_contract} response contract.",
-        f"Validation error: {violation.reason}",
-        "",
-        "Re-emit only a corrected final answer for the same decision.",
-        "Do not do new repository work.",
-        "Do not run commands.",
-        "Do not change the substantive decision, routing label, or context updates except as required to satisfy the response contract.",
-    ]
-    allowed_keys = tuple(violation.write_contract.allowed_keys) if violation.write_contract is not None else ()
-    if allowed_keys:
-        lines.append(
-            'Re-emit the same decision using only these "context_updates" keys when needed: '
-            f"{format_status_envelope_allowed_keys(violation.write_contract)}."
-        )
-    else:
-        lines.append('Re-emit the same decision with no "context_updates".')
-    lines.extend(
-        [
-            build_status_envelope_context_updates_contract_text(violation.write_contract),
-            "",
-            "Previous invalid final answer:",
-            violation.raw_text,
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _contract_failure_outcome(violation: _StructuredContractViolation) -> Outcome:
-    return Outcome(
-        status=OutcomeStatus.FAIL,
-        notes=violation.raw_text,
-        failure_reason=violation.reason,
-        failure_kind=FailureKind.CONTRACT,
-        raw_response_text=violation.raw_text,
-    )
-
-
-def _extract_structured_outcome_payload(
-    text: str,
-    *,
-    require_contract: bool = False,
-) -> tuple[dict[str, object] | None, str | None]:
-    stripped = text.strip()
-    if not stripped:
-        if require_contract:
-            return None, "invalid structured status envelope: empty response"
-        return None, None
-
-    candidates = [stripped]
-    if stripped.startswith("```") and stripped.endswith("```"):
-        lines = stripped.splitlines()
-        if len(lines) >= 3:
-            inner = "\n".join(lines[1:-1]).strip()
-            if inner and inner not in candidates:
-                candidates.append(inner)
-
-    validation_errors: list[str] = []
-    for candidate in candidates:
-        try:
-            payload = json.loads(candidate)
-        except json.JSONDecodeError as exc:
-            if require_contract:
-                validation_errors.append(f"invalid structured status envelope: invalid JSON: {exc}")
-            continue
-        if not isinstance(payload, dict):
-            if require_contract:
-                validation_errors.append("invalid structured status envelope: expected a JSON object")
-            continue
-        if "outcome" not in payload:
-            if require_contract:
-                validation_errors.append('invalid structured status envelope: missing required top-level key "outcome"')
-            continue
-        if not set(payload.keys()).issubset(_STRUCTURED_OUTCOME_KEYS):
-            unexpected = sorted(set(payload.keys()) - _STRUCTURED_OUTCOME_KEYS)
-            unexpected_text = ", ".join(unexpected)
-            return None, f"invalid structured status envelope: unexpected top-level keys {unexpected_text}"
-        return payload, None
-    if require_contract and validation_errors:
-        return None, validation_errors[-1]
-    return None, None
