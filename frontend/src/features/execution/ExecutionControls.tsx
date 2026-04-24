@@ -123,12 +123,19 @@ export function ExecutionControls() {
         : Boolean(activeProjectPath) && Boolean(executionFlowName) && !hasValidationErrors
     const visibleDiagnostics = diagnostics.slice(0, 8)
     const pendingHumanGatePrompt = humanGate && humanGate.runId === selectedRunId ? humanGate.prompt : null
+    const selectedLlmProvider = typeof graphAttrs.ui_default_llm_provider === 'string'
+        ? graphAttrs.ui_default_llm_provider
+        : ''
+    const selectedReasoningEffort = typeof graphAttrs.ui_default_reasoning_effort === 'string'
+        ? graphAttrs.ui_default_reasoning_effort
+        : ''
     const runInitiationForm = {
         projectPath: activeProjectPath || '',
         flowSource: executionFlowName || '',
         workingDirectory: workingDir,
-        backend: 'codex-app-server',
         model: model.trim() || null,
+        llmProvider: selectedLlmProvider,
+        reasoningEffort: selectedReasoningEffort,
         launchContext: null,
     }
 
@@ -199,6 +206,8 @@ export function ExecutionControls() {
                         projectPath: activeProjectPath || executionContinuation.sourceWorkingDirectory,
                         workingDirectory: workingDir,
                         model: model.trim() || null,
+                        llmProvider: selectedLlmProvider,
+                        reasoningEffort: selectedReasoningEffort,
                     },
                     {
                         startNodeId: executionContinuation.startNodeId || '',

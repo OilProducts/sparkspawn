@@ -1,8 +1,13 @@
-export type LlmProviderKey = 'openai' | 'anthropic' | 'gemini' | 'mistral'
+export type LlmProviderKey = 'codex' | 'openai' | 'anthropic' | 'gemini'
 
-export const LLM_PROVIDER_OPTIONS: LlmProviderKey[] = ['openai', 'anthropic', 'gemini', 'mistral']
+export const LLM_PROVIDER_OPTIONS: LlmProviderKey[] = ['codex', 'openai', 'anthropic', 'gemini']
 
 export const LLM_MODELS_BY_PROVIDER: Record<LlmProviderKey, string[]> = {
+    codex: [
+        'gpt-5.4',
+        'gpt-5.4-mini',
+        'gpt-5.2',
+    ],
     openai: [
         'gpt-5.5',
         'gpt-5.4',
@@ -26,7 +31,6 @@ export const LLM_MODELS_BY_PROVIDER: Record<LlmProviderKey, string[]> = {
         'gemini-2.5-flash-preview-09-2025',
         'gemini-flash-latest',
     ],
-    mistral: ['mistral-large-2512'],
 }
 
 export function getModelSuggestions(provider?: string): string[] {

@@ -37,6 +37,9 @@ export interface RunRecord {
     spec_id?: string | null
     plan_id?: string | null
     model: string
+    provider?: string | null
+    llm_provider?: string | null
+    reasoning_effort?: string | null
     started_at: string
     ended_at?: string | null
     last_error?: string

@@ -2,16 +2,18 @@ export interface RunInitiationFormState {
     projectPath: string
     flowSource: string
     workingDirectory: string
-    backend: string
     model: string | null
+    llmProvider?: string | null
+    reasoningEffort?: string | null
     launchContext?: Record<string, unknown> | null
 }
 
 export interface PipelineStartPayload {
     flow_content: string
     working_directory: string
-    backend: string
     model: string | null
+    llm_provider?: string | null
+    reasoning_effort?: string | null
     launch_context?: Record<string, unknown> | null
     flow_name: string | null
 }
@@ -24,6 +26,8 @@ export interface PipelineContinuePayload {
     flow_name?: string | null
     working_directory?: string
     model?: string | null
+    llm_provider?: string | null
+    reasoning_effort?: string | null
 }
 
 const normalizePath = (value: string): string => {
@@ -83,29 +87,45 @@ export function buildPipelineStartPayload(
     const payload: PipelineStartPayload = {
         flow_content: flowContent,
         working_directory: workingDirectory,
-        backend: form.backend,
         model: form.model,
         flow_name: form.flowSource || null,
     }
     if (form.launchContext && Object.keys(form.launchContext).length > 0) {
         payload.launch_context = form.launchContext
     }
+    const llmProvider = form.llmProvider?.trim()
+    if (llmProvider) {
+        payload.llm_provider = llmProvider
+    }
+    const reasoningEffort = form.reasoningEffort?.trim()
+    if (reasoningEffort) {
+        payload.reasoning_effort = reasoningEffort
+    }
     return payload
 }
 
 export function buildPipelineContinuePayload(
-    form: Pick<RunInitiationFormState, 'projectPath' | 'workingDirectory' | 'model'>,
+    form: Pick<RunInitiationFormState, 'projectPath' | 'workingDirectory' | 'model' | 'llmProvider' | 'reasoningEffort'>,
     continuation: {
         startNodeId: string
         flowSourceMode: PipelineContinueFlowSourceMode
         flowName?: string | null
     },
 ): PipelineContinuePayload {
-    return {
+    const payload: PipelineContinuePayload = {
         start_node: continuation.startNodeId,
         flow_source_mode: continuation.flowSourceMode,
         flow_name: continuation.flowSourceMode === 'flow_name' ? (continuation.flowName || null) : undefined,
         working_directory: resolveExecutionWorkingDirectory(form),
         model: form.model,
     }
+    const llmProvider = form.llmProvider?.trim()
+    if (llmProvider) {
+        payload.llm_provider = llmProvider
+    }
+    const reasoningEffort = form.reasoningEffort?.trim()
+    if (reasoningEffort) {
+        payload.reasoning_effort = reasoningEffort
+    }
+    return payload
 }

@@ -1,4 +1,4 @@
-import { buildPipelineStartPayload } from '@/lib/pipelineStartPayload'
+import { buildPipelineContinuePayload, buildPipelineStartPayload } from '@/lib/pipelineStartPayload'
 import { ExecutionControls } from '@/features/execution/ExecutionControls'
 import { ExecutionWorkspace } from '@/features/execution/ExecutionWorkspace'
 import { useStore } from '@/store'
@@ -199,14 +199,15 @@ describe('Execution controls behavior', () => {
     vi.unstubAllGlobals()
   })
 
-  it('builds start payload with project, flow, and backend model', () => {
+  it('builds start payload with project, flow, and model', () => {
     const payload = buildPipelineStartPayload(
       {
         projectPath: '/tmp/project',
         flowSource: TEST_SPEC_FLOW,
         workingDirectory: '/tmp/project',
-        backend: 'codex-app-server',
         model: 'gpt-5',
+        llmProvider: 'openai',
+        reasoningEffort: 'high',
       },
       'digraph G { start -> done }',
     )
@@ -214,10 +215,54 @@ describe('Execution controls behavior', () => {
     expect(payload).toEqual({
       flow_content: 'digraph G { start -> done }',
       working_directory: '/tmp/project',
-      backend: 'codex-app-server',
       model: 'gpt-5',
+      llm_provider: 'openai',
+      reasoning_effort: 'high',
       flow_name: TEST_SPEC_FLOW,
     })
+  })
+
+  it('builds continue payload with explicit provider and reasoning selections', () => {
+    const payload = buildPipelineContinuePayload(
+      {
+        projectPath: '/tmp/project',
+        workingDirectory: '/tmp/project',
+        model: 'gpt-5',
+        llmProvider: 'anthropic',
+        reasoningEffort: 'medium',
+      },
+      {
+        startNodeId: 'review',
+        flowSourceMode: 'snapshot',
+      },
+    )
+
+    expect(payload).toEqual({
+      start_node: 'review',
+      flow_source_mode: 'snapshot',
+      flow_name: undefined,
+      working_directory: '/tmp/project',
+      model: 'gpt-5',
+      llm_provider: 'anthropic',
+      reasoning_effort: 'medium',
+    })
+  })
+
+  it('omits provider and reasoning fields when selections are blank', () => {
+    const payload = buildPipelineStartPayload(
+      {
+        projectPath: '/tmp/project',
+        flowSource: TEST_SPEC_FLOW,
+        workingDirectory: '/tmp/project',
+        model: 'gpt-5',
+        llmProvider: '',
+        reasoningEffort: '',
+      },
+      'digraph G { start -> done }',
+    )
+
+    expect(payload).not.toHaveProperty('llm_provider')
+    expect(payload).not.toHaveProperty('reasoning_effort')
   })
 
   it('includes structured launch context in the start payload when provided', () => {
@@ -226,7 +271,6 @@ describe('Execution controls behavior', () => {
         projectPath: '/tmp/project',
         flowSource: TEST_REVIEW_FLOW,
         workingDirectory: '/tmp/project',
-        backend: 'codex-app-server',
         model: 'gpt-5',
         launchContext: {
           'context.request.summary': 'Add a health check endpoint.',
@@ -239,7 +283,6 @@ describe('Execution controls behavior', () => {
     expect(payload).toEqual({
       flow_content: 'digraph G { start -> done }',
       working_directory: '/tmp/project',
-      backend: 'codex-app-server',
       model: 'gpt-5',
       launch_context: {
         'context.request.summary': 'Add a health check endpoint.',
@@ -443,6 +486,53 @@ describe('Execution controls behavior', () => {
     expect(useStore.getState().selectedRunId).toBe('run-555')
     expect(useStore.getState().viewMode).toBe('execution')
     expect(screen.getByTestId('execution-launch-success-notice')).toBeVisible()
+  })
+
+  it('includes explicit graph provider and reasoning selections when starting a run', async () => {
+    const user = userEvent.setup()
+    const fetchMock = installExecutionFetchMock({
+      flowName: TEST_LINEAR_FLOW,
+      graphAttrs: {
+        ui_default_llm_provider: 'openai',
+        ui_default_reasoning_effort: 'high',
+      },
+    })
+
+    useStore.setState((state) => ({
+      ...state,
+      viewMode: 'execution',
+      activeProjectPath: '/tmp/project',
+      executionFlow: TEST_LINEAR_FLOW,
+      workingDir: '/tmp/project',
+      model: 'gpt-5.4',
+    }))
+
+    renderExecutionControls()
+
+    await screen.findByTestId('execute-button')
+    await waitFor(() => {
+      expect(useStore.getState().executionGraphAttrs.ui_default_llm_provider).toBe('openai')
+    })
+    await user.click(screen.getByTestId('execute-button'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/attractor/pipelines',
+        expect.objectContaining({
+          method: 'POST',
+        }),
+      )
+    })
+
+    const pipelineCall = fetchMock.mock.calls.find(([input, init]) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      return url.endsWith('/attractor/pipelines') && init?.method === 'POST'
+    })
+    expect(JSON.parse(String(pipelineCall?.[1]?.body))).toMatchObject({
+      model: 'gpt-5.4',
+      llm_provider: 'openai',
+      reasoning_effort: 'high',
+    })
   })
 
   it('launches without a Git warning dialog when project metadata has no branch or commit', async () => {
@@ -771,6 +861,66 @@ describe('Execution controls behavior', () => {
       flow_name: 'override.dot',
       working_directory: '/tmp/project',
       model: 'gpt-5.4-mini',
+    })
+  })
+
+  it('includes explicit graph provider and reasoning selections when continuing a run', async () => {
+    const user = userEvent.setup()
+    const fetchMock = installExecutionFetchMock({
+      flowName: TEST_LINEAR_FLOW,
+      graphAttrs: {
+        ui_default_llm_provider: 'anthropic',
+        ui_default_reasoning_effort: 'medium',
+      },
+      continueSourceRunId: 'run-source-provider',
+      continuePipelineId: 'run-derived-provider',
+    })
+
+    useStore.setState((state) => ({
+      ...state,
+      viewMode: 'execution',
+      activeProjectPath: '/tmp/project',
+      executionFlow: TEST_LINEAR_FLOW,
+      executionContinuation: {
+        sourceRunId: 'run-source-provider',
+        sourceFlowName: TEST_LINEAR_FLOW,
+        sourceWorkingDirectory: '/tmp/project',
+        sourceModel: 'gpt-5.4-mini',
+        flowSourceMode: 'flow_name',
+        startNodeId: 'task',
+      },
+      workingDir: '/tmp/project',
+      model: 'claude-test',
+    }))
+
+    renderExecutionControls()
+
+    await screen.findByTestId('execute-button')
+    await waitFor(() => {
+      expect(useStore.getState().executionGraphAttrs.ui_default_llm_provider).toBe('anthropic')
+    })
+    await user.click(screen.getByTestId('execute-button'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/attractor/pipelines/run-source-provider/continue',
+        expect.objectContaining({
+          method: 'POST',
+        }),
+      )
+    })
+
+    const continueCall = fetchMock.mock.calls.find(([input, init]) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      return url.endsWith('/attractor/pipelines/run-source-provider/continue') && init?.method === 'POST'
+    })
+    expect(JSON.parse(String(continueCall?.[1]?.body))).toMatchObject({
+      start_node: 'task',
+      flow_source_mode: 'flow_name',
+      flow_name: TEST_LINEAR_FLOW,
+      model: 'claude-test',
+      llm_provider: 'anthropic',
+      reasoning_effort: 'medium',
     })
   })
 })

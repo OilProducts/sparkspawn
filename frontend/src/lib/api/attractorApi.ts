@@ -86,6 +86,9 @@ export interface PipelineStartResponse {
     run_id?: string
     working_directory?: string
     model?: string
+    provider?: string | null
+    llm_provider?: string | null
+    reasoning_effort?: string | null
     diagnostics?: import('@/state/store-types').DiagnosticEntry[]
     errors?: import('@/state/store-types').DiagnosticEntry[]
     error?: string
@@ -131,6 +134,9 @@ export interface PipelineStatusResponse {
     spec_id?: string | null
     plan_id?: string | null
     model?: string
+    provider?: string | null
+    llm_provider?: string | null
+    reasoning_effort?: string | null
     last_error?: string | null
     token_usage?: number | null
     token_usage_breakdown?: TokenUsageBreakdownResponse | null
@@ -220,6 +226,9 @@ export interface RunRecordResponse {
     spec_id?: string | null
     plan_id?: string | null
     model: string
+    provider?: string | null
+    llm_provider?: string | null
+    reasoning_effort?: string | null
     started_at: string
     ended_at?: string | null
     last_error?: string
@@ -362,6 +371,9 @@ export function parsePipelineStartResponse(payload: unknown, endpoint = '/attrac
         run_id: asOptionalString(record.run_id),
         working_directory: asOptionalString(record.working_directory),
         model: asOptionalString(record.model),
+        provider: asOptionalNullableString(record.provider),
+        llm_provider: asOptionalNullableString(record.llm_provider),
+        reasoning_effort: asOptionalNullableString(record.reasoning_effort),
         diagnostics: parseDiagnosticList(record.diagnostics, endpoint, 'diagnostics'),
         errors: parseDiagnosticList(record.errors, endpoint, 'errors'),
         error: asOptionalString(record.error),
@@ -622,6 +634,9 @@ function parseRunRecord(payload: unknown): RunRecordResponse | null {
         spec_id: asOptionalNullableString(record.spec_id),
         plan_id: asOptionalNullableString(record.plan_id),
         model: typeof record.model === 'string' ? record.model : '',
+        provider: asOptionalNullableString(record.provider),
+        llm_provider: asOptionalNullableString(record.llm_provider),
+        reasoning_effort: asOptionalNullableString(record.reasoning_effort),
         started_at: typeof record.started_at === 'string' ? record.started_at : '',
         ended_at: asOptionalNullableString(record.ended_at),
         last_error: asOptionalString(record.last_error),
