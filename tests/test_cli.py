@@ -289,7 +289,7 @@ def test_service_install_writes_user_unit_and_starts_service(
     assert "spark.server_cli" in unit_text
     assert f"EnvironmentFile=-{data_dir.resolve(strict=False) / 'config' / 'provider.env'}" in unit_text
     assert f"--data-dir {data_dir.resolve(strict=False)}" in unit_text
-    assert "Listening on http://127.0.0.1:8000" in capsys.readouterr().out
+    assert "Listening on http://0.0.0.0:8000" in capsys.readouterr().out
 
 
 def test_service_install_requires_linux_systemd(monkeypatch, tmp_path: Path, capsys) -> None:

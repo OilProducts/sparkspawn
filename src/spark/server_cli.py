@@ -88,7 +88,7 @@ def _build_runtime_parser() -> argparse.ArgumentParser:
         "install",
         help="Install or update a user-level systemd service and start it",
     )
-    service_install.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    service_install.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     service_install.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
     service_install.add_argument("--data-dir", type=Path, default=None, help="Runtime data directory root")
     service_install.add_argument("--flows-dir", type=Path, default=None, help="Flow storage directory")

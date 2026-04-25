@@ -170,10 +170,10 @@ On Linux, install and start the background service explicitly with:
 just install-systemd
 ```
 
-To bind the service on every interface instead of loopback, set `SPARK_HOST=0.0.0.0` when installing it:
+The installed service binds every interface by default. To bind the service to loopback only, set `SPARK_HOST=127.0.0.1` when installing it:
 
 ```bash
-SPARK_HOST=0.0.0.0 just install-systemd
+SPARK_HOST=127.0.0.1 just install-systemd
 ```
 
 You can also bypass `just` and install the user service directly with an explicit host and port:
@@ -183,6 +183,12 @@ You can also bypass `just` and install the user service directly with an explici
 ```
 
 Use `~/.spark/venv/bin/spark-server service status` to inspect it or `~/.spark/venv/bin/spark-server service remove` to stop and unregister it.
+
+If `just install-systemd` appears to pause after the wheel installation completes, it is likely waiting for `systemctl --user restart spark.service`. An existing server with open browser connections, especially event streams, may take up to systemd's default stop timeout to restart. Check the service with:
+
+```bash
+systemctl --user status spark.service --no-pager --full
+```
 
 ### Provider API Keys
 
