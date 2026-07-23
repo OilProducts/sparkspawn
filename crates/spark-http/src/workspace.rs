@@ -785,6 +785,7 @@ async fn delete_trigger(
 async fn post_trigger_webhook(
     State(settings): State<Arc<SparkSettings>>,
     State(live_hub): State<Arc<WorkspaceLiveHub>>,
+    State(run_event_observer): State<RunEventObserverHandle>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, WorkspaceApiError> {
@@ -803,14 +804,16 @@ async fn post_trigger_webhook(
     let payload = value.as_object().cloned().ok_or_else(|| {
         WorkspaceError::Validation("Webhook payload must be a JSON object.".to_string())
     })?;
-    let dispatch = WorkspaceTriggerService::new((*settings).clone()).dispatch_webhook(
-        WebhookHandleRequest {
-            webhook_key,
-            webhook_secret,
-            request_id: (!request_id.is_empty()).then_some(request_id),
-            payload,
-        },
-    )?;
+    let mut service = WorkspaceTriggerService::new((*settings).clone());
+    if let Some(observer) = run_event_observer.0 {
+        service = service.with_run_event_observer(observer);
+    }
+    let dispatch = service.dispatch_webhook(WebhookHandleRequest {
+        webhook_key,
+        webhook_secret,
+        request_id: (!request_id.is_empty()).then_some(request_id),
+        payload,
+    })?;
     publish_trigger_activation_outcomes(&settings, &live_hub, vec![dispatch.activation]);
     Ok(Json(dispatch.response).into_response())
 }

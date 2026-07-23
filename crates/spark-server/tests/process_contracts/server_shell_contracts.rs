@@ -200,8 +200,10 @@ fn init_creates_runtime_layout_flows_and_catalog() {
         catalog
             .matches("launch_policy = \"agent_requestable\"")
             .count(),
-        9
+        12
     );
+    assert!(catalog.contains("[flows.\"math-research/explore-conjecture.yaml\".execution_lock]"));
+    assert!(catalog.contains("key = \"math-research\""));
     assert!(catalog.contains("[flows.\"software-development/merge-change.yaml\".execution_lock]"));
     assert!(catalog.contains("key = \"software-development-integration\""));
     assert!(!catalog.contains("software-development/workers/"));

@@ -304,6 +304,79 @@ fn different_lock_keys_do_not_conflict() {
 }
 
 #[test]
+fn all_math_catalog_flows_serialize_per_project_while_other_projects_run() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    fs::create_dir_all(&settings.config_dir).expect("config dir");
+    let project_a = temp.path().join("math-a");
+    let project_b = temp.path().join("math-b");
+    init_git_repo(&project_a);
+    init_git_repo(&project_b);
+    let service = AttractorApiService::new(settings.clone());
+    let math_lock = || Some(project_lock("math-research"));
+
+    start_locked_run(
+        &service,
+        "math-explore-a",
+        &project_a,
+        tool_flow(
+            "math-research-explore-conjecture",
+            &wait_for_release_file_command("release-math"),
+        ),
+        math_lock(),
+    );
+    wait_until("explore holds project A math lock", || {
+        read_lock(&settings, "math-explore-a").is_some_and(|lock| lock.state == "holding")
+    });
+    start_locked_run(
+        &service,
+        "math-formalize-a",
+        &project_a,
+        tool_flow("math-research-formalize-result", "printf formalized"),
+        math_lock(),
+    );
+    start_locked_run(
+        &service,
+        "math-prove-a",
+        &project_a,
+        tool_flow("math-research-prove-refute", "printf proved"),
+        math_lock(),
+    );
+    wait_until("the other two math flows queue in project A", || {
+        ["math-formalize-a", "math-prove-a"]
+            .iter()
+            .all(|run_id| read_lock(&settings, run_id).is_some_and(|lock| lock.state == "queued"))
+    });
+
+    start_locked_run(
+        &service,
+        "math-prove-b",
+        &project_b,
+        tool_flow(
+            "math-research-prove-refute-other-project",
+            "printf independent",
+        ),
+        math_lock(),
+    );
+    wait_until("project B runs while project A remains locked", || {
+        read_status(&settings, "math-prove-b") == "completed"
+    });
+    assert_eq!(
+        read_lock(&settings, "math-explore-a")
+            .expect("holder")
+            .state,
+        "holding"
+    );
+
+    fs::write(project_a.join("release-math"), "go").expect("release math holder");
+    wait_until("all project A math flows complete serially", || {
+        ["math-explore-a", "math-formalize-a", "math-prove-a"]
+            .iter()
+            .all(|run_id| read_status(&settings, run_id) == "completed")
+    });
+}
+
+#[test]
 fn unsupported_lock_scope_is_a_validation_error() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());
