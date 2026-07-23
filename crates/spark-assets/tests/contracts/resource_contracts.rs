@@ -15,6 +15,7 @@ const STARTER_FLOW_NAMES: &[&str] = &[
     "math-research/explore-conjecture.yaml",
     "math-research/formalize-result.yaml",
     "math-research/prove-refute.yaml",
+        "math-research/research-program.yaml",
     "software-development/audit-codebase.yaml",
     "software-development/design-change.yaml",
     "software-development/implement-change.yaml",
@@ -260,6 +261,31 @@ fn implement_milestone_reviews_before_expensive_validation_and_blocks_invalid_st
 
 #[test]
 fn math_commit_tools_promote_drafts_only_after_successful_git_commits() {
+    // The perpetual research-program flow chains internally (commit -> orient)
+    // and must carry no draft-handoff machinery at all.
+    {
+        let asset = flows::load_starter_flow("math-research/research-program.yaml")
+            .expect("load research program");
+        let text = asset.text().expect("flow text");
+        assert!(
+            !text.contains("next-session.draft.json") || text.contains("rm -f .mathlab/next-session.draft.json"),
+            "research-program may only reference drafts to clean legacy files"
+        );
+        let flow = attractor_dsl::parse_flow_definition(text).expect("parse research program");
+        let commit_commands = flow
+            .nodes
+            .values()
+            .filter(|node| node.label.starts_with("Commit"))
+            .filter_map(|node| serde_json::to_value(&node.config).ok())
+            .filter_map(|config| config["command"].as_str().map(str::to_string))
+            .collect::<Vec<_>>();
+        assert_eq!(commit_commands.len(), 1, "one deterministic commit node");
+        assert!(
+            !commit_commands[0].contains("next-session"),
+            "perpetual commit node must not touch draft files"
+        );
+    }
+
     for flow_name in [
         "math-research/explore-conjecture.yaml",
         "math-research/formalize-result.yaml",

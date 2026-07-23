@@ -936,3 +936,73 @@ fn settings(root: &Path) -> SparkSettings {
         project_roots: Vec::new(),
     }
 }
+
+#[tokio::test]
+async fn workspace_draft_schedule_activation_launches_without_event_payload() {
+    // Regression: schedule/poll activations carry no flow-event payload, so the
+    // cross-project event guard must not reject them; they are scoped by the
+    // action's own configured project path.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().canonicalize().expect("canonical tempdir");
+    let settings = settings(&root);
+    fs::create_dir_all(&settings.config_dir).expect("config");
+    fs::write(
+        settings.config_dir.join("execution-profiles.toml"),
+        "[profiles.math-lab]\nlabel = \"Math Lab\"\nmode = \"native\"\n",
+    )
+    .expect("profiles");
+    write_typed_math_flow(&settings, "math-research/explore-conjecture.yaml");
+    let project_path = root.join("project");
+    fs::create_dir_all(project_path.join(".mathlab")).expect("mathlab");
+    fs::write(
+        project_path.join(".mathlab/next-session.json"),
+        json!({
+            "status": "continue",
+            "flow": "math-research/explore-conjecture.yaml",
+            "inputs": {"context.request.problem": "P"},
+            "rationale": "ignite"
+        })
+        .to_string(),
+    )
+    .expect("draft");
+    let created = WorkspaceTriggerService::new(settings.clone())
+        .create_trigger(TriggerCreateRequest {
+            name: "Ignite once".to_string(),
+            enabled: true,
+            source_type: "schedule".to_string(),
+            action: Map::from_iter([
+                ("mode".to_string(), json!("workspace_draft")),
+                ("project_path".to_string(), json!(project_path)),
+                ("flow_allowlist".to_string(), json!(["math-research/*"])),
+                ("execution_profile_id".to_string(), json!("math-lab")),
+            ]),
+            source: Map::from_iter([
+                ("kind".to_string(), json!("once")),
+                ("run_at".to_string(), json!("2026-06-24T09:00:00Z")),
+            ]),
+        })
+        .expect("create schedule draft trigger");
+
+    let outcomes = WorkspaceTriggerService::new(settings.clone())
+        .process_due_trigger_sources_at(at("2026-06-24T10:00:00Z"))
+        .await
+        .expect("process source");
+
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].trigger_id, created.id);
+    let run_id = outcomes[0]
+        .run_id
+        .as_deref()
+        .unwrap_or_else(|| panic!("run id: {}", outcomes[0].message));
+    assert!(project_path
+        .join(".mathlab/next-session.launched.json")
+        .exists());
+    assert!(!project_path.join(".mathlab/next-session.json").exists());
+    let run = RunStore::for_settings(&settings)
+        .read_run_bundle(run_id)
+        .expect("read run")
+        .expect("run");
+    let record = run.record.expect("record");
+    assert_eq!(record.flow_name, "math-research/explore-conjecture.yaml");
+    assert_eq!(record.execution_profile_id.as_deref(), Some("math-lab"));
+}

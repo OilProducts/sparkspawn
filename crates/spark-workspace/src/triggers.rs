@@ -247,26 +247,6 @@ impl WorkspaceTriggerActivationSink {
         &self,
         mut request: TriggerActivationRequest,
     ) -> spark_triggers::TriggerResult<TriggerActivationSinkOutcome> {
-        let Some(project_path) = request
-            .source_payload
-            .get("project_path")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            return Ok(chain_noop(
-                "Next-session launch skipped: terminal event has no project path.",
-            ));
-        };
-        let event_project = match normalize_project_path(project_path) {
-            Ok(Some(path)) => path,
-            Ok(None) => unreachable!("the event project path was checked above"),
-            Err(error) => {
-                return Ok(chain_noop(format!(
-                    "Next-session launch skipped: terminal event project path is invalid: {error}"
-                )))
-            }
-        };
         let configured_project =
             match request
                 .action
@@ -285,12 +265,37 @@ impl WorkspaceTriggerActivationSink {
                 )))
                 }
             };
-        if configured_project != event_project {
-            return Ok(chain_noop(
-                "Next-session launch skipped: terminal event belongs to another project.",
-            ));
+        // Only flow events carry a source project; the cross-project guard is
+        // meaningless for schedule/poll activations, which are scoped by the
+        // action's own configured project path.
+        if request.source_type == "flow_event" {
+            let Some(project_path) = request
+                .source_payload
+                .get("project_path")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return Ok(chain_noop(
+                    "Next-session launch skipped: terminal event has no project path.",
+                ));
+            };
+            let event_project = match normalize_project_path(project_path) {
+                Ok(Some(path)) => path,
+                Ok(None) => unreachable!("the event project path was checked above"),
+                Err(error) => {
+                    return Ok(chain_noop(format!(
+                        "Next-session launch skipped: terminal event project path is invalid: {error}"
+                    )))
+                }
+            };
+            if configured_project != event_project {
+                return Ok(chain_noop(
+                    "Next-session launch skipped: terminal event belongs to another project.",
+                ));
+            }
         }
-        let project_path = event_project.to_string_lossy().into_owned();
+        let project_path = configured_project.to_string_lossy().into_owned();
         let active = Path::new(&project_path).join(".mathlab/next-session.json");
         let launching = Path::new(&project_path).join(".mathlab/next-session.launching.json");
         let launched = Path::new(&project_path).join(".mathlab/next-session.launched.json");
