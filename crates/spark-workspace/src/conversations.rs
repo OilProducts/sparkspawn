@@ -2020,6 +2020,7 @@ impl WorkspaceConversationService {
         &self,
         request: TriggerActivationRequest,
     ) -> WorkspaceResult<String> {
+        let inject_top_level_inputs = crate::triggers::is_math_chain_trigger(&request);
         let trigger_id = request.trigger_id.clone();
         let flow_name = request.action.flow_name.clone();
         ensure_flow_exists(&self.settings, &flow_name)?;
@@ -2028,23 +2029,43 @@ impl WorkspaceConversationService {
             .project_path
             .clone()
             .unwrap_or_else(|| self.settings.data_dir.to_string_lossy().into_owned());
-        let launch_context = json!({
-            "context.trigger_static": Value::Object(request.action.static_context),
-            "context.trigger_payload": request.source_payload,
-            "context.spark_trigger": {
-                "trigger_id": request.trigger_id,
-                "trigger_name": request.trigger_name,
-                "source_type": request.source_type,
-            },
-        });
+        let mut launch_context = Map::from_iter([
+            (
+                "context.trigger_static".to_string(),
+                Value::Object(request.action.static_context.clone()),
+            ),
+            (
+                "context.trigger_payload".to_string(),
+                request.source_payload,
+            ),
+            (
+                "context.spark_trigger".to_string(),
+                json!({
+                    "trigger_id": request.trigger_id,
+                    "trigger_name": request.trigger_name,
+                    "source_type": request.source_type,
+                }),
+            ),
+        ]);
+        if inject_top_level_inputs {
+            launch_context.extend(request.action.static_context);
+            launch_context.insert(
+                "context.internal.math_chain_claim".to_string(),
+                Value::Bool(true),
+            );
+        }
+        let launch_context = Value::Object(launch_context);
         let artifact = json!({
             "flow_name": flow_name.clone(),
             "summary": format!("Trigger {trigger_id} fired {flow_name}."),
             "project_path": working_directory.clone(),
             "launch_context": launch_context,
         });
-        self.launch_workspace_flow(&working_directory, &flow_name, &artifact)
-            .map_err(WorkspaceError::Internal)
+        let response =
+            self.start_workspace_flow_route_response(&working_directory, &flow_name, &artifact);
+        flow_start_outcome_from_response(&response)
+            .map(|outcome| outcome.run_id)
+            .map_err(|failure| WorkspaceError::Internal(failure.detail))
     }
 
     pub fn retry_workspace_run(

@@ -196,6 +196,9 @@ fn legacy_dot_catalog_entries_are_skipped_instead_of_failing_load() {
     assert_eq!(
         missing,
         vec![
+            "math-research/explore-conjecture.yaml".to_string(),
+            "math-research/formalize-result.yaml".to_string(),
+            "math-research/prove-refute.yaml".to_string(),
             "software-development/audit-codebase.yaml".to_string(),
             "software-development/design-change.yaml".to_string(),
             "software-development/implement-change.yaml".to_string(),
@@ -218,4 +221,20 @@ fn legacy_dot_catalog_entries_are_skipped_instead_of_failing_load() {
             conflict_policy: "queue".to_string(),
         })
     );
+    for flow_name in [
+        "math-research/explore-conjecture.yaml",
+        "math-research/formalize-result.yaml",
+        "math-research/prove-refute.yaml",
+    ] {
+        assert_eq!(
+            read_flow_launch_policy(&config_dir, flow_name)
+                .expect("math policy")
+                .execution_lock,
+            Some(FlowExecutionLockConfig {
+                scope: "project".to_string(),
+                key: "math-research".to_string(),
+                conflict_policy: "queue".to_string(),
+            })
+        );
+    }
 }

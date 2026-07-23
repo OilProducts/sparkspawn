@@ -206,6 +206,9 @@ impl RunEventPublisher {
             return (RunEventObserverHandle(None), None);
         };
         let (sender, receiver) = mpsc::unbounded_channel::<String>();
+        let observer: attractor_api::RunEventObserver = Arc::new(move |run_id: &str| {
+            let _ = sender.send(run_id.to_string());
+        });
         let cancellation = CancellationToken::new();
         let task_cancellation = cancellation.clone();
         let handle = handle.spawn(run_event_publisher_loop(
@@ -213,10 +216,8 @@ impl RunEventPublisher {
             live_hub,
             receiver,
             task_cancellation,
+            observer.clone(),
         ));
-        let observer: attractor_api::RunEventObserver = Arc::new(move |run_id: &str| {
-            let _ = sender.send(run_id.to_string());
-        });
         (
             RunEventObserverHandle(Some(observer)),
             Some(Arc::new(Self {
@@ -242,6 +243,7 @@ async fn run_event_publisher_loop(
     live_hub: Arc<WorkspaceLiveHub>,
     mut receiver: mpsc::UnboundedReceiver<String>,
     cancellation: CancellationToken,
+    run_event_observer: attractor_api::RunEventObserver,
 ) {
     let mut last_published_sequence: HashMap<String, u64> = HashMap::new();
     let mut usage_accumulators: HashMap<String, RunUsageAccumulator> = HashMap::new();
@@ -268,14 +270,16 @@ async fn run_event_publisher_loop(
             let publish_settings = settings.clone();
             let publish_hub = live_hub.clone();
             let publish_run_id = run_id.clone();
+            let publish_observer = run_event_observer.clone();
             let mut usage = usage_accumulators.remove(&run_id);
             let published = tokio::task::spawn_blocking(move || {
-                let sequence = publish_live_run_after_incremental(
+                let sequence = publish_live_run_after_incremental_with_observer(
                     &publish_settings,
                     &publish_hub,
                     &publish_run_id,
                     before_sequence,
                     &mut usage,
+                    Some(publish_observer),
                 );
                 (sequence, usage)
             })
@@ -302,7 +306,11 @@ struct TriggerSourceLoop {
 }
 
 impl TriggerSourceLoop {
-    fn spawn(settings: Arc<SparkSettings>, live_hub: Arc<WorkspaceLiveHub>) -> Option<Arc<Self>> {
+    fn spawn(
+        settings: Arc<SparkSettings>,
+        live_hub: Arc<WorkspaceLiveHub>,
+        run_event_observer: RunEventObserverHandle,
+    ) -> Option<Arc<Self>> {
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             return None;
         };
@@ -312,6 +320,7 @@ impl TriggerSourceLoop {
             settings,
             live_hub,
             task_cancellation,
+            run_event_observer,
         ));
         Some(Arc::new(Self {
             cancellation,
@@ -329,8 +338,11 @@ impl Drop for TriggerSourceLoop {
 
 impl HttpAppState {
     fn with_trigger_source_loop(mut self) -> Self {
-        self.trigger_source_loop =
-            TriggerSourceLoop::spawn(self.settings.clone(), self.live_hub.clone());
+        self.trigger_source_loop = TriggerSourceLoop::spawn(
+            self.settings.clone(),
+            self.live_hub.clone(),
+            self.run_event_observer.clone(),
+        );
         self
     }
 }
@@ -540,12 +552,31 @@ fn publish_live_run_after_incremental(
     before_sequence: Option<u64>,
     usage: &mut Option<RunUsageAccumulator>,
 ) -> Option<u64> {
+    publish_live_run_after_incremental_with_observer(
+        settings,
+        live_hub,
+        run_id,
+        before_sequence,
+        usage,
+        None,
+    )
+}
+
+fn publish_live_run_after_incremental_with_observer(
+    settings: &SparkSettings,
+    live_hub: &WorkspaceLiveHub,
+    run_id: &str,
+    before_sequence: Option<u64>,
+    usage: &mut Option<RunUsageAccumulator>,
+    run_event_observer: Option<attractor_api::RunEventObserver>,
+) -> Option<u64> {
     publish_live_run_after_incremental_with(
         settings,
         live_hub,
         run_id,
         before_sequence,
         usage,
+        run_event_observer,
         || full_run_usage_accumulator(settings, run_id).ok(),
     )
 }
@@ -556,6 +587,7 @@ fn publish_live_run_after_incremental_with(
     run_id: &str,
     before_sequence: Option<u64>,
     usage: &mut Option<RunUsageAccumulator>,
+    run_event_observer: Option<attractor_api::RunEventObserver>,
     mut initialize_full: impl FnMut() -> Option<RunUsageAccumulator>,
 ) -> Option<u64> {
     let publication = run_live_publication(settings, run_id, before_sequence)
@@ -597,7 +629,7 @@ fn publish_live_run_after_incremental_with(
             live_hub.publish(spark_workspace::workflow_log_envelope(entry));
         }
     }
-    publish_terminal_run_trigger_events(settings, live_hub, run_id);
+    publish_terminal_run_trigger_events(settings, live_hub, run_id, run_event_observer);
     if spark_workspace::live::evict_run_live_cache_if_terminal(settings, run_id) {
         *usage = None;
     }
@@ -609,8 +641,9 @@ mod incremental_usage_tests {
     use super::*;
     use attractor_core::{RawRuntimeEvent, RunRecord};
     use attractor_runtime::{CreateRunRequest, RunStore};
-    use serde_json::json;
+    use serde_json::{json, Map};
     use std::fs;
+    use std::sync::Mutex;
 
     fn test_settings(root: &std::path::Path) -> SparkSettings {
         let data = root.join("data");
@@ -762,6 +795,7 @@ mod incremental_usage_tests {
             "bounded-usage",
             Some(1),
             &mut usage,
+            None,
             &mut initialize,
         );
         publish_live_run_after_incremental_with(
@@ -770,6 +804,7 @@ mod incremental_usage_tests {
             "bounded-usage",
             cursor,
             &mut usage,
+            None,
             &mut initialize,
         );
         drop(initialize);
@@ -783,19 +818,131 @@ mod incremental_usage_tests {
             7
         );
     }
+
+    #[test]
+    fn http_terminal_publisher_launches_observed_successor_once_for_duplicate_events() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let settings = test_settings(temp.path());
+        let project = temp.path().join("project");
+        let mathlab = project.join(".mathlab");
+        fs::create_dir_all(&mathlab).expect("mathlab");
+        let flow_name = "math-research/prove-refute.yaml";
+        let flow_path = settings.flows_dir.join(flow_name);
+        fs::create_dir_all(flow_path.parent().expect("flow parent")).expect("flow parent");
+        fs::write(
+            flow_path,
+            "schema_version: '1'\nid: math-chain\ninputs:\n  - key: context.request.problem\n    type: string\n    required: true\nnodes:\n  start:\n    kind: start\n  done:\n    kind: exit\nedges:\n  - from: start\n    to: done\n",
+        )
+        .expect("flow");
+        fs::write(
+            mathlab.join("next-session.json"),
+            serde_json::to_vec(&json!({
+                "flow_name": flow_name,
+                "inputs": {"context.request.problem": "P"}
+            }))
+            .expect("draft json"),
+        )
+        .expect("draft");
+        spark_storage::TriggerRepositories::from_settings(&settings)
+            .definitions
+            .put(&spark_storage::TriggerDefinition {
+                id: "math-http-chain".into(),
+                name: "Math HTTP chain".into(),
+                enabled: true,
+                protected: false,
+                source_type: "flow_event".into(),
+                action: spark_storage::TriggerAction {
+                    flow_name: flow_name.into(),
+                    project_path: Some(project.to_string_lossy().into_owned()),
+                    static_context: Map::new(),
+                },
+                source: Map::from_iter([
+                    ("flow_name".into(), json!(flow_name)),
+                    ("statuses".into(), json!(["completed"])),
+                ]),
+                created_at: "2026-07-23T00:00:00Z".into(),
+                updated_at: "2026-07-23T00:00:00Z".into(),
+            })
+            .expect("trigger");
+        let store = RunStore::for_settings(&settings);
+        let mut terminal = RunRecord::new("terminal-source", project.to_string_lossy());
+        terminal.flow_name = flow_name.into();
+        terminal.status = "completed".into();
+        store
+            .create_run(CreateRunRequest {
+                record: terminal,
+                ..Default::default()
+            })
+            .expect("terminal run");
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let captured = observed.clone();
+        let observer: attractor_api::RunEventObserver = Arc::new(move |run_id| {
+            captured.lock().expect("observed").push(run_id.to_string());
+        });
+        let hub = WorkspaceLiveHub::new();
+        let mut usage = None;
+
+        publish_live_run_after_incremental_with_observer(
+            &settings,
+            &hub,
+            "terminal-source",
+            None,
+            &mut usage,
+            Some(observer.clone()),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline && observed.lock().expect("observed").is_empty()
+        {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let successor_ids = observed
+            .lock()
+            .expect("observed")
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(successor_ids.len(), 1, "observed {successor_ids:?}");
+        assert!(store
+            .find_run_root(successor_ids.first().expect("successor"))
+            .expect("find successor")
+            .is_some());
+
+        publish_live_run_after_incremental_with_observer(
+            &settings,
+            &hub,
+            "terminal-source",
+            None,
+            &mut usage,
+            Some(observer),
+        );
+        assert_eq!(
+            observed
+                .lock()
+                .expect("observed")
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            successor_ids,
+            "duplicate terminal publication must not launch another successor"
+        );
+    }
 }
 
 async fn run_trigger_source_loop(
     settings: Arc<SparkSettings>,
     live_hub: Arc<WorkspaceLiveHub>,
     cancellation: CancellationToken,
+    run_event_observer: RunEventObserverHandle,
 ) {
     let mut interval = time::interval(Duration::from_secs(1));
     loop {
         tokio::select! {
             _ = cancellation.cancelled() => break,
             _ = interval.tick() => {
-                let service = WorkspaceTriggerService::new((*settings).clone());
+                let mut service = WorkspaceTriggerService::new((*settings).clone());
+                if let Some(observer) = &run_event_observer.0 {
+                    service = service.with_run_event_observer(observer.clone());
+                }
                 if let Ok(outcomes) = service.process_due_trigger_sources().await {
                     publish_trigger_activation_outcomes(&settings, &live_hub, outcomes);
                 }
@@ -808,10 +955,13 @@ fn publish_terminal_run_trigger_events(
     settings: &SparkSettings,
     live_hub: &WorkspaceLiveHub,
     run_id: &str,
+    run_event_observer: Option<attractor_api::RunEventObserver>,
 ) {
-    if let Ok(outcomes) =
-        WorkspaceTriggerService::new(settings.clone()).emit_terminal_flow_event_for_run(run_id)
-    {
+    let mut service = WorkspaceTriggerService::new(settings.clone());
+    if let Some(observer) = run_event_observer {
+        service = service.with_run_event_observer(observer);
+    }
+    if let Ok(outcomes) = service.emit_terminal_flow_event_for_run(run_id) {
         publish_trigger_activation_outcomes(settings, live_hub, outcomes);
     }
 }
