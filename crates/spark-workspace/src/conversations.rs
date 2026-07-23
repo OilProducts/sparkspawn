@@ -2805,7 +2805,7 @@ impl WorkspaceConversationService {
             })
     }
 
-    fn launch_workspace_flow(
+    pub(crate) fn launch_workspace_flow(
         &self,
         project_path: &str,
         flow_name: &str,

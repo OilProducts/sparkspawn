@@ -14,6 +14,8 @@ const SOURCE_SCHEDULE: &str = "schedule";
 const SOURCE_POLL: &str = "poll";
 const SOURCE_WEBHOOK: &str = "webhook";
 const SOURCE_FLOW_EVENT: &str = "flow_event";
+const ACTION_MODE_STATIC: &str = "static";
+const ACTION_MODE_WORKSPACE_DRAFT: &str = "workspace_draft";
 const WEEKDAY_ORDER: &[&str] = &["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const TERMINAL_PIPELINE_STATUSES: &[&str] = &[
     "completed",
@@ -25,9 +27,26 @@ const TERMINAL_PIPELINE_STATUSES: &[&str] = &[
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TriggerAction {
+    #[serde(
+        default = "default_trigger_action_mode",
+        skip_serializing_if = "is_static_action_mode"
+    )]
+    pub mode: String,
     pub flow_name: String,
     pub project_path: Option<String>,
     pub static_context: Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flow_allowlist: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_profile_id: Option<String>,
+}
+
+fn default_trigger_action_mode() -> String {
+    ACTION_MODE_STATIC.to_string()
+}
+
+fn is_static_action_mode(value: &str) -> bool {
+    value == ACTION_MODE_STATIC
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -383,13 +402,28 @@ fn normalize_trigger_action_payload_at(
     payload: &Map<String, Value>,
     path: &Path,
 ) -> Result<TriggerAction> {
+    let mode = payload
+        .get("mode")
+        .and_then(|value| value.as_str())
+        .unwrap_or(ACTION_MODE_STATIC)
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(
+        mode.as_str(),
+        ACTION_MODE_STATIC | ACTION_MODE_WORKSPACE_DRAFT
+    ) {
+        return Err(invalid_trigger(
+            path,
+            "Trigger action mode must be static or workspace_draft.",
+        ));
+    }
     let flow_name = payload
         .get("flow_name")
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .trim()
         .to_string();
-    if flow_name.is_empty() {
+    if mode == ACTION_MODE_STATIC && flow_name.is_empty() {
         return Err(invalid_trigger(
             path,
             "Trigger action requires a flow_name.",
@@ -430,10 +464,40 @@ fn normalize_trigger_action_payload_at(
             ))
         }
     };
+    if mode == ACTION_MODE_WORKSPACE_DRAFT && project_path.is_none() {
+        return Err(invalid_trigger(
+            path,
+            "Workspace-draft trigger actions require a project_path.",
+        ));
+    }
+    let flow_allowlist = payload
+        .get("flow_allowlist")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| json_value_to_python_string(&value).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if mode == ACTION_MODE_WORKSPACE_DRAFT && flow_allowlist.is_empty() {
+        return Err(invalid_trigger(
+            path,
+            "Workspace-draft trigger actions require a flow_allowlist.",
+        ));
+    }
+    let execution_profile_id = payload
+        .get("execution_profile_id")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     Ok(TriggerAction {
+        mode,
         flow_name,
         project_path,
         static_context,
+        flow_allowlist,
+        execution_profile_id,
     })
 }
 
@@ -743,8 +807,16 @@ fn trigger_definition_toml(definition: &TriggerDefinition) -> String {
         format!("updated_at = {}", toml_string(&definition.updated_at)),
         String::new(),
         "[action]".to_string(),
-        format!("flow_name = {}", toml_string(&definition.action.flow_name)),
     ];
+    if definition.action.mode != ACTION_MODE_STATIC {
+        lines.push(format!("mode = {}", toml_string(&definition.action.mode)));
+    }
+    if !definition.action.flow_name.is_empty() {
+        lines.push(format!(
+            "flow_name = {}",
+            toml_string(&definition.action.flow_name)
+        ));
+    }
     if let Some(project_path) = definition.action.project_path.as_deref() {
         lines.push(format!("project_path = {}", toml_string(project_path)));
     }
@@ -754,6 +826,24 @@ fn trigger_definition_toml(definition: &TriggerDefinition) -> String {
             toml_string(&json_string_python_style(&Value::Object(
                 definition.action.static_context.clone()
             )))
+        ));
+    }
+    if !definition.action.flow_allowlist.is_empty() {
+        lines.push(format!(
+            "flow_allowlist = [{}]",
+            definition
+                .action
+                .flow_allowlist
+                .iter()
+                .map(|value| toml_string(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(execution_profile_id) = definition.action.execution_profile_id.as_deref() {
+        lines.push(format!(
+            "execution_profile_id = {}",
+            toml_string(execution_profile_id)
         ));
     }
     lines.push(String::new());

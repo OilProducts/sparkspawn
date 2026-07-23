@@ -50,6 +50,11 @@ pub fn normalize_trigger_update(
         }
         if let Some(action_update) = request.action.as_ref() {
             let next_action = normalize_action(merge_action(&existing.action, action_update)?)?;
+            if next_action.mode != existing.action.mode {
+                return Err(validation(
+                    "Protected triggers do not allow action mode changes.",
+                ));
+            }
             if next_action.project_path != existing.action.project_path {
                 return Err(validation(
                     "Protected triggers do not allow project target changes.",
@@ -58,6 +63,16 @@ pub fn normalize_trigger_update(
             if next_action.static_context != existing.action.static_context {
                 return Err(validation(
                     "Protected triggers do not allow static context changes.",
+                ));
+            }
+            if next_action.flow_allowlist != existing.action.flow_allowlist {
+                return Err(validation(
+                    "Protected triggers do not allow flow allowlist changes.",
+                ));
+            }
+            if next_action.execution_profile_id != existing.action.execution_profile_id {
+                return Err(validation(
+                    "Protected triggers do not allow execution profile changes.",
                 ));
             }
         }
@@ -189,6 +204,7 @@ fn merge_action(
 
 fn action_to_map(action: &TriggerAction) -> Map<String, Value> {
     let mut payload = Map::new();
+    payload.insert("mode".to_string(), Value::String(action.mode.clone()));
     payload.insert(
         "flow_name".to_string(),
         Value::String(action.flow_name.clone()),
@@ -204,6 +220,25 @@ fn action_to_map(action: &TriggerAction) -> Map<String, Value> {
     payload.insert(
         "static_context".to_string(),
         Value::Object(action.static_context.clone()),
+    );
+    payload.insert(
+        "flow_allowlist".to_string(),
+        Value::Array(
+            action
+                .flow_allowlist
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    payload.insert(
+        "execution_profile_id".to_string(),
+        action
+            .execution_profile_id
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
     );
     payload
 }

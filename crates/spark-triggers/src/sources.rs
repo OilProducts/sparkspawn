@@ -32,6 +32,7 @@ impl TriggerActivationSink for AcceptAllTriggerActivationSink {
         Ok(TriggerActivationSinkOutcome {
             run_id: None,
             message: Some("Trigger fired successfully.".to_string()),
+            no_op: false,
         })
     }
 }
@@ -307,13 +308,22 @@ impl TriggerSourceRuntime {
                     .message
                     .clone()
                     .unwrap_or_else(|| "Trigger fired successfully.".to_string());
-                state::record_activation_success(
-                    definition,
-                    &mut trigger_state,
-                    timestamp,
-                    message.clone(),
-                    sink_outcome.run_id.clone(),
-                );
+                if sink_outcome.no_op {
+                    state::record_activation_no_op(
+                        definition,
+                        &mut trigger_state,
+                        timestamp,
+                        message.clone(),
+                    );
+                } else {
+                    state::record_activation_success(
+                        definition,
+                        &mut trigger_state,
+                        timestamp,
+                        message.clone(),
+                        sink_outcome.run_id.clone(),
+                    );
+                }
                 self.repositories
                     .runtime_state
                     .save(&definition.id, &trigger_state)?;

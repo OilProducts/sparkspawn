@@ -402,6 +402,7 @@ impl TriggerActivationSink for CountingSink {
         Ok(TriggerActivationSinkOutcome {
             run_id: Some(format!("run-{index}")),
             message: Some("Trigger fired successfully.".to_string()),
+            no_op: false,
         })
     }
 }

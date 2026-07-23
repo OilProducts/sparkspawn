@@ -155,6 +155,30 @@ pub fn record_activation_failure(
     state.next_run_at = compute_next_run_at_at(definition, state, timestamp);
 }
 
+pub fn record_activation_no_op(
+    definition: &TriggerDefinition,
+    state: &mut TriggerState,
+    timestamp: OffsetDateTime,
+    message: impl Into<String>,
+) {
+    let next_run_base = timestamp;
+    let timestamp = datetime_to_iso(timestamp);
+    let message = message.into();
+    state.last_error = Some(message.clone());
+    state.last_fired_at = Some(timestamp.clone());
+    state.last_result = Some("success".to_string());
+    push_history(
+        state,
+        TriggerStateHistoryEntry {
+            timestamp,
+            status: "success".to_string(),
+            message,
+            run_id: None,
+        },
+    );
+    state.next_run_at = compute_next_run_at_at(definition, state, next_run_base);
+}
+
 fn compute_schedule_next_run_at(
     definition: &TriggerDefinition,
     state: &TriggerState,

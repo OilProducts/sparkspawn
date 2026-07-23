@@ -124,6 +124,98 @@ async fn workspace_source_activation_accepts_existing_flow_and_preserves_action_
     );
 }
 
+#[tokio::test]
+async fn workspace_draft_flow_event_launches_draft_once_with_profile() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().canonicalize().expect("canonical tempdir");
+    let settings = settings(&root);
+    fs::create_dir_all(&settings.config_dir).expect("config");
+    fs::write(
+        settings.config_dir.join("execution-profiles.toml"),
+        "[profiles.math-lab]\nlabel = \"Math Lab\"\nmode = \"native\"\n",
+    )
+    .expect("profiles");
+    write_flow(&settings, "math-research/explore-conjecture.yaml");
+    let project_path = root.join("project");
+    fs::create_dir_all(project_path.join(".mathlab")).expect("mathlab");
+    fs::write(
+        project_path.join(".mathlab/next-session.json"),
+        json!({
+            "status": "continue",
+            "flow": "math-research/explore-conjecture.yaml",
+            "inputs": {"context.request.problem": "P"},
+            "rationale": "next"
+        })
+        .to_string(),
+    )
+    .expect("draft");
+    let created = WorkspaceTriggerService::new(settings.clone())
+        .create_trigger(TriggerCreateRequest {
+            name: "Chain".to_string(),
+            enabled: true,
+            source_type: "flow_event".to_string(),
+            action: Map::from_iter([
+                ("mode".to_string(), json!("workspace_draft")),
+                ("project_path".to_string(), json!(project_path)),
+                ("flow_allowlist".to_string(), json!(["math-research/*"])),
+                ("execution_profile_id".to_string(), json!("math-lab")),
+            ]),
+            source: Map::from_iter([
+                (
+                    "flow_name".to_string(),
+                    json!("math-research/explore-conjecture.yaml"),
+                ),
+                ("statuses".to_string(), json!(["completed"])),
+            ]),
+        })
+        .expect("create draft trigger");
+
+    let service = WorkspaceTriggerService::new(settings.clone());
+    let first = service
+        .emit_flow_event(Map::from_iter([
+            (
+                "flow_name".to_string(),
+                json!("math-research/explore-conjecture.yaml"),
+            ),
+            ("status".to_string(), json!("completed")),
+        ]))
+        .expect("first event");
+    let second = service
+        .emit_flow_event(Map::from_iter([
+            (
+                "flow_name".to_string(),
+                json!("math-research/explore-conjecture.yaml"),
+            ),
+            ("status".to_string(), json!("completed")),
+        ]))
+        .expect("second event");
+
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].status, "success");
+    let run_id = first[0].run_id.as_deref().expect("run id");
+    assert!(project_path
+        .join(".mathlab/next-session.launched.json")
+        .exists());
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].status, "success");
+    assert!(second[0].run_id.is_none());
+    let run = RunStore::for_settings(&settings)
+        .read_run_bundle(run_id)
+        .expect("read run")
+        .expect("run");
+    let record = run.record.expect("record");
+    assert_eq!(record.flow_name, "math-research/explore-conjecture.yaml");
+    assert_eq!(record.execution_profile_id.as_deref(), Some("math-lab"));
+    let context = run.checkpoint.expect("checkpoint").context;
+    assert_eq!(context["context.request.problem"], json!("P"));
+    let state = spark_storage::load_trigger_state(&settings.data_dir, &created.id)
+        .expect("load trigger state");
+    assert_eq!(
+        state.last_error.as_deref(),
+        Some("Workspace draft is missing.")
+    );
+}
+
 #[test]
 fn workspace_webhook_dispatch_records_success_and_duplicate_request_runs() {
     let temp = tempfile::tempdir().expect("tempdir");

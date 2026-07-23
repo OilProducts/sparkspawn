@@ -311,11 +311,14 @@ fn definition_with_source(
         protected: false,
         source_type: source_type.to_string(),
         action: TriggerAction {
+            mode: "static".to_string(),
             flow_name: "ops/run.dot".to_string(),
             // A prefix that exists on no platform: /tmp is a symlink on macOS and
             // would be rewritten by canonicalization, breaking the round-trip.
             project_path: Some("/spark-contract-fixture/project".to_string()),
             static_context: Map::from_iter([("origin".to_string(), json!("compat"))]),
+            flow_allowlist: Vec::new(),
+            execution_profile_id: None,
         },
         source,
         created_at: "2026-06-22T16:16:08Z".to_string(),

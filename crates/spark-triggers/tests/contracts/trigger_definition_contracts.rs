@@ -577,9 +577,12 @@ fn protected_definition(id: &str) -> TriggerDefinition {
         protected: true,
         source_type: "webhook".to_string(),
         action: TriggerAction {
+            mode: "static".to_string(),
             flow_name: "ops/run.dot".to_string(),
             project_path: Some("/spark-contract-fixture/project".to_string()),
             static_context: Map::from_iter([("origin".to_string(), json!("test"))]),
+            flow_allowlist: Vec::new(),
+            execution_profile_id: None,
         },
         source: Map::from_iter([
             ("webhook_key".to_string(), json!("protected-key")),

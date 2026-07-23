@@ -71,6 +71,7 @@ pub struct TriggerActivationRequest {
 pub struct TriggerActivationSinkOutcome {
     pub run_id: Option<String>,
     pub message: Option<String>,
+    pub no_op: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
