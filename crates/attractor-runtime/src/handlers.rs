@@ -404,11 +404,12 @@ pub struct RuntimeHandlerRunner {
     codergen_backend_factory: Option<CodergenBackendFactory>,
     codergen_intervention_broker: Option<spark_agent_adapter::CodergenSessionInterventionBroker>,
     event_append_lock: Arc<Mutex<()>>,
-    usage_record_writes: Arc<Mutex<BTreeMap<String, Instant>>>,
     child_run_launcher: Option<ChildRunLauncher>,
     child_status_resolver: Option<ChildStatusResolver>,
     child_intervention_requester: Option<ChildInterventionRequester>,
     run_event_observer: Option<crate::store::RunEventObserver>,
+    external_event_sink:
+        Option<Arc<dyn Fn(attractor_core::RawRuntimeEvent) -> Result<()> + Send + Sync>>,
     human_gate_blocking: bool,
 }
 
@@ -431,11 +432,11 @@ impl RuntimeHandlerRunner {
             codergen_backend_factory: None,
             codergen_intervention_broker: None,
             event_append_lock: Arc::new(Mutex::new(())),
-            usage_record_writes: Arc::new(Mutex::new(BTreeMap::new())),
             child_run_launcher: None,
             child_status_resolver: None,
             child_intervention_requester: None,
             run_event_observer: None,
+            external_event_sink: None,
             human_gate_blocking: false,
         }
     }
@@ -452,6 +453,40 @@ impl RuntimeHandlerRunner {
     pub fn with_run_event_observer(mut self, observer: crate::store::RunEventObserver) -> Self {
         self.run_event_observer = Some(observer);
         self
+    }
+
+    pub fn with_external_event_sink(
+        mut self,
+        sink: impl Fn(attractor_core::RawRuntimeEvent) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.external_event_sink = Some(Arc::new(sink));
+        self
+    }
+
+    pub fn set_external_event_sink(
+        &mut self,
+        sink: impl Fn(attractor_core::RawRuntimeEvent) -> Result<()> + Send + Sync + 'static,
+    ) {
+        self.external_event_sink = Some(Arc::new(sink));
+    }
+
+    pub fn append_and_notify(
+        &self,
+        paths: &RunRootPaths,
+        event: attractor_core::RawRuntimeEvent,
+    ) -> Result<attractor_core::RawRuntimeEvent> {
+        let _guard = self.event_append_lock.lock().map_err(|_| {
+            crate::error::RuntimeStorageError::io(
+                "lock runtime event append",
+                paths.events_jsonl(),
+                std::io::Error::other("runtime event append lock poisoned"),
+            )
+        })?;
+        let event = append_event(paths, event)?;
+        if let Some(observer) = &self.run_event_observer {
+            observer(&paths.run_id);
+        }
+        Ok(event)
     }
 
     pub(crate) fn run_event_observer(&self) -> Option<crate::store::RunEventObserver> {
@@ -673,21 +708,10 @@ impl RuntimeHandlerRunner {
         runtime: &HandlerRuntime,
         event: attractor_core::RawRuntimeEvent,
     ) -> Result<()> {
-        if let Some(paths) = &runtime.run_paths {
-            let _guard = self.event_append_lock.lock().map_err(|_| {
-                crate::error::RuntimeStorageError::io(
-                    "lock runtime event append",
-                    paths.events_jsonl(),
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "runtime event append lock poisoned",
-                    ),
-                )
-            })?;
-            append_event(paths, event)?;
-            if let Some(observer) = &self.run_event_observer {
-                observer(&paths.run_id);
-            }
+        if let Some(sink) = &self.external_event_sink {
+            sink(event)?;
+        } else if let Some(paths) = &runtime.run_paths {
+            self.append_and_notify(paths, event)?;
         }
         Ok(())
     }
@@ -697,7 +721,9 @@ impl RuntimeHandlerRunner {
         runtime: &HandlerRuntime,
         event: attractor_core::RawRuntimeEvent,
     ) -> Result<()> {
-        if let Some(paths) = &runtime.run_paths {
+        if let Some(sink) = &self.external_event_sink {
+            sink(event)?;
+        } else if let Some(paths) = &runtime.run_paths {
             let _guard = self.event_append_lock.lock().map_err(|_| {
                 crate::error::RuntimeStorageError::io(
                     "lock runtime event append",
@@ -763,75 +789,26 @@ impl RuntimeHandlerRunner {
             .logs_root
             .as_ref()
             .map(|logs_root| logs_root.join(&runtime.node_id).join(AGENT_TRACE_FILE_NAME));
-        let live_sink = runtime.run_paths.as_ref().map(|paths| {
-            let paths = paths.clone();
+        let has_event_destination =
+            self.external_event_sink.is_some() || runtime.run_paths.is_some();
+        let live_sink = has_event_destination.then(|| {
             let run_id = runtime.run_id.clone();
             let node_id = runtime.node_id.clone();
-            let append_lock = Arc::clone(&self.event_append_lock);
-            let run_event_observer = self.run_event_observer.clone();
+            let runner = self.clone();
             let sink_error = Arc::clone(&live_sink_error);
-            let usage_record_writes = Arc::clone(&self.usage_record_writes);
             let trace_path = trace_path.clone();
+            let sink_runtime = runtime.clone();
             Arc::new(move |event: spark_agent_adapter::CodergenEvent| {
                 write_agent_trace_event(trace_path.as_deref(), &event);
-                let has_usage = event.payload.get("token_usage").is_some();
                 let raw_event = crate::events::codergen_adapter_event(
                     &run_id,
                     &node_id,
                     &event.event_type,
                     serde_json::to_value(&event.payload).unwrap_or_else(|_| json!({})),
                 );
-                let append_result = match append_lock.lock() {
-                    Ok(_guard) => crate::events::append_event(&paths, raw_event).map(|_| ()),
-                    Err(_) => Err(crate::error::RuntimeStorageError::io(
-                        "lock runtime event append",
-                        paths.events_jsonl(),
-                        std::io::Error::other("runtime event append lock poisoned"),
-                    )),
-                };
+                let append_result = runner.emit(&sink_runtime, raw_event);
                 match append_result {
-                    Ok(()) => {
-                        if has_usage {
-                            let mut writes = usage_record_writes
-                                .lock()
-                                .unwrap_or_else(|poison| poison.into_inner());
-                            if writes
-                                .get(&run_id)
-                                .map(|instant| instant.elapsed() >= Duration::from_secs(5))
-                                .unwrap_or(true)
-                            {
-                                let store = crate::store::RunStore::for_runs_dir(&paths.runs_dir);
-                                if let Ok(entries) = store.read_journal(&paths) {
-                                    let model = store
-                                        .read_run_record(&paths)
-                                        .ok()
-                                        .flatten()
-                                        .map(|record| record.model)
-                                        .unwrap_or_default();
-                                    if let Some(breakdown) =
-                                        crate::usage::project_run_usage(&entries, &model)
-                                    {
-                                        let cost = crate::usage::estimate_model_cost(&breakdown);
-                                        let value = breakdown.to_value();
-                                        if store
-                                            .update_run_record(&run_id, |record| {
-                                                record.token_usage =
-                                                    Some(breakdown.totals.total_tokens);
-                                                record.estimated_model_cost = cost;
-                                                record.token_usage_breakdown = Some(value);
-                                            })
-                                            .is_ok()
-                                        {
-                                            writes.insert(run_id.clone(), Instant::now());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(observer) = &run_event_observer {
-                            observer(&run_id);
-                        }
-                    }
+                    Ok(()) => {}
                     Err(error) => {
                         let mut slot = sink_error
                             .lock()
@@ -854,7 +831,7 @@ impl RuntimeHandlerRunner {
         {
             return Err(RuntimeNodeError::runtime(error));
         }
-        if runtime.run_paths.is_some() && !journaling_live {
+        if has_event_destination && !journaling_live {
             for event in codergen_events_for_journal(&runtime.run_id, &runtime.node_id, &execution)
             {
                 self.emit(&runtime, event)
@@ -872,7 +849,7 @@ impl RuntimeHandlerRunner {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|kind| matches!(kind, "content_delta" | "content_completed"))
         });
-        if runtime.run_paths.is_some()
+        if has_event_destination
             && !streamed_assistant_content
             && !execution.response_text.trim().is_empty()
         {

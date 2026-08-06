@@ -14,26 +14,9 @@ use spark_server::{
     build_serve_configuration_from_args, resolve_server_settings_with_executable_path,
 };
 
-const STARTER_FLOW_NAMES: &[&str] = &[
-    "examples/human-review-loop.yaml",
-    "examples/implement-review-loop.yaml",
-    "examples/parallel-review.yaml",
-    "examples/simple-linear.yaml",
-    "examples/supervision/implementation-worker.yaml",
-    "examples/supervision/supervised-implementation.yaml",
-    "software-development/audit-codebase.yaml",
-    "software-development/design-change.yaml",
-    "software-development/implement-change.yaml",
-    "software-development/integrate-ready-branches.yaml",
-    "software-development/investigate-bug.yaml",
-    "software-development/merge-change.yaml",
-    "software-development/review-change.yaml",
-    "software-development/run-retrospective.yaml",
-    "software-development/spec-implementation/implement-milestone.yaml",
-    "software-development/spec-implementation/implement-spec.yaml",
-    "software-development/workers/implement-task.yaml",
-    "software-development/workers/resolve-merge-conflicts.yaml",
-];
+fn starter_flow_names() -> Vec<String> {
+    spark_assets::flows::starter_flow_names().expect("packaged starter flow names")
+}
 
 const TOP_LEVEL_HELP: &str = concat!(
     "usage: spark-server [-h] {serve,init,service} ...\n",
@@ -120,12 +103,13 @@ fn cargo_installed_server_process_init_uses_default_home_without_source_checkout
         .expect("run installed spark-server");
 
     let data_dir = home.join(".spark");
+    let flow_count = starter_flow_names().len();
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(String::from_utf8(output.stderr).expect("stderr utf8"), "");
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout utf8"),
         format!(
-            "Initialized Spark at {}\nSeeded flows: {}\ncreated=18 updated=0 skipped=0\n",
+            "Initialized Spark at {}\nSeeded flows: {}\ncreated={flow_count} updated=0 skipped=0\n",
             data_dir.display(),
             data_dir.join("flows").display()
         )
@@ -174,6 +158,7 @@ fn init_creates_runtime_layout_flows_and_catalog() {
     let root = temp.path().canonicalize().expect("canonical tempdir");
     let data_dir = root.join("spark-home");
     let flows_dir = root.join("flows");
+    let flow_names = starter_flow_names();
 
     let output = run_with_args_and_env(
         [
@@ -192,9 +177,10 @@ fn init_creates_runtime_layout_flows_and_catalog() {
     assert_eq!(
         output.stdout,
         format!(
-            "Initialized Spark at {}\nSeeded flows: {}\ncreated=18 updated=0 skipped=0\n",
+            "Initialized Spark at {}\nSeeded flows: {}\ncreated={} updated=0 skipped=0\n",
             data_dir.display(),
-            flows_dir.display()
+            flows_dir.display(),
+            flow_names.len()
         )
     );
     for relative in [
@@ -208,13 +194,7 @@ fn init_creates_runtime_layout_flows_and_catalog() {
     ] {
         assert!(data_dir.join(relative).is_dir(), "missing {relative}");
     }
-    assert_eq!(
-        list_flow_files(&flows_dir),
-        STARTER_FLOW_NAMES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect::<Vec<_>>()
-    );
+    assert_eq!(list_flow_files(&flows_dir), flow_names);
     let catalog = fs::read_to_string(data_dir.join("config/flow-catalog.toml")).expect("catalog");
     assert_eq!(
         catalog
@@ -235,6 +215,7 @@ fn init_respects_skip_and_force_counts() {
     let flows_dir = temp.path().join("flows");
     let data_dir_text = data_dir.to_str().expect("utf-8 data dir");
     let flows_dir_text = flows_dir.to_str().expect("utf-8 flows dir");
+    let flow_count = starter_flow_names().len();
 
     let first = run_with_args_and_env(
         [
@@ -263,7 +244,9 @@ fn init_respects_skip_and_force_counts() {
         &env,
     );
     assert_eq!(second.exit_code, 0);
-    assert!(second.stdout.ends_with("created=0 updated=0 skipped=18\n"));
+    assert!(second
+        .stdout
+        .ends_with(&format!("created=0 updated=0 skipped={flow_count}\n")));
     assert_eq!(
         fs::read_to_string(&edited_flow).expect("edited flow"),
         "edited: true\n"
@@ -282,7 +265,9 @@ fn init_respects_skip_and_force_counts() {
         &env,
     );
     assert_eq!(forced.exit_code, 0);
-    assert!(forced.stdout.ends_with("created=0 updated=18 skipped=0\n"));
+    assert!(forced
+        .stdout
+        .ends_with(&format!("created=0 updated={flow_count} skipped=0\n")));
     assert_ne!(
         fs::read_to_string(&edited_flow).expect("forced flow"),
         "edited: true\n"
@@ -516,7 +501,22 @@ fn worker_run_node_process_accepts_json_line_request() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    let frame: Value = serde_json::from_slice(&output.stdout).expect("worker frame");
+    let frames: Vec<Value> = String::from_utf8(output.stdout)
+        .expect("utf8 worker frames")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("worker frame"))
+        .collect();
+    assert!(frames[..frames.len() - 1]
+        .iter()
+        .all(|frame| frame["type"] == json!("event")));
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| frame["type"] == json!("result"))
+            .count(),
+        1
+    );
+    let frame = frames.last().expect("terminal result");
     assert_eq!(frame["type"], json!("result"));
     assert_eq!(frame["outcome"]["status"], json!("success"));
 }
@@ -577,7 +577,22 @@ fn worker_run_node_process_routes_llm_nodes_to_rust_adapter_boundary() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    let frame: Value = serde_json::from_slice(&output.stdout).expect("worker frame");
+    let frames: Vec<Value> = String::from_utf8(output.stdout)
+        .expect("utf8 worker frames")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("worker frame"))
+        .collect();
+    assert!(frames[..frames.len() - 1]
+        .iter()
+        .all(|frame| frame["type"] == json!("event")));
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| frame["type"] == json!("result"))
+            .count(),
+        1
+    );
+    let frame = frames.last().expect("terminal result");
     assert_eq!(frame["type"], json!("result"));
     assert_eq!(frame["outcome"]["status"], json!("fail"));
     let reason = frame["outcome"]["failure_reason"]

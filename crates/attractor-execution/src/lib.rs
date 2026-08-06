@@ -13,9 +13,8 @@ pub mod settings_view;
 pub mod worker;
 
 pub use container::{
-    profile_mounts_for_test,
-    CommandResult, CommandSpec, ContainerCommandRunner, ContainerizedNodeExecutor,
-    SystemCommandRunner,
+    profile_mounts_for_test, CommandResult, CommandSpec, ContainerCommandRunner,
+    ContainerizedNodeExecutor, SystemCommandRunner,
 };
 pub use context::{
     seed_execution_profile_context, EXECUTION_CONTAINER_IMAGE_CONTEXT_KEY,
@@ -42,7 +41,7 @@ pub use protocol::{
     outcome_from_payload, outcome_to_payload, ChildInterventionRequestFrame,
     ChildInterventionResultFrame, ChildRunRequestFrame, ChildRunResultFrame,
     ChildStatusRequestFrame, ChildStatusResultFrame, EventFrame, HumanGateAnswerFrame,
-    HumanGateRequestFrame, ResultFrame, WorkerFrame, WorkerNodeRequest,
+    HumanGateRequestFrame, ResultFrame, RunRootMetadata, WorkerFrame, WorkerNodeRequest,
 };
 pub use settings_view::public_execution_placement_settings;
 pub use worker::{run_worker_node_from_reader_writer, run_worker_node_stdio};

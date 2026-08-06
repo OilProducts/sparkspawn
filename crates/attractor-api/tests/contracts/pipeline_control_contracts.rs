@@ -182,9 +182,10 @@ edges:
     source_checkpoint
         .context
         .insert("internal.run_id".to_string(), json!("run-identity-src"));
-    source_checkpoint
-        .context
-        .insert("internal.root_run_id".to_string(), json!("run-identity-src"));
+    source_checkpoint.context.insert(
+        "internal.root_run_id".to_string(),
+        json!("run-identity-src"),
+    );
     source_checkpoint
         .context
         .insert("internal.run_workdir".to_string(), json!("/stale/workdir"));
@@ -244,7 +245,10 @@ edges:
     let context = final_bundle.checkpoint.expect("final checkpoint").context;
     let record = final_bundle.record.expect("final record");
     assert_eq!(context.get("internal.run_id"), Some(&json!(new_run_id)));
-    assert_eq!(context.get("internal.root_run_id"), Some(&json!(new_run_id)));
+    assert_eq!(
+        context.get("internal.root_run_id"),
+        Some(&json!(new_run_id))
+    );
     assert_eq!(
         context.get("internal.run_workdir"),
         Some(&json!(record.working_directory)),
@@ -345,6 +349,7 @@ fn reset_clears_only_runs_directory() {
 
 fn failed_record(run_id: &str, project_path: &Path) -> RunRecord {
     let mut record = RunRecord::new(run_id, project_path.to_string_lossy());
+    record.execution_profile_id = Some("native".to_string());
     record.flow_name = "control.yaml".to_string();
     record.status = "failed".to_string();
     record.last_error = "previous failure".to_string();
@@ -354,6 +359,7 @@ fn failed_record(run_id: &str, project_path: &Path) -> RunRecord {
 
 fn running_record(run_id: &str, project_path: &Path) -> RunRecord {
     let mut record = RunRecord::new(run_id, project_path.to_string_lossy());
+    record.execution_profile_id = Some("native".to_string());
     record.flow_name = "control.yaml".to_string();
     record.status = "running".to_string();
     record.started_at = "2026-06-23T10:00:00Z".to_string();
