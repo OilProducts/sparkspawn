@@ -181,6 +181,49 @@ fn starter_flow_inventory_is_packaged_sorted_and_utf8() {
 }
 
 #[test]
+fn implement_milestone_reviews_before_expensive_validation_and_blocks_invalid_state() {
+    let asset = flows::load_starter_flow(
+        "software-development/spec-implementation/implement-milestone.yaml",
+    )
+    .expect("implement milestone flow");
+    let flow = attractor_dsl::parse_flow_definition(asset.text().expect("utf-8 flow"))
+        .expect("valid implement milestone flow");
+    for (from, to, condition) in [
+        (
+            "validate_active_item_state",
+            "review_current",
+            "outcome=success",
+        ),
+        ("review_current", "prepare_validation", "outcome=success"),
+        ("prepare_validation", "validate_repo", ""),
+        (
+            "assess_validation",
+            "gate_item_completion",
+            "outcome=success",
+        ),
+        (
+            "prepare_milestone_state",
+            "blocked_exit",
+            "outcome=fail && preferred_label=Blocked",
+        ),
+        (
+            "prepare_milestone_state",
+            "extract_items",
+            "outcome=success",
+        ),
+    ] {
+        assert!(flow
+            .edges
+            .iter()
+            .any(|edge| edge.from == from && edge.to == to && edge.condition == condition));
+    }
+    assert!(!flow
+        .edges
+        .iter()
+        .any(|edge| edge.from == "validate_item_plan" && edge.to == "extract_items"));
+}
+
+#[test]
 fn guide_model_icon_and_provider_template_resources_are_available() {
     assert_eq!(
         guides::guide_names(),

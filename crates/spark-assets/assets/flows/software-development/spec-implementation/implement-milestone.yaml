@@ -178,15 +178,19 @@ nodes:
         as the binding implementation contract, and .spark/spec-implementation/current/spec/contract-decisions.json as the
         approved machine-readable resolution set. Do not reread another duplicate copy of the same spec from the repository.
         Read files needed from the current repository. Stay within the current cwd (the repository root). Do not inspect paths
-        outside it. Derive milestone_dir as .spark/spec-implementation/current/milestones/<context milestone id>/. Update
-        milestone_dir/state.json so it contains an items array of bounded implementable work items for only this milestone.
-        Each item must include: id, title, summary, decision_ids, acceptance_criteria, constraints, target_paths, depends_on,
-        status, attempts, and notes. Use status=pending and attempts=0 for newly extracted items. Every milestone decision_id
+        outside it. Derive milestone_dir as .spark/spec-implementation/current/milestones/<context milestone id>/ and read
+        milestone_dir/state.json before editing it. If its items array is nonempty, treat it as an existing initial or extension
+        plan: preserve current_item_id and the entire items array exactly, including every id, title, status, attempts, dependency,
+        and note, and do not regenerate, collapse, renumber, or replace any item. Return outcome success only after rereading
+        the unchanged queue. Only when the items array is empty, update state.json with bounded implementable work items for
+        this milestone. Each newly extracted item must include: id, title, summary, decision_ids, acceptance_criteria, constraints,
+        target_paths, depends_on, status, attempts, and notes, using status=pending and attempts=0. Every milestone decision_id
         must appear in at least one item''s decision_ids, and each bound decision must be reflected directly in item acceptance_criteria
         and target_paths rather than buried only in notes. If the spec, architecture, and contract decisions cannot be reconciled
-        into a truthful item plan, leave the issue explicit so Validate Item Plan can force re-extraction rather than silently
-        choosing one source. Preserve milestone metadata and keep the file valid JSON. Respond with ONLY a JSON status envelope
-        and return outcome success only after the milestone state is written.'
+        into a truthful initial item plan, leave the issue explicit so Validate Item Plan can block safely rather than silently
+        choosing one source. Preserve milestone metadata and keep the file valid JSON. Respond with ONLY a JSON status
+        envelope and return outcome success only after the milestone state is written or the existing nonempty queue is verified
+        unchanged.'
     execution:
       llm_model: gpt-5.6-sol
       reasoning_effort: high
@@ -225,7 +229,9 @@ nodes:
         bookkeeping passes. Treat missing deliverability work inside this milestone as remaining implementable work, not premature
         success. If the milestone is complete, respond with ONLY a JSON status envelope with outcome success. If more implementable
         repository work remains inside the same milestone, append new pending items directly into milestone_dir/state.json
-        using the existing item schema including decision_ids and return outcome fail with preferred_label Extend. Use Extend
+        using the existing item schema including decision_ids, the next unused milestone item ids, status=pending, and attempts=0;
+        preserve every existing item''s id, status, attempts, and notes, and do not duplicate equivalent pending work. Return
+        outcome fail with preferred_label Extend only after the durable ledger contains the appended work. Use Extend
         for remaining packaging, bootstrap, export, validation, repository-hygiene, cohesion cleanup, or unmet public-surface
         decision work that still belongs inside this milestone. Metadata-only repair items are allowed only when all bound
         decision_ids are already satisfied; otherwise append real implementation items for the unmet decision work. If the
@@ -288,7 +294,8 @@ nodes:
       prompt: Implement the current milestone item described by context.item.summary, context.item.acceptance_criteria, context.item.constraints,
         and context.item.target_paths. Keep the scope bounded to this item only. If review feedback exists in context.review.summary
         or context.review.required_changes, address it directly in this pass before validation. Do not rely on environment-specific
-        hacks, test-only bootstrap behavior, or compatibility shims as the primary way the item works. Do not edit milestone_dir/state.json
+        hacks, test-only bootstrap behavior, or compatibility shims as the primary way the item works. Run focused checks
+        while implementing, but do not run the repository-wide validation command; the downstream validate_repo node owns that gate. Do not edit milestone_dir/state.json
         or .spark/spec-implementation/current/validation-result.json in this node. Do not claim that a later item is now active,
         complete, or next; queue advancement belongs only to the queue-state nodes. If the cleanest path appears broader than
         the current item, keep the repository coherent so review can request Rewrite instead of cementing a brittle workaround.
@@ -413,7 +420,10 @@ nodes:
     config:
       kind: agent_task
       prompt: 'Read the current milestone state in .spark/spec-implementation/current/milestones/<current milestone id>/state.json
-        and choose the next ready work item. A ready item is pending and all of its depends_on items are already done. If
+        and choose the next ready work item. If current_item_id names the sole in_progress item and context.item.id matches
+        it, treat this as a controlled child restart: preserve state.json exactly, do not increment attempts, return outcome
+        success with preferred_label Work, and emit context_updates for context.item.* from that item while clearing the review
+        feedback and validation scratch keys listed below. A ready item is pending and all of its depends_on items are already done. If
         a ready item exists, store its id and previous attempts as selected_id and previous_attempts before editing. Update
         that same state.json file before responding: modify only the item whose id equals selected_id, mark that item status=in_progress,
         set its attempts to previous_attempts + 1, set current_item_id to selected_id, preserve the rest of the queue, and
@@ -517,11 +527,14 @@ nodes:
         context.milestone.decision_ids, context.milestone.acceptance_criteria, context.milestone.target_paths, and context.milestone.attempts,
         then derive milestone_dir as .spark/spec-implementation/current/milestones/<context milestone id>/. Treat the bound
         context.milestone.* snapshot as authoritative for this child even if shared runtime binding files under .spark/spec-implementation/current/current-milestone.json
-        later drift. Create milestone_dir if it does not exist. Write milestone_dir/state.json as valid JSON with this shape:
-        {"milestone":{...current milestone snapshot including decision_ids...},"current_item_id":null,"items":[],"updated_at":"<timestamp>"}.
-        Preserve any existing attempts history if the file already exists, but ensure the file remains valid and scoped to
-        the current milestone. Respond with ONLY a JSON status envelope and return outcome success only after the milestone
-        state file exists.'
+        later drift. Create milestone_dir if it does not exist. If milestone_dir/state.json does not exist, write it as valid
+        JSON with this shape: {"milestone":{...current milestone snapshot including decision_ids...},"current_item_id":null,"items":[],"updated_at":"<timestamp>"}.
+        If state.json already exists and is valid for this same milestone, preserve current_item_id and the entire items array
+        exactly, including every item''s id, title, status, attempts, dependencies, and notes; never replace an existing item
+        array with an empty array. Refresh only the milestone metadata from the bound snapshot and updated_at as needed. If
+        the existing file belongs to another milestone or is invalid, leave it unchanged and return outcome fail with preferred_label
+        Blocked rather than discarding history. Respond with ONLY a JSON status envelope and return outcome success only after
+        the milestone state file exists with any existing queue history preserved.'
     execution:
       llm_model: gpt-5.6-sol
       reasoning_effort: high
@@ -556,11 +569,12 @@ nodes:
         valid JSON with fields item_id, item_title, entrypoint, resolved_command, scope_summary, and suites, where each suite
         includes name, required, and intent. Resolve validation in this order: request.validation_command from .spark/spec-implementation/current/state.json
         if present; otherwise the strongest deterministic repo-wide gate already supported by the repo; then narrower targeted
-        checks as supplements; then minimal bootstrap only if no truthful repo-wide gate exists yet. Prefer validation that
-        is supportable from committed repository files and documented workflow. Do not rely on ambient tooling, one-off dependency
-        injection, or test-only path hacks as the primary validation path. If truthful validation requires committed manifests,
-        bootstrap files, package wiring, public export fixes, docs, or ignore entries, add the minimal repo-local support
-        needed so the validation command is honest and repeatable from committed files. Do not let narrow checks replace a
+        checks as supplements. Prefer validation that is supportable from committed repository files and documented workflow.
+        Do not rely on ambient tooling, one-off dependency injection, or test-only path hacks as the primary validation path.
+        Do not edit repository deliverables in this node; implementation owns manifests, bootstrap files, package wiring,
+        public exports, docs, and ignore rules. If truthful validation requires missing repository support, record the exact
+        required work in validation-plan.json.scope_summary and make the validation script fail without running the expensive
+        repo-wide gate so Assess Validation can route it back to implementation. Do not let narrow checks replace a
         stronger repo-wide gate. If the item changes a documented public surface, require at least one suite that exercises
         that surface directly rather than only helpers, fixtures, request builders, or manual transport code. Persist the
         resolved validation command back into .spark/spec-implementation/current/state.json once you establish it. The script
@@ -569,9 +583,9 @@ nodes:
         than symlinks or indirections outside the repository root, and exit 0 on pass or nonzero on failure. Do not edit milestone_dir/state.json
         in this node. Do not write .spark/spec-implementation/current/validation-result.json in this node; the canonical active-workspace
         file remains .spark/spec-implementation/current/validation-result.json. Do not claim that a different item is now
-        active. If validation remains impossible after a concrete bootstrap attempt, make the script exit 2 and record the
-        missing prerequisite in validation-plan.json.scope_summary. Respond with ONLY a JSON status envelope and return outcome
-        success only after the validation script, validation plan, and any required bootstrap files are written.'
+        active. Reserve exit 2 for a truly external missing prerequisite; use another nonzero exit for missing repository
+        support. Respond with ONLY a JSON status envelope and return outcome success only after the validation script and
+        validation plan are written.'
     execution:
       llm_model: gpt-5.6-sol
       reasoning_effort: high
@@ -618,7 +632,7 @@ nodes:
       kind: agent_task
       prompt: Review the current item against context.item.summary, context.item.decision_ids, context.item.acceptance_criteria,
         context.item.constraints, context.item.target_paths, .spark/spec-implementation/current/spec/source.md, .spark/spec-implementation/current/spec/architecture.md,
-        .spark/spec-implementation/current/spec/contract-decisions.json, the milestone state, and .spark/spec-implementation/current/validation-result.json.
+        .spark/spec-implementation/current/spec/contract-decisions.json, and the milestone state.
         In active-workspace shorthand, the architecture file is .spark/spec-implementation/current/spec/architecture.md and
         the decision ledger is .spark/spec-implementation/current/spec/contract-decisions.json. Treat .spark/spec-implementation/current/spec/source.md
         as product behavior, .spark/spec-implementation/current/spec/architecture.md as the binding implementation contract,
@@ -630,11 +644,10 @@ nodes:
         that the touched area did not introduce obvious duplicate validators or mixed-responsibility growth; and that docs,
         exports, manifests, and ignore rules remain coherent. Treat helper-only validation of a documented public surface
         as incomplete. Treat wrapper-only or duplicate delivery layers as incomplete unless a real external compatibility
-        contract requires them. Fail if code, tests, or validation evidence satisfy a weaker contract than the item's bound
+        contract requires them. Fail if code or tests satisfy a weaker contract than the item's bound
         decisions, or if a material spec-versus-architecture conflict was chosen silently instead of being resolved in .spark/spec-implementation/current/spec/contract-decisions.json.
-        Never return outcome success unless .spark/spec-implementation/current/validation-result.json exists for the current
-        item, item_id matches context.item.id, status=pass, and all required suites passed. Treat blocked, fail, stale, or
-        mismatched validation evidence as incomplete. Respond with ONLY a JSON status envelope. If the current item is done,
+        This is the pre-validation deliverability review; do not require or assess validation-result.json here because the
+        unchanged repository-wide validation and completion gate follow a successful review. Respond with ONLY a JSON status envelope. If the current item is done,
         return outcome success. If more implementation work is needed on the same item, return outcome fail with preferred_label
         Fix and write context.review.summary, context.review.required_changes, and context.review.blockers. If the item is
         too broad, wrongly scoped, or exposed prerequisite repair work that should happen before it can complete cleanly,
@@ -766,9 +779,13 @@ nodes:
         as the durable queue ledger that must agree with that binding. Validate the milestone-local item ledger before continuing.
         Confirm item ids are unique, every depends_on item id exists, no item depends on itself, the item dependency graph
         is acyclic, current_item_id plus the queue ordering remain valid after any extracted, appended, or rewritten items,
-        and at most one item is status=in_progress. When context.item.id is absent, treat success as a pre-dispatch queue
-        state for next_item: require current_item_id to be null, require no item to be status=in_progress, and require item
-        attempts to remain unchanged by this node. If the durable ledger is already idle but stale context.item.*, context.review.*,
+        and at most one item is status=in_progress. When context.item.id is absent and current_item_id names exactly one
+        in_progress item with attempts greater than zero, treat it as a controlled child restart: preserve the ledger exactly,
+        restore context.item.id, context.item.title, context.item.summary, context.item.decision_ids, context.item.acceptance_criteria,
+        context.item.constraints, context.item.target_paths, context.item.depends_on, and context.item.attempts from that item,
+        and clear the review feedback and validation scratch keys listed below. Otherwise, when context.item.id is absent,
+        treat success as a pre-dispatch queue state for next_item: require current_item_id to be null, require no item to be
+        status=in_progress, and require item attempts to remain unchanged by this node. If the durable ledger is already idle but stale context.item.*, context.review.*,
         or validation scratch keys remain from a previously finished item, use context_updates for context.item.id, context.item.title,
         context.item.summary, context.item.decision_ids, context.item.acceptance_criteria, context.item.constraints, context.item.target_paths,
         context.item.depends_on, context.item.attempts, context.review.summary, context.review.required_changes, context.review.blockers,
@@ -784,11 +801,13 @@ nodes:
         decision ownership as queue corruption or decomposition failure. You may repair purely mechanical active-item drift
         only when context.item.id already names the sole in_progress item and the durable ledger simply needs current_item_id
         rewritten to match. Treat a live context.item.id with no matching in_progress item, or an in_progress ledger item
-        with no live context.item.id, as active-item control-plane corruption. If that contradiction cannot be repaired truthfully,
+        with no live context.item.id outside the controlled restart case above, as active-item control-plane corruption. If
+        that contradiction cannot be repaired truthfully,
         write .spark/spec-implementation/current/block-reason.md and return outcome fail with preferred_label Blocked. If
         the current item decomposition is structurally wrong, ambiguous, drops a bound contract obligation, or cannot be repaired
-        truthfully from the milestone state plus approved decisions, return outcome fail with preferred_label Reextract so
-        item extraction can regenerate a coherent queue. If the item plan is coherent after any needed repairs or cleanup,
+        truthfully from the milestone state plus approved decisions, write .spark/spec-implementation/current/block-reason.md
+        and return outcome fail with preferred_label Blocked rather than regenerating durable queue history automatically.
+        If the item plan is coherent after any needed repairs or cleanup,
         return outcome success. Respond with ONLY a JSON status envelope.'
     execution:
       llm_model: gpt-5.6-sol
@@ -864,8 +883,8 @@ edges:
   extensions:
     loop_restart: false
 - from: assess_validation
-  to: review_current
-  label: Review
+  to: gate_item_completion
+  label: Complete
   condition: outcome=success
   extensions:
     loop_restart: false
@@ -1044,7 +1063,14 @@ edges:
   extensions:
     loop_restart: false
 - from: prepare_milestone_state
+  to: blocked_exit
+  label: Blocked State
+  condition: outcome=fail && preferred_label=Blocked
+  extensions:
+    loop_restart: false
+- from: prepare_milestone_state
   to: extract_items
+  condition: outcome=success
   extensions:
     loop_restart: false
 - from: prepare_validation
@@ -1056,8 +1082,8 @@ edges:
   extensions:
     loop_restart: false
 - from: review_current
-  to: gate_item_completion
-  label: Ready To Complete
+  to: prepare_validation
+  label: Validate
   condition: outcome=success
   extensions:
     loop_restart: false
@@ -1133,8 +1159,8 @@ edges:
   extensions:
     loop_restart: false
 - from: validate_active_item_state
-  to: prepare_validation
-  label: Validate
+  to: review_current
+  label: Review
   condition: outcome=success
   extensions:
     loop_restart: false
@@ -1149,18 +1175,6 @@ edges:
   label: Blocked Partial
   condition: outcome=partial_success && preferred_label=Blocked
   weight: 1
-  extensions:
-    loop_restart: false
-- from: validate_item_plan
-  to: extract_items
-  label: Reextract
-  condition: outcome=fail && preferred_label=Reextract
-  extensions:
-    loop_restart: false
-- from: validate_item_plan
-  to: extract_items
-  label: Reextract Partial
-  condition: outcome=partial_success
   extensions:
     loop_restart: false
 - from: validate_item_plan

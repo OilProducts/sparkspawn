@@ -79,8 +79,14 @@ nodes:
         a milestone if it skipped the strongest deterministic repo-wide gate that was available, if claimed public surfaces
         were validated only through internal or bypass paths, if a bound decision remains unmet, or if remaining decision-bound
         implementation work was downgraded into metadata-only sync. If the milestone is mostly complete but bounded remaining
-        work still belongs inside this same milestone, leave the milestone current, keep the ledgers valid, and return outcome
-        partial_success with preferred_label Extend so the milestone worker can continue. If the milestone decomposition is
+        work still belongs inside this same milestone, leave the milestone current and append one or more pending items directly
+        to .spark/spec-implementation/current/milestones/<context milestone id>/state.json before returning. Preserve every
+        existing item''s id, status, attempts, and notes; do not delete, renumber, replace, or reopen completed items. Give
+        each genuinely new item the next unused milestone item id, the full existing item schema, status=pending, attempts=0,
+        and notes that identify the audit gap. Do not duplicate an equivalent pending item. Keep current_item_id null and
+        no item in_progress at this audit handoff. Return outcome partial_success with preferred_label Extend only after the
+        durable ledger contains bounded pending work that directly covers the audit finding so the milestone worker can continue.
+        If the milestone decomposition is
         wrong or the remaining deliverability work should be replanned as bounded milestone-level follow-up, write .spark/spec-implementation/current/rewrite-milestones.json
         with replacement milestones and return outcome fail with preferred_label Rewrite. If the effort is blocked, update
         ledgers accordingly and return outcome fail with preferred_label Blocked. Do not silently choose between spec and
