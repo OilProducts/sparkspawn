@@ -2060,6 +2060,7 @@ impl WorkspaceConversationService {
             "summary": format!("Trigger {trigger_id} fired {flow_name}."),
             "project_path": working_directory.clone(),
             "launch_context": launch_context,
+            "execution_profile_id": request.action.execution_profile_id,
         });
         let response =
             self.start_workspace_flow_route_response(&working_directory, &flow_name, &artifact);

@@ -136,7 +136,7 @@ async fn workspace_draft_flow_event_launches_draft_once_with_profile() {
         "[profiles.math-lab]\nlabel = \"Math Lab\"\nmode = \"native\"\n",
     )
     .expect("profiles");
-    write_flow(&settings, "math-research/explore-conjecture.yaml");
+    write_typed_math_flow(&settings, "math-research/explore-conjecture.yaml");
     let project_path = root.join("project");
     fs::create_dir_all(project_path.join(".mathlab")).expect("mathlab");
     fs::write(
@@ -178,6 +178,7 @@ async fn workspace_draft_flow_event_launches_draft_once_with_profile() {
                 "flow_name".to_string(),
                 json!("math-research/explore-conjecture.yaml"),
             ),
+            ("project_path".to_string(), json!(project_path)),
             ("status".to_string(), json!("completed")),
         ]))
         .expect("first event");
@@ -187,13 +188,17 @@ async fn workspace_draft_flow_event_launches_draft_once_with_profile() {
                 "flow_name".to_string(),
                 json!("math-research/explore-conjecture.yaml"),
             ),
+            ("project_path".to_string(), json!(project_path)),
             ("status".to_string(), json!("completed")),
         ]))
         .expect("second event");
 
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].status, "success");
-    let run_id = first[0].run_id.as_deref().expect("run id");
+    let run_id = first[0]
+        .run_id
+        .as_deref()
+        .unwrap_or_else(|| panic!("run id: {}", first[0].message));
     assert!(project_path
         .join(".mathlab/next-session.launched.json")
         .exists());
@@ -213,7 +218,7 @@ async fn workspace_draft_flow_event_launches_draft_once_with_profile() {
         .expect("load trigger state");
     assert_eq!(
         state.last_error.as_deref(),
-        Some("Workspace draft is missing.")
+        Some("Next-session launch skipped: no next-session.json was available.")
     );
 }
 
@@ -537,9 +542,7 @@ fn math_flow_event_rejects_installed_non_catalog_successor_without_claiming_or_r
 
     assert_eq!(outcomes.len(), 1);
     assert!(outcomes[0].run_id.is_none());
-    assert!(outcomes[0]
-        .message
-        .contains("not an approved math-research catalog flow"));
+    assert!(outcomes[0].message.contains("not allowlisted"));
     assert!(
         active.is_file(),
         "authorization failure must not consume draft"
@@ -783,9 +786,12 @@ async fn non_math_chain_id_keeps_static_schedule_context_nested() {
         protected: false,
         source_type: "schedule".to_string(),
         action: spark_storage::TriggerAction {
+            mode: "static".to_string(),
             flow_name: "ops/run.yaml".to_string(),
             project_path: Some(project_path.to_string_lossy().into_owned()),
             static_context: Map::from_iter([("origin".to_string(), json!("nested"))]),
+            flow_allowlist: Vec::new(),
+            execution_profile_id: None,
         },
         source: Map::from_iter([
             ("kind".to_string(), json!("once")),
@@ -880,9 +886,20 @@ fn flow_event_definition(
         protected: false,
         source_type: "flow_event".to_string(),
         action: spark_storage::TriggerAction {
+            mode: if id.ends_with("-chain") {
+                "workspace_draft".to_string()
+            } else {
+                "static".to_string()
+            },
             flow_name: "math-research/prove-refute.yaml".to_string(),
             project_path: Some(project_path.to_string_lossy().into_owned()),
             static_context,
+            flow_allowlist: if id.ends_with("-chain") {
+                vec!["math-research/*".to_string()]
+            } else {
+                Vec::new()
+            },
+            execution_profile_id: None,
         },
         source: Map::from_iter([
             (
