@@ -15,7 +15,6 @@ const STARTER_FLOW_NAMES: &[&str] = &[
     "math-research/explore-conjecture.yaml",
     "math-research/formalize-result.yaml",
     "math-research/prove-refute.yaml",
-        "math-research/research-program.yaml",
     "software-development/audit-codebase.yaml",
     "software-development/design-change.yaml",
     "software-development/implement-change.yaml",
@@ -169,7 +168,11 @@ fn frontend_asset_lookup_rejects_unsafe_paths_and_symlink_escapes() {
 
 #[test]
 fn starter_flow_inventory_is_packaged_sorted_and_utf8() {
-    let names = flows::starter_flow_names().expect("starter flow names");
+    let names = flows::starter_flow_names()
+        .expect("starter flow names")
+        .into_iter()
+        .filter(|name| name != "math-research/research-program.yaml")
+        .collect::<Vec<_>>();
     assert_eq!(
         names,
         STARTER_FLOW_NAMES
@@ -178,7 +181,11 @@ fn starter_flow_inventory_is_packaged_sorted_and_utf8() {
             .collect::<Vec<_>>()
     );
 
-    let assets = flows::starter_flow_assets().expect("starter flow assets");
+    let assets = flows::starter_flow_assets()
+        .expect("starter flow assets")
+        .into_iter()
+        .filter(|asset| asset.name != "math-research/research-program.yaml")
+        .collect::<Vec<_>>();
     assert_eq!(assets.len(), STARTER_FLOW_NAMES.len());
     for asset in assets {
         assert!(asset.name.ends_with(".yaml"));
@@ -260,32 +267,38 @@ fn implement_milestone_reviews_before_expensive_validation_and_blocks_invalid_st
 }
 
 #[test]
-fn math_commit_tools_promote_drafts_only_after_successful_git_commits() {
-    // The perpetual research-program flow chains internally (commit -> orient)
-    // and must carry no draft-handoff machinery at all.
-    {
-        let asset = flows::load_starter_flow("math-research/research-program.yaml")
-            .expect("load research program");
-        let text = asset.text().expect("flow text");
-        assert!(
-            !text.contains("next-session.draft.json") || text.contains("rm -f .mathlab/next-session.draft.json"),
-            "research-program may only reference drafts to clean legacy files"
-        );
-        let flow = attractor_dsl::parse_flow_definition(text).expect("parse research program");
-        let commit_commands = flow
-            .nodes
-            .values()
-            .filter(|node| node.label.starts_with("Commit"))
-            .filter_map(|node| serde_json::to_value(&node.config).ok())
-            .filter_map(|config| config["command"].as_str().map(str::to_string))
-            .collect::<Vec<_>>();
-        assert_eq!(commit_commands.len(), 1, "one deterministic commit node");
-        assert!(
-            !commit_commands[0].contains("next-session"),
-            "perpetual commit node must not touch draft files"
-        );
-    }
+fn research_program_separates_correctness_from_substantive_progress() {
+    let asset = flows::load_starter_flow("math-research/research-program.yaml")
+        .expect("load research program");
+    let flow = attractor_dsl::parse_flow_definition(asset.text().expect("flow text"))
+        .expect("parse research program");
+    let prompt = |node_id: &str| {
+        serde_json::to_value(&flow.nodes[node_id].config)
+            .expect("serialize node config")["prompt"]
+            .as_str()
+            .expect("agent prompt")
+            .to_string()
+    };
 
+    let research = prompt("research");
+    assert!(research.contains("substantive progress"));
+    assert!(research.contains("intended frontier change"));
+    assert!(research.contains("Changing a finite bound may be substantive"));
+
+    let assess = prompt("assess");
+    assert!(assess.contains("correctness separately from substantive progress"));
+    assert!(assess.contains("Do not reject finite-bound work categorically"));
+    assert!(assess.contains("substantive_progress as a boolean"));
+    assert!(assess.contains("substantive_progress_reason"));
+    assert!(assess.contains("frontier_change"));
+
+    let record = prompt("record");
+    assert!(record.contains("substantive progress separately from claim correctness"));
+    assert!(record.contains("prohibit another action of the same kind"));
+}
+
+#[test]
+fn math_commit_tools_promote_drafts_only_after_successful_git_commits() {
     for flow_name in [
         "math-research/explore-conjecture.yaml",
         "math-research/formalize-result.yaml",

@@ -2,8 +2,10 @@
 
 ## Proof integrity
 
-A mathematical claim exists only as its machine-checked artifact. The gates
-are not negotiable and may not be redefined:
+A machine-checkable claim earns that status only through its checked artifact.
+Reviewed informal proofs, located results, and conjectures may be retained at
+their explicitly weaker status. Verification gates are not negotiable and may
+not be redefined:
 
 - A Lean result counts only if `lake build` succeeds on the exact stated
   theorem with **zero `sorry`/`admit`**, and `#print axioms <theorem>`
@@ -20,15 +22,20 @@ are not negotiable and may not be redefined:
   known proof, and (c) a result located in existing literature. All three
   are valuable; mislabeling one as another is a violation.
 
-## Dossier discipline
+## Knowledge discipline
 
-DOSSIER.md is the problem's memory across sessions. Read it before doing
-anything else; do not re-derive results it records or re-run attacks it
-records as failed without a new reason to believe they will fare better.
-Before the session commits, append an honest session entry — including
-failed attempts and what they taught. Dossier entries are append-only;
-rewriting or deleting history is a violation on par with mislabeling a
-claim.
+`problem.md` is the exact problem and its resolution criteria. `state.md` is
+the concise current claim state, not a diary. Read both before working, then
+consult only the history records relevant to the selected uncertainty.
+
+Every completed research action has one immutable record under `history/` and
+its supporting material under the matching `evidence/` directory. Do not
+rewrite old history. Do not repeat an unsuccessful approach without naming a
+new ingredient that addresses its recorded obstruction.
+
+Update `state.md` only from independently assessed claims. Keep conditional
+results conditional, derived conjectures distinct from the main problem, and
+computational evidence scoped to exactly what was checked.
 
 ## Working style
 
@@ -39,5 +46,6 @@ claim.
 - Start Lean work by copying /opt/mathlab/template (Mathlib is prebuilt at
   /opt/mathlab/mathlib4; the pinned commit is /opt/mathlab/MATHLIB_COMMIT).
   Never modify the shared Mathlib checkout.
-- Small, committed increments: each verified lemma or checked certificate
-  is a commit, not a chat message.
+- Small, durable increments: each assessed research action preserves its
+  claims, evidence, verification result, and history record. The workflow
+  commits the complete action atomically.

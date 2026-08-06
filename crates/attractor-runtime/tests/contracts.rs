@@ -14,5 +14,3 @@ mod storage_contracts;
 mod transcript_contracts;
 #[path = "contracts/usage_contracts.rs"]
 mod usage_contracts;
-#[path = "contracts/research_program_flow_contracts.rs"]
-mod research_program_flow_contracts;

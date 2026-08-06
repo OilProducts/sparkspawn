@@ -1,18 +1,18 @@
 schema_version: '1'
 id: research_program
 title: Research Program
-description: A perpetual research program on one problem — each cycle an orient step reads the dossier and routes into exploration (verified computational evidence), attack (adversarial prove/refute with kernel and certificate gates), or formalization (kernel-checked Lean against pinned Mathlib), then commits the cycle deterministically and re-orients. Runs until the problem is mechanically settled or a human cancels it. State lives in the workspace dossier and git history; recovery is relaunch, not resume. Launch with execution_profile_id math-lab.
-goal: Advance the stated problem cycle by cycle — every claim backed by a machine-checked artifact and every cycle committed — until a mechanically verified proof or refutation settles it or a human cancels the run.
+description: Repeatedly perform the most useful next mathematical action, assess its evidence, update a concise claim state, and commit the result until the exact problem is mechanically resolved or a human cancels the run. Launch with execution_profile_id math-lab.
+goal: Improve justified knowledge about one mathematical problem until a faithful kernel-checked proof, a directly verified counterexample, or an explicitly human-accepted reviewed proof resolves it.
 inputs:
 - key: context.request.problem
   label: Problem
   type: string
-  description: The open problem this program exists to attack, with any known constraints or prior results worth starting from. Read directly on the first cycle; afterward the dossier leads.
+  description: The precise mathematical problem to investigate, with known constraints or results.
   required: true
 - key: context.request.focus
   label: Focus
   type: string
-  description: Optional standing focus or constraint for the program (a case, a bound, a computational budget).
+  description: Optional standing scope, resource, or methodology constraints.
   required: false
 defaults:
   fidelity: summary:high
@@ -28,908 +28,285 @@ nodes:
     label: Start
     config:
       kind: start
-  prepare_workspace:
+  prepare:
     kind: tool
     label: Prepare Workspace
     config:
       kind: tool
       command: |-
         set -eu
-        mkdir -p .mathlab shared prover refuter experiments
-        rm -f .mathlab/next-session.draft.json .mathlab/next-session.json .mathlab/next-session.launching.json
-        rm -f .mathlab/round .mathlab/max-rounds .mathlab/guard-*
+        mkdir -p .math-research history evidence
+        rm -f .math-research/current-action .math-research/repair-used
         if [ ! -f AGENTS.md ] && [ -f /opt/mathlab/workspace-template/AGENTS.md ]; then
           cp /opt/mathlab/workspace-template/AGENTS.md AGENTS.md
         fi
-        if [ ! -f DOSSIER.md ] && [ -f /opt/mathlab/workspace-template/DOSSIER.md ]; then
-          cp /opt/mathlab/workspace-template/DOSSIER.md DOSSIER.md
+        if [ ! -f problem.md ] && [ -f /opt/mathlab/workspace-template/problem.md ]; then
+          cp /opt/mathlab/workspace-template/problem.md problem.md
         fi
+        if [ ! -f state.md ] && [ -f /opt/mathlab/workspace-template/state.md ]; then
+          cp /opt/mathlab/workspace-template/state.md state.md
+        fi
+        touch problem.md state.md
         git init -q 2>/dev/null || true
     extensions:
-      tool.artifacts.stderr: prepare-workspace.stderr.txt
-      tool.artifacts.stdout: prepare-workspace.stdout.txt
+      tool.artifacts.stderr: prepare.stderr.txt
+      tool.artifacts.stdout: prepare.stdout.txt
       tool.command: |-
         set -eu
-        mkdir -p .mathlab shared prover refuter experiments
-        rm -f .mathlab/next-session.draft.json .mathlab/next-session.json .mathlab/next-session.launching.json
-        rm -f .mathlab/round .mathlab/max-rounds .mathlab/guard-*
+        mkdir -p .math-research history evidence
+        rm -f .math-research/current-action .math-research/repair-used
         if [ ! -f AGENTS.md ] && [ -f /opt/mathlab/workspace-template/AGENTS.md ]; then
           cp /opt/mathlab/workspace-template/AGENTS.md AGENTS.md
         fi
-        if [ ! -f DOSSIER.md ] && [ -f /opt/mathlab/workspace-template/DOSSIER.md ]; then
-          cp /opt/mathlab/workspace-template/DOSSIER.md DOSSIER.md
+        if [ ! -f problem.md ] && [ -f /opt/mathlab/workspace-template/problem.md ]; then
+          cp /opt/mathlab/workspace-template/problem.md problem.md
         fi
+        if [ ! -f state.md ] && [ -f /opt/mathlab/workspace-template/state.md ]; then
+          cp /opt/mathlab/workspace-template/state.md state.md
+        fi
+        touch problem.md state.md
         git init -q 2>/dev/null || true
-  orient:
+  research:
     kind: agent_task
-    label: Orient
+    label: Do Mathematics
     config:
       kind: agent_task
-      prompt: 'You are the orientation step of a perpetual research program. Read DOSSIER.md first per AGENTS.md dossier discipline; on a fresh dossier, found the program on context.request.problem (with context.request.focus as a standing constraint) and record the problem in the dossier''s Problem section. Decide what this cycle should be, then write .mathlab/cycle.md with: the phase, a one-paragraph precise goal, and the cycle''s scope or budget. Choose exactly one phase and set it as your preferred_label: Explore — the frontier needs verified computational evidence or a sharper question (survey plus gate-verified experiments); Attack — the dossier holds a precise statement worth an adversarial prove/refute cycle: update shared/statement.md with the statement version under attack (every definition, quantifier, and range pinned; adopt the dossier''s latest repaired version when one exists), initialize or append a Round 0 section to shared/exchange.md (known results, promising proof avenues, promising counterexample families, recorded failed attacks not to repeat blind), and write the round budget (default 3) to .mathlab/max-rounds; Formalize — a proved or literature-located result should be banked as a kernel-checked artifact: write .mathlab/formalize-target.md with the precise informal statement and any reference or proof sketch; Park — only when the dossier already records a mechanically verified proof or refutation of the program problem. Lack of a promising or cost-effective next attack is never grounds to Park; choose Explore to sharpen the frontier instead. Do not do the phase''s work here — orient only. Respond with ONLY a JSON status envelope whose outcome is success, whose preferred_label is exactly one of Explore, Attack, Formalize, or Park, and whose context_updates set context.cycle.phase and context.cycle.goal.'
+      prompt: 'Advance the mathematical problem by one bounded action capable of making substantive progress. Read problem.md and state.md first, consulting relevant history/ records rather than reading all history blindly. If problem.md is empty or still a template, initialize it from context.request.problem and context.request.focus without silently changing the problem. If state.md is empty or still a template, initialize its current claim state from the workspace evidence and known results, labeling uncertainty honestly. Judge progress by how an action can change the current research frontier, not merely by whether its method, artifacts, or numerical scope differ from previous work. An action may be substantive if it establishes or refutes a structural claim, removes a genuine obstacle to resolution, tests a qualitatively different mechanism, crosses a mathematically meaningful threshold, closes a necessary finite case, supplies an induction base, distinguishes competing conjectures, or enables a concrete proof step. Changing a finite bound may be substantive when its mathematical consequence is stated; it is not substantive solely because the bound is larger, smaller, or independently recomputed. Choose the feasible substantive action most likely to change the state: it may combine literature work, examples, computation, counterexample search, proof development, reduction, statement clarification, or formalization. Before working, choose the next unused sequential action ID A0001, A0002, ...; write it to .math-research/current-action; create evidence/<ID>/; and write evidence/<ID>/plan.md stating the target claim, current uncertainty, possible outcomes, resource bound, intended frontier change, and why that change would be substantive relative to prior actions and failed attacks. Then do the mathematics and preserve all outputs under evidence/<ID> (existing relevant workspace artifacts may be copied or referenced exactly). Write report.md and claim.json there. claim.json must identify the exact proposed claims, their type, the problem-statement version, supporting artifacts, relevant tool versions, and whether each claim is machine-checkable. For any machine-checkable claim write verify.sh that independently checks it and exits nonzero on mismatch; do not create resolution.json yourself. Do not update state.md or history/ yet—the independent assessor and recorder own acceptance. A completed bounded action is outcome success even when it only makes partial mathematical progress or identifies an obstruction. Respond with ONLY a JSON status envelope whose outcome is success and whose context_updates set context.action.id and context.action.summary.'
     contracts:
       response: status_envelope
       reads_context:
       - context.request.problem
       - context.request.focus
+      - context.action.repair
       writes_context:
-      - context.cycle.phase
-      - context.cycle.goal
-  survey:
-    kind: agent_task
-    label: Survey
-    config:
-      kind: agent_task
-      prompt: 'Execute the exploration cycle briefed in .mathlab/cycle.md. Read DOSSIER.md per dossier discipline: do not re-derive recorded results or re-run recorded failed attacks without a new reason. Survey the cycle goal without running experiments yet: restate it precisely, record what is known — including whether it or nearby cases are already resolved in the literature, labeled per AGENTS.md — and design a small set of concrete computational experiments the installed engines can run (SAT via cadical/kissat with DRAT certificates, SMT via z3/cvc5, graph enumeration via nauty-geng, number theory via PARI/GP, optimization via CBC/CSDP, bespoke programs in Python or C). Write the survey and the experiment plan to survey.md. Respond with ONLY a JSON status envelope whose context_updates set context.survey.summary and context.survey.plan.'
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.cycle.goal
-      writes_context:
-      - context.survey.summary
-      - context.survey.plan
-  experiment:
-    kind: agent_task
-    label: Experiment
-    config:
-      kind: agent_task
-      prompt: 'Execute the experiment plan from context.survey.plan. Implement each experiment under experiments/ as runnable programs with fixed seeds and exact inputs; run them; keep raw outputs, and for every SAT result keep the DRAT certificate beside its CNF. Write experiments/verify.sh: a deterministic script that re-checks all machine-checkable evidence (drat-trim on each certificate, digest comparison of exhaustive-search outputs, re-execution of cheap checks) and exits nonzero on any mismatch — the next node runs it as a gate, and evidence it cannot re-verify does not exist. If .mathlab/verify.log exists it holds the output of a failed previous verification; fix the evidence or the script honestly rather than weakening checks. If context.review.required_changes is present, close those gaps. Record an experiment log in experiments/log.md. Respond with ONLY a JSON status envelope whose context_updates set context.experiments.summary.'
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.survey.plan
-      - context.review.required_changes
-      writes_context:
-      - context.experiments.summary
-  verify_evidence:
+      - context.action.id
+      - context.action.summary
+  verify:
     kind: tool
-    label: Verify Evidence
+    label: Check Evidence
     config:
       kind: tool
       command: |-
         set -eu
-        mkdir -p .mathlab
-        if [ ! -x experiments/verify.sh ] && [ ! -f experiments/verify.sh ]; then
-          echo 'GATE FAILURE: experiments/verify.sh is missing.' | tee .mathlab/verify.log
-          exit 1
-        fi
-        if bash experiments/verify.sh > .mathlab/verify.log 2>&1; then
-          cat .mathlab/verify.log
-          rm -f .mathlab/verify.log
-        else
-          cat .mathlab/verify.log
-          exit 1
-        fi
-    extensions:
-      tool.artifacts.stderr: verify-evidence.stderr.txt
-      tool.artifacts.stdout: verify-evidence.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        if [ ! -x experiments/verify.sh ] && [ ! -f experiments/verify.sh ]; then
-          echo 'GATE FAILURE: experiments/verify.sh is missing.' | tee .mathlab/verify.log
-          exit 1
-        fi
-        if bash experiments/verify.sh > .mathlab/verify.log 2>&1; then
-          cat .mathlab/verify.log
-          rm -f .mathlab/verify.log
-        else
-          cat .mathlab/verify.log
-          exit 1
-        fi
-  synthesize_explore:
-    kind: agent_task
-    label: Synthesize Evidence
-    config:
-      kind: agent_task
-      prompt: 'Synthesize the verified experimental results into findings.md: what was computed, what it suggests, and what it rules out. Label every claim per AGENTS.md — new proof, formalization of a known result, located in literature, or computational evidence — and state the exact scope of each computation (parameters covered, cases exhausted, certificates checked). Conjectures must be stated as conjectures with the evidence that motivates them and the smallest open case. If context.review.required_changes is present, close those findings or labeling gaps. Then append a cycle entry to DOSSIER.md per its structure and update its status board: outcome, established results, failed attacks with what they taught, verified data locations, and open subproblems. Close the entry with the natural next cycle — the next orient step reads it there; there is no separate handoff file. Dossier entries are append-only. Respond with ONLY a JSON status envelope whose context_updates set context.findings.summary.'
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.survey.summary
-      - context.experiments.summary
-      - context.review.required_changes
-      writes_context:
-      - context.findings.summary
-  review_explore:
-    kind: agent_task
-    label: Review Evidence
-    config:
-      kind: agent_task
-      prompt: 'You are the adversarial reviewer of experimental mathematics. Treat findings.md, DOSSIER.md, and experiments/ as untrusted claims. Check that every claim is labeled per AGENTS.md and the label is truthful; that computational scopes are stated exactly and match what the programs actually cover (read the programs, not the prose); that certificates exist and experiments/verify.sh genuinely re-checks them rather than rubber-stamping; and that nothing presented as evidence is unreproducible. Check the DOSSIER.md cycle entry: it must be present, honest, and append-only — failed attacks recorded, nothing inflated, no prior entries rewritten. Spot-check by re-running at least one experiment. Return outcome success only when the findings are honest, scoped, and verified. On failure, set context_updates for context.review.required_changes listing each violation precisely, and set your preferred_label to the node that owns the fix: Experiment for evidence problems, Synthesize for labeling or scope problems. On success, clear context.review.required_changes to null. Respond with ONLY a JSON status envelope.'
-    runtime:
-      error_policy: continue
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.findings.summary
-      - context.experiments.summary
-      writes_context:
-      - context.review.required_changes
-  fan_out:
-    kind: parallel
-    label: Prove And Refute
-    config:
-      kind: parallel
-      join_policy: wait_all
-      max_parallel: 2
-  prove:
-    kind: agent_task
-    label: Prove
-    config:
-      kind: agent_task
-      prompt: 'You are the prover branch of an adversarial attack cycle, running in parallel with a counterexample search. Work ONLY inside prover/ — never write outside it and never run git commands; the refuter branch shares this repository. Read shared/statement.md and attack its latest statement version; read shared/exchange.md — the refuter''s near-misses from earlier rounds are your case analysis (they show where the obstruction lives), and your own earlier stuck points are recorded there. Attempt a proof: informal argument first, then formalize what you can in Lean 4 under prover/lean (copy /opt/mathlab/template to prover/lean if it does not exist; Mathlib is prebuilt; never modify /opt/mathlab/mathlib4). Follow AGENTS.md proof-integrity rules exactly. Create the marker file prover/PROVED if and only if you hold a complete kernel-checked proof of the full latest statement — (cd prover/lean && lake build) succeeds with no sorry, no admit, and no new axioms; delete any stale prover/PROVED marker whose claim you no longer stand behind. Either way write prover/report.md: status, method, lemmas actually proved with their Lean names, and — most importantly when stuck — the precise statement of the smallest lemma you cannot prove, stated so the refuter can attack it directly next round. If .mathlab/prover-gate.log exists it holds the output of a failed previous gate; fix the proof honestly or withdraw the marker rather than weakening the statement silently. Respond with ONLY a JSON status envelope whose context_updates set context.prover.summary.'
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.cycle.goal
-      writes_context:
-      - context.prover.summary
-  prover_gate:
-    kind: tool
-    label: Prover Gate
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        if [ ! -f prover/PROVED ]; then
-          echo 'No complete proof claimed this round; gate passes.'
-          rm -f .mathlab/prover-gate.log
+        ACTION="$(cat .math-research/current-action)"
+        case "$ACTION" in A[0-9][0-9][0-9][0-9]) ;; *) echo "Invalid action id: $ACTION"; exit 1;; esac
+        DIR="evidence/$ACTION"
+        test -f "$DIR/claim.json"
+        rm -f "$DIR/.verified" "$DIR/.not-machine-checkable"
+        if [ ! -f "$DIR/verify.sh" ]; then
+          touch "$DIR/.not-machine-checkable"
+          echo "No machine-checkable claim proposed."
           exit 0
         fi
-        if (
-          cd prover/lean
-          lake build
-          if grep -rn --include='*.lean' -E '\bsorry\b|\badmit\b' MathLab MathLab.lean; then
-            echo 'GATE FAILURE: sorry/admit present in claimed proof.'
-            exit 1
-          fi
-          if grep -rn --include='*.lean' -E '^[[:space:]]*axiom[[:space:]]' MathLab MathLab.lean; then
-            echo 'GATE FAILURE: new axiom declared in claimed proof.'
-            exit 1
-          fi
-        ) > .mathlab/prover-gate.log 2>&1; then
-          cat .mathlab/prover-gate.log
-          rm -f .mathlab/prover-gate.log
+        if bash "$DIR/verify.sh" > "$DIR/verification.log" 2>&1; then
+          touch "$DIR/.verified"
+          cat "$DIR/verification.log"
         else
-          cat .mathlab/prover-gate.log
+          cat "$DIR/verification.log"
           exit 1
         fi
     extensions:
-      tool.artifacts.stderr: prover-gate.stderr.txt
-      tool.artifacts.stdout: prover-gate.stdout.txt
+      tool.artifacts.stderr: verify.stderr.txt
+      tool.artifacts.stdout: verify.stdout.txt
       tool.command: |-
         set -eu
-        mkdir -p .mathlab
-        if [ ! -f prover/PROVED ]; then
-          echo 'No complete proof claimed this round; gate passes.'
-          rm -f .mathlab/prover-gate.log
+        ACTION="$(cat .math-research/current-action)"
+        case "$ACTION" in A[0-9][0-9][0-9][0-9]) ;; *) echo "Invalid action id: $ACTION"; exit 1;; esac
+        DIR="evidence/$ACTION"
+        test -f "$DIR/claim.json"
+        rm -f "$DIR/.verified" "$DIR/.not-machine-checkable"
+        if [ ! -f "$DIR/verify.sh" ]; then
+          touch "$DIR/.not-machine-checkable"
+          echo "No machine-checkable claim proposed."
           exit 0
         fi
-        if (
-          cd prover/lean
-          lake build
-          if grep -rn --include='*.lean' -E '\bsorry\b|\badmit\b' MathLab MathLab.lean; then
-            echo 'GATE FAILURE: sorry/admit present in claimed proof.'
-            exit 1
-          fi
-          if grep -rn --include='*.lean' -E '^[[:space:]]*axiom[[:space:]]' MathLab MathLab.lean; then
-            echo 'GATE FAILURE: new axiom declared in claimed proof.'
-            exit 1
-          fi
-        ) > .mathlab/prover-gate.log 2>&1; then
-          cat .mathlab/prover-gate.log
-          rm -f .mathlab/prover-gate.log
+        if bash "$DIR/verify.sh" > "$DIR/verification.log" 2>&1; then
+          touch "$DIR/.verified"
+          cat "$DIR/verification.log"
         else
-          cat .mathlab/prover-gate.log
+          cat "$DIR/verification.log"
           exit 1
         fi
-  refute:
-    kind: agent_task
-    label: Refute
-    config:
-      kind: agent_task
-      prompt: 'You are the refuter branch of an adversarial attack cycle, running in parallel with a proof attempt. Work ONLY inside refuter/ — never write outside it and never run git commands; the prover branch shares this repository. Read shared/statement.md and attack its latest statement version; read shared/exchange.md — the prover''s stuck lemma from earlier rounds is your highest-value target, since a counterexample to it redirects the whole proof, and your own earlier near-misses are recorded there. Search for counterexamples with the installed engines (nauty-geng enumeration, cadical/kissat with DRAT certificates, z3/cvc5, PARI/GP, bespoke Python or C programs) implemented as fixed-seed runnable programs under refuter/ with raw outputs kept. Write refuter/verify.sh: a deterministic script that re-checks every machine-checkable claim this branch makes — counterexample property checks, drat-trim on each certificate, digest comparison of exhaustive-search outputs — and exits nonzero on any mismatch; the branch gate runs it, and evidence it cannot re-verify does not exist. If you find a genuine counterexample, shrink it before reporting: repeatedly reduce its size or parameters while re-verifying it still violates the statement, and record the shrink trajectory; then create the marker file refuter/REFUTED and write refuter/counterexample.md with the minimal witness and its verification. Delete any stale refuter/REFUTED marker whose claim you no longer stand behind. If you find no counterexample, write refuter/report.md reporting near-misses honestly: the extremal objects that came closest, exactly which hypothesis blocked each one, and the exhausted scope stated only as large as the programs actually cover. If .mathlab/refuter-gate.log exists it holds the output of a failed previous gate; fix the evidence or the script honestly rather than weakening checks. Respond with ONLY a JSON status envelope whose context_updates set context.refuter.summary.'
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.cycle.goal
-      writes_context:
-      - context.refuter.summary
-  refuter_gate:
+  repair_budget:
     kind: tool
-    label: Refuter Gate
+    label: One Repair
     config:
       kind: tool
       command: |-
         set -eu
-        mkdir -p .mathlab
-        if [ ! -f refuter/verify.sh ]; then
-          echo 'GATE FAILURE: refuter/verify.sh is missing.' | tee .mathlab/refuter-gate.log
+        ACTION="$(cat .math-research/current-action)"
+        if [ -f .math-research/repair-used ]; then
+          echo "Evidence repair already attempted for $ACTION; assess it as unverified."
           exit 1
         fi
-        if bash refuter/verify.sh > .mathlab/refuter-gate.log 2>&1; then
-          if [ -f refuter/REFUTED ] && [ ! -f refuter/counterexample.md ]; then
-            echo 'GATE FAILURE: REFUTED claimed without refuter/counterexample.md.' | tee -a .mathlab/refuter-gate.log
-            exit 1
-          fi
-          cat .mathlab/refuter-gate.log
-          rm -f .mathlab/refuter-gate.log
-        else
-          cat .mathlab/refuter-gate.log
-          exit 1
-        fi
+        printf '%s\n' "$ACTION" > .math-research/repair-used
+        echo "Allowing one focused evidence repair for $ACTION."
     extensions:
-      tool.artifacts.stderr: refuter-gate.stderr.txt
-      tool.artifacts.stdout: refuter-gate.stdout.txt
+      tool.artifacts.stderr: repair-budget.stderr.txt
+      tool.artifacts.stdout: repair-budget.stdout.txt
       tool.command: |-
         set -eu
-        mkdir -p .mathlab
-        if [ ! -f refuter/verify.sh ]; then
-          echo 'GATE FAILURE: refuter/verify.sh is missing.' | tee .mathlab/refuter-gate.log
+        ACTION="$(cat .math-research/current-action)"
+        if [ -f .math-research/repair-used ]; then
+          echo "Evidence repair already attempted for $ACTION; assess it as unverified."
           exit 1
         fi
-        if bash refuter/verify.sh > .mathlab/refuter-gate.log 2>&1; then
-          if [ -f refuter/REFUTED ] && [ ! -f refuter/counterexample.md ]; then
-            echo 'GATE FAILURE: REFUTED claimed without refuter/counterexample.md.' | tee -a .mathlab/refuter-gate.log
-            exit 1
-          fi
-          cat .mathlab/refuter-gate.log
-          rm -f .mathlab/refuter-gate.log
-        else
-          cat .mathlab/refuter-gate.log
-          exit 1
-        fi
-  join:
-    kind: fan_in
-    label: Join
-    config:
-      kind: fan_in
-  arbiter:
+        printf '%s\n' "$ACTION" > .math-research/repair-used
+        echo "Allowing one focused evidence repair for $ACTION."
+  repair:
     kind: agent_task
-    label: Arbiter
+    label: Repair Evidence
     config:
       kind: agent_task
-      prompt: 'You are the arbiter of an adversarial attack cycle; a round of parallel prover and refuter work just finished. Read shared/statement.md, shared/exchange.md, prover/report.md, refuter/report.md, refuter/counterexample.md when present, and .mathlab/round. Markers carry mechanical weight: prover/PROVED means the Lean build passed the kernel gate, refuter/REFUTED means the counterexample re-verified — but if .mathlab/prover-gate.log or .mathlab/refuter-gate.log exists, that branch''s claim failed its gate this round and must be treated as unverified. Check fidelity yourself before trusting a marker: PROVED settles the cycle only if the Lean statement faithfully encodes the latest statement version (check quantifier structure, hypotheses, and definitional choices against shared/statement.md); REFUTED settles it only if the witness violates that statement as written, not a strawman. Then decide the round. Respond with ONLY a JSON status envelope whose outcome is success, whose context_updates set context.arbiter.decision to a short justification, and whose preferred_label is exactly one of: Findings — the statement is settled (faithfully proved, or faithfully refuted with no repair worth pursuing) or further rounds are clearly not worth their budget, so proceed to synthesis; Repair — the statement needs surgery: a verified counterexample kills the current version but the near-miss pattern points to a natural weakening, the proof went through only for a materially different statement worth adopting, or PROVED and REFUTED both stand — which means the branches encoded different claims and the definitions must be re-pinned; Continue — the statement stands unsettled and another round is warranted. Before responding, append a round section to shared/exchange.md: on Continue, record what each side established, the prover''s stuck lemma as the refuter''s next target, the refuter''s near-misses as the prover''s case hints, and any claim that failed its gate, named as unverified; on Repair or Findings, record the verdict evidence instead.'
+      prompt: 'The current action''s verify.sh failed. Read .math-research/current-action and its evidence directory, especially verification.log. Make one focused repair to the evidence, program, formalization, or verifier. Never weaken a check, change the target claim silently, introduce axioms, or label unsupported output as evidence. If the claim cannot be repaired honestly, withdraw or downgrade it in claim.json and leave a verifier that accurately reflects the remaining machine-checkable claim. Respond with ONLY a JSON status envelope whose context_updates set context.action.repair.'
     contracts:
       response: status_envelope
       reads_context:
-      - parallel.results
-      - context.cycle.goal
+      - context.action.id
+      - context.action.summary
       writes_context:
-      - context.arbiter.decision
-  repair_statement:
+      - context.action.repair
+  assess:
     kind: agent_task
-    label: Repair Statement
+    label: Assess Mathematics
     config:
       kind: agent_task
-      prompt: 'You are the statement surgeon of the attack cycle. The arbiter routed here because the current statement version needs surgery; read context.arbiter.decision, shared/statement.md, shared/exchange.md, and both branch reports. Append a new numbered statement version to shared/statement.md — never rewrite earlier versions — stating the revised claim with every definition, quantifier, and range pinned, the exact edit relative to the previous version, and the evidence that forced it. A repair may weaken (exclude a counterexample family by an honest structural hypothesis, never by enumerating away the known witnesses) or strengthen (adopt the stronger or corrected claim the proof attempt actually established). The revision must be checked, not guessed: verify computationally that it survives every verified counterexample and near-miss recorded so far — a small script or direct evaluation under shared/ is fine — and record the check you ran in the new version''s section. Delete any prover/PROVED or refuter/REFUTED markers, since they refer to the previous statement version. Respond with ONLY a JSON status envelope whose context_updates set context.statement.current.'
+      prompt: 'Independently assess the current research action. Read problem.md, state.md, .math-research/current-action, and that evidence directory. Treat report.md, claim.json, verification.log, and .verified as untrusted evidence. Check statement fidelity, missing hypotheses and cases, whether witnesses attack the exact claim, whether computational scope matches the programs, whether cited results have the needed hypotheses, and whether conclusions exceed the evidence. For a Lean proof, inspect the formal statement against problem.md and require a successful build with no sorry/admit or new axioms; for a counterexample, directly check it against the exact current problem statement. Assess mathematical correctness separately from substantive progress: a correct claim must not be downgraded merely because it has low research value. Judge substantive progress relative to the prior state by whether the result changes a ranked uncertainty, resolves a required case, crosses a meaningful threshold, validates or invalidates a proposed mechanism, removes a genuine obstruction, or enables a concrete next proof step. Do not reject finite-bound work categorically; find it non-substantive only when the changed bound has no demonstrated consequence for the research frontier. Write assessment.md and assessment.json in the evidence directory. assessment.json must give each proposed claim a verdict of accepted, downgraded, or rejected with reasons, and must separately include substantive_progress as a boolean, substantive_progress_reason, and frontier_change. It may also contain a resolution candidate only for a faithful certified proof or directly verified counterexample of the exact problem; write resolution.json with kind, claim_id, and problem_statement_version only in that case. A reviewed informal proof is not an automatic resolution. Do not update state.md or history/. Respond with ONLY a JSON status envelope whose context_updates set context.assessment.summary and context.assessment.resolution_candidate.'
     contracts:
       response: status_envelope
       reads_context:
-      - context.arbiter.decision
+      - context.action.id
+      - context.action.summary
+      - context.action.repair
       writes_context:
-      - context.statement.current
-  round_gate:
+      - context.assessment.summary
+      - context.assessment.resolution_candidate
+  record:
+    kind: agent_task
+    label: Update Knowledge
+    config:
+      kind: agent_task
+      prompt: 'Record the independently assessed research action. Read problem.md, state.md, the current evidence directory, and its assessment. Update state.md so it remains a concise current claim state rather than a diary: verdict, established claims with stable IDs and evidence pointers, dependencies, ranked open frontier, and approaches not to repeat unchanged. Accept no claim beyond its assessment verdict. Record the assessment of substantive progress separately from claim correctness. If substantive_progress is false, preserve the valid evidence without letting repeated certification or bookkeeping dominate state.md, and prohibit another action of the same kind unless it states a new resolution-relevant consequence. Write exactly one immutable history/<ACTION>.md describing why the action was selected, what was attempted, what was accepted/downgraded/rejected, whether and how the frontier changed, what changed in state.md, and what a future attempt must do differently. Preserve unsuccessful evidence. Do not rewrite older history records. Respond with ONLY a JSON status envelope whose context_updates set context.state.summary.'
+    contracts:
+      response: status_envelope
+      reads_context:
+      - context.action.id
+      - context.assessment.summary
+      - context.assessment.resolution_candidate
+      writes_context:
+      - context.state.summary
+  commit:
     kind: tool
-    label: Round Gate
+    label: Commit Knowledge
     config:
       kind: tool
       command: |-
         set -eu
-        mkdir -p .mathlab
-        ROUND="$(cat .mathlab/round 2>/dev/null || echo 0)"
-        ROUND=$((ROUND + 1))
-        printf '%s\n' "$ROUND" > .mathlab/round
-        MAX="$(cat .mathlab/max-rounds 2>/dev/null || echo 3)"
-        if [ "$ROUND" -ge "$MAX" ]; then
-          echo "BUDGET EXHAUSTED: round $ROUND of $MAX complete; proceeding to synthesis."
+        ACTION="$(cat .math-research/current-action)"
+        test -f "history/$ACTION.md"
+        git add -- problem.md state.md history evidence
+        if git diff --cached --quiet; then
+          echo "No knowledge changes to commit for $ACTION."
           exit 1
         fi
-        echo "Round $ROUND of $MAX complete; starting next round."
+        git commit -m "Research $ACTION: $(head -c 72 "evidence/$ACTION/plan.md" | head -1)"
+        rm -f .math-research/repair-used
     extensions:
-      tool.artifacts.stderr: round-gate.stderr.txt
-      tool.artifacts.stdout: round-gate.stdout.txt
+      tool.artifacts.stderr: commit.stderr.txt
+      tool.artifacts.stdout: commit.stdout.txt
       tool.command: |-
         set -eu
-        mkdir -p .mathlab
-        ROUND="$(cat .mathlab/round 2>/dev/null || echo 0)"
-        ROUND=$((ROUND + 1))
-        printf '%s\n' "$ROUND" > .mathlab/round
-        MAX="$(cat .mathlab/max-rounds 2>/dev/null || echo 3)"
-        if [ "$ROUND" -ge "$MAX" ]; then
-          echo "BUDGET EXHAUSTED: round $ROUND of $MAX complete; proceeding to synthesis."
+        ACTION="$(cat .math-research/current-action)"
+        test -f "history/$ACTION.md"
+        git add -- problem.md state.md history evidence
+        if git diff --cached --quiet; then
+          echo "No knowledge changes to commit for $ACTION."
           exit 1
         fi
-        echo "Round $ROUND of $MAX complete; starting next round."
-  synthesize_attack:
-    kind: agent_task
-    label: Synthesize Attack
-    config:
-      kind: agent_task
-      prompt: 'Synthesize the attack cycle into findings.md: the statement history (every version in shared/statement.md with what forced each revision), the verdict — proved, refuted, or open — with the verified evidence behind it, the prover''s progress (lemmas proved with Lean names, the final stuck point), the refuter''s coverage (verified counterexamples, or exact exhausted scopes and near-misses), and the smallest open case. Read .mathlab/round and .mathlab/max-rounds and note plainly when the cycle ended on budget rather than resolution. Label every claim per AGENTS.md and state the exact scope of every computation: a proof counts only if its marker passed the kernel gate, a counterexample only if it re-verified. If context.review.required_changes is present, close those gaps. Then append a cycle entry to DOSSIER.md per its structure and update its status board: statement version attacked, verdict, established results, failed attacks with what they taught, verified data locations, and open subproblems with the stuck lemma first. Close the entry with the natural next cycle — the next orient step reads it there. Dossier entries are append-only. Respond with ONLY a JSON status envelope whose context_updates set context.findings.summary.'
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.arbiter.decision
-      - context.review.required_changes
-      writes_context:
-      - context.findings.summary
-  review_attack:
-    kind: agent_task
-    label: Review Attack
-    config:
-      kind: agent_task
-      prompt: 'You are the adversarial reviewer of an attack cycle. Treat findings.md, DOSSIER.md, and both branch directories as untrusted claims. Check that the verdict matches the mechanically verified artifacts: a proved verdict requires the kernel-checked Lean build in prover/lean whose formal statement faithfully encodes the final statement version in shared/statement.md, and a refuted verdict requires the counterexample to re-verify — run refuter/verify.sh yourself — against that statement as written. Check that every claim is labeled per AGENTS.md and the label is truthful, that computational scopes match what the programs actually cover (read the programs, not the prose), that the statement history in findings.md matches shared/statement.md, and that the DOSSIER.md cycle entry is honest and append-only — failed attacks recorded, nothing inflated, no prior entries rewritten. Spot-check by re-running at least one verification. Return outcome success only when the findings and the dossier entry are honest, scoped, and verified. On failure, set context_updates for context.review.required_changes listing each violation precisely, and set your preferred_label to Synthesize. On success, clear context.review.required_changes to null. Respond with ONLY a JSON status envelope.'
-    runtime:
-      error_policy: continue
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.findings.summary
-      writes_context:
-      - context.review.required_changes
-  formalize:
-    kind: agent_task
-    label: Formalize
-    config:
-      kind: agent_task
-      prompt: 'Execute the formalization cycle briefed in .mathlab/formalize-target.md (the precise informal statement to formalize, with any reference or proof sketch) and .mathlab/cycle.md. Read DOSSIER.md first per dossier discipline: prior cycles may already record proved lemmas, failed proof strategies, or statement caveats. Formalize the target in Lean 4 inside the lean/ project (copy /opt/mathlab/template to lean/ if it does not exist; Mathlib is prebuilt; never modify /opt/mathlab/mathlib4). Add the formal statement and its proof under lean/MathLab/, imported from lean/MathLab.lean, and record every theorem name you consider part of the deliverable in .mathlab/theorems.txt, one fully qualified name per line. Follow AGENTS.md proof-integrity rules exactly: no sorry or admit, no new axiom declarations, and if you must weaken or adjust the statement to make it provable, state the deviation explicitly in .mathlab/notes.md. If .mathlab/lean-gate.log exists, it holds the compiler output of a failed previous gate; if context.review.required_changes is present, it lists fidelity gaps a verifier found; close both. Verify locally with (cd lean && lake build) before finishing, then append a cycle entry to DOSSIER.md — statement formalized, theorem names, any declared deviations, and failed proof strategies with what they taught; close the entry with the natural next cycle. Dossier entries are append-only. Respond with ONLY a JSON status envelope whose context_updates set context.formalization.summary and context.formalization.theorems (the recorded theorem names).'
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.cycle.goal
-      - context.review.required_changes
-      writes_context:
-      - context.formalization.summary
-      - context.formalization.theorems
-  lean_gate:
+        git commit -m "Research $ACTION: $(head -c 72 "evidence/$ACTION/plan.md" | head -1)"
+        rm -f .math-research/repair-used
+  resolution:
     kind: tool
-    label: Lean Gate
+    label: Check Resolution
     config:
       kind: tool
       command: |-
         set -eu
-        mkdir -p .mathlab
-        {
-          cd lean
-          lake build
-          if grep -rn --include='*.lean' -E '\bsorry\b|\badmit\b' MathLab MathLab.lean; then
-            echo 'GATE FAILURE: sorry/admit present in deliverable sources.'
-            exit 1
-          fi
-          if grep -rn --include='*.lean' -E '^[[:space:]]*axiom[[:space:]]' MathLab MathLab.lean; then
-            echo 'GATE FAILURE: new axiom declared in deliverable sources.'
-            exit 1
-          fi
-        } > .mathlab/lean-gate.log 2>&1 || { cat .mathlab/lean-gate.log; exit 1; }
-        cat .mathlab/lean-gate.log
-        rm -f .mathlab/lean-gate.log
-    extensions:
-      tool.artifacts.stderr: lean-gate.stderr.txt
-      tool.artifacts.stdout: lean-gate.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        {
-          cd lean
-          lake build
-          if grep -rn --include='*.lean' -E '\bsorry\b|\badmit\b' MathLab MathLab.lean; then
-            echo 'GATE FAILURE: sorry/admit present in deliverable sources.'
-            exit 1
-          fi
-          if grep -rn --include='*.lean' -E '^[[:space:]]*axiom[[:space:]]' MathLab MathLab.lean; then
-            echo 'GATE FAILURE: new axiom declared in deliverable sources.'
-            exit 1
-          fi
-        } > .mathlab/lean-gate.log 2>&1 || { cat .mathlab/lean-gate.log; exit 1; }
-        cat .mathlab/lean-gate.log
-        rm -f .mathlab/lean-gate.log
-  review_fidelity:
-    kind: agent_task
-    label: Review Fidelity
-    config:
-      kind: agent_task
-      prompt: 'You are the adversarial reviewer of a Lean formalization. The build already passed the kernel gate; your job is the part the kernel cannot check: does the formal statement faithfully encode the target stated in .mathlab/formalize-target.md? Read the theorems named in .mathlab/theorems.txt inside lean/, and for each one check quantifier structure, hypotheses, definitional choices, and edge conditions against the informal claim — a proved theorem about the wrong statement is a violation, not a result. Run (cd lean && lake env lean) probes or #check/#print inspections as needed. Verify any stated deviations in .mathlab/notes.md are honest and prominently declared, that AGENTS.md claim-labeling rules are followed, and that the DOSSIER.md cycle entry is present, honest, and append-only — deviations and failed strategies recorded, no prior entries rewritten. Return outcome success only when the formalization faithfully captures the claim or transparently declares its deviations. On failure, set context_updates for context.review.required_changes describing each fidelity gap precisely. On success, clear context.review.required_changes to null. Respond with ONLY a JSON status envelope.'
-    runtime:
-      error_policy: continue
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.formalization.theorems
-      writes_context:
-      - context.review.required_changes
-  commit_cycle:
-    kind: tool
-    label: Commit Cycle
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        rm -f .mathlab/round .mathlab/max-rounds .mathlab/guard-*
-        if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
-          echo "No repository changes this cycle; continuing."
+        ACTION="$(cat .math-research/current-action)"
+        DIR="evidence/$ACTION"
+        if [ -f .math-research/human-accepted-resolution.json ]; then
+          jq -e '.claim_id | type == "string" and length > 0' .math-research/human-accepted-resolution.json >/dev/null
+          echo "Human-accepted reviewed proof recorded."
           exit 0
         fi
-        git add -A
-        git commit -m "Cycle: $(head -c 72 .mathlab/cycle.md 2>/dev/null | head -1 || echo research cycle)"
-  record_obstruction:
-    kind: agent_task
-    label: Record Cycle Obstruction
-    config:
-      kind: agent_task
-      prompt: 'A bounded repair loop was exhausted. Do not weaken a gate or repeat the failed repair. Read .mathlab/cycle.md, the .mathlab/guard-* counters, available gate logs, branch reports, findings.md, and DOSSIER.md. Withdraw or clearly label any claim whose verification did not pass; delete stale PROVED or REFUTED markers when their gate failed. Append an honest blocked-cycle entry to DOSSIER.md naming the exact failed gate or review objection, the attempted repairs, what was learned, and a materially different next direction for the next orientation step. Dossier history is append-only. Respond with ONLY a JSON status envelope whose context_updates set context.cycle.obstruction and clear context.review.required_changes to null.'
-    contracts:
-      response: status_envelope
-      reads_context:
-      - context.cycle.goal
-      - context.review.required_changes
-      writes_context:
-      - context.cycle.obstruction
-      - context.review.required_changes
+        test -f "$DIR/resolution.json" || { echo "Problem remains open."; exit 1; }
+        test -f "$DIR/.verified"
+        jq -e '.kind == "certified_proof" or .kind == "verified_counterexample"' "$DIR/resolution.json" >/dev/null
+        jq -e '.claim_id | type == "string" and length > 0' "$DIR/resolution.json" >/dev/null
+        bash "$DIR/verify.sh"
+        echo "Mechanically verified resolution accepted."
     extensions:
-      tool.artifacts.stderr: commit-cycle.stderr.txt
-      tool.artifacts.stdout: commit-cycle.stdout.txt
+      tool.artifacts.stderr: resolution.stderr.txt
+      tool.artifacts.stdout: resolution.stdout.txt
       tool.command: |-
         set -eu
-        rm -f .mathlab/round .mathlab/max-rounds .mathlab/guard-*
-        if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
-          echo "No repository changes this cycle; continuing."
+        ACTION="$(cat .math-research/current-action)"
+        DIR="evidence/$ACTION"
+        if [ -f .math-research/human-accepted-resolution.json ]; then
+          jq -e '.claim_id | type == "string" and length > 0' .math-research/human-accepted-resolution.json >/dev/null
+          echo "Human-accepted reviewed proof recorded."
           exit 0
         fi
-        git add -A
-        git commit -m "Cycle: $(head -c 72 .mathlab/cycle.md 2>/dev/null | head -1 || echo research cycle)"
-  guard_verify:
-    kind: tool
-    label: Verify Repair Budget
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_verify 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_verify
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_verify attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_verify."
-    extensions:
-      tool.artifacts.stderr: guard_verify.stderr.txt
-      tool.artifacts.stdout: guard_verify.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_verify 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_verify
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_verify attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_verify."
-  guard_explore_exp:
-    kind: tool
-    label: Experiment Repair Budget
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_explore_exp 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_explore_exp
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_explore_exp attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_explore_exp."
-    extensions:
-      tool.artifacts.stderr: guard_explore_exp.stderr.txt
-      tool.artifacts.stdout: guard_explore_exp.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_explore_exp 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_explore_exp
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_explore_exp attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_explore_exp."
-  guard_explore_synth:
-    kind: tool
-    label: Findings Repair Budget
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_explore_synth 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_explore_synth
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_explore_synth attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_explore_synth."
-    extensions:
-      tool.artifacts.stderr: guard_explore_synth.stderr.txt
-      tool.artifacts.stdout: guard_explore_synth.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_explore_synth 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_explore_synth
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_explore_synth attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_explore_synth."
-  guard_prover:
-    kind: tool
-    label: Prover Repair Budget
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_prover 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_prover
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_prover attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_prover."
-    extensions:
-      tool.artifacts.stderr: guard_prover.stderr.txt
-      tool.artifacts.stdout: guard_prover.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_prover 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_prover
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_prover attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_prover."
-  guard_refuter:
-    kind: tool
-    label: Refuter Repair Budget
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_refuter 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_refuter
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_refuter attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_refuter."
-    extensions:
-      tool.artifacts.stderr: guard_refuter.stderr.txt
-      tool.artifacts.stdout: guard_refuter.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_refuter 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_refuter
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_refuter attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_refuter."
-  guard_attack_synth:
-    kind: tool
-    label: Attack Findings Repair Budget
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_attack_synth 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_attack_synth
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_attack_synth attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_attack_synth."
-    extensions:
-      tool.artifacts.stderr: guard_attack_synth.stderr.txt
-      tool.artifacts.stdout: guard_attack_synth.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_attack_synth 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_attack_synth
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_attack_synth attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_attack_synth."
-  guard_lean:
-    kind: tool
-    label: Lean Repair Budget
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_lean 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_lean
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_lean attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_lean."
-    extensions:
-      tool.artifacts.stderr: guard_lean.stderr.txt
-      tool.artifacts.stdout: guard_lean.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_lean 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_lean
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_lean attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_lean."
-  guard_fidelity:
-    kind: tool
-    label: Fidelity Repair Budget
-    config:
-      kind: tool
-      command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_fidelity 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_fidelity
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_fidelity attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_fidelity."
-    extensions:
-      tool.artifacts.stderr: guard_fidelity.stderr.txt
-      tool.artifacts.stdout: guard_fidelity.stdout.txt
-      tool.command: |-
-        set -eu
-        mkdir -p .mathlab
-        N="$(cat .mathlab/guard-guard_fidelity 2>/dev/null || echo 0)"
-        N=$((N + 1))
-        printf '%s\n' "$N" > .mathlab/guard-guard_fidelity
-        if [ "$N" -ge 3 ]; then
-          echo "REPAIR BUDGET EXHAUSTED: guard_fidelity attempt $N of 3; ending this cycle and recording the obstruction."
-          exit 1
-        fi
-        echo "Repair attempt $N of 3 via guard_fidelity."
+        test -f "$DIR/resolution.json" || { echo "Problem remains open."; exit 1; }
+        test -f "$DIR/.verified"
+        jq -e '.kind == "certified_proof" or .kind == "verified_counterexample"' "$DIR/resolution.json" >/dev/null
+        jq -e '.claim_id | type == "string" and length > 0' "$DIR/resolution.json" >/dev/null
+        bash "$DIR/verify.sh"
+        echo "Mechanically verified resolution accepted."
   done:
     kind: exit
-    label: Parked
+    label: Resolved
     config:
       kind: exit
 edges:
 - from: start
-  to: prepare_workspace
-- from: prepare_workspace
-  to: orient
+  to: prepare
+- from: prepare
+  to: research
   condition: outcome=success
-- from: orient
-  to: fan_out
-  label: Attack
-  condition: outcome=success && preferred_label=Attack
-- from: orient
-  to: formalize
-  label: Formalize
-  condition: outcome=success && preferred_label=Formalize
-- from: orient
+- from: research
+  to: verify
+  condition: outcome=success
+- from: research
+  to: verify
+  condition: outcome=partial_success
+- from: verify
+  to: repair_budget
+  condition: outcome=fail
+- from: repair_budget
+  to: repair
+  condition: outcome=success
+- from: repair_budget
+  to: assess
+  condition: outcome=fail
+- from: repair
+  to: verify
+  condition: outcome=success
+- from: verify
+  to: assess
+  condition: outcome=success
+- from: assess
+  to: record
+  condition: outcome=success
+- from: record
+  to: commit
+  condition: outcome=success
+- from: commit
+  to: resolution
+  condition: outcome=success
+- from: resolution
   to: done
-  label: Park
-  condition: outcome=success && preferred_label=Park
-- from: orient
-  to: survey
-  label: Explore
-  condition: outcome=success && preferred_label=Explore
-- from: survey
-  to: experiment
   condition: outcome=success
-- from: experiment
-  to: verify_evidence
-  condition: outcome=success
-- from: verify_evidence
-  to: guard_verify
-  label: Fix Evidence
+- from: resolution
+  to: research
   condition: outcome=fail
-- from: guard_verify
-  to: experiment
-  condition: outcome=success
-- from: guard_verify
-  to: record_obstruction
-  condition: outcome=fail
-- from: verify_evidence
-  to: synthesize_explore
-  condition: outcome=success
-- from: synthesize_explore
-  to: review_explore
-  condition: outcome=success
-- from: review_explore
-  to: guard_explore_exp
-  label: Fix Experiments
-  condition: outcome=fail && preferred_label=Experiment
-- from: guard_explore_exp
-  to: experiment
-  condition: outcome=success
-- from: guard_explore_exp
-  to: record_obstruction
-  condition: outcome=fail
-- from: review_explore
-  to: guard_explore_synth
-  label: Fix Findings
-  condition: outcome=fail && preferred_label=Synthesize
-- from: guard_explore_synth
-  to: synthesize_explore
-  condition: outcome=success
-- from: guard_explore_synth
-  to: record_obstruction
-  condition: outcome=fail
-- from: review_explore
-  to: commit_cycle
-  condition: outcome=success
-# The weighted fan_out -> join edge does double duty: inside the parallel
-# handler it is a trivially-succeeding branch, and after the fan-out
-# completes the main traversal prefers it by weight, so neither real
-# branch is re-executed sequentially. It stays unconditional because a
-# wait_all fan-out reports partial_success when a branch fails and the
-# arbiter must still convene to judge what survived.
-- from: fan_out
-  to: join
-  weight: 1
-- from: fan_out
-  to: prove
-- from: fan_out
-  to: refute
-- from: prove
-  to: prover_gate
-  condition: outcome=success
-- from: prover_gate
-  to: guard_prover
-  label: Fix Proof
-  condition: outcome=fail
-- from: guard_prover
-  to: prove
-  condition: outcome=success
-- from: guard_prover
-  to: join
-  condition: outcome=fail
-- from: prover_gate
-  to: join
-  condition: outcome=success
-- from: refute
-  to: refuter_gate
-  condition: outcome=success
-- from: refuter_gate
-  to: guard_refuter
-  label: Fix Evidence
-  condition: outcome=fail
-- from: guard_refuter
-  to: refute
-  condition: outcome=success
-- from: guard_refuter
-  to: join
-  condition: outcome=fail
-- from: refuter_gate
-  to: join
-  condition: outcome=success
-- from: join
-  to: arbiter
-  condition: outcome=success
-- from: arbiter
-  to: repair_statement
-  label: Repair
-  condition: outcome=success && preferred_label=Repair
-- from: arbiter
-  to: round_gate
-  label: Continue
-  condition: outcome=success && preferred_label=Continue
-- from: arbiter
-  to: synthesize_attack
-  label: Findings
-  condition: outcome=success && preferred_label=Findings
-- from: repair_statement
-  to: round_gate
-  condition: outcome=success
-- from: round_gate
-  to: synthesize_attack
-  label: Budget Exhausted
-  condition: outcome=fail
-- from: round_gate
-  to: fan_out
-  label: Next Round
-  condition: outcome=success
-- from: synthesize_attack
-  to: review_attack
-  condition: outcome=success
-- from: review_attack
-  to: guard_attack_synth
-  label: Fix Findings
-  condition: outcome=fail && preferred_label=Synthesize
-- from: guard_attack_synth
-  to: synthesize_attack
-  condition: outcome=success
-- from: guard_attack_synth
-  to: record_obstruction
-  condition: outcome=fail
-- from: review_attack
-  to: commit_cycle
-  condition: outcome=success
-- from: formalize
-  to: lean_gate
-  condition: outcome=success
-- from: lean_gate
-  to: guard_lean
-  label: Fix Proof
-  condition: outcome=fail
-- from: guard_lean
-  to: formalize
-  condition: outcome=success
-- from: guard_lean
-  to: record_obstruction
-  condition: outcome=fail
-- from: lean_gate
-  to: review_fidelity
-  condition: outcome=success
-- from: review_fidelity
-  to: guard_fidelity
-  label: Fix Fidelity
-  condition: outcome=fail
-- from: guard_fidelity
-  to: formalize
-  condition: outcome=success
-- from: guard_fidelity
-  to: record_obstruction
-  condition: outcome=fail
-- from: review_fidelity
-  to: commit_cycle
-  condition: outcome=success
-- from: commit_cycle
-  to: orient
-  condition: outcome=success
-- from: record_obstruction
-  to: commit_cycle
-  condition: outcome=success
