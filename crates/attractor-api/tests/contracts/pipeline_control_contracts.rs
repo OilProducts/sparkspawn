@@ -188,6 +188,17 @@ edges:
     source_checkpoint
         .context
         .insert("internal.run_workdir".to_string(), json!("/stale/workdir"));
+    source_checkpoint
+        .context
+        .insert("context.workflow_outcome".to_string(), json!("failure"));
+    source_checkpoint.context.insert(
+        "context.workflow_outcome_reason_code".to_string(),
+        json!("blocked"),
+    );
+    source_checkpoint.context.insert(
+        "context.workflow_outcome_reason_message".to_string(),
+        json!("stale failure"),
+    );
     store
         .create_run(CreateRunRequest {
             record: failed_record("run-identity-src", &project_path),
@@ -238,6 +249,9 @@ edges:
         context.get("internal.run_workdir"),
         Some(&json!(record.working_directory)),
     );
+    assert_eq!(record.outcome.as_deref(), Some("success"));
+    assert_eq!(record.outcome_reason_code, None);
+    assert_eq!(record.outcome_reason_message, None);
 }
 
 #[test]
