@@ -1853,6 +1853,11 @@ pub fn build_codex_runtime_environment() -> Result<BTreeMap<String, String>, Cod
             let _ = copy_file_if_changed(&source, &codex_home.join(file_name));
         }
     }
+    force_standard_service_tier(&codex_home.join("config.toml")).map_err(|error| {
+        CodexAppServerError::configuration(format!(
+            "codex runtime config could not default to the standard service tier: {error}"
+        ))
+    })?;
     for candidate in seed_candidates {
         let _ = copy_tree_contents(
             &candidate.join("plugins").join("cache"),
@@ -2161,6 +2166,40 @@ fn copy_file_if_changed(source: &Path, destination: &Path) -> std::io::Result<()
         fs::create_dir_all(parent)?;
     }
     fs::copy(source, destination).map(|_| ())
+}
+
+fn force_standard_service_tier(path: &Path) -> std::io::Result<()> {
+    let contents = fs::read_to_string(path).unwrap_or_default();
+    let mut found = false;
+    let mut normalized = Vec::new();
+    let mut in_top_level = true;
+
+    for line in contents.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            in_top_level = false;
+        }
+        if in_top_level
+            && trimmed
+                .split_once('=')
+                .is_some_and(|(key, _)| key.trim() == "service_tier")
+        {
+            normalized.push(r#"service_tier = "standard""#);
+            found = true;
+        } else {
+            normalized.push(line);
+        }
+    }
+    if !found {
+        normalized.insert(0, r#"service_tier = "standard""#);
+    }
+
+    let mut output = normalized.join("\n");
+    output.push('\n');
+    if output != contents {
+        fs::write(path, output)?;
+    }
+    Ok(())
 }
 
 fn copy_tree_contents(source: &Path, destination: &Path) -> std::io::Result<()> {

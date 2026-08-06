@@ -500,6 +500,11 @@ fn runtime_environment_uses_isolated_codex_home_and_seeds_from_host_home() {
     let host_codex_home = temp.path().join("host-codex-home");
     fs::create_dir_all(&host_codex_home).expect("host codex home");
     fs::write(host_codex_home.join("auth.json"), r#"{"seed":true}"#).expect("seed auth");
+    fs::write(
+        host_codex_home.join("config.toml"),
+        "model = \"gpt-5.6-sol\"\nservice_tier = \"fast\"\n",
+    )
+    .expect("seed config");
     let _runtime_guard = EnvVarGuard::set("ATTRACTOR_CODEX_RUNTIME_ROOT", &runtime_root);
     let _seed_guard =
         EnvVarGuard::set("ATTRACTOR_CODEX_SEED_DIR", temp.path().join("missing-seed"));
@@ -516,6 +521,14 @@ fn runtime_environment_uses_isolated_codex_home_and_seeds_from_host_home() {
     assert_eq!(
         fs::read_to_string(isolated_codex_home.join("auth.json")).expect("seeded auth"),
         r#"{"seed":true}"#
+    );
+    assert_eq!(
+        fs::read_to_string(isolated_codex_home.join("config.toml")).expect("seeded config"),
+        "model = \"gpt-5.6-sol\"\nservice_tier = \"standard\"\n"
+    );
+    assert_eq!(
+        fs::read_to_string(host_codex_home.join("config.toml")).expect("host config"),
+        "model = \"gpt-5.6-sol\"\nservice_tier = \"fast\"\n"
     );
 }
 
