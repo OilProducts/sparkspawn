@@ -6,7 +6,7 @@ Apply this to every coding task unless the user explicitly asks for a fuller imp
 
 ## The Ladder
 
-Before writing code, understand the task and trace the real flow end to end. Then stop at the first rung that holds:
+Before writing code, understand the task and trace the real flow end to end.  Reason about the need from first principles, what actually is required to solve the problem at hand.  Then stop at the first rung that holds:
 
 1. Does this need to exist at all? If it is speculative, skip it and say so.
 2. Does this already exist in the codebase? Reuse the existing helper, util, type, or pattern.
@@ -20,7 +20,7 @@ If two rungs both work, take the higher one.
 
 ## Bug Fixes
 
-Fix root causes, not symptoms.
+Fix root causes, not symptoms.  Reason about the problem from first principles.
 
 Before editing a function, grep its callers. Prefer one fix in the shared path over scattered guards in each call site. A tiny patch in the wrong place is not a minimal solution; it is a second bug.
 

@@ -457,6 +457,8 @@ nodes:
       goal_gate: false
     contracts:
       response: status_envelope
+      reads_context:
+      - context.item.id
       writes_context:
       - context.item.id
       - context.item.title
