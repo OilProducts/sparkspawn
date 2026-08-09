@@ -285,8 +285,8 @@ impl WorkspaceTriggerActivationSink {
                 Ok(None) => unreachable!("the event project path was checked above"),
                 Err(error) => {
                     return Ok(chain_noop(format!(
-                        "Next-session launch skipped: terminal event project path is invalid: {error}"
-                    )))
+                    "Next-session launch skipped: terminal event project path is invalid: {error}"
+                )))
                 }
             };
             if configured_project != event_project {

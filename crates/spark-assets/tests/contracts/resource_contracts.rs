@@ -273,8 +273,7 @@ fn research_program_separates_correctness_from_substantive_progress() {
     let flow = attractor_dsl::parse_flow_definition(asset.text().expect("flow text"))
         .expect("parse research program");
     let prompt = |node_id: &str| {
-        serde_json::to_value(&flow.nodes[node_id].config)
-            .expect("serialize node config")["prompt"]
+        serde_json::to_value(&flow.nodes[node_id].config).expect("serialize node config")["prompt"]
             .as_str()
             .expect("agent prompt")
             .to_string()
