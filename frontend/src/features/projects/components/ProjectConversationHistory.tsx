@@ -254,7 +254,7 @@ const PlanRow = memo(function PlanRow({
                 {entry.status === 'failed' ? (
                     <p className="whitespace-pre-wrap break-words text-xs leading-5 [overflow-wrap:anywhere]">{content}</p>
                 ) : (
-                    <ProjectConversationMarkdown content={content} />
+                    <ProjectConversationMarkdown content={content} enableCodeCopy />
                 )}
                 {proposedPlan ? (
                     <div className="mt-2 space-y-2 text-[11px] text-emerald-950/75">
@@ -558,6 +558,7 @@ export function ProjectConversationHistory({
                             <MessageRow
                                 key={key}
                                 entry={entry}
+                                enableCopy
                                 formatConversationTimestamp={formatConversationTimestamp}
                             />
                         )
