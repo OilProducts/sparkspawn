@@ -1,9 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ProjectConversationHistory } from '@/features/projects/components/ProjectConversationHistory'
+import { ProjectConversationMarkdown } from '@/features/projects/components/ProjectConversationMarkdown'
+import { TranscriptCopyButton } from '@/components/app/transcript/TranscriptCopyButton'
 import type {
     ConversationTimelineEntry,
     ProjectFlowLaunch,
@@ -20,7 +22,7 @@ vi.mock('@/features/projects/components/ProjectConversationMarkdown', async () =
     )
     const React = await import('react')
     return {
-        ProjectConversationMarkdown: (props: { content: string }) => {
+        ProjectConversationMarkdown: (props: { content: string; enableCodeCopy?: boolean }) => {
             markdownRenderSpy(props.content)
             return React.createElement(actual.ProjectConversationMarkdown, props)
         },
@@ -101,6 +103,7 @@ const renderHistory = (
 ) => render(makeHistoryElement(activeConversationHistory, overrides))
 
 afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
 })
 
@@ -348,6 +351,78 @@ const makeProposedPlan = (
 })
 
 describe('ProjectConversationHistory', () => {
+    it('keeps successful copy feedback for 2 seconds, restarts it, and cleans up on unmount', async () => {
+        vi.useFakeTimers()
+        const writeText = vi.fn().mockResolvedValue(undefined)
+        vi.stubGlobal('navigator', { clipboard: { writeText } })
+        const { unmount } = render(<TranscriptCopyButton label="Copy message" text="raw" />)
+        const button = screen.getByRole('button', { name: 'Copy message' })
+
+        fireEvent.click(button)
+        await act(async () => {})
+        expect(button).toHaveAccessibleName('Copy message copied')
+
+        act(() => vi.advanceTimersByTime(1_999))
+        expect(button).toHaveAccessibleName('Copy message copied')
+
+        fireEvent.click(button)
+        await act(async () => {})
+        act(() => vi.advanceTimersByTime(1_999))
+        expect(button).toHaveAccessibleName('Copy message copied')
+
+        act(() => vi.advanceTimersByTime(1))
+        expect(button).toHaveAccessibleName('Copy message')
+
+        fireEvent.click(button)
+        await act(async () => {})
+        expect(vi.getTimerCount()).toBe(1)
+        unmount()
+        expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('copies exact raw eligible messages and preserves copy failures', async () => {
+        const user = userEvent.setup()
+        const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'))
+        vi.stubGlobal('navigator', { clipboard: { writeText } })
+        renderHistory([
+            makeMessageEntry({ id: 'user', role: 'user', content: '  **raw user**\n' }),
+            makeMessageEntry({ id: 'assistant', content: '## Raw assistant\n' }),
+        ])
+
+        const buttons = screen.getAllByRole('button', { name: 'Copy message' })
+        await user.click(buttons[0])
+        expect(writeText).toHaveBeenLastCalledWith('  **raw user**\n')
+        expect(buttons[0]).toHaveAccessibleName('Copy message copied')
+        await user.click(buttons[1])
+        expect(await screen.findByRole('status')).toHaveTextContent('Copy failed.')
+    })
+
+    it('excludes ineligible assistant and non-message rows from copying', () => {
+        renderHistory([
+            makeMessageEntry({ id: 'streaming', status: 'streaming', content: 'partial' }),
+            makeMessageEntry({ id: 'failed', status: 'failed', content: 'failed' }),
+            makeMessageEntry({ id: 'thinking', presentation: 'thinking', content: 'reasoning' }),
+            makeMessageEntry({ id: 'placeholder', content: '' }),
+            makeModeChangeEntry(),
+            makeContextCompactionEntry(),
+            makeToolCallEntry(),
+        ])
+
+        expect(screen.queryByRole('button', { name: 'Copy message' })).not.toBeInTheDocument()
+    })
+
+    it('copies exact fenced code bodies only when opted in', async () => {
+        const user = userEvent.setup()
+        const writeText = vi.fn().mockResolvedValue(undefined)
+        vi.stubGlobal('navigator', { clipboard: { writeText } })
+        const { rerender } = render(<ProjectConversationMarkdown content={'```text\nno control\n```'} />)
+        expect(screen.queryByRole('button', { name: 'Copy code' })).not.toBeInTheDocument()
+
+        rerender(<ProjectConversationMarkdown enableCodeCopy content={'```ts meta\n  const x = 1;  \n\n```'} />)
+        await user.click(screen.getByRole('button', { name: 'Copy code' }))
+        expect(writeText).toHaveBeenCalledWith('  const x = 1;  \n\n')
+    })
+
     it('renders markdown semantics for normal assistant messages', () => {
         renderHistory([
             makeMessageEntry({

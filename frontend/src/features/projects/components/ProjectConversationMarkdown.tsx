@@ -1,6 +1,7 @@
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 
+import { TranscriptCopyButton } from '@/components/app/transcript/TranscriptCopyButton'
 import { cn } from '@/lib/utils'
 
 const INLINE_CODE_CONTAINER_CLASS_NAME =
@@ -107,12 +108,45 @@ const markdownComponents: Components = {
 
 interface ProjectConversationMarkdownProps {
     content: string
+    enableCodeCopy?: boolean
 }
 
-function ProjectConversationMarkdownComponent({ content }: ProjectConversationMarkdownProps) {
+const fencedCodeText = (source: string, start: number, end: number) => {
+    const block = source.slice(start, end)
+    const opening = block.match(/^[ \t]{0,3}(`{3,}|~{3,})[^\r\n]*(?:\r\n|\n|\r)/)
+    if (!opening) return null
+    const fence = opening[1]
+    const body = block.slice(opening[0].length)
+    const closing = body.match(new RegExp(`(^|\\r\\n|\\n|\\r)[ \\t]{0,3}${fence[0]}{${fence.length},}[ \\t]*(?:\\r\\n|\\n|\\r)?$`))
+    return closing?.index === undefined ? body : body.slice(0, closing.index + closing[1].length)
+}
+
+function ProjectConversationMarkdownComponent({ content, enableCodeCopy = false }: ProjectConversationMarkdownProps) {
+    const components = useMemo<Components>(() => enableCodeCopy ? {
+        ...markdownComponents,
+        pre({ children, node }) {
+            const position = node?.position
+            const text = position?.start.offset !== undefined && position.end.offset !== undefined
+                ? fencedCodeText(content, position.start.offset, position.end.offset)
+                : null
+            return (
+                <div className="relative">
+                    <pre className="max-w-full overflow-x-hidden whitespace-pre-wrap break-words rounded border border-border/60 bg-background/80 px-3 py-2 pr-9 [overflow-wrap:anywhere]">
+                        {children}
+                    </pre>
+                    {text !== null ? (
+                        <span className="absolute right-1 top-1">
+                            <TranscriptCopyButton label="Copy code" text={text} />
+                        </span>
+                    ) : null}
+                </div>
+            )
+        },
+    } : markdownComponents, [content, enableCodeCopy])
+
     return (
         <div className="min-w-0 space-y-2 break-words text-foreground [overflow-wrap:anywhere]">
-            <ReactMarkdown components={markdownComponents} skipHtml>
+            <ReactMarkdown components={components} skipHtml>
                 {content}
             </ReactMarkdown>
         </div>

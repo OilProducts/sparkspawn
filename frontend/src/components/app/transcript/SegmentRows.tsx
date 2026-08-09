@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProjectConversationMarkdown } from '@/features/projects/components/ProjectConversationMarkdown'
+import { TranscriptCopyButton } from './TranscriptCopyButton'
 
 // Shared presentational rows for agent transcripts. A chat turn and a run
 // node are the same activity — inference, tool calls, and thinking
@@ -237,9 +238,11 @@ export const ThinkingRow = memo(function ThinkingRow({
 
 export const MessageRow = memo(function MessageRow({
     entry,
+    enableCopy = false,
     formatConversationTimestamp,
 }: {
     entry: TranscriptMessageEntry
+    enableCopy?: boolean
     formatConversationTimestamp: (value: string) => string
 }) {
     const shouldRenderAssistantMarkdown =
@@ -253,6 +256,15 @@ export const MessageRow = memo(function MessageRow({
                 ? (entry.error || 'Response failed.')
                 : 'Thinking...'
             : entry.content
+    const canCopy = enableCopy && (
+        entry.role === 'user'
+        || (
+            entry.role === 'assistant'
+            && entry.status === 'complete'
+            && entry.presentation !== 'thinking'
+            && entry.content.length > 0
+        )
+    )
 
     return (
         <li
@@ -267,13 +279,16 @@ export const MessageRow = memo(function MessageRow({
                             : 'border-border bg-muted/40 text-foreground'
                 }`}
             >
-                <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
-                    {entry.role === 'assistant'
-                        ? (entry.presentation === 'thinking' ? 'Thinking' : 'Spark')
-                        : entry.role}
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                        {entry.role === 'assistant'
+                            ? (entry.presentation === 'thinking' ? 'Thinking' : 'Spark')
+                            : entry.role}
+                    </p>
+                    {canCopy ? <TranscriptCopyButton label="Copy message" text={entry.content} /> : null}
+                </div>
                 {shouldRenderAssistantMarkdown ? (
-                    <ProjectConversationMarkdown content={entry.content} />
+                    <ProjectConversationMarkdown content={entry.content} enableCodeCopy={enableCopy && entry.status === 'complete'} />
                 ) : (
                     <p
                         className={`whitespace-pre-wrap text-xs leading-5 ${
