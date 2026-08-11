@@ -938,13 +938,13 @@ impl WorkspaceConversationService {
                 runtime_session_provider,
             );
         }
-        for event in output.events {
+        for mut event in output.events {
             if persist_provider_events {
                 repository.append_provider_event(
                     conversation_id,
                     &project_path,
                     assistant_turn_id,
-                    &event,
+                    &mut event,
                 )?;
             }
             ensure_assistant_streaming(&mut snapshot, assistant_turn_id, &mut emitted_payloads);
@@ -3596,12 +3596,12 @@ struct LiveConversationTurnState {
 }
 
 impl LiveConversationTurnState {
-    fn ingest_event(&mut self, event: TurnStreamEvent) -> spark_storage::Result<()> {
+    fn ingest_event(&mut self, mut event: TurnStreamEvent) -> spark_storage::Result<()> {
         self.repository.append_provider_event(
             &self.conversation_id,
             &self.project_path,
             &self.assistant_turn_id,
-            &event,
+            &mut event,
         )?;
         let mut emitted_payloads = Vec::new();
         if apply_assistant_turn_app_server_ids(

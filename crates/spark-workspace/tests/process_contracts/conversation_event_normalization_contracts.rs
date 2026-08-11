@@ -210,6 +210,70 @@ fn project_chat_persists_every_provider_event_but_only_the_completed_logical_uni
 }
 
 #[test]
+fn project_chat_event_and_transcript_share_externalized_tool_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    let service = WorkspaceConversationService::new(settings.clone());
+    let (prepared, _) = service
+        .start_turn(
+            "conversation-large-tool-output",
+            ConversationTurnRequest {
+                project_path: "/projects/large-tool-output".to_string(),
+                message: "Run it".to_string(),
+                ..ConversationTurnRequest::default()
+            },
+        )
+        .expect("start turn");
+    let full_output = "large output".repeat(2_000);
+    service
+        .ingest_agent_turn_output(
+            "conversation-large-tool-output",
+            "/projects/large-tool-output",
+            &prepared.assistant_turn_id,
+            "chat",
+            AgentTurnOutput {
+                events: vec![tool_event(
+                    "tool_call_completed",
+                    "tool-large",
+                    "completed",
+                    &full_output,
+                )],
+                ..AgentTurnOutput::default()
+            },
+        )
+        .expect("ingest tool output");
+
+    let project = ProjectRegistry::new(&settings.data_dir)
+        .ensure_project_paths("/projects/large-tool-output")
+        .expect("project paths");
+    let root = project
+        .conversations_dir
+        .join("conversation-large-tool-output");
+    let activity = ActivityRepository::new(&root);
+    let event = activity
+        .read_events()
+        .expect("events")
+        .into_iter()
+        .find(|record| record.event["type"] == "provider_event")
+        .expect("provider event");
+    let transcript = activity.hydrate_transcript().expect("transcript");
+    let segment = transcript
+        .segments
+        .iter()
+        .find(|segment| segment.kind == "tool_call")
+        .expect("tool segment");
+    assert_eq!(
+        segment.tool_call.as_ref(),
+        Some(&event.event["event"]["tool_call"])
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("tool-output/segment-tool-app-turn-tool-large.txt"))
+            .expect("artifact"),
+        full_output
+    );
+}
+
+#[test]
 fn recovered_terminal_provider_unit_stays_visible_across_reopens() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());
@@ -225,12 +289,13 @@ fn recovered_terminal_provider_unit_stays_visible_across_reopens() {
         )
         .expect("start turn");
     let repository = ConversationRepository::new(&settings.data_dir);
+    let mut completed = content_completed("assistant", "recovered", "app-turn", "answer");
     let provider_event = repository
         .append_provider_event(
             "conversation-recovered-provider-unit",
             "/projects/recovered-provider-unit",
             &prepared.assistant_turn_id,
-            &content_completed("assistant", "recovered", "app-turn", "answer"),
+            &mut completed,
         )
         .expect("persist terminal provider event");
 

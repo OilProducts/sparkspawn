@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::conversation::{
-    truncate_utf8, Transcript, TranscriptSegment, TranscriptTurn, TOOL_OUTPUT_INLINE_LIMIT_BYTES,
+    externalize_segment_tool_output, Transcript, TranscriptSegment, TranscriptTurn,
 };
 use crate::{read_jsonl, JsonLinesOptions, JsonLinesPolicy, Result, StorageError};
 
@@ -94,6 +94,13 @@ impl ActivityRepository {
 
     pub fn transcript_path(&self) -> PathBuf {
         self.root.join(ACTIVITY_TRANSCRIPT_FILE_NAME)
+    }
+
+    pub fn externalize_tool_output(&self, artifact_id: &str, tool_call: &mut Value) -> Result<()> {
+        let Some(tool_call) = tool_call.as_object_mut() else {
+            return Ok(());
+        };
+        crate::conversation::externalize_tool_output(&self.root, artifact_id, tool_call)
     }
 
     /// Append detailed activity first and return its dense, tail-derived sequence.
@@ -253,39 +260,7 @@ fn externalize_tool_output(root: &Path, record: &mut TranscriptRecord) -> Result
     let TranscriptRecord::SegmentUpsert { segment, .. } = record else {
         return Ok(());
     };
-    let Some(tool_call) = segment.tool_call.as_mut().and_then(Value::as_object_mut) else {
-        return Ok(());
-    };
-    if tool_call.get("output_truncated").and_then(Value::as_bool) == Some(true) {
-        return Ok(());
-    }
-    let Some(output) = tool_call.get("output").and_then(Value::as_str) else {
-        return Ok(());
-    };
-    if output.len() <= TOOL_OUTPUT_INLINE_LIMIT_BYTES || !safe_artifact_id(&segment.id) {
-        return Ok(());
-    }
-    let output = output.to_string();
-    let path = root.join("tool-output").join(format!("{}.txt", segment.id));
-    crate::write_text_atomic(&path, &output)?;
-    let (preview, _) = truncate_utf8(&output, TOOL_OUTPUT_INLINE_LIMIT_BYTES);
-    tool_call.insert("output".to_string(), Value::String(preview));
-    tool_call.insert("output_size".to_string(), Value::from(output.len()));
-    tool_call.insert("output_truncated".to_string(), Value::Bool(true));
-    tool_call.insert(
-        "output_artifact".to_string(),
-        Value::String(format!("tool-output/{}.txt", segment.id)),
-    );
-    Ok(())
-}
-
-fn safe_artifact_id(value: &str) -> bool {
-    !value.is_empty()
-        && !value.starts_with('.')
-        && !value.contains("..")
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    externalize_segment_tool_output(root, segment)
 }
 
 fn read_lines<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Vec<T>> {
@@ -388,16 +363,27 @@ fn tail_record<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>> {
         .metadata()
         .map_err(|error| activity_io("stat", path, error))?
         .len();
-    let start = length.saturating_sub(TAIL_CHUNK_BYTES);
-    file.seek(SeekFrom::Start(start))
-        .map_err(|error| activity_io("seek", path, error))?;
+    let mut end = length;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|error| activity_io("read", path, error))?;
-    for line in String::from_utf8_lossy(&bytes).lines().rev() {
-        if let Ok(record) = serde_json::from_str(line.trim()) {
-            return Ok(Some(record));
+    while end > 0 {
+        let start = end.saturating_sub(TAIL_CHUNK_BYTES);
+        file.seek(SeekFrom::Start(start))
+            .map_err(|error| activity_io("seek", path, error))?;
+        let mut chunk = vec![0; (end - start) as usize];
+        file.read_exact(&mut chunk)
+            .map_err(|error| activity_io("read", path, error))?;
+        chunk.extend(bytes);
+        bytes = chunk;
+        let mut lines = bytes.split(|byte| *byte == b'\n');
+        if start > 0 {
+            lines.next();
         }
+        for line in lines.rev().filter(|line| !line.is_empty()) {
+            if let Ok(record) = serde_json::from_slice(line) {
+                return Ok(Some(record));
+            }
+        }
+        end = start;
     }
     Ok(None)
 }

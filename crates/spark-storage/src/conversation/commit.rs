@@ -91,7 +91,7 @@ impl ConversationRepository {
                 }
                 ConversationMutation::SegmentUpserted { mut segment } => {
                     resolve_segment_order(&record, &mut segment);
-                    externalize_segment_tool_output(&record_paths, &mut segment)?;
+                    externalize_segment_tool_output(record_paths.root(), &mut segment)?;
                     record.transcript.upsert_segment(segment.clone());
                     entry_kinds.push(JournalEntryKind::SegmentUpserted { segment });
                     source_event_sequences.push(None);
@@ -102,7 +102,7 @@ impl ConversationRepository {
                     source_event_sequence,
                 } => {
                     resolve_segment_order(&record, &mut segment);
-                    externalize_segment_tool_output(&record_paths, &mut segment)?;
+                    externalize_segment_tool_output(record_paths.root(), &mut segment)?;
                     record.transcript.upsert_segment(segment.clone());
                     entry_kinds.push(JournalEntryKind::SegmentUpserted { segment });
                     source_event_sequences.push(Some(source_event_sequence));

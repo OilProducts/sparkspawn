@@ -19,7 +19,9 @@ mod tool_output;
 mod transient;
 
 pub(crate) use store::{read_record, ConversationRecordPaths};
-pub(crate) use tool_output::is_safe_segment_file_id;
+pub(crate) use tool_output::{
+    externalize_segment_tool_output, externalize_tool_output, is_safe_segment_file_id,
+};
 
 pub use commit::ConversationCommit;
 pub use identity::{

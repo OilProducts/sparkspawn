@@ -12,7 +12,6 @@ use crate::error::Result;
 use crate::write_text_atomic;
 
 use super::records::TranscriptSegment;
-use super::store::ConversationRecordPaths;
 
 /// Largest tool output stored inline in the durable transcript. Larger outputs
 /// are externalized and the inline value becomes a preview of this size.
@@ -24,27 +23,37 @@ pub const TOOL_OUTPUT_INLINE_LIMIT_BYTES: usize = 8 * 1024;
 /// output is already a preview (`output_truncated`), or the segment id is not
 /// filesystem-safe. Never overwrites a sidecar with an existing preview.
 pub(crate) fn externalize_segment_tool_output(
-    paths: &ConversationRecordPaths,
+    root: &std::path::Path,
     segment: &mut TranscriptSegment,
 ) -> Result<()> {
     let Some(tool_call) = segment.tool_call.as_mut().and_then(Value::as_object_mut) else {
         return Ok(());
     };
+    externalize_tool_output(root, &segment.id, tool_call)
+}
+
+pub(crate) fn externalize_tool_output(
+    root: &std::path::Path,
+    artifact_id: &str,
+    tool_call: &mut serde_json::Map<String, Value>,
+) -> Result<()> {
     if tool_call.get("output_truncated").and_then(Value::as_bool) == Some(true) {
         return Ok(());
     }
     let Some(output) = tool_call.get("output").and_then(Value::as_str) else {
         return Ok(());
     };
-    if output.len() <= TOOL_OUTPUT_INLINE_LIMIT_BYTES || !is_safe_segment_file_id(&segment.id) {
+    if output.len() <= TOOL_OUTPUT_INLINE_LIMIT_BYTES || !is_safe_segment_file_id(artifact_id) {
         return Ok(());
     }
     let output = output.to_string();
-    write_text_atomic(paths.tool_output_file(&segment.id), &output)?;
+    let artifact = format!("tool-output/{artifact_id}.txt");
+    write_text_atomic(root.join(&artifact), &output)?;
     let (preview, _) = truncate_utf8(&output, TOOL_OUTPUT_INLINE_LIMIT_BYTES);
     tool_call.insert("output".to_string(), json!(preview));
     tool_call.insert("output_size".to_string(), json!(output.len()));
     tool_call.insert("output_truncated".to_string(), json!(true));
+    tool_call.insert("output_artifact".to_string(), json!(artifact));
     Ok(())
 }
 

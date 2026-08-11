@@ -727,7 +727,7 @@ impl ConversationRepository {
         conversation_id: &str,
         project_path: &str,
         turn_id: &str,
-        event: &TurnStreamEvent,
+        event: &mut TurnStreamEvent,
     ) -> Result<crate::ActivityEvent> {
         let project_paths = self.registry.ensure_project_paths(project_path)?;
         let root = project_paths.conversations_dir.join(conversation_id);
@@ -739,8 +739,23 @@ impl ConversationRepository {
                 reason: "conversation activity cache lock poisoned".to_string(),
             })?
             .entry(root.clone())
-            .or_insert_with(|| crate::ActivityRepository::new(root))
+            .or_insert_with(|| crate::ActivityRepository::new(root.clone()))
             .clone();
+        if matches!(
+            event.kind,
+            spark_common::events::TurnStreamEventKind::ToolCallCompleted
+                | spark_common::events::TurnStreamEventKind::ToolCallFailed
+        ) {
+            if let Some(artifact_id) = event
+                .tool_call
+                .as_ref()
+                .map(|tool_call| spark_common::segments::tool_segment_id(turn_id, event, tool_call))
+            {
+                if let Some(tool_call) = event.tool_call.as_mut() {
+                    activity.externalize_tool_output(&artifact_id, tool_call)?;
+                }
+            }
+        }
         activity.append_event(
             json!({"type": "provider_event", "turn_id": turn_id, "event": event}),
             iso_now(),

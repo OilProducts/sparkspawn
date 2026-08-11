@@ -140,6 +140,67 @@ fn materialize_execution_suffix(
     Ok(())
 }
 
+fn externalize_codergen_tool_output(
+    activity: &spark_storage::ActivityRepository,
+    event: &mut CodergenEvent,
+) -> spark_storage::Result<()> {
+    let kind = event
+        .payload
+        .get("turn_stream_event")
+        .and_then(|event| event.get("kind"))
+        .or_else(|| event.payload.get("kind"))
+        .and_then(Value::as_str);
+    if !matches!(kind, Some("tool_call_completed" | "tool_call_failed")) {
+        return Ok(());
+    }
+    let normalized_id = event
+        .payload
+        .get("turn_stream_event")
+        .and_then(|event| event.get("tool_call"))
+        .and_then(spark_common::segments::tool_call_id);
+    if let Some(id) = normalized_id {
+        let bounded = {
+            let tool_call = event
+                .payload
+                .get_mut("turn_stream_event")
+                .and_then(Value::as_object_mut)
+                .and_then(|event| event.get_mut("tool_call"));
+            let Some(tool_call) = tool_call else {
+                return Ok(());
+            };
+            activity.externalize_tool_output(&id, tool_call)?;
+            tool_call.clone()
+        };
+        if let Some(tool_event) = event
+            .payload
+            .get_mut("tool_event")
+            .filter(|tool_event| {
+                spark_common::segments::tool_call_id(tool_event).as_deref() == Some(id.as_str())
+            })
+            .and_then(Value::as_object_mut)
+        {
+            for key in [
+                "output",
+                "output_size",
+                "output_truncated",
+                "output_artifact",
+            ] {
+                if let Some(value) = bounded.get(key) {
+                    tool_event.insert(key.to_string(), value.clone());
+                }
+            }
+        }
+        return Ok(());
+    }
+    let Some(tool_event) = event.payload.get_mut("tool_event") else {
+        return Ok(());
+    };
+    let Some(id) = spark_common::segments::tool_call_id(tool_event) else {
+        return Ok(());
+    };
+    activity.externalize_tool_output(&id, tool_event)
+}
+
 pub type RuntimeHandlerFn =
     Box<dyn FnMut(HandlerRuntime) -> std::result::Result<Outcome, RuntimeNodeError> + Send>;
 
@@ -927,8 +988,19 @@ impl RuntimeHandlerRunner {
             let trace_path = trace_path.clone();
             let activity = activity.clone();
             let sink_runtime = runtime.clone();
-            Arc::new(move |event: spark_agent_adapter::CodergenEvent| {
+            Arc::new(move |mut event: spark_agent_adapter::CodergenEvent| {
                 write_agent_trace_event(trace_path.as_deref(), &event);
+                if let Some(activity) = activity.as_ref() {
+                    if let Err(error) = externalize_codergen_tool_output(activity, &mut event) {
+                        let mut slot = sink_error
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner());
+                        if slot.is_none() {
+                            *slot = Some(error.to_string());
+                        }
+                        return;
+                    }
+                }
                 let value = serde_json::to_value(&event).unwrap_or_else(|_| json!({}));
                 let append_result = if let Some(activity) = activity.as_ref() {
                     activity
@@ -2715,4 +2787,39 @@ fn object_string(value: &Value, key: &str) -> String {
             _ => None,
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+
+    #[test]
+    fn codergen_event_duplicates_share_externalized_tool_output() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let activity = spark_storage::ActivityRepository::new(temp.path());
+        let full_output = "large output".repeat(2_000);
+        let tool_call = json!({"id": "call-1", "output": full_output.clone()});
+        let mut event = CodergenEvent::new(
+            "codex_app_server_session_event",
+            BTreeMap::from([
+                ("tool_event".to_string(), tool_call.clone()),
+                (
+                    "turn_stream_event".to_string(),
+                    json!({"kind": "tool_call_completed", "tool_call": tool_call}),
+                ),
+            ]),
+        );
+
+        externalize_codergen_tool_output(&activity, &mut event).expect("externalize");
+
+        assert_eq!(
+            event.payload["tool_event"],
+            event.payload["turn_stream_event"]["tool_call"]
+        );
+        assert_eq!(event.payload["tool_event"]["output_truncated"], true);
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("tool-output/call-1.txt")).expect("artifact"),
+            full_output
+        );
+    }
 }

@@ -4,6 +4,86 @@ use spark_storage::{ActivityRepository, TranscriptRecord};
 use std::io::Write;
 
 #[test]
+fn oversized_jsonl_records_remain_valid_tail_authority() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repository = ActivityRepository::new(temp.path());
+    let completion = repository
+        .append_event(
+            json!({"type": "content_completed", "text": "x".repeat(128 * 1024)}),
+            "now",
+        )
+        .expect("large event");
+    repository
+        .append_transcript(&TranscriptRecord::SegmentUpsert {
+            revision: 1,
+            committed_at: "now".to_string(),
+            source_event_sequence: completion.sequence,
+            segment: serde_json::from_value(json!({
+                "id": "large-answer", "turn_id": "turn", "kind": "assistant_message",
+                "content": "y".repeat(128 * 1024)
+            }))
+            .expect("large segment"),
+        })
+        .expect("transcript after large event");
+
+    let reopened = ActivityRepository::new(temp.path());
+    let next = reopened
+        .append_event(json!({"type": "content_completed"}), "later")
+        .expect("event after large transcript");
+    reopened
+        .append_transcript(&TranscriptRecord::SegmentUpsert {
+            revision: 2,
+            committed_at: "later".to_string(),
+            source_event_sequence: next.sequence,
+            segment: serde_json::from_value(json!({
+                "id": "next", "turn_id": "turn", "kind": "assistant_message"
+            }))
+            .expect("next segment"),
+        })
+        .expect("transcript after large transcript tail");
+}
+
+#[test]
+fn event_and_transcript_share_one_externalized_tool_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repository = ActivityRepository::new(temp.path());
+    let full_output = "tool output".repeat(2_000);
+    let mut tool_call = json!({"id": "call-1", "output": full_output.clone()});
+    repository
+        .externalize_tool_output("call-1", &mut tool_call)
+        .expect("externalize event output");
+    let event = repository
+        .append_event(
+            json!({"type": "tool_call_completed", "tool_call": tool_call}),
+            "now",
+        )
+        .expect("tool event");
+    repository
+        .append_transcript(&TranscriptRecord::SegmentUpsert {
+            revision: 1,
+            committed_at: "now".to_string(),
+            source_event_sequence: event.sequence,
+            segment: serde_json::from_value(json!({
+                "id": "segment-tool", "turn_id": "turn", "kind": "tool_call",
+                "tool_call": event.event["tool_call"]
+            }))
+            .expect("tool segment"),
+        })
+        .expect("tool transcript");
+
+    let transcript = repository.read_transcript_records().expect("transcript");
+    let TranscriptRecord::SegmentUpsert { segment, .. } = &transcript[0] else {
+        panic!("segment record");
+    };
+    assert_eq!(segment.tool_call.as_ref(), Some(&event.event["tool_call"]));
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("tool-output/call-1.txt")).expect("artifact"),
+        full_output
+    );
+    assert!(!temp.path().join("tool-output/segment-tool.txt").exists());
+}
+
+#[test]
 fn activity_repository_keeps_deltas_out_of_the_logical_transcript() {
     let temp = tempfile::tempdir().expect("tempdir");
     let repository = ActivityRepository::new(temp.path());
