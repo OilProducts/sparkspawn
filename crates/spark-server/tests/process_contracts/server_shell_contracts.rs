@@ -464,6 +464,8 @@ fn worker_run_node_process_accepts_json_line_request() {
     let binary = env!("CARGO_BIN_EXE_spark-server");
     let request = json!({
         "run_id": "run-worker-process",
+        "stage_index": 0,
+        "attempt": 0,
         "flow": {
             "schema_version": "1",
             "id": "G",
@@ -528,6 +530,8 @@ fn worker_run_node_process_routes_llm_nodes_to_rust_adapter_boundary() {
     let binary = env!("CARGO_BIN_EXE_spark-server");
     let request = json!({
         "run_id": "run-worker-llm-process",
+        "stage_index": 0,
+        "attempt": 0,
         "flow": {
             "schema_version": "1",
             "id": "G",

@@ -1,10 +1,13 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use spark_common::debug::CODEX_JSONRPC_TRACE_FILE_NAME;
+use spark_common::events::{TurnStreamEvent, TurnStreamEventKind};
 use time::OffsetDateTime;
 
 use crate::error::{Result, StorageError};
@@ -390,10 +393,11 @@ pub struct RawConversationLogLine {
     pub line: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ConversationRepository {
     home_dir: PathBuf,
     registry: ProjectRegistry,
+    activities: Arc<Mutex<HashMap<PathBuf, crate::ActivityRepository>>>,
 }
 
 impl ConversationRepository {
@@ -402,6 +406,7 @@ impl ConversationRepository {
         Self {
             registry: ProjectRegistry::new(home_dir.clone()),
             home_dir,
+            activities: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -548,9 +553,75 @@ impl ConversationRepository {
         if !record_paths.conversation_json().exists() {
             return Ok(None);
         }
-        let Some(record) = crate::conversation::read_record(&record_paths)? else {
+        let Some(mut record) = crate::conversation::read_record(&record_paths)? else {
             return Ok(None);
         };
+        let activity = crate::ActivityRepository::new(record_paths.root());
+        let published_event_sequence = activity
+            .read_events()?
+            .into_iter()
+            .filter(|event| {
+                event
+                    .event
+                    .get("revision")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|revision| revision <= record.meta.revision)
+            })
+            .map(|event| event.sequence)
+            .max()
+            .unwrap_or(0);
+        let mut snapshot = crate::conversation::snapshot_from_record(&record);
+        let mut revision = activity.read_transcript_records()?.len() as u64 + 1;
+        for provider_record in activity.uncommitted_event_suffix()? {
+            let Some(turn_id) = provider_record.event.get("turn_id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(event) = provider_record.event.get("event") else {
+                continue;
+            };
+            let Ok(event) = serde_json::from_value::<TurnStreamEvent>(event.clone()) else {
+                continue;
+            };
+            if !matches!(
+                event.kind,
+                TurnStreamEventKind::ContentCompleted
+                    | TurnStreamEventKind::ToolCallCompleted
+                    | TurnStreamEventKind::ToolCallFailed
+                    | TurnStreamEventKind::ContextCompactionCompleted
+                    | TurnStreamEventKind::Error
+                    | TurnStreamEventKind::TurnCompleted
+            ) {
+                continue;
+            }
+            let Some(segment) = spark_common::segments::materialize_segment_for_event(
+                &mut snapshot,
+                turn_id,
+                &event,
+                &provider_record.committed_at,
+            ) else {
+                continue;
+            };
+            let segment: crate::conversation::TranscriptSegment =
+                serde_json::from_value(segment).map_err(|source| StorageError::JsonRead {
+                    path: activity.transcript_path(),
+                    source,
+                })?;
+            if record.transcript.find_segment(&segment.id).is_some() {
+                continue;
+            }
+            activity.append_transcript(&crate::TranscriptRecord::SegmentUpsert {
+                revision,
+                committed_at: provider_record.committed_at,
+                // Recovery is part of the already-published snapshot, not the
+                // interrupted batch following it. Keeping its cursor here
+                // makes it visible on later reads without publishing the rest
+                // of that in-flight batch.
+                source_event_sequence: published_event_sequence,
+                segment: segment.clone(),
+            })?;
+            revision += 1;
+            record.transcript.upsert_segment(segment);
+        }
         Ok(Some(crate::conversation::snapshot_from_record(&record)))
     }
 
@@ -644,6 +715,32 @@ impl ConversationRepository {
         crate::ActivityRepository::new(root.root())
             .append_event(payload.clone(), iso_now())
             .map(|_| ())
+    }
+
+    /// Persist one normalized provider event before it is projected or published.
+    pub fn append_provider_event(
+        &self,
+        conversation_id: &str,
+        project_path: &str,
+        turn_id: &str,
+        event: &TurnStreamEvent,
+    ) -> Result<crate::ActivityEvent> {
+        let project_paths = self.registry.ensure_project_paths(project_path)?;
+        let root = project_paths.conversations_dir.join(conversation_id);
+        let activity = self
+            .activities
+            .lock()
+            .map_err(|_| StorageError::InvalidRepositoryPath {
+                path: root.clone(),
+                reason: "conversation activity cache lock poisoned".to_string(),
+            })?
+            .entry(root.clone())
+            .or_insert_with(|| crate::ActivityRepository::new(root))
+            .clone();
+        activity.append_event(
+            json!({"type": "provider_event", "turn_id": turn_id, "event": event}),
+            iso_now(),
+        )
     }
 
     pub fn read_conversation_events_after(

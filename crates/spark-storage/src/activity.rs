@@ -104,11 +104,11 @@ impl ActivityRepository {
     ) -> Result<ActivityEvent> {
         let mut guard = self.lock()?;
         let _file_lock = ActivityFileLock::acquire(&self.root)?;
-        truncate_partial_tail(&self.events_path())?;
         let current_len = file_len(&self.events_path())?;
         let tail = if guard.event_sequence.is_some() && guard.event_len == current_len {
             guard.event_sequence.unwrap_or(0)
         } else {
+            truncate_partial_tail(&self.events_path())?;
             tail_event_sequence(&self.events_path())?
         };
         let sequence = tail.saturating_add(1);

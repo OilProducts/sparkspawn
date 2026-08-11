@@ -867,6 +867,25 @@ impl WorkspaceConversationService {
         chat_mode: &str,
         output: AgentTurnOutput,
     ) -> WorkspaceResult<Value> {
+        self.ingest_agent_turn_output_inner(
+            conversation_id,
+            project_path,
+            assistant_turn_id,
+            chat_mode,
+            output,
+            true,
+        )
+    }
+
+    fn ingest_agent_turn_output_inner(
+        &self,
+        conversation_id: &str,
+        project_path: &str,
+        assistant_turn_id: &str,
+        chat_mode: &str,
+        output: AgentTurnOutput,
+        persist_provider_events: bool,
+    ) -> WorkspaceResult<Value> {
         let project_path = normalize_project_path_or_400(project_path)?;
         let _ = chat_mode;
         let repository = self.repository();
@@ -920,6 +939,14 @@ impl WorkspaceConversationService {
             );
         }
         for event in output.events {
+            if persist_provider_events {
+                repository.append_provider_event(
+                    conversation_id,
+                    &project_path,
+                    assistant_turn_id,
+                    &event,
+                )?;
+            }
             ensure_assistant_streaming(&mut snapshot, assistant_turn_id, &mut emitted_payloads);
             match &event.kind {
                 TurnStreamEventKind::TokenUsageUpdated => {
@@ -1140,12 +1167,13 @@ impl WorkspaceConversationService {
             .agent_turn_backend
             .run_turn_with_event_sink(prepared.agent_turn_request.clone(), Some(event_sink))
         {
-            Ok(output) => self.ingest_agent_turn_output(
+            Ok(output) => self.ingest_agent_turn_output_inner(
                 &prepared.conversation_id,
                 &prepared.project_path,
                 &prepared.assistant_turn_id,
                 &prepared.chat_mode,
                 output,
+                false,
             ),
             Err(error) => self.ingest_agent_turn_backend_failure(&prepared, error),
         }
@@ -3541,6 +3569,18 @@ struct LiveConversationTurnState {
 
 impl LiveConversationTurnState {
     fn ingest_event(&mut self, event: TurnStreamEvent) {
+        if self
+            .repository
+            .append_provider_event(
+                &self.conversation_id,
+                &self.project_path,
+                &self.assistant_turn_id,
+                &event,
+            )
+            .is_err()
+        {
+            return;
+        }
         let mut emitted_payloads = Vec::new();
         if apply_assistant_turn_app_server_ids(
             &mut self.snapshot,

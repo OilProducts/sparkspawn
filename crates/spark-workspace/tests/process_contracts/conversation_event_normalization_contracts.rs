@@ -18,7 +18,9 @@ use spark_common::events::{
     TurnStreamChannel, TurnStreamEvent, TurnStreamEventKind, TurnStreamSource,
 };
 use spark_common::settings::SparkSettings;
-use spark_storage::{ProjectRegistry, CONVERSATION_STATE_SCHEMA_VERSION};
+use spark_storage::{
+    ActivityRepository, ConversationRepository, ProjectRegistry, CONVERSATION_STATE_SCHEMA_VERSION,
+};
 use spark_workspace::{
     live::conversation_envelopes_after, ConversationRequestUserInputAnswerRequest,
     ConversationSettingsUpdate, ConversationTurnRequest, WorkspaceConversationService,
@@ -131,6 +133,144 @@ fn start_turn_persists_one_user_one_assistant_turn_settings_and_events() {
         )
         .expect_err("active assistant conflict");
     assert!(matches!(conflict, WorkspaceError::Conflict(_)));
+}
+
+#[test]
+fn project_chat_persists_every_provider_event_but_only_the_completed_logical_unit() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    let service = WorkspaceConversationService::new(settings.clone());
+    let (prepared, _) = service
+        .start_turn(
+            "conversation-large-provider-stream",
+            ConversationTurnRequest {
+                project_path: "/projects/large-provider-stream".to_string(),
+                message: "Stream it".to_string(),
+                ..ConversationTurnRequest::default()
+            },
+        )
+        .expect("start turn");
+    let mut events = (0..50_000)
+        .map(|_| content_delta("assistant", "x", "app-turn", "answer"))
+        .collect::<Vec<_>>();
+    events.push(content_completed(
+        "assistant",
+        "complete",
+        "app-turn",
+        "answer",
+    ));
+
+    service
+        .ingest_agent_turn_output(
+            "conversation-large-provider-stream",
+            "/projects/large-provider-stream",
+            &prepared.assistant_turn_id,
+            "chat",
+            AgentTurnOutput {
+                events,
+                final_assistant_text: Some("complete".to_string()),
+                ..AgentTurnOutput::default()
+            },
+        )
+        .expect("ingest provider stream");
+
+    let project = ProjectRegistry::new(&settings.data_dir)
+        .ensure_project_paths("/projects/large-provider-stream")
+        .expect("project paths");
+    let activity = ActivityRepository::new(
+        project
+            .conversations_dir
+            .join("conversation-large-provider-stream"),
+    );
+    let provider_events = activity
+        .read_events()
+        .expect("events")
+        .into_iter()
+        .filter(|record| record.event["type"] == "provider_event")
+        .collect::<Vec<_>>();
+    assert_eq!(provider_events.len(), 50_001);
+    assert!(provider_events
+        .iter()
+        .all(|record| record.event["turn_id"] == prepared.assistant_turn_id));
+    assert_eq!(
+        provider_events
+            .iter()
+            .filter(|record| record.event["event"]["kind"] == "content_delta")
+            .count(),
+        50_000
+    );
+    let transcript = activity.hydrate_transcript().expect("transcript");
+    let logical_units = transcript
+        .segments
+        .iter()
+        .filter(|segment| segment.turn_id == prepared.assistant_turn_id)
+        .collect::<Vec<_>>();
+    assert_eq!(logical_units.len(), 1);
+    assert_eq!(logical_units[0].content, "complete");
+}
+
+#[test]
+fn recovered_terminal_provider_unit_stays_visible_across_reopens() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    let service = WorkspaceConversationService::new(settings.clone());
+    let (prepared, _) = service
+        .start_turn(
+            "conversation-recovered-provider-unit",
+            ConversationTurnRequest {
+                project_path: "/projects/recovered-provider-unit".to_string(),
+                message: "Recover it".to_string(),
+                ..ConversationTurnRequest::default()
+            },
+        )
+        .expect("start turn");
+    let repository = ConversationRepository::new(&settings.data_dir);
+    repository
+        .append_provider_event(
+            "conversation-recovered-provider-unit",
+            "/projects/recovered-provider-unit",
+            &prepared.assistant_turn_id,
+            &content_completed("assistant", "recovered", "app-turn", "answer"),
+        )
+        .expect("persist terminal provider event");
+
+    for _ in 0..2 {
+        let snapshot = ConversationRepository::new(&settings.data_dir)
+            .read_snapshot(
+                "conversation-recovered-provider-unit",
+                Some("/projects/recovered-provider-unit"),
+            )
+            .expect("reopen")
+            .expect("snapshot");
+        let recovered = snapshot["segments"]
+            .as_array()
+            .expect("segments")
+            .iter()
+            .filter(|segment| {
+                segment["turn_id"] == prepared.assistant_turn_id
+                    && segment["content"] == "recovered"
+            })
+            .count();
+        assert_eq!(recovered, 1);
+    }
+
+    let project = ProjectRegistry::new(&settings.data_dir)
+        .ensure_project_paths("/projects/recovered-provider-unit")
+        .expect("project paths");
+    let activity = ActivityRepository::new(
+        project
+            .conversations_dir
+            .join("conversation-recovered-provider-unit"),
+    );
+    assert_eq!(
+        activity
+            .read_transcript_records()
+            .expect("transcript records")
+            .into_iter()
+            .filter(|record| matches!(record, spark_storage::TranscriptRecord::SegmentUpsert { segment, .. } if segment.turn_id == prepared.assistant_turn_id && segment.content == "recovered"))
+            .count(),
+        1
+    );
 }
 
 #[test]
