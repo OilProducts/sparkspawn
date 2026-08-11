@@ -1154,7 +1154,7 @@ impl WorkspaceConversationService {
         F: Fn(Value) + Send + Sync + 'static,
     {
         let progress = Arc::new(progress);
-        let event_sink = live_conversation_turn_event_sink(
+        let (event_sink, provider_event_error) = live_conversation_turn_event_sink(
             started_snapshot,
             prepared.assistant_turn_id.clone(),
             prepared.chat_mode.clone(),
@@ -1163,10 +1163,19 @@ impl WorkspaceConversationService {
             prepared.project_path.clone(),
             progress,
         );
-        match self
+        let output = self
             .agent_turn_backend
-            .run_turn_with_event_sink(prepared.agent_turn_request.clone(), Some(event_sink))
+            .run_turn_with_event_sink(prepared.agent_turn_request.clone(), Some(event_sink));
+        if let Some(error) = provider_event_error
+            .lock()
+            .map_err(|_| {
+                WorkspaceError::Internal("provider event error lock poisoned".to_string())
+            })?
+            .take()
         {
+            return Err(error.into());
+        }
+        match output {
             Ok(output) => self.ingest_agent_turn_output_inner(
                 &prepared.conversation_id,
                 &prepared.project_path,
@@ -3529,7 +3538,10 @@ fn live_conversation_turn_event_sink(
     conversation_id: String,
     project_path: String,
     progress: Arc<dyn Fn(Value) + Send + Sync + 'static>,
-) -> AgentTurnEventSink {
+) -> (
+    AgentTurnEventSink,
+    Arc<Mutex<Option<spark_storage::StorageError>>>,
+) {
     let base_revision = snapshot_revision(&snapshot);
     let state = Arc::new(Mutex::new(LiveConversationTurnState {
         snapshot,
@@ -3543,11 +3555,27 @@ fn live_conversation_turn_event_sink(
         project_path,
         progress,
     }));
-    Arc::new(move |event| {
-        if let Ok(mut state) = state.lock() {
-            state.ingest_event(event);
+    let provider_event_error = Arc::new(Mutex::new(None));
+    let sink_error = Arc::clone(&provider_event_error);
+    let sink = Arc::new(move |event| {
+        if sink_error
+            .lock()
+            .map(|stored| stored.is_some())
+            .unwrap_or(true)
+        {
+            return;
         }
-    })
+        if let Ok(mut state) = state.lock() {
+            if let Err(error) = state.ingest_event(event) {
+                if let Ok(mut stored) = sink_error.lock() {
+                    if stored.is_none() {
+                        *stored = Some(error);
+                    }
+                }
+            }
+        }
+    });
+    (sink, provider_event_error)
 }
 
 struct LiveConversationTurnState {
@@ -3568,19 +3596,13 @@ struct LiveConversationTurnState {
 }
 
 impl LiveConversationTurnState {
-    fn ingest_event(&mut self, event: TurnStreamEvent) {
-        if self
-            .repository
-            .append_provider_event(
-                &self.conversation_id,
-                &self.project_path,
-                &self.assistant_turn_id,
-                &event,
-            )
-            .is_err()
-        {
-            return;
-        }
+    fn ingest_event(&mut self, event: TurnStreamEvent) -> spark_storage::Result<()> {
+        self.repository.append_provider_event(
+            &self.conversation_id,
+            &self.project_path,
+            &self.assistant_turn_id,
+            &event,
+        )?;
         let mut emitted_payloads = Vec::new();
         if apply_assistant_turn_app_server_ids(
             &mut self.snapshot,
@@ -3709,7 +3731,7 @@ impl LiveConversationTurnState {
                     (self.progress)(payload);
                 }
             }
-            return;
+            return Ok(());
         }
         self.pending_payloads
             .extend(emitted_payloads.iter().cloned());
@@ -3718,6 +3740,7 @@ impl LiveConversationTurnState {
                 (self.progress)(delta);
             }
         }
+        Ok(())
     }
 
     /// Convert a working-view upsert into a transient stream delta. Deltas

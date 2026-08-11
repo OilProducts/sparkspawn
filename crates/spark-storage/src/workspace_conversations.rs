@@ -557,21 +557,7 @@ impl ConversationRepository {
             return Ok(None);
         };
         let activity = crate::ActivityRepository::new(record_paths.root());
-        let published_event_sequence = activity
-            .read_events()?
-            .into_iter()
-            .filter(|event| {
-                event
-                    .event
-                    .get("revision")
-                    .and_then(Value::as_i64)
-                    .is_some_and(|revision| revision <= record.meta.revision)
-            })
-            .map(|event| event.sequence)
-            .max()
-            .unwrap_or(0);
         let mut snapshot = crate::conversation::snapshot_from_record(&record);
-        let mut revision = activity.read_transcript_records()?.len() as u64 + 1;
         for provider_record in activity.uncommitted_event_suffix()? {
             let Some(turn_id) = provider_record.event.get("turn_id").and_then(Value::as_str) else {
                 continue;
@@ -609,20 +595,38 @@ impl ConversationRepository {
             if record.transcript.find_segment(&segment.id).is_some() {
                 continue;
             }
-            activity.append_transcript(&crate::TranscriptRecord::SegmentUpsert {
-                revision,
-                committed_at: provider_record.committed_at,
-                // Recovery is part of the already-published snapshot, not the
-                // interrupted batch following it. Keeping its cursor here
-                // makes it visible on later reads without publishing the rest
-                // of that in-flight batch.
-                source_event_sequence: published_event_sequence,
-                segment: segment.clone(),
-            })?;
-            revision += 1;
-            record.transcript.upsert_segment(segment);
+            let commit = self.commit_conversation(
+                conversation_id,
+                &record.meta.project_path,
+                record.meta.revision,
+                vec![
+                    crate::conversation::ConversationMutation::RecoveredSegmentUpserted {
+                        segment,
+                        source_event_sequence: provider_record.sequence,
+                    },
+                ],
+            )?;
+            record = commit.record;
+            snapshot = commit.snapshot;
         }
-        Ok(Some(crate::conversation::snapshot_from_record(&record)))
+        Ok(Some(snapshot))
+    }
+
+    pub(crate) fn read_snapshot_without_recovery(
+        &self,
+        conversation_id: &str,
+        project_path: Option<&str>,
+    ) -> Result<Option<Value>> {
+        let Some(project_paths) =
+            self.project_paths_for_conversation(conversation_id, project_path)?
+        else {
+            return Ok(None);
+        };
+        let paths = crate::conversation::ConversationRecordPaths::new(
+            project_paths.conversations_dir.join(conversation_id),
+        );
+        Ok(crate::conversation::read_record(&paths)?
+            .map(|record| crate::conversation::snapshot_from_record(&record)))
     }
 
     /// Read one segment's externalized tool output. Returns `None` when the

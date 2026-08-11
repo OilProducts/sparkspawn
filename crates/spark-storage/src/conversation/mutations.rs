@@ -17,6 +17,10 @@ pub enum ConversationMutation {
     SegmentUpserted {
         segment: TranscriptSegment,
     },
+    RecoveredSegmentUpserted {
+        segment: TranscriptSegment,
+        source_event_sequence: u64,
+    },
     /// Upsert one artifact record (matched by `id`) in a collection.
     ArtifactUpserted {
         collection: ArtifactCollection,

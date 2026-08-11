@@ -225,7 +225,7 @@ fn recovered_terminal_provider_unit_stays_visible_across_reopens() {
         )
         .expect("start turn");
     let repository = ConversationRepository::new(&settings.data_dir);
-    repository
+    let provider_event = repository
         .append_provider_event(
             "conversation-recovered-provider-unit",
             "/projects/recovered-provider-unit",
@@ -262,14 +262,70 @@ fn recovered_terminal_provider_unit_stays_visible_across_reopens() {
             .conversations_dir
             .join("conversation-recovered-provider-unit"),
     );
+    let recovered_records = activity
+        .read_transcript_records()
+        .expect("transcript records");
     assert_eq!(
-        activity
-            .read_transcript_records()
-            .expect("transcript records")
+        recovered_records
+            .iter()
             .into_iter()
-            .filter(|record| matches!(record, spark_storage::TranscriptRecord::SegmentUpsert { segment, .. } if segment.turn_id == prepared.assistant_turn_id && segment.content == "recovered"))
+            .filter(|record| matches!(record, spark_storage::TranscriptRecord::SegmentUpsert { segment, source_event_sequence, .. } if segment.turn_id == prepared.assistant_turn_id && segment.content == "recovered" && *source_event_sequence == provider_event.sequence))
             .count(),
         1
+    );
+    assert!(activity
+        .uncommitted_event_suffix()
+        .expect("suffix")
+        .into_iter()
+        .all(|record| record.event["type"] != "provider_event"));
+}
+
+#[test]
+fn live_provider_event_write_failure_prevents_transcript_commit() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    let completion = content_completed("assistant", "must not commit", "app-turn", "answer");
+    let backend = ScriptedAgentTurnBackend::with_stream_events(
+        vec![AgentTurnOutput {
+            events: vec![completion.clone()],
+            final_assistant_text: Some("must not commit".to_string()),
+            ..AgentTurnOutput::default()
+        }],
+        vec![vec![completion]],
+    );
+    let service = WorkspaceConversationService::new_with_agent_turn_backend(
+        settings.clone(),
+        Arc::new(backend),
+    );
+    let (prepared, started) = service
+        .start_turn(
+            "conversation-provider-write-failure",
+            ConversationTurnRequest {
+                project_path: "/projects/provider-write-failure".to_string(),
+                message: "Do not publish an unbacked answer".to_string(),
+                ..ConversationTurnRequest::default()
+            },
+        )
+        .expect("start turn");
+    let project = ProjectRegistry::new(&settings.data_dir)
+        .ensure_project_paths("/projects/provider-write-failure")
+        .expect("project paths");
+    let root = project
+        .conversations_dir
+        .join("conversation-provider-write-failure");
+    let transcript_path = root.join("transcript.jsonl");
+    let transcript_before = fs::read(&transcript_path).expect("transcript before");
+    let events_path = root.join("events.jsonl");
+    fs::remove_file(&events_path).expect("remove events file");
+    fs::create_dir(&events_path).expect("block event append");
+
+    let error = service
+        .complete_started_turn_with_progress_payloads(prepared, started, |_| {})
+        .expect_err("provider event write must fail the turn");
+    assert!(matches!(error, WorkspaceError::Internal(_)));
+    assert_eq!(
+        fs::read(&transcript_path).expect("transcript after"),
+        transcript_before
     );
 }
 

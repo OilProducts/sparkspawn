@@ -46,7 +46,8 @@ impl ConversationRepository {
         if mutations.is_empty() {
             return Err(commit_rejected(conversation_id, "No mutations to commit."));
         }
-        let latest_snapshot = self.read_snapshot(conversation_id, Some(project_path))?;
+        let latest_snapshot =
+            self.read_snapshot_without_recovery(conversation_id, Some(project_path))?;
         if latest_snapshot.is_none() && base_revision != 0 {
             return Err(commit_rejected(
                 conversation_id,
@@ -70,6 +71,7 @@ impl ConversationRepository {
 
         let now = iso_now();
         let mut entry_kinds = Vec::new();
+        let mut source_event_sequences = Vec::new();
         let mut snapshot_level_change = false;
         let mut write_plan = RecordWritePlan {
             everything: latest_snapshot.is_none(),
@@ -84,6 +86,7 @@ impl ConversationRepository {
                 ConversationMutation::TurnUpserted { turn } => {
                     record.transcript.upsert_turn(turn.clone());
                     entry_kinds.push(JournalEntryKind::TurnUpserted { turn });
+                    source_event_sequences.push(None);
                     write_plan.transcript = true;
                 }
                 ConversationMutation::SegmentUpserted { mut segment } => {
@@ -91,6 +94,18 @@ impl ConversationRepository {
                     externalize_segment_tool_output(&record_paths, &mut segment)?;
                     record.transcript.upsert_segment(segment.clone());
                     entry_kinds.push(JournalEntryKind::SegmentUpserted { segment });
+                    source_event_sequences.push(None);
+                    write_plan.transcript = true;
+                }
+                ConversationMutation::RecoveredSegmentUpserted {
+                    mut segment,
+                    source_event_sequence,
+                } => {
+                    resolve_segment_order(&record, &mut segment);
+                    externalize_segment_tool_output(&record_paths, &mut segment)?;
+                    record.transcript.upsert_segment(segment.clone());
+                    entry_kinds.push(JournalEntryKind::SegmentUpserted { segment });
+                    source_event_sequences.push(Some(source_event_sequence));
                     write_plan.transcript = true;
                 }
                 ConversationMutation::ArtifactUpserted {
@@ -110,6 +125,7 @@ impl ConversationRepository {
         }
         if snapshot_level_change {
             entry_kinds.push(JournalEntryKind::SnapshotCommitted);
+            source_event_sequences.push(None);
         }
 
         maintain_metadata(&mut record, &now);
@@ -132,7 +148,7 @@ impl ConversationRepository {
         let activity = crate::ActivityRepository::new(record_paths.root());
         let mut transcript_revision = activity.read_transcript_records()?.len() as u64 + 1;
         let mut journal_payloads = Vec::with_capacity(journal_entries.len());
-        for entry in &journal_entries {
+        for (entry, source_event_sequence) in journal_entries.iter().zip(source_event_sequences) {
             let line = entry.journal_line_payload(&record.meta);
             let event = activity.append_event(line.clone(), now.clone())?;
             match &entry.kind {
@@ -149,7 +165,7 @@ impl ConversationRepository {
                     activity.append_transcript(&crate::TranscriptRecord::SegmentUpsert {
                         revision: transcript_revision,
                         committed_at: event.committed_at.clone(),
-                        source_event_sequence: event.sequence,
+                        source_event_sequence: source_event_sequence.unwrap_or(event.sequence),
                         segment: segment.clone(),
                     })?;
                     transcript_revision += 1;
@@ -204,8 +220,10 @@ fn validate_segment_targets(
     mutations: &[ConversationMutation],
 ) -> Result<()> {
     for mutation in mutations {
-        let ConversationMutation::SegmentUpserted { segment } = mutation else {
-            continue;
+        let segment = match mutation {
+            ConversationMutation::SegmentUpserted { segment }
+            | ConversationMutation::RecoveredSegmentUpserted { segment, .. } => segment,
+            _ => continue,
         };
         let turn_known = record.transcript.find_turn(&segment.turn_id).is_some()
             || mutations.iter().any(|candidate| {
