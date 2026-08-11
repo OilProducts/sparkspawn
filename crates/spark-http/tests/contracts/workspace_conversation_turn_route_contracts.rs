@@ -151,7 +151,7 @@ async fn conversation_turn_route_executes_injected_backend_and_preserves_validat
         "conversation-http-turn",
         "/projects/http-turn",
         |snapshot| {
-            snapshot["turns"]
+            let answer_complete = snapshot["turns"]
                 .as_array()
                 .expect("turns")
                 .iter()
@@ -159,7 +159,13 @@ async fn conversation_turn_route_executes_injected_backend_and_preserves_validat
                     turn["role"] == "assistant"
                         && turn["status"] == "complete"
                         && turn["content"] == "Scripted route answer."
-                })
+                });
+            let input_pending = snapshot["segments"]
+                .as_array()
+                .expect("segments")
+                .iter()
+                .any(|segment| segment["kind"] == "request_user_input");
+            answer_complete && input_pending
         },
     )
     .await;
@@ -265,11 +271,11 @@ async fn conversation_turn_route_executes_injected_backend_and_preserves_validat
         .exists());
     assert!(project
         .conversations_dir
-        .join("conversation-http-turn/transcript.json")
+        .join("conversation-http-turn/transcript.jsonl")
         .exists());
     assert!(project
         .conversations_dir
-        .join("conversation-http-turn/journal.jsonl")
+        .join("conversation-http-turn/events.jsonl")
         .exists());
     assert!(!project
         .conversations_dir
@@ -394,7 +400,7 @@ async fn conversation_turn_route_uses_rust_llm_client_backend_for_openai_compati
         "conversation-http-rust-agent",
         "/projects/http-rust-agent",
         |snapshot| {
-            snapshot["turns"]
+            let turn_completed = snapshot["turns"]
                 .as_array()
                 .expect("turns")
                 .iter()
@@ -402,7 +408,17 @@ async fn conversation_turn_route_uses_rust_llm_client_backend_for_openai_compati
                     turn["role"] == "assistant"
                         && turn["status"] == "complete"
                         && turn["content"] == "route adapter response for gpt-route-agent"
-                })
+                });
+            let segment_completed = snapshot["segments"]
+                .as_array()
+                .expect("segments")
+                .iter()
+                .any(|segment| {
+                    segment["kind"] == "assistant_message"
+                        && segment["status"] == "complete"
+                        && segment["content"] == "route adapter response for gpt-route-agent"
+                });
+            turn_completed && segment_completed
         },
     )
     .await;

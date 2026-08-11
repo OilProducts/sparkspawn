@@ -1032,7 +1032,7 @@ describe('ProjectConversationHistory', () => {
             expect(screen.getByText('preview plus full output')).toBeVisible()
         })
         expect(fetchSpy).toHaveBeenCalledWith(
-            expect.stringContaining('/workspace/api/conversations/conversation-1/segments/segment-tool-1/tool-output?project_path='),
+            expect.stringContaining('/workspace/api/conversations/conversation-1/tool-output/segment-tool-1?project_path='),
             undefined,
         )
     })

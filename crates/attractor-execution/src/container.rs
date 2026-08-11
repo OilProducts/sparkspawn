@@ -236,6 +236,8 @@ impl ContainerizedNodeExecutor {
             run_id: request.run_id.clone(),
             flow: request.flow.clone(),
             node_id: request.node_id.clone(),
+            stage_index: request.stage_index,
+            attempt: request.attempt,
             prompt: request.prompt.clone(),
             context: request.context.clone(),
             context_logs: Vec::new(),
@@ -273,7 +275,7 @@ impl ContainerizedNodeExecutor {
         let mut outcome = None;
         let mut protocol_error = None;
         let inner = self.inner.clone();
-        let run_paths = request.run_paths.clone();
+        let run_id = request.run_id.clone();
         let mut saw_result = false;
         let result = self
             .command_runner
@@ -293,14 +295,8 @@ impl ContainerizedNodeExecutor {
                     return;
                 }
                 match frame {
-                    WorkerFrame::Event(frame) => {
-                        let Some(paths) = &run_paths else {
-                            return;
-                        };
-                        if let Err(error) = inner.append_and_notify(paths, frame.event) {
-                            protocol_error =
-                                Some(format!("worker event ingestion failed: {error}"));
-                        }
+                    WorkerFrame::Event(_) => {
+                        inner.notify_run_event(&run_id);
                     }
                     WorkerFrame::Result(frame) => {
                         saw_result = true;

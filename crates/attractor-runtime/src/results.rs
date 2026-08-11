@@ -244,12 +244,23 @@ fn source_node_is_valid(
 }
 
 fn source_artifact_path(paths: &RunRootPaths, node_id: &str) -> Option<PathBuf> {
-    [
-        Path::new("logs").join(node_id).join("response.md"),
-        Path::new(node_id).join("response.md"),
-    ]
-    .into_iter()
-    .find(|candidate| {
+    let executions = Path::new("logs").join(node_id).join("executions");
+    let latest_execution = std::fs::read_dir(paths.root.join(&executions))
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(std::result::Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let (stage, attempt) = name.split_once('-')?;
+            Some((
+                (stage.parse::<u64>().ok()?, attempt.parse::<u64>().ok()?),
+                name,
+            ))
+        })
+        .max_by_key(|(identity, _)| *identity)
+        .map(|(_, name)| executions.join(name).join("response.md"));
+    latest_execution.filter(|candidate| {
         let path = paths.root.join(candidate);
         path.exists() && path.is_file()
     })

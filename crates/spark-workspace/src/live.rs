@@ -220,7 +220,6 @@ pub fn evict_run_live_cache_if_terminal(settings: &SparkSettings, run_id: &str) 
         status.as_str(),
         "completed" | "failed" | "canceled" | "cancelled" | "aborted"
     ) {
-        attractor_runtime::evict_combined_journal(run_id);
         return true;
     }
     false
@@ -234,64 +233,97 @@ pub fn latest_run_sequence(settings: &SparkSettings, run_id: &str) -> WorkspaceR
     Ok(entries.into_iter().map(|entry| entry.sequence).max())
 }
 
-/// Segment upserts for every projected transcript segment touched after the
-/// given combined-journal sequence. Full-segment snapshots on the run
-/// resource with the shared run_sequence cursor, so existing query gating
-/// and replay semantics apply unchanged.
-pub fn run_segment_envelopes_after(
+pub fn execution_transcript_envelopes(
     settings: &SparkSettings,
     run_id: &str,
-    after_sequence: u64,
+    cursors: &mut std::collections::HashMap<String, ExecutionTranscriptCursor>,
 ) -> WorkspaceResult<Vec<LiveEnvelope>> {
     let store = RunStore::for_settings(settings);
-    let Some(entries) = run_journal_entries(&store, run_id)? else {
+    let Some(meta) = store
+        .read_run_meta(run_id)
+        .map_err(|error| WorkspaceError::Internal(error.to_string()))?
+    else {
         return Ok(Vec::new());
     };
-    Ok(segment_envelopes_from_entries(
-        run_id,
-        &entries,
-        after_sequence,
-    ))
-}
-
-fn segment_envelopes_from_entries(
-    run_id: &str,
-    entries: &[JournalEntry],
-    after_sequence: u64,
-) -> Vec<LiveEnvelope> {
-    let projection = attractor_runtime::project_run_segments(entries);
-    projection
-        .segments
-        .into_iter()
-        .filter(|segment| {
-            segment
-                .get("latest_sequence")
-                .and_then(Value::as_u64)
-                .is_some_and(|sequence| sequence > after_sequence)
-        })
-        .map(|segment| run_segment_upsert_envelope(run_id, segment))
-        .collect()
-}
-
-fn run_segment_upsert_envelope(run_id: &str, segment: Value) -> LiveEnvelope {
-    let sequence = segment
-        .get("latest_sequence")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    LiveEnvelope {
-        event_type: "run.segment_upsert".to_string(),
-        project_path: None,
-        resource: LiveResource {
-            kind: "run".to_string(),
-            id: Some(run_id.to_string()),
-        },
-        cursor: Some(LiveCursor {
-            kind: "run_sequence".to_string(),
-            value: sequence as i64,
-        }),
-        payload: json!({"run_id": run_id, "segment": segment}),
-        reason: None,
+    let parent_run_id = meta
+        .record
+        .as_ref()
+        .and_then(|record| record.parent_run_id.clone());
+    let presentation_run_id = parent_run_id.as_deref().unwrap_or(run_id);
+    let source_scope = if parent_run_id.is_some() {
+        "child"
+    } else {
+        "root"
+    };
+    let mut envelopes = Vec::new();
+    for execution in store
+        .list_node_executions(&meta.paths)
+        .map_err(|error| WorkspaceError::Internal(error.to_string()))?
+    {
+        let identity = format!(
+            "{}:{}:{}:{}",
+            run_id, execution.node_id, execution.stage_index, execution.attempt
+        );
+        let cursor = cursors.get(&identity).copied().unwrap_or_default();
+        let root = store
+            .node_execution_root(
+                &meta.paths,
+                &execution.node_id,
+                execution.stage_index,
+                execution.attempt,
+            )
+            .map_err(|error| WorkspaceError::Internal(error.to_string()))?;
+        let (records, byte_offset) = spark_storage::ActivityRepository::new(root)
+            .read_transcript_records_from(cursor.byte_offset)
+            .map_err(|error| WorkspaceError::Internal(error.to_string()))?;
+        for record in records {
+            if record.revision() <= cursor.revision {
+                continue;
+            }
+            let event_type = match &record {
+                spark_storage::TranscriptRecord::TurnUpsert { .. } => "conversation.turn_upsert",
+                spark_storage::TranscriptRecord::SegmentUpsert { .. } => {
+                    "conversation.segment_upsert"
+                }
+            };
+            envelopes.push(LiveEnvelope {
+                event_type: event_type.to_string(),
+                project_path: None,
+                resource: LiveResource {
+                    kind: "node_execution".to_string(),
+                    id: Some(identity.clone()),
+                },
+                cursor: Some(LiveCursor {
+                    kind: "transcript_revision".to_string(),
+                    value: record.revision() as i64,
+                }),
+                payload: json!({
+                    "run_id": run_id,
+                    "presentation_run_id": presentation_run_id,
+                    "source_scope": source_scope,
+                    "node_id": execution.node_id,
+                    "stage_index": execution.stage_index,
+                    "attempt": execution.attempt,
+                    "record": record,
+                }),
+                reason: None,
+            });
+            cursors.insert(
+                identity.clone(),
+                ExecutionTranscriptCursor {
+                    revision: record.revision(),
+                    byte_offset,
+                },
+            );
+        }
     }
+    Ok(envelopes)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExecutionTranscriptCursor {
+    pub revision: u64,
+    pub byte_offset: u64,
 }
 
 pub fn run_upsert_envelope(
@@ -381,6 +413,9 @@ pub fn envelope_matches_query(envelope: &LiveEnvelope, query: &LiveQuery) -> boo
             .run_id
             .as_deref()
             .is_some_and(|expected| envelope.resource.id.as_deref() == Some(expected)),
+        "node_execution" => query.run_id.as_deref().is_some_and(|expected| {
+            envelope.payload.get("run_id").and_then(Value::as_str) == Some(expected)
+        }),
         "runs_overview" => {
             if !query.include_runs_overview {
                 return false;
@@ -572,54 +607,18 @@ fn run_envelopes(
 ) -> WorkspaceResult<Vec<LiveEnvelope>> {
     let store = RunStore::for_settings(settings);
     let after = run_sequence.unwrap_or(0);
-    // Recent cursors are served from the incremental cache; a cursor older
-    // than the retained ring rebuilds cold, exactly as before.
-    if let Some(window) = attractor_runtime::combined_journal_window(&store, run_id, after)
-        .map_err(|error| WorkspaceError::Internal(error.to_string()))?
-    {
-        if window.complete {
-            let (mut envelopes, contiguous) =
-                journal_envelopes_from_replay(run_id, window.entries_after, after);
-            if contiguous {
-                envelopes.extend(
-                    window
-                        .segments_after
-                        .into_iter()
-                        .map(|segment| run_segment_upsert_envelope(run_id, segment)),
-                );
-            }
-            return Ok(envelopes);
-        }
-    } else {
-        return Err(WorkspaceError::NotFound("Unknown pipeline".to_string()));
-    }
     let Some(entries) = run_journal_entries(&store, run_id)? else {
         return Err(WorkspaceError::NotFound("Unknown pipeline".to_string()));
     };
     Ok(run_envelopes_from_entries(run_id, &entries, after))
 }
 
-/// Journal envelopes after the cursor, plus — only for contiguous replays —
-/// the segment upserts touched in the same window. A gap terminates the list
-/// with a resync envelope and no segments: the resynced client refetches
-/// full state anyway.
 fn run_envelopes_from_entries(
     run_id: &str,
     entries: &[JournalEntry],
     after_sequence: u64,
 ) -> Vec<LiveEnvelope> {
-    let (mut envelopes, contiguous) =
-        journal_envelopes_from_entries(run_id, entries, after_sequence);
-    if contiguous {
-        // Segment upserts are otherwise only published live: replay the
-        // projected segments touched after the cursor so a late subscriber
-        // converges to the same transcript without a resync.
-        envelopes.extend(segment_envelopes_from_entries(
-            run_id,
-            entries,
-            after_sequence,
-        ));
-    }
+    let (envelopes, _) = journal_envelopes_from_entries(run_id, entries, after_sequence);
     envelopes
 }
 
@@ -665,14 +664,10 @@ fn journal_envelopes_from_entries(
     (envelopes, true)
 }
 
-/// One publish cycle's worth of run envelopes plus the journal's newest
-/// sequence, derived from a single combined-journal build. The publisher
-/// loop uses `latest_sequence` to advance its cursor instead of rebuilding
-/// the journal a second time.
+/// One publish cycle over the run's source-local orchestration journal.
 pub struct RunLivePublication {
     pub envelopes: Vec<LiveEnvelope>,
     pub latest_sequence: Option<u64>,
-    /// Journal entries read for this cursor, for incremental projections.
     pub newly_read_entries: Vec<JournalEntry>,
     pub starts_at_sequence_zero: bool,
     pub fallback_model: String,
@@ -691,46 +686,20 @@ pub fn run_live_publication(
         .map(|record| record.model)
         .unwrap_or_default();
     let after = after_sequence.unwrap_or(0);
-    // Incremental path: the cache parses only bytes appended since the last
-    // publication for this run. `complete: false` (cursor older than the
-    // retained ring) falls through to the publisher's resync behavior below.
-    let Some(window) = attractor_runtime::combined_journal_window(&store, run_id, after)
-        .map_err(|error| WorkspaceError::Internal(error.to_string()))?
-    else {
+    let Some(entries) = run_journal_entries(&store, run_id)? else {
         return Ok(None);
     };
-    let latest_sequence = (window.latest_sequence > 0).then_some(window.latest_sequence);
-    let newly_read_entries = if window.complete {
-        window.entries_after.clone()
-    } else {
-        Vec::new()
-    };
-    let mut envelopes = if window.complete {
-        let (envelopes, _contiguous) =
-            journal_envelopes_from_replay(run_id, window.entries_after, after);
-        envelopes
-    } else {
-        vec![resync_required(
-            "run",
-            Some(run_id.to_string()),
-            None,
-            "run journal no longer contains a contiguous replay from the requested cursor",
-        )]
-    };
-    // Unlike cursor replay, the publisher delivers segment upserts even when
-    // the journal window resyncs: live subscribers keep converging on the
-    // transcript while they refetch journal state.
-    envelopes.extend(
-        window
-            .segments_after
-            .into_iter()
-            .map(|segment| run_segment_upsert_envelope(run_id, segment)),
-    );
+    let latest_sequence = entries.iter().map(|entry| entry.sequence).max();
+    let newly_read_entries = entries
+        .into_iter()
+        .filter(|entry| entry.sequence > after)
+        .collect::<Vec<_>>();
+    let (envelopes, _) = journal_envelopes_from_replay(run_id, newly_read_entries.clone(), after);
     Ok(Some(RunLivePublication {
         envelopes,
         latest_sequence,
         newly_read_entries,
-        starts_at_sequence_zero: after == 0 && window.complete,
+        starts_at_sequence_zero: after == 0,
         fallback_model,
     }))
 }
@@ -746,8 +715,30 @@ pub fn full_run_usage_accumulator(
         .and_then(|meta| meta.record)
         .map(|record| record.model)
         .unwrap_or_default();
-    let entries = run_journal_entries(&store, run_id)?.unwrap_or_default();
-    Ok(RunUsageAccumulator::from_entries(&entries, &fallback_model))
+    let Some(meta) = store
+        .read_run_meta(run_id)
+        .map_err(|error| WorkspaceError::Internal(error.to_string()))?
+    else {
+        return Ok(RunUsageAccumulator::new(fallback_model));
+    };
+    let mut usage = RunUsageAccumulator::new(fallback_model);
+    for execution in store
+        .list_node_executions(&meta.paths)
+        .map_err(|error| WorkspaceError::Internal(error.to_string()))?
+    {
+        if let Some(events) = store
+            .read_node_execution_events(
+                &meta.paths,
+                &execution.node_id,
+                execution.stage_index,
+                execution.attempt,
+            )
+            .map_err(|error| WorkspaceError::Internal(error.to_string()))?
+        {
+            usage.apply_activity_events(&events);
+        }
+    }
+    Ok(usage)
 }
 
 /// Journal envelopes from an already-windowed replay (entries strictly after
@@ -780,8 +771,14 @@ fn run_journal_entries(
     store: &RunStore,
     run_id: &str,
 ) -> WorkspaceResult<Option<Vec<JournalEntry>>> {
-    attractor_runtime::combined_run_journal_entries(store, run_id)
-        .map_err(|error| WorkspaceError::Internal(error.to_string()))
+    let mut entries = store
+        .read_run_bundle(run_id)
+        .map(|bundle| bundle.map(|bundle| bundle.journal))
+        .map_err(|error| WorkspaceError::Internal(error.to_string()))?;
+    if let Some(entries) = entries.as_mut() {
+        entries.sort_by_key(|entry| entry.sequence);
+    }
+    Ok(entries)
 }
 
 fn run_journal_envelope(run_id: &str, entry: JournalEntry) -> LiveEnvelope {

@@ -1546,34 +1546,6 @@ impl AttractorApiService {
         }
     }
 
-    /// Transcript segments projected from the combined (parent + child) run
-    /// journal — the same resequenced view the live stream cursors over.
-    pub fn get_pipeline_segments(&self, pipeline_id: &str) -> RuntimeRouteResponse {
-        let store = RunStore::for_settings(&self.settings);
-        let entries = match attractor_runtime::combined_run_journal_entries(&store, pipeline_id) {
-            Ok(Some(entries)) => entries,
-            Ok(None) => {
-                return RuntimeRouteResponse::json(404, json!({"detail": "Unknown pipeline"}))
-            }
-            Err(error) => {
-                return RuntimeRouteResponse::json(500, json!({"detail": error.to_string()}))
-            }
-        };
-        let mut projection = attractor_runtime::project_run_segments(&entries);
-        for segment in &mut projection.segments {
-            truncate_segment_tool_output_preview(segment);
-        }
-        RuntimeRouteResponse::json(
-            200,
-            json!({
-                "pipeline_id": pipeline_id,
-                "run_id": pipeline_id,
-                "segments": projection.segments,
-                "newest_sequence": projection.newest_sequence,
-            }),
-        )
-    }
-
     pub fn get_pipeline_journal(
         &self,
         pipeline_id: &str,
@@ -1589,15 +1561,8 @@ impl AttractorApiService {
             Err(detail) => return RuntimeRouteResponse::json(400, json!({"detail": detail})),
         };
         let store = RunStore::for_settings(&self.settings);
-        // Combined journal, same re-sequenced cursor space as the live
-        // stream and transcript. This page seeds the client's live-stream
-        // cursor: a parent-only page numbers entries in the parent's own
-        // space, leaving the cursor an entire child history behind the
-        // combined numbering, and every live-stream connect then replays
-        // all of it.
-        let mut entries = match attractor_runtime::combined_run_journal_entries(&store, pipeline_id)
-        {
-            Ok(Some(entries)) => entries,
+        let mut entries = match store.read_run_bundle(pipeline_id) {
+            Ok(Some(bundle)) => bundle.journal,
             Ok(None) => {
                 return RuntimeRouteResponse::json(404, json!({"detail": "Unknown pipeline"}))
             }
@@ -1605,7 +1570,7 @@ impl AttractorApiService {
                 return RuntimeRouteResponse::json(500, json!({"detail": error.to_string()}))
             }
         };
-        entries.reverse();
+        entries.sort_by(|left, right| right.sequence.cmp(&left.sequence));
         if let Some(before_sequence) = before_sequence {
             entries.retain(|entry| entry.sequence < before_sequence);
         }
@@ -1625,10 +1590,16 @@ impl AttractorApiService {
         )
     }
 
-    pub fn get_pipeline_transcript(&self, pipeline_id: &str) -> RuntimeRouteResponse {
+    pub fn get_pipeline_execution_transcript(
+        &self,
+        pipeline_id: &str,
+        node_id: &str,
+        stage_index: u64,
+        attempt: u64,
+    ) -> RuntimeRouteResponse {
         let store = RunStore::for_settings(&self.settings);
-        let entries = match attractor_runtime::combined_run_journal_entries(&store, pipeline_id) {
-            Ok(Some(entries)) => entries,
+        let bundle = match store.read_run_bundle(pipeline_id) {
+            Ok(Some(bundle)) => bundle,
             Ok(None) => {
                 return RuntimeRouteResponse::json(404, json!({"detail": "Unknown pipeline"}))
             }
@@ -1636,14 +1607,41 @@ impl AttractorApiService {
                 return RuntimeRouteResponse::json(500, json!({"detail": error.to_string()}))
             }
         };
-        let transcript = attractor_runtime::project_run_transcript(&entries);
-        RuntimeRouteResponse::json(
-            200,
-            json!({
-                "pipeline_id": pipeline_id,
-                "entries": transcript.segments,
-            }),
-        )
+        match store.read_node_execution_transcript(&bundle.paths, node_id, stage_index, attempt) {
+            Ok(Some(records)) => RuntimeRouteResponse::json(
+                200,
+                json!({"run_id": pipeline_id, "node_id": node_id, "stage_index": stage_index, "attempt": attempt, "records": records}),
+            ),
+            Ok(None) => RuntimeRouteResponse::json(404, json!({"detail": "Unknown execution"})),
+            Err(error) => RuntimeRouteResponse::json(500, json!({"detail": error.to_string()})),
+        }
+    }
+
+    pub fn get_pipeline_execution_events(
+        &self,
+        pipeline_id: &str,
+        node_id: &str,
+        stage_index: u64,
+        attempt: u64,
+    ) -> RuntimeRouteResponse {
+        let store = RunStore::for_settings(&self.settings);
+        let bundle = match store.read_run_bundle(pipeline_id) {
+            Ok(Some(bundle)) => bundle,
+            Ok(None) => {
+                return RuntimeRouteResponse::json(404, json!({"detail": "Unknown pipeline"}))
+            }
+            Err(error) => {
+                return RuntimeRouteResponse::json(500, json!({"detail": error.to_string()}))
+            }
+        };
+        match store.read_node_execution_events(&bundle.paths, node_id, stage_index, attempt) {
+            Ok(Some(events)) => RuntimeRouteResponse::json(
+                200,
+                json!({"run_id": pipeline_id, "node_id": node_id, "stage_index": stage_index, "attempt": attempt, "events": events}),
+            ),
+            Ok(None) => RuntimeRouteResponse::json(404, json!({"detail": "Unknown execution"})),
+            Err(error) => RuntimeRouteResponse::json(500, json!({"detail": error.to_string()})),
+        }
     }
 
     pub fn get_pipeline_events(
@@ -2296,8 +2294,29 @@ fn dispatch_pipeline_route(
             query_i64(query, "limit"),
             query_i64(query, "before_sequence"),
         ),
-        ("GET", "transcript") => service.get_pipeline_transcript(pipeline_id),
-        ("GET", "segments") => service.get_pipeline_segments(pipeline_id),
+        ("GET", subpath) if subpath.starts_with("executions/") => {
+            let parts = subpath.split('/').collect::<Vec<_>>();
+            if parts.len() != 4 {
+                RuntimeRouteResponse::json(404, json!({"detail": "Not Found"}))
+            } else {
+                let node_id = percent_decode_path(parts[1]).ok();
+                let identity = parts[2].split_once('-').and_then(|(stage, attempt)| {
+                    Some((stage.parse::<u64>().ok()?, attempt.parse::<u64>().ok()?))
+                });
+                match (node_id, identity, parts[3]) {
+                    (Some(node_id), Some((stage_index, attempt)), "transcript") => service
+                        .get_pipeline_execution_transcript(
+                            pipeline_id,
+                            &node_id,
+                            stage_index,
+                            attempt,
+                        ),
+                    (Some(node_id), Some((stage_index, attempt)), "events") => service
+                        .get_pipeline_execution_events(pipeline_id, &node_id, stage_index, attempt),
+                    _ => RuntimeRouteResponse::json(404, json!({"detail": "Not Found"})),
+                }
+            }
+        }
         ("GET", "events") => match query_i64_strict(
             query,
             "after_sequence",
@@ -2910,6 +2929,10 @@ fn pipeline_detail_payload(bundle: &RunBundle, children: &[RunBundle]) -> Value 
         "child_runs".to_string(),
         json!(child_run_summaries(children)),
     );
+    let executions = RunStore::for_runs_dir(bundle.paths.runs_dir.clone())
+        .list_node_executions(&bundle.paths)
+        .unwrap_or_default();
+    payload.insert("executions".to_string(), json!(executions));
     Value::Object(payload)
 }
 
@@ -3274,12 +3297,16 @@ fn child_run_summaries(children: &[RunBundle]) -> Vec<Value> {
         .iter()
         .map(|child| {
             let record = child.record.as_ref();
+            let executions = RunStore::for_runs_dir(child.paths.runs_dir.clone())
+                .list_node_executions(&child.paths)
+                .unwrap_or_default();
             json!({
                 "run_id": record.map(|record| record.run_id.clone()).unwrap_or_else(|| child.paths.run_id.clone()),
                 "record": child.record,
                 "checkpoint": child.checkpoint,
                 "journal_count": child.journal.len(),
                 "event_count": child.raw_events.len(),
+                "executions": executions,
             })
         })
         .collect()
@@ -3311,27 +3338,4 @@ fn child_event_groups(children: &[RunBundle]) -> Vec<Value> {
             })
         })
         .collect()
-}
-
-/// Mirrors the conversation UI preview shape: `tool_call.output` is capped for
-/// hydration payloads, with `output_size`/`output_truncated` recording the
-/// full size. (8 KiB, same as the chat snapshot preview.)
-fn truncate_segment_tool_output_preview(segment: &mut Value) {
-    const SEGMENT_TOOL_OUTPUT_PREVIEW_BYTES: usize = 8 * 1024;
-    let Some(tool_call) = segment.get_mut("tool_call").and_then(Value::as_object_mut) else {
-        return;
-    };
-    let Some(output) = tool_call
-        .get("output")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-    else {
-        return;
-    };
-    let output_size = output.len();
-    let (preview, truncated) =
-        spark_common::segments::truncate_utf8(&output, SEGMENT_TOOL_OUTPUT_PREVIEW_BYTES);
-    tool_call.insert("output".to_string(), json!(preview));
-    tool_call.insert("output_size".to_string(), json!(output_size));
-    tool_call.insert("output_truncated".to_string(), json!(truncated));
 }

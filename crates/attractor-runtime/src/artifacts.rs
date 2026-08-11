@@ -46,11 +46,17 @@ pub fn ensure_run_layout(paths: &RunRootPaths) -> Result<()> {
 pub fn write_node_artifacts(
     paths: &RunRootPaths,
     node_id: &str,
+    stage_index: u64,
+    attempt: u64,
     artifacts: &NodeArtifacts,
 ) -> Result<PathBuf> {
     let node_path = validate_relative_path(node_id)?;
     let root = if artifacts.under_logs {
-        paths.logs_dir().join(node_path)
+        paths
+            .logs_dir()
+            .join(node_path)
+            .join("executions")
+            .join(format!("{stage_index}-{attempt}"))
     } else {
         paths.root.join(node_path)
     };

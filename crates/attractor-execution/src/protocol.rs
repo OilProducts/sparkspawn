@@ -15,6 +15,8 @@ pub struct WorkerNodeRequest {
     pub run_id: String,
     pub flow: FlowDefinition,
     pub node_id: String,
+    pub stage_index: u64,
+    pub attempt: u64,
     #[serde(default)]
     pub prompt: String,
     #[serde(default)]

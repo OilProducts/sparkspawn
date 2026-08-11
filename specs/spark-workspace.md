@@ -208,26 +208,24 @@ Rules:
 Spark conversation persistence separates durable render state from runtime continuity and debug traces. Each conversation directory holds its complete record set.
 
 The persistent authorities per conversation are:
-- `conversation.json`: stable metadata — id, handle, project path, settings, title, timestamps — plus the committed revision cursor. No transcript arrays, no protocol payloads.
-- `transcript.json`: canonical durable render state — ordered turns and segments with inline artifact anchors by id and kind. Values are coalesced render state, never raw deltas. Tool-call segments store a bounded output preview; full outputs live in per-segment `tool-output/<segment_id>.txt` records written at the commit boundary and fetched on demand.
+- `conversation.json`: stable metadata — id, handle, project path, settings, title, and timestamps. No transcript arrays or protocol payloads.
+- `transcript.jsonl`: append-only full `turn_upsert` and `segment_upsert` records. Values are complete logical state, never raw deltas. Hydration is last-write-wins by stable id. Tool-call segments store a bounded output preview; full outputs live in per-segment `tool-output/<segment_id>.txt` records written at the commit boundary and fetched on demand.
+- `events.jsonl`: append-only detailed activity, including provider stream deltas. Transcript records reference their source event sequence so recovery only inspects the uncommitted event suffix.
 - `artifacts/<kind>.json` and `event-log.json`: artifact records (flow run requests, flow launches, run recoveries, proposed plans) and the workflow event log. Transcript segments anchor artifacts by id; artifact state never subordinates to render state.
-- `journal.jsonl`: append-only committed mutation journal with strictly increasing revisions. Journal lines never embed full snapshots — snapshot-level commits journal a slim ref, and replay across one recovers via a fresh snapshot envelope. Replay-after-revision serves reconnecting clients; a cursor the journal cannot cover recovers through a fresh snapshot.
 - `runtime-session.json`: best-effort model continuity (backend thread id, resume-failure tombstone). A separate failure domain: losing it only costs thread resume, never render state.
 - `codex-jsonrpc-trace.jsonl`: optional exact Codex app-server protocol transcript for debugging upstream behavior.
 
-All writes go through one typed commit boundary. Services construct identity-keyed mutations (metadata patch, turn upsert, segment upsert, artifact upsert, workflow event append); the repository loads the latest committed state, applies the mutations onto it — a stale base revision rebases by identity instead of clobbering concurrent writes — allocates segment orders and every journal revision, maintains metadata (timestamps, title, handle), writes the record files with the revision cursor last, and appends the stamped journal entries. Services never allocate revisions and never hand-build journal payloads.
-
-Legacy single-file `state.json` conversations migrate once, on first read: the merged legacy content is projected into the record files, `journal.jsonl` is seeded with a snapshot checkpoint at the carried-over revision (so pre-migration replay cursors recover naturally and revisions never regress), the originals are renamed aside as `*.migrated`, and the project-level artifact sidecar files are absorbed. Unsupported historical shapes are rejected untouched rather than heuristically reconstructed.
+Conversation and LLM-node execution writes use the same activity repository and transcript schemas. This is a hard cutover; pre-cutover layouts are not migrated or read compatibly.
 
 Normal chat rendering, prompt construction, and live replay must not parse debug traces or `runtime-session.json`.
 
-Committed journal entries and transient live stream events are distinct:
-- committed events have conversation revisions, are appended to the durable journal, and are replayable after reconnect
-- transient `stream_delta` events carry a per-turn stream sequence and the committed base revision they render on top of; they are never appended to the durable journal and exist to make connected clients responsive during streaming
-- transient events may be dropped on reconnect; recovery uses the latest committed transcript state plus committed journal entries, not raw stream deltas
-- clients apply transient deltas to the active view without advancing the committed revision
+Complete transcript upserts and transient live stream events are distinct:
+- complete logical records carry revisions and are appended to `transcript.jsonl`
+- transient stream deltas make connected clients responsive but never become transcript records
+- reconnect hydrates complete history from `transcript.jsonl` and rebuilds only an unfinished unit from the execution-event suffix after the last transcript commit
+- clients apply transient deltas without advancing the durable transcript revision
 
-Run and project-chat transcripts share the same turn/segment record contract, including segment identity derivation and delta coalescing; run-only workflow boundary metadata lives outside the shared segment core.
+Each LLM-node attempt owns its own `events.jsonl` and `transcript.jsonl`. Runs own only orchestration events and compose their presentation from independently addressed execution resources; a run root is not transcript authority.
 
 The durable render state must contain enough information to restore:
 - conversation metadata
@@ -455,10 +453,10 @@ SPARK_HOME/
 
 Conversation-specific durable files include:
 - `conversation.json`
-- `transcript.json`
+- `transcript.jsonl`
+- `events.jsonl`
 - `artifacts/<kind>.json`
 - `event-log.json`
-- `journal.jsonl`
 - `runtime-session.json`
 - `codex-jsonrpc-trace.jsonl`
 

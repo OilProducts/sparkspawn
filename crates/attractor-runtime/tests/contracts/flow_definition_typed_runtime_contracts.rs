@@ -186,6 +186,7 @@ fn parallel_handler_uses_typed_parallel_config_without_extension_duplicate() {
         .execute(attractor_runtime::NodeExecutionRequest {
             node_id: "fan".to_string(),
             stage_index: 0,
+            attempt: 0,
             context: ContextMap::new(),
             prompt: String::new(),
             node: flow.nodes["fan"].clone(),
@@ -226,6 +227,7 @@ fn handler_dispatch_ignores_legacy_extension_type_override() {
         .execute(attractor_runtime::NodeExecutionRequest {
             node_id: "task".to_string(),
             stage_index: 0,
+            attempt: 0,
             context: ContextMap::new(),
             prompt: String::new(),
             node: flow.nodes["task"].clone(),
@@ -461,6 +463,7 @@ edges:
         .execute(attractor_runtime::NodeExecutionRequest {
             node_id: "run_child".to_string(),
             stage_index: 0,
+            attempt: 0,
             context: ContextMap::from([(
                 "internal.run_workdir".to_string(),
                 json!(temp.path().to_string_lossy().to_string()),
@@ -591,6 +594,7 @@ edges:
         .execute(attractor_runtime::NodeExecutionRequest {
             node_id: "run_child".to_string(),
             stage_index: 0,
+            attempt: 0,
             context: ContextMap::from([
                 ("context.parent_ticket".to_string(), json!("TICKET-7")),
                 ("context.count".to_string(), json!(42)),
@@ -724,6 +728,7 @@ fn execute_dynamic_workdir_subflow(
         .execute(attractor_runtime::NodeExecutionRequest {
             node_id: "run_child".to_string(),
             stage_index: 0,
+            attempt: 0,
             context,
             prompt: String::new(),
             node: flow.nodes["run_child"].clone(),
@@ -813,6 +818,7 @@ fn default_child_launch_inherits_parent_project_and_keeps_worktree() {
         .execute(NodeExecutionRequest {
             node_id: "run_child".to_string(),
             stage_index: 0,
+            attempt: 0,
             context: ContextMap::from([
                 ("internal.run_id".to_string(), json!("parent-run")),
                 ("internal.root_run_id".to_string(), json!("parent-run")),
@@ -1011,6 +1017,7 @@ fn execute_tool_node(
         .execute(attractor_runtime::NodeExecutionRequest {
             node_id: "run_tool".to_string(),
             stage_index: 0,
+            attempt: 0,
             context,
             prompt: String::new(),
             node: flow.nodes["run_tool"].clone(),

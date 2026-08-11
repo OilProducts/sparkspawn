@@ -81,7 +81,8 @@ where
         attractor_runtime::flow_runtime::node_attrs_for_handler(&request.node_id, &node);
     let execution_request = NodeExecutionRequest {
         node_id: request.node_id.clone(),
-        stage_index: 0,
+        stage_index: request.stage_index,
+        attempt: request.attempt,
         context: request.context.clone(),
         prompt: request.prompt.clone(),
         node,

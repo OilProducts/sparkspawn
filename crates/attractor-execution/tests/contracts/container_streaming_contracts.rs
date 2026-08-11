@@ -4,11 +4,13 @@ use std::sync::{Arc, Mutex};
 
 use attractor_core::{OutcomeStatus, RawRuntimeEvent, RunRecord};
 use attractor_execution::{
-    CommandResult, CommandSpec, ContainerCommandRunner, ContainerizedNodeExecutor, EventFrame,
-    ExecutionMode, ExecutionProfile, ExecutionProfileSelection, ResultFrame, WorkerFrame,
+    run_worker_node_from_reader_writer, CommandResult, CommandSpec, ContainerCommandRunner,
+    ContainerizedNodeExecutor, EventFrame, ExecutionMode, ExecutionProfile,
+    ExecutionProfileSelection, ResultFrame, RunRootMetadata, WorkerFrame, WorkerNodeRequest,
 };
 use attractor_runtime::{
     CreateRunRequest, NodeExecutionRequest, NodeExecutor, RunStore, RuntimeHandlerRunner,
+    HANDLER_CODERGEN,
 };
 use serde_json::json;
 
@@ -20,6 +22,7 @@ struct StreamingFake {
     io_failure: bool,
     delivered: Arc<Mutex<usize>>,
     after_first_line: Option<Arc<dyn Fn() + Send + Sync>>,
+    expected_identity: Option<(u64, u64)>,
 }
 
 impl ContainerCommandRunner for StreamingFake {
@@ -41,11 +44,16 @@ impl ContainerCommandRunner for StreamingFake {
 
     fn run_streaming(
         &mut self,
-        _: CommandSpec,
+        spec: CommandSpec,
         callback: &mut dyn FnMut(&str),
     ) -> io::Result<CommandResult> {
         if self.io_failure {
             return Err(io::Error::other("stream broke"));
+        }
+        if let Some(expected) = self.expected_identity {
+            let request: attractor_execution::WorkerNodeRequest =
+                serde_json::from_str(spec.stdin.trim()).unwrap();
+            assert_eq!((request.stage_index, request.attempt), expected);
         }
         let mut stdout = String::new();
         for frame in &self.frames {
@@ -158,11 +166,13 @@ edges:
         io_failure: false,
         delivered: delivered.clone(),
         after_first_line: None,
+        expected_identity: None,
     });
     let node = flow.nodes["task"].clone();
     let request = NodeExecutionRequest {
         node_id: "task".into(),
         stage_index: 0,
+        attempt: 0,
         context: Default::default(),
         prompt: String::new(),
         node_attrs: attractor_runtime::flow_runtime::node_attrs_for_handler("task", &node),
@@ -193,6 +203,7 @@ fn streams_canonical_events_to_host_once_in_order_before_exit_and_notifies() {
     let live_observed_from_runner = live_observed.clone();
     let live_notifications = notifications.clone();
     let live_paths = paths.clone();
+    let initial_event_count = attractor_runtime::read_raw_events(&paths).unwrap().len();
     executor = executor.with_command_runner(StreamingFake {
         frames,
         exit_code: 0,
@@ -201,31 +212,23 @@ fn streams_canonical_events_to_host_once_in_order_before_exit_and_notifies() {
         delivered: delivered.clone(),
         after_first_line: Some(Arc::new(move || {
             let persisted = attractor_runtime::read_raw_events(&live_paths).unwrap();
-            assert_eq!(persisted.last().unwrap().event_type, "first");
+            assert_eq!(persisted.len(), initial_event_count);
             assert_eq!(&*live_notifications.lock().unwrap(), &["stream-run"]);
             *live_observed_from_runner.lock().unwrap() = true;
         })),
+        expected_identity: Some((7, 2)),
     });
+    let mut request = request;
+    request.stage_index = 7;
+    request.attempt = 2;
     let outcome = executor.execute(request).unwrap();
     assert_eq!(outcome.status, OutcomeStatus::Success);
     assert_eq!(*delivered.lock().unwrap(), 3);
     assert!(*live_observed.lock().unwrap());
-    let persisted = attractor_runtime::read_raw_events(&paths).unwrap();
-    let streamed = &persisted[persisted.len() - 2..];
     assert_eq!(
-        streamed
-            .iter()
-            .map(|e| e.event_type.as_str())
-            .collect::<Vec<_>>(),
-        ["first", "second"]
+        attractor_runtime::read_raw_events(&paths).unwrap().len(),
+        initial_event_count
     );
-    assert_eq!(
-        streamed.iter().map(|e| e.sequence).collect::<Vec<_>>(),
-        [Some(41), Some(42)]
-    );
-    assert!(streamed
-        .iter()
-        .all(|e| e.run_id == "worker-run" && e.emitted_at == "2026-07-22T12:00:00Z"));
     assert_eq!(
         &*notifications.lock().unwrap(),
         &["stream-run", "stream-run"]
@@ -264,16 +267,7 @@ fn rejects_every_invalid_stream_shape_with_diagnostics() {
 }
 
 #[test]
-fn reports_persistence_streaming_and_nonzero_exit_failures() {
-    let (_temp, mut executor, request, _, notifications) =
-        fixture(vec![event("x", "stream-run", 1), result()]);
-    let events_path = request.run_paths.as_ref().unwrap().events_jsonl();
-    std::fs::remove_file(&events_path).unwrap();
-    std::fs::create_dir(&events_path).unwrap();
-    let error = executor.execute(request).unwrap_err();
-    assert!(error.message.contains("worker event ingestion failed"));
-    assert!(notifications.lock().unwrap().is_empty());
-
+fn reports_streaming_and_nonzero_exit_failures() {
     let (_temp, mut executor, request, _, _) = fixture(vec![]);
     executor = executor.with_command_runner(StreamingFake {
         frames: vec![],
@@ -282,6 +276,7 @@ fn reports_persistence_streaming_and_nonzero_exit_failures() {
         io_failure: true,
         delivered: Arc::new(Mutex::new(0)),
         after_first_line: None,
+        expected_identity: None,
     });
     assert!(executor
         .execute(request)
@@ -297,7 +292,97 @@ fn reports_persistence_streaming_and_nonzero_exit_failures() {
         io_failure: false,
         delivered: Arc::new(Mutex::new(0)),
         after_first_line: None,
+        expected_identity: None,
     });
     let error = executor.execute(request).unwrap_err();
     assert!(error.message.contains("exit code 17") && error.message.contains("worker exploded"));
+}
+
+#[test]
+fn worker_protocol_preserves_repeated_visit_and_retry_execution_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_id = "worker-identity";
+    let store = RunStore::for_runs_dir(temp.path().join("runs"));
+    let paths = store
+        .create_run(CreateRunRequest {
+            record: RunRecord::new(run_id, temp.path().to_string_lossy()),
+            checkpoint: None,
+            manifest: None,
+            flow_source: None,
+            flow_definition_json: None,
+        })
+        .unwrap();
+    let flow = attractor_dsl::parse_flow_definition(
+        r#"
+schema_version: "1"
+id: worker-identity
+nodes:
+  start: { kind: start }
+  task: { kind: agent_task }
+  done: { kind: exit }
+edges:
+  - { from: start, to: task }
+  - { from: task, to: done }
+"#,
+    )
+    .unwrap();
+
+    for (stage_index, attempt) in [(3, 0), (3, 1), (4, 0)] {
+        let request = WorkerNodeRequest {
+            run_id: run_id.into(),
+            flow: flow.clone(),
+            node_id: "task".into(),
+            stage_index,
+            attempt,
+            prompt: String::new(),
+            context: Default::default(),
+            context_logs: Vec::new(),
+            logs_root: Some(paths.logs_dir()),
+            working_dir: temp.path().into(),
+            backend_name: None,
+            model: None,
+            config_dir: None,
+            run_root: Some(RunRootMetadata {
+                runs_dir: paths.runs_dir.clone(),
+                project_id: paths.project_id.clone(),
+                root: paths.root.clone(),
+            }),
+        };
+        let mut runner = RuntimeHandlerRunner::new();
+        runner.register_thread_safe_handler_fn(HANDLER_CODERGEN, |runtime| {
+            let root = runtime
+                .run_paths
+                .as_ref()
+                .unwrap()
+                .logs_dir()
+                .join(&runtime.node_id)
+                .join("executions")
+                .join(format!("{}-{}", runtime.stage_index, runtime.attempt));
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(
+                root.join("events.jsonl"),
+                "{\"type\":\"provider_detail\"}\n",
+            )
+            .unwrap();
+            Ok(attractor_core::Outcome::new(OutcomeStatus::Success))
+        });
+        let input = serde_json::to_vec(&request).unwrap();
+        assert_eq!(
+            run_worker_node_from_reader_writer(input.as_slice(), Vec::new(), runner),
+            0
+        );
+    }
+
+    for identity in ["3-0", "3-1", "4-0"] {
+        let events = paths
+            .logs_dir()
+            .join("task/executions")
+            .join(identity)
+            .join("events.jsonl");
+        assert!(events.is_file(), "missing {}", events.display());
+    }
+    assert!(attractor_runtime::read_raw_events(&paths)
+        .unwrap()
+        .iter()
+        .all(|event| event.event_type != "CodergenAdapter"));
 }

@@ -5,6 +5,8 @@ use std::sync::Arc;
 use attractor_core::{
     CheckpointState, FlowDefinition, RawRuntimeEvent, RunManifest, RunRecord, RunResult,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use spark_common::settings::SparkSettings;
 use spark_storage::{write_json_atomic, write_text_atomic, JsonWriteOptions};
 
@@ -77,6 +79,17 @@ pub struct RunArtifactFile {
     pub content: Vec<u8>,
 }
 
+/// One independently stored node attempt. Sequences in its activity files are
+/// local to this resource and are never re-numbered with run or child-run data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeExecution {
+    pub run_id: String,
+    pub node_id: String,
+    pub stage_index: u64,
+    pub attempt: u64,
+    pub status: Value,
+}
+
 impl RunStore {
     pub fn for_settings(settings: &SparkSettings) -> Self {
         Self {
@@ -109,6 +122,128 @@ impl RunStore {
 
     pub fn run_root(&self, project_path: &str, run_id: &str) -> Result<RunRootPaths> {
         RunRootPaths::new(self.runs_dir.clone(), project_path, run_id)
+    }
+
+    pub fn list_node_executions(&self, paths: &RunRootPaths) -> Result<Vec<NodeExecution>> {
+        let mut executions = Vec::new();
+        let logs = paths.logs_dir();
+        let nodes = match fs::read_dir(&logs) {
+            Ok(entries) => entries,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(executions),
+            Err(source) => {
+                return Err(RuntimeStorageError::io(
+                    "read execution nodes",
+                    logs,
+                    source,
+                ))
+            }
+        };
+        for node in nodes {
+            let node = node
+                .map_err(|source| RuntimeStorageError::io("read execution node", &logs, source))?;
+            if !node.path().is_dir() {
+                continue;
+            }
+            let Some(node_id) = node.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let root = node.path().join("executions");
+            let attempts = match fs::read_dir(&root) {
+                Ok(entries) => entries,
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(source) => {
+                    return Err(RuntimeStorageError::io(
+                        "read node executions",
+                        root,
+                        source,
+                    ))
+                }
+            };
+            for attempt_entry in attempts {
+                let attempt_entry = attempt_entry.map_err(|source| {
+                    RuntimeStorageError::io("read node execution", &root, source)
+                })?;
+                if !attempt_entry.path().is_dir() {
+                    continue;
+                }
+                let name = attempt_entry.file_name().to_string_lossy().to_string();
+                let Some((stage, attempt)) = name.split_once('-') else {
+                    continue;
+                };
+                let (Ok(stage_index), Ok(attempt)) = (stage.parse(), attempt.parse()) else {
+                    continue;
+                };
+                let status_path = attempt_entry.path().join("status.json");
+                let status = match fs::read_to_string(&status_path) {
+                    Ok(text) => serde_json::from_str(&text).unwrap_or(Value::Null),
+                    Err(source) if source.kind() == std::io::ErrorKind::NotFound => Value::Null,
+                    Err(source) => {
+                        return Err(RuntimeStorageError::io(
+                            "read execution status",
+                            status_path,
+                            source,
+                        ))
+                    }
+                };
+                executions.push(NodeExecution {
+                    run_id: paths.run_id.clone(),
+                    node_id: node_id.clone(),
+                    stage_index,
+                    attempt,
+                    status,
+                });
+            }
+        }
+        executions.sort_by_key(|item| (item.stage_index, item.attempt, item.node_id.clone()));
+        Ok(executions)
+    }
+
+    pub fn node_execution_root(
+        &self,
+        paths: &RunRootPaths,
+        node_id: &str,
+        stage_index: u64,
+        attempt: u64,
+    ) -> Result<PathBuf> {
+        Ok(paths
+            .logs_dir()
+            .join(validate_relative_path(node_id)?)
+            .join("executions")
+            .join(format!("{stage_index}-{attempt}")))
+    }
+
+    pub fn read_node_execution_transcript(
+        &self,
+        paths: &RunRootPaths,
+        node_id: &str,
+        stage_index: u64,
+        attempt: u64,
+    ) -> Result<Option<Vec<spark_storage::TranscriptRecord>>> {
+        let root = self.node_execution_root(paths, node_id, stage_index, attempt)?;
+        if !root.is_dir() {
+            return Ok(None);
+        }
+        spark_storage::ActivityRepository::new(root)
+            .read_transcript_records()
+            .map(Some)
+            .map_err(Into::into)
+    }
+
+    pub fn read_node_execution_events(
+        &self,
+        paths: &RunRootPaths,
+        node_id: &str,
+        stage_index: u64,
+        attempt: u64,
+    ) -> Result<Option<Vec<spark_storage::ActivityEvent>>> {
+        let root = self.node_execution_root(paths, node_id, stage_index, attempt)?;
+        if !root.is_dir() {
+            return Ok(None);
+        }
+        spark_storage::ActivityRepository::new(root)
+            .read_events()
+            .map(Some)
+            .map_err(Into::into)
     }
 
     pub fn create_run(&self, request: CreateRunRequest) -> Result<RunRootPaths> {
@@ -397,9 +532,11 @@ impl RunStore {
         &self,
         paths: &RunRootPaths,
         node_id: &str,
+        stage_index: u64,
+        attempt: u64,
         artifacts: &NodeArtifacts,
     ) -> Result<PathBuf> {
-        write_node_artifacts(paths, node_id, artifacts)
+        write_node_artifacts(paths, node_id, stage_index, attempt, artifacts)
     }
 
     pub fn list_artifacts(

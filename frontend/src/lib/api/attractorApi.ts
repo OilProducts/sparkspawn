@@ -41,10 +41,6 @@ export function pipelineJournalUrl(
     return `${attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/journal`)}${query ? `?${query}` : ''}`
 }
 
-export function pipelineTranscriptUrl(pipelineId: string): string {
-    return attractorUrl(`/pipelines/${encodeURIComponent(pipelineId)}/transcript`)
-}
-
 export interface FlowPayloadResponse {
     name: string
     content: string
@@ -170,6 +166,21 @@ export interface PipelineStatusResponse {
     } | null
     cleanup_error?: string
     launch_context?: Record<string, unknown> | null
+    executions?: NodeExecutionResponse[]
+    child_runs?: ChildRunActivityResponse[]
+}
+
+export interface NodeExecutionResponse {
+    run_id: string
+    node_id: string
+    stage_index: number
+    attempt: number
+    status: Record<string, unknown> | null
+}
+
+export interface ChildRunActivityResponse {
+    run_id: string
+    executions: NodeExecutionResponse[]
 }
 
 export interface PipelineCancelResponse {
@@ -228,11 +239,6 @@ export interface RunJournalPageResponse {
     oldest_sequence?: number | null
     newest_sequence?: number | null
     has_older: boolean
-}
-
-export interface RunTranscriptResponse {
-    pipeline_id: string
-    entries: Record<string, unknown>[]
 }
 
 export interface PipelineAnswerResponse {
@@ -476,7 +482,25 @@ export function parsePipelineStatusResponse(payload: unknown, endpoint = '/attra
                 completed_count: progressCompletedCount,
             }
             : undefined,
+        executions: parseNodeExecutions(record.executions),
+        child_runs: Array.isArray(record.child_runs) ? record.child_runs.map((value) => {
+            const child = asUnknownRecord(value)
+            return child && typeof child.run_id === 'string'
+                ? { run_id: child.run_id, executions: parseNodeExecutions(child.executions) }
+                : null
+        }).filter((value): value is ChildRunActivityResponse => value !== null) : [],
     }
+}
+
+function parseNodeExecutions(value: unknown): NodeExecutionResponse[] {
+    if (!Array.isArray(value)) return []
+    return value.map((item) => {
+        const record = asUnknownRecord(item)
+        if (!record || typeof record.run_id !== 'string' || typeof record.node_id !== 'string'
+            || typeof record.stage_index !== 'number' || typeof record.attempt !== 'number') return null
+        return { run_id: record.run_id, node_id: record.node_id, stage_index: record.stage_index,
+            attempt: record.attempt, status: asUnknownRecord(record.status) }
+    }).filter((item): item is NodeExecutionResponse => item !== null)
 }
 
 export function parsePipelineCancelResponse(payload: unknown, endpoint = '/attractor/pipelines/{id}/cancel'): PipelineCancelResponse {
@@ -575,22 +599,6 @@ export function parseRunJournalPageResponse(
                 ? null
                 : undefined,
         has_older: record.has_older === true,
-    }
-}
-
-export function parseRunTranscriptResponse(
-    payload: unknown,
-    endpoint = '/attractor/pipelines/{id}/transcript',
-): RunTranscriptResponse {
-    const record = expectObjectRecord(payload, endpoint)
-    if (!Array.isArray(record.entries)) {
-        throw new ApiSchemaError(endpoint, 'Expected "entries" to be an array.')
-    }
-    return {
-        pipeline_id: expectString(record.pipeline_id, endpoint, 'pipeline_id'),
-        entries: record.entries
-            .map((entry) => asUnknownRecord(entry))
-            .filter((entry): entry is Record<string, unknown> => entry !== null),
     }
 }
 
@@ -990,17 +998,6 @@ export async function fetchPipelineJournalValidated(
     )
 }
 
-export async function fetchPipelineTranscriptValidated(
-    pipelineId: string,
-): Promise<RunTranscriptResponse> {
-    return fetchJsonWithValidation(
-        pipelineTranscriptUrl(pipelineId),
-        undefined,
-        '/attractor/pipelines/{id}/transcript',
-        parseRunTranscriptResponse,
-    )
-}
-
 export async function fetchPipelineAnswerValidated(
     pipelineId: string,
     questionId: string,
@@ -1155,24 +1152,37 @@ export function parseRunTranscriptSegment(value: unknown): RunTranscriptSegment 
     }
 }
 
-function parseRunSegmentsResponse(payload: unknown): RunSegmentsResponse {
-    const record = expectObjectRecord(payload, '/attractor/pipelines/{id}/segments')
-    return {
-        run_id: expectString(record.run_id, 'run_id', '/attractor/pipelines/{id}/segments'),
-        segments: Array.isArray(record.segments)
-            ? record.segments
-                .map((entry) => parseRunTranscriptSegment(entry))
-                .filter((entry): entry is RunTranscriptSegment => entry !== null)
-            : [],
-        newest_sequence: typeof record.newest_sequence === 'number' ? record.newest_sequence : 0,
-    }
+async function fetchExecutionSegments(execution: NodeExecutionResponse, sourceScope: 'root' | 'child'): Promise<RunTranscriptSegment[]> {
+    const endpoint = `/attractor/pipelines/{id}/executions/{node}/{identity}/transcript`
+    const url = attractorUrl(`/pipelines/${encodeURIComponent(execution.run_id)}/executions/${encodeURIComponent(execution.node_id)}/${execution.stage_index}-${execution.attempt}/transcript`)
+    const response = await fetchJsonWithValidation(url, undefined, endpoint, (payload) => {
+        const record = expectObjectRecord(payload, endpoint)
+        return Array.isArray(record.records) ? record.records : []
+    })
+    return response.flatMap((value): RunTranscriptSegment[] => {
+        const record = asUnknownRecord(value)
+        if (record?.type !== 'segment_upsert') return []
+        const segment = parseConversationSegmentResponse(record.segment)
+        if (!segment) return []
+        return [{
+            ...segment,
+            node_id: execution.node_id,
+            attempt: execution.attempt,
+            latest_sequence: typeof record.source_event_sequence === 'number' ? record.source_event_sequence : 0,
+            source_scope: sourceScope,
+            source_flow_name: null,
+            source_parent_node_id: null,
+            source_run_id: execution.run_id,
+        }]
+    })
 }
 
-export function fetchRunSegmentsValidated(runId: string): Promise<RunSegmentsResponse> {
-    return fetchJsonWithValidation(
-        attractorUrl(`/pipelines/${encodeURIComponent(runId)}/segments`),
-        undefined,
-        '/attractor/pipelines/{id}/segments',
-        parseRunSegmentsResponse,
-    )
+export async function fetchRunActivityValidated(runId: string): Promise<RunSegmentsResponse> {
+    const detail = await fetchPipelineStatusValidated(runId)
+    const resources = [
+        ...(detail.executions ?? []).map((execution) => ({ execution, scope: 'root' as const })),
+        ...(detail.child_runs ?? []).flatMap((child) => child.executions.map((execution) => ({ execution, scope: 'child' as const }))),
+    ]
+    const segments = (await Promise.all(resources.map(({ execution, scope }) => fetchExecutionSegments(execution, scope)))).flat()
+    return { run_id: runId, segments, newest_sequence: 0 }
 }

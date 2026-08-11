@@ -2,8 +2,8 @@
 //!
 //! Durable transcripts store a bounded tool-output preview; full outputs live
 //! in per-segment sidecar files under `conversations/<id>/tool-output/`,
-//! written at the commit boundary (and during legacy migration) and fetched on
-//! demand. This keeps `transcript.json` and journal lines small no matter how
+//! written at the commit boundary and fetched on demand. This keeps semantic
+//! transcript records small no matter how
 //! large tool outputs get.
 
 use serde_json::{json, Value};

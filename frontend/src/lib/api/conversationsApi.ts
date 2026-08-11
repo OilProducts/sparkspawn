@@ -781,11 +781,11 @@ export async function fetchConversationSegmentToolOutputValidated(
     projectPath: string,
 ): Promise<ConversationToolOutputResponse> {
     return fetchWorkspaceJsonValidated(
-        `/conversations/${encodeURIComponent(conversationId)}/segments/${encodeURIComponent(segmentId)}/tool-output?project_path=${encodeURIComponent(projectPath)}`,
+        `/conversations/${encodeURIComponent(conversationId)}/tool-output/${encodeURIComponent(segmentId)}?project_path=${encodeURIComponent(projectPath)}`,
         undefined,
-        '/workspace/api/conversations/{id}/segments/{segmentId}/tool-output',
+        '/workspace/api/conversations/{id}/tool-output/{segmentId}',
         (payload) => {
-            const endpoint = '/workspace/api/conversations/{id}/segments/{segmentId}/tool-output'
+            const endpoint = '/workspace/api/conversations/{id}/tool-output/{segmentId}'
             const record = expectObjectRecord(payload, endpoint)
             const output = expectString(record.output, endpoint, 'output')
             return {

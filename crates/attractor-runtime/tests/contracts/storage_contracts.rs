@@ -318,19 +318,14 @@ fn raw_event_append_does_not_update_render_transcript() {
     let events = store.read_raw_events(&paths).expect("events");
     assert_eq!(events.last().and_then(|event| event.sequence), Some(4));
 
-    // Transcripts are a read-time projection of the journal now: the
-    // appended stage event surfaces as a boundary segment on read.
-    let transcript =
-        attractor_runtime::project_run_transcript(&store.read_journal(&paths).expect("journal"));
-    assert!(transcript
-        .segments
-        .iter()
-        .any(|segment| segment.kind == "boundary"
-            && segment
-                .boundary
-                .as_ref()
-                .and_then(|meta| meta.node_id.as_deref())
-                == Some("work")));
+    assert!(
+        !paths.root.join("transcript.jsonl").exists(),
+        "runs do not own transcripts"
+    );
+    assert!(store
+        .list_node_executions(&paths)
+        .expect("executions")
+        .is_empty());
 }
 
 #[test]
@@ -409,6 +404,8 @@ fn result_materialization_selects_successful_response_artifact_and_overlays_mark
         .write_node_artifacts(
             &paths,
             "work",
+            1,
+            0,
             &NodeArtifacts {
                 prompt: Some("Prompt".to_string()),
                 response: Some("Raw response body\n".to_string()),
@@ -428,7 +425,7 @@ fn result_materialization_selects_successful_response_artifact_and_overlays_mark
     assert_eq!(result.source_node_id.as_deref(), Some("work"));
     assert_eq!(
         result.source_artifact_path.as_deref(),
-        Some("logs/work/response.md")
+        Some("logs/work/executions/1-0/response.md")
     );
     assert_eq!(result.body_markdown, "Raw response body\n");
     assert_eq!(
@@ -442,6 +439,48 @@ fn result_materialization_selects_successful_response_artifact_and_overlays_mark
         .expect("read result")
         .expect("result");
     assert_eq!(reread.body_markdown, "Edited body\n");
+}
+
+#[test]
+fn repeated_visits_and_retries_preserve_separate_execution_attempts() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store(&temp);
+    let project_path = temp.path().join("Repeated Executions");
+    std::fs::create_dir_all(&project_path).expect("project dir");
+    let paths = store
+        .create_run(CreateRunRequest {
+            record: record("run-repeated", &project_path.to_string_lossy()),
+            ..Default::default()
+        })
+        .expect("run");
+    for (stage, attempt, response) in [(1, 0, "visit one"), (2, 0, "failed"), (2, 1, "retry")] {
+        store
+            .write_node_artifacts(
+                &paths,
+                "work",
+                stage,
+                attempt,
+                &NodeArtifacts {
+                    response: Some(response.to_string()),
+                    status: Some(json!({"outcome": if attempt == 0 && stage == 2 { "fail" } else { "success" }})),
+                    under_logs: true,
+                    ..Default::default()
+                },
+            )
+            .expect("execution artifacts");
+    }
+    let identities = store
+        .list_node_executions(&paths)
+        .expect("executions")
+        .into_iter()
+        .map(|execution| (execution.stage_index, execution.attempt))
+        .collect::<Vec<_>>();
+    assert_eq!(identities, vec![(1, 0), (2, 0), (2, 1)]);
+    assert_eq!(
+        std::fs::read_to_string(paths.logs_dir().join("work/executions/2-0/response.md"))
+            .expect("failed response"),
+        "failed"
+    );
 }
 
 #[test]
@@ -469,6 +508,8 @@ fn artifact_listing_is_relative_viewable_and_excludes_internal_state() {
         .write_node_artifacts(
             &paths,
             "work",
+            1,
+            0,
             &NodeArtifacts {
                 prompt: Some("Prompt".to_string()),
                 response: Some("Response".to_string()),
@@ -504,7 +545,7 @@ fn artifact_listing_is_relative_viewable_and_excludes_internal_state() {
         .map(|artifact| artifact.path.as_str())
         .collect::<Vec<_>>();
     assert!(paths_only.contains(&"artifacts/flow/flow-source.yaml"));
-    assert!(paths_only.contains(&"logs/work/response.md"));
+    assert!(paths_only.contains(&"logs/work/executions/1-0/response.md"));
     assert!(artifacts.iter().any(|artifact| {
         artifact.path == "logs/work/initial-context.txt"
             && artifact.context_capture_kind.as_deref() == Some("codex_turn_input")

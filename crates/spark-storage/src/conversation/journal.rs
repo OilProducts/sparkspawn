@@ -32,7 +32,7 @@ pub enum JournalEntryKind {
 }
 
 impl JournalEntry {
-    /// The line appended to `journal.jsonl`. Never embeds a full snapshot, so
+    /// The detailed activity payload. Never embeds a full snapshot, so
     /// journal growth is bounded by actual transcript content.
     pub fn journal_line_payload(&self, meta: &ConversationMeta) -> Value {
         match &self.kind {

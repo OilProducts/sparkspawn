@@ -10,7 +10,6 @@
 mod commit;
 mod identity;
 mod journal;
-mod migrate;
 mod mutations;
 mod projection;
 mod records;
@@ -19,7 +18,6 @@ mod store;
 mod tool_output;
 mod transient;
 
-pub(crate) use migrate::migrate_legacy_conversation;
 pub(crate) use store::{read_record, ConversationRecordPaths};
 pub(crate) use tool_output::is_safe_segment_file_id;
 

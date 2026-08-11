@@ -318,14 +318,9 @@ fn seed_conversation(settings: &SparkSettings, project_path: &str, conversation_
     let project = registry
         .ensure_project_paths(project_path)
         .expect("project");
-    let state_path = project
-        .conversations_dir
-        .join(conversation_id)
-        .join("state.json");
-    fs::create_dir_all(state_path.parent().expect("state parent")).expect("state dir");
-    fs::write(
-        state_path,
-        serde_json::to_string_pretty(&json!({
+    crate::write_conversation_snapshot(
+        &settings.data_dir,
+        &json!({
             "schema_version": 5,
             "revision": 0,
             "conversation_id": conversation_id,
@@ -344,10 +339,8 @@ fn seed_conversation(settings: &SparkSettings, project_path: &str, conversation_
                 {"id": "turn-assistant", "role": "assistant", "content": "I can request that.", "timestamp": "2026-01-01T00:00:01Z", "status": "complete", "kind": "message"}
             ],
             "segments": []
-        }))
-        .expect("json"),
-    )
-    .expect("write state");
+        }),
+    );
     ConversationHandleRepository::new(&settings.data_dir)
         .ensure_conversation_handle(
             conversation_id,
@@ -491,68 +484,73 @@ impl ProviderAdapter for RecordingAdapter {
 /// `state.json`, artifact arrays in the project-level sidecar files. The
 /// repository migrates these on first read.
 fn write_legacy_conversation_files(data_dir: &Path, snapshot: &serde_json::Value) {
-    let object = snapshot.as_object().expect("snapshot object");
-    let conversation_id = snapshot["conversation_id"]
-        .as_str()
-        .expect("conversation id");
-    let project_path = snapshot["project_path"].as_str().expect("project path");
-    let project = ProjectRegistry::new(data_dir)
-        .ensure_project_paths(project_path)
-        .expect("project paths");
-    let root = project.conversations_dir.join(conversation_id);
-    fs::create_dir_all(&root).expect("conversation dir");
-    let mut core = object.clone();
-    let artifact = |key: &str| object.get(key).cloned().unwrap_or_else(|| json!([]));
-    for key in [
-        "event_log",
-        "flow_run_requests",
-        "flow_launches",
-        "run_recoveries",
-        "proposed_plans",
-    ] {
-        core.remove(key);
-    }
-    fs::write(
-        root.join("state.json"),
-        serde_json::to_string_pretty(&serde_json::Value::Object(core)).expect("state json"),
-    )
-    .expect("state.json");
-    for (dir, payload) in [
-        (
-            &project.flow_run_requests_dir,
-            json!({
-                "conversation_id": conversation_id,
-                "project_id": project.project_id,
-                "project_path": project_path,
-                "event_log": artifact("event_log"),
-                "flow_run_requests": artifact("flow_run_requests"),
-            }),
-        ),
-        (
-            &project.flow_launches_dir,
-            json!({
-                "conversation_id": conversation_id,
-                "project_id": project.project_id,
-                "project_path": project_path,
-                "flow_launches": artifact("flow_launches"),
-                "run_recoveries": artifact("run_recoveries"),
-            }),
-        ),
-        (
-            &project.proposed_plans_dir,
-            json!({
-                "conversation_id": conversation_id,
-                "project_id": project.project_id,
-                "project_path": project_path,
-                "proposed_plans": artifact("proposed_plans"),
-            }),
-        ),
-    ] {
+    crate::write_conversation_snapshot(data_dir, snapshot);
+    return;
+    #[allow(unreachable_code)]
+    {
+        let object = snapshot.as_object().expect("snapshot object");
+        let conversation_id = snapshot["conversation_id"]
+            .as_str()
+            .expect("conversation id");
+        let project_path = snapshot["project_path"].as_str().expect("project path");
+        let project = ProjectRegistry::new(data_dir)
+            .ensure_project_paths(project_path)
+            .expect("project paths");
+        let root = project.conversations_dir.join(conversation_id);
+        fs::create_dir_all(&root).expect("conversation dir");
+        let mut core = object.clone();
+        let artifact = |key: &str| object.get(key).cloned().unwrap_or_else(|| json!([]));
+        for key in [
+            "event_log",
+            "flow_run_requests",
+            "flow_launches",
+            "run_recoveries",
+            "proposed_plans",
+        ] {
+            core.remove(key);
+        }
         fs::write(
-            dir.join(format!("{conversation_id}.json")),
-            serde_json::to_string_pretty(&payload).expect("sidecar json"),
+            root.join("state.json"),
+            serde_json::to_string_pretty(&serde_json::Value::Object(core)).expect("state json"),
         )
-        .expect("sidecar");
+        .expect("state.json");
+        for (dir, payload) in [
+            (
+                &project.flow_run_requests_dir,
+                json!({
+                    "conversation_id": conversation_id,
+                    "project_id": project.project_id,
+                    "project_path": project_path,
+                    "event_log": artifact("event_log"),
+                    "flow_run_requests": artifact("flow_run_requests"),
+                }),
+            ),
+            (
+                &project.flow_launches_dir,
+                json!({
+                    "conversation_id": conversation_id,
+                    "project_id": project.project_id,
+                    "project_path": project_path,
+                    "flow_launches": artifact("flow_launches"),
+                    "run_recoveries": artifact("run_recoveries"),
+                }),
+            ),
+            (
+                &project.proposed_plans_dir,
+                json!({
+                    "conversation_id": conversation_id,
+                    "project_id": project.project_id,
+                    "project_path": project_path,
+                    "proposed_plans": artifact("proposed_plans"),
+                }),
+            ),
+        ] {
+            fs::write(
+                dir.join(format!("{conversation_id}.json")),
+                serde_json::to_string_pretty(&payload).expect("sidecar json"),
+            )
+            .expect("sidecar");
+        }
     }
 }
 

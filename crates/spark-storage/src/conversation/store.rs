@@ -1,9 +1,8 @@
 //! Split-file persistence for conversation records.
 //!
 //! One conversation directory holds all of its durable authorities:
-//! `conversation.json` (metadata + revision cursor), `transcript.json`
-//! (turns/segments), `artifacts/<kind>.json` and `event-log.json` (artifact
-//! records and workflow events), and `journal.jsonl` (committed mutations).
+//! `conversation.json` (metadata + revision cursor), shared append-only
+//! `events.jsonl` / `transcript.jsonl`, and artifact records.
 //! `conversation.json` is written last in a commit so an observed revision
 //! always implies durable transcript and artifact state.
 
@@ -18,16 +17,12 @@ use crate::{
 };
 
 use super::records::{
-    ArtifactCollection, ConversationArtifacts, ConversationMeta, ConversationRecord, Transcript,
+    ArtifactCollection, ConversationArtifacts, ConversationMeta, ConversationRecord,
 };
 
 pub(crate) const CONVERSATION_META_FILE_NAME: &str = "conversation.json";
-pub(crate) const TRANSCRIPT_FILE_NAME: &str = "transcript.json";
 pub(crate) const EVENT_LOG_FILE_NAME: &str = "event-log.json";
-pub(crate) const JOURNAL_FILE_NAME: &str = "journal.jsonl";
 pub(crate) const TOOL_OUTPUT_DIR_NAME: &str = "tool-output";
-pub(crate) const LEGACY_STATE_FILE_NAME: &str = "state.json";
-pub(crate) const LEGACY_EVENTS_FILE_NAME: &str = "events.jsonl";
 
 /// File locations for one conversation's record set.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,10 +41,6 @@ impl ConversationRecordPaths {
         self.root.join(CONVERSATION_META_FILE_NAME)
     }
 
-    pub fn transcript_json(&self) -> PathBuf {
-        self.root.join(TRANSCRIPT_FILE_NAME)
-    }
-
     pub fn artifact_file(&self, collection: ArtifactCollection) -> PathBuf {
         self.root
             .join("artifacts")
@@ -60,22 +51,14 @@ impl ConversationRecordPaths {
         self.root.join(EVENT_LOG_FILE_NAME)
     }
 
-    pub fn journal_jsonl(&self) -> PathBuf {
-        self.root.join(JOURNAL_FILE_NAME)
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     pub fn tool_output_file(&self, segment_id: &str) -> PathBuf {
         self.root
             .join(TOOL_OUTPUT_DIR_NAME)
             .join(format!("{segment_id}.txt"))
-    }
-
-    pub fn legacy_state_json(&self) -> PathBuf {
-        self.root.join(LEGACY_STATE_FILE_NAME)
-    }
-
-    pub fn legacy_events_jsonl(&self) -> PathBuf {
-        self.root.join(LEGACY_EVENTS_FILE_NAME)
     }
 }
 
@@ -130,7 +113,26 @@ pub(crate) fn read_record(paths: &ConversationRecordPaths) -> Result<Option<Conv
             reason: UNSUPPORTED_CONVERSATION_STATE_SCHEMA.to_string(),
         });
     }
-    let transcript = read_json_optional::<Transcript>(paths.transcript_json())?.unwrap_or_default();
+    let activity = crate::ActivityRepository::new(paths.root());
+    // conversation.json is the commit publication cursor. Ignore transcript
+    // records from an in-flight batch until that batch's final revision is
+    // visible, so readers never observe a completed/failed turn without the
+    // rest of its committed state.
+    let published_event_sequence = activity
+        .read_events()?
+        .into_iter()
+        .filter(|event| {
+            event
+                .event
+                .get("revision")
+                .and_then(Value::as_i64)
+                .is_some_and(|revision| revision <= meta.revision)
+        })
+        .map(|event| event.sequence)
+        .max()
+        .unwrap_or(0);
+    let transcript =
+        activity.hydrate_transcript_through_event_sequence(published_event_sequence)?;
     let artifacts = ConversationArtifacts {
         event_log: read_value_array(paths.event_log_json())?,
         flow_run_requests: read_value_array(
@@ -167,13 +169,6 @@ pub(crate) fn write_record(
         write_json_atomic(
             paths.event_log_json(),
             &record.artifacts.event_log,
-            JsonWriteOptions::default(),
-        )?;
-    }
-    if plan.everything || plan.transcript {
-        write_json_atomic(
-            paths.transcript_json(),
-            &record.transcript,
             JsonWriteOptions::default(),
         )?;
     }

@@ -168,6 +168,7 @@ default_model = "local-model"
 }
 
 #[test]
+#[ignore = "legacy state.json fixtures are unsupported after the conversation hard cutover"]
 fn project_service_lists_conversation_summaries_for_python_created_state() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());

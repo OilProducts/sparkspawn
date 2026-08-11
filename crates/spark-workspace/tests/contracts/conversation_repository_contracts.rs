@@ -73,18 +73,23 @@ fn conversation_service_reads_python_state_sidecars_and_truncates_tool_output_fo
             ]
         }),
     );
+    let root = project.conversations_dir.join("conversation-a");
     fs::write(
-        project.flow_run_requests_dir.join("conversation-a.json"),
-        serde_json::to_string_pretty(&json!({
-            "conversation_id": "conversation-a",
-            "project_id": project.project_id,
-            "project_path": project_path,
-            "event_log": [{"message": "Review requested", "timestamp": "2026-01-01T00:00:04Z"}],
-            "flow_run_requests": [{"id": "request-a", "created_at": "2026-01-01T00:00:04Z", "updated_at": "2026-01-01T00:00:04Z", "flow_name": "flow.dot", "summary": "Run", "project_path": project_path, "conversation_id": "conversation-a", "source_turn_id": "turn-assistant"}]
-        }))
+        root.join("event-log.json"),
+        serde_json::to_string_pretty(&json!([
+            {"message": "Review requested", "timestamp": "2026-01-01T00:00:04Z"}
+        ]))
         .expect("json"),
     )
-    .expect("sidecar");
+    .expect("event log");
+    fs::write(
+        root.join("artifacts/flow-run-requests.json"),
+        serde_json::to_string_pretty(&json!([
+            {"id": "request-a", "created_at": "2026-01-01T00:00:04Z", "updated_at": "2026-01-01T00:00:04Z", "flow_name": "flow.dot", "summary": "Run", "project_path": project_path, "conversation_id": "conversation-a", "source_turn_id": "turn-assistant"}
+        ]))
+        .expect("json"),
+    )
+    .expect("flow requests");
 
     let service = WorkspaceConversationService::new(settings);
     let snapshot = service
@@ -181,7 +186,7 @@ fn conversation_settings_update_creates_shell_state_handle_and_mode_change_once(
         .exists());
     assert!(project
         .conversations_dir
-        .join("conversation-settings/journal.jsonl")
+        .join("conversation-settings/events.jsonl")
         .exists());
     assert!(!project
         .conversations_dir
@@ -337,13 +342,12 @@ fn conversation_service_rejects_project_mismatch_and_deletes_conversation_state(
 }
 
 fn write_state(conversations_dir: &Path, conversation_id: &str, payload: Value) {
-    let state_path = conversations_dir.join(conversation_id).join("state.json");
-    fs::create_dir_all(state_path.parent().expect("state parent")).expect("state parent");
-    fs::write(
-        state_path,
-        serde_json::to_string_pretty(&payload).expect("json"),
-    )
-    .expect("state");
+    assert_eq!(payload["conversation_id"], conversation_id);
+    let data_dir = conversations_dir
+        .ancestors()
+        .nth(4)
+        .expect("data directory");
+    crate::write_conversation_snapshot(data_dir, &payload);
 }
 
 fn settings(root: &Path) -> SparkSettings {

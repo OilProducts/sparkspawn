@@ -272,7 +272,23 @@ fn blocking_gate_waits_for_journaled_answer_and_routes_it() {
 
     // The note travels with the selection into the gate's context updates so
     // downstream nodes can read it as `human.gate.note`.
-    let gate_status_path = harness.paths.logs_dir().join("review").join("status.json");
+    let gate_execution = harness
+        .store
+        .list_node_executions(&harness.paths)
+        .expect("execution inventory")
+        .into_iter()
+        .find(|execution| execution.node_id == "review")
+        .expect("review execution");
+    let gate_status_path = harness
+        .store
+        .node_execution_root(
+            &harness.paths,
+            &gate_execution.node_id,
+            gate_execution.stage_index,
+            gate_execution.attempt,
+        )
+        .expect("execution root")
+        .join("status.json");
     let gate_status: Value = serde_json::from_str(
         &std::fs::read_to_string(&gate_status_path).expect("gate status artifact"),
     )

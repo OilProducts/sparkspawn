@@ -19,7 +19,8 @@ use spark_common::events::{
 };
 use spark_common::settings::SparkSettings;
 use spark_http::{build_app, build_app_with_agent_turn_backend};
-use spark_storage::{ConversationRepository, ProjectRegistry};
+use spark_storage::conversation::{ConversationMutation, TranscriptSegment, TranscriptTurn};
+use spark_storage::ConversationRepository;
 use spark_workspace::{
     project_run_milestones, ConversationTurnRequest, TriggerCreateRequest,
     WorkspaceConversationService, WorkspaceTriggerService,
@@ -56,7 +57,7 @@ async fn live_route_returns_sse_keepalive_and_json_cursor_errors() {
     );
 
     let missing_scope = request(
-        app,
+        app.clone(),
         "GET",
         "/workspace/api/live/events?conversation_id=conversation-live",
         None,
@@ -1120,7 +1121,7 @@ async fn live_route_replays_run_journals_and_runs_overview() {
 }
 
 #[tokio::test]
-async fn live_route_replays_manager_loop_child_journals_with_combined_cursor() {
+async fn live_route_replays_manager_loop_child_journals_with_source_local_cursors() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());
     let project_path = temp.path().join("project");
@@ -1137,64 +1138,61 @@ async fn live_route_replays_manager_loop_child_journals_with_combined_cursor() {
     .await;
     assert_eq!(replay.status(), StatusCode::OK);
     let mut replay_stream = replay.into_body().into_data_stream();
-    let mut envelopes = Vec::new();
-    for _ in 0..7 {
-        envelopes.push(sse_data_json(&next_sse_chunk(&mut replay_stream).await));
+    let mut parent_envelopes = Vec::new();
+    for _ in 0..4 {
+        parent_envelopes.push(sse_data_json(&next_sse_chunk(&mut replay_stream).await));
     }
+    assert_eq!(
+        parent_envelopes
+            .iter()
+            .map(|envelope| envelope["cursor"]["value"].as_i64().expect("parent cursor"))
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3, 4]
+    );
+    assert!(parent_envelopes
+        .iter()
+        .all(|envelope| envelope["resource"] == json!({"kind": "run", "id": "run-live-parent"})));
 
+    let child_replay = request(
+        app.clone(),
+        "GET",
+        "/workspace/api/live/events?run_id=run-live-child&run_sequence=0",
+        None,
+    )
+    .await;
+    let mut child_stream = child_replay.into_body().into_data_stream();
+    let mut envelopes = Vec::new();
+    for _ in 0..3 {
+        envelopes.push(sse_data_json(&next_sse_chunk(&mut child_stream).await));
+    }
     let cursor_values = envelopes
         .iter()
         .map(|envelope| envelope["cursor"]["value"].as_i64().expect("run cursor"))
         .collect::<Vec<_>>();
-    assert_eq!(cursor_values, vec![1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(cursor_values, vec![1, 2, 3]);
 
-    let child = envelopes
-        .iter()
-        .find(|envelope| envelope["payload"]["source_scope"] == "child")
-        .expect("child-scoped journal envelope");
+    let child = &envelopes[0];
     assert_eq!(child["type"], "run.journal_entry");
     assert_eq!(
         child["resource"],
-        json!({"kind": "run", "id": "run-live-parent"})
+        json!({"kind": "run", "id": "run-live-child"})
     );
-    assert_eq!(child["payload"]["source_parent_node_id"], "manager");
-    assert_eq!(child["payload"]["source_flow_name"], "child-live.yaml");
-    assert_eq!(child["payload"]["payload"]["source_scope"], "child");
-    assert_eq!(
-        child["payload"]["payload"]["source_parent_node_id"],
-        "manager"
-    );
-    assert_eq!(
-        child["payload"]["payload"]["source_flow_name"],
-        "child-live.yaml"
-    );
-    assert_eq!(
-        child["payload"]["payload"]["source_run_id"],
-        "run-live-child"
-    );
+    assert!(envelopes
+        .iter()
+        .all(|envelope| envelope["payload"]["source_scope"] == "root"));
 
-    let child_cursor = child["cursor"]["value"].as_i64().expect("child cursor");
+    let child_cursor = 2;
     let reconnect = request(
         app,
         "GET",
-        &format!("/workspace/api/live/events?run_id=run-live-parent&run_sequence={child_cursor}"),
+        &format!("/workspace/api/live/events?run_id=run-live-child&run_sequence={child_cursor}"),
         None,
     )
     .await;
     assert_eq!(reconnect.status(), StatusCode::OK);
     let mut reconnect_stream = reconnect.into_body().into_data_stream();
-    if child_cursor < 7 {
-        let next = sse_data_json(&next_sse_chunk(&mut reconnect_stream).await);
-        assert_eq!(
-            next["cursor"]["value"].as_i64().expect("next cursor"),
-            child_cursor + 1
-        );
-    } else {
-        assert_eq!(
-            next_sse_chunk(&mut reconnect_stream).await,
-            ": keepalive\n\n"
-        );
-    }
+    let next = sse_data_json(&next_sse_chunk(&mut reconnect_stream).await);
+    assert_eq!(next["cursor"]["value"].as_i64().expect("next cursor"), 3);
 }
 
 #[tokio::test]
@@ -1970,95 +1968,39 @@ fn request_user_input_event() -> TurnStreamEvent {
 }
 
 fn seed_conversation(settings: &SparkSettings, project_path: &Path, conversation_id: &str) {
-    let project_path = project_path.to_string_lossy();
+    let project_path = project_path.to_string_lossy().to_string();
     let repository = ConversationRepository::new(&settings.data_dir);
-    write_legacy_conversation_files(
-        &settings.data_dir,
-        &json!({
-            "schema_version": 5,
-            "revision": 2,
-            "conversation_id": conversation_id,
-            "conversation_handle": "amber-anchor",
-            "project_path": project_path,
-            "chat_mode": "chat",
-            "provider": "codex",
-            "model": null,
-            "llm_profile": null,
-            "reasoning_effort": null,
-            "title": "Live route",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:02Z",
-            "turns": [{
-                "id": "turn-live",
-                "role": "assistant",
-                "content": "Ready.",
-                "timestamp": "2026-01-01T00:00:01Z",
-                "status": "complete",
-                "kind": "message"
-            }],
-            "segments": [{
-                "id": "segment-live",
-                "turn_id": "turn-live",
-                "role": "assistant",
-                "kind": "message",
-                "content": "Ready.",
-                "timestamp": "2026-01-01T00:00:02Z",
-                "status": "complete",
-                "order": 1
-            }],
-            "event_log": [],
-            "flow_run_requests": [],
-            "flow_launches": [],
-            "run_recoveries": [],
-            "proposed_plans": []
-        }),
-    );
+    let turn: TranscriptTurn = serde_json::from_value(json!({
+        "id": "turn-live",
+        "role": "assistant",
+        "content": "Ready.",
+        "timestamp": "2026-01-01T00:00:01Z",
+        "status": "complete",
+        "kind": "message"
+    }))
+    .expect("turn");
+    let segment: TranscriptSegment = serde_json::from_value(json!({
+        "id": "segment-live",
+        "turn_id": "turn-live",
+        "role": "assistant",
+        "kind": "message",
+        "content": "Ready.",
+        "timestamp": "2026-01-01T00:00:02Z",
+        "status": "complete",
+        "order": 1
+    }))
+    .expect("segment");
     repository
-        .append_conversation_event(
+        .commit_conversation(
             conversation_id,
             &project_path,
-            &json!({
-                "type": "turn_upsert",
-                "revision": 1,
-                "conversation_id": conversation_id,
-                "project_path": project_path,
-                "title": "Live route",
-                "updated_at": "2026-01-01T00:00:01Z",
-                "turn": {
-                    "id": "turn-live",
-                    "role": "assistant",
-                    "content": "Ready.",
-                    "timestamp": "2026-01-01T00:00:01Z",
-                    "status": "complete",
-                    "kind": "message"
-                }
-            }),
+            0,
+            vec![
+                ConversationMutation::TurnUpserted { turn },
+                ConversationMutation::SegmentUpserted { segment },
+            ],
         )
-        .expect("append turn event");
-    repository
-        .append_conversation_event(
-            conversation_id,
-            &project_path,
-            &json!({
-                "type": "segment_upsert",
-                "revision": 2,
-                "conversation_id": conversation_id,
-                "project_path": project_path,
-                "title": "Live route",
-                "updated_at": "2026-01-01T00:00:02Z",
-                "segment": {
-                    "id": "segment-live",
-                    "turn_id": "turn-live",
-                    "role": "assistant",
-                    "kind": "message",
-                    "content": "Ready.",
-                    "timestamp": "2026-01-01T00:00:02Z",
-                    "status": "complete",
-                    "order": 1
-                }
-            }),
-        )
-        .expect("append segment event");
+        .expect("seed conversation");
 }
 
 fn write_flow(settings: &SparkSettings, name: &str) {
@@ -2161,75 +2103,6 @@ fn url_encode(value: &str) -> String {
             other => format!("%{other:02X}").chars().collect(),
         })
         .collect()
-}
-
-/// Seed the pre-split legacy conversation layout by hand: core keys in
-/// `state.json`, artifact arrays in the project-level sidecar files. The
-/// repository migrates these on first read.
-fn write_legacy_conversation_files(data_dir: &Path, snapshot: &serde_json::Value) {
-    let object = snapshot.as_object().expect("snapshot object");
-    let conversation_id = snapshot["conversation_id"]
-        .as_str()
-        .expect("conversation id");
-    let project_path = snapshot["project_path"].as_str().expect("project path");
-    let project = ProjectRegistry::new(data_dir)
-        .ensure_project_paths(project_path)
-        .expect("project paths");
-    let root = project.conversations_dir.join(conversation_id);
-    fs::create_dir_all(&root).expect("conversation dir");
-    let mut core = object.clone();
-    let artifact = |key: &str| object.get(key).cloned().unwrap_or_else(|| json!([]));
-    for key in [
-        "event_log",
-        "flow_run_requests",
-        "flow_launches",
-        "run_recoveries",
-        "proposed_plans",
-    ] {
-        core.remove(key);
-    }
-    fs::write(
-        root.join("state.json"),
-        serde_json::to_string_pretty(&serde_json::Value::Object(core)).expect("state json"),
-    )
-    .expect("state.json");
-    for (dir, payload) in [
-        (
-            &project.flow_run_requests_dir,
-            json!({
-                "conversation_id": conversation_id,
-                "project_id": project.project_id,
-                "project_path": project_path,
-                "event_log": artifact("event_log"),
-                "flow_run_requests": artifact("flow_run_requests"),
-            }),
-        ),
-        (
-            &project.flow_launches_dir,
-            json!({
-                "conversation_id": conversation_id,
-                "project_id": project.project_id,
-                "project_path": project_path,
-                "flow_launches": artifact("flow_launches"),
-                "run_recoveries": artifact("run_recoveries"),
-            }),
-        ),
-        (
-            &project.proposed_plans_dir,
-            json!({
-                "conversation_id": conversation_id,
-                "project_id": project.project_id,
-                "project_path": project_path,
-                "proposed_plans": artifact("proposed_plans"),
-            }),
-        ),
-    ] {
-        fs::write(
-            dir.join(format!("{conversation_id}.json")),
-            serde_json::to_string_pretty(&payload).expect("sidecar json"),
-        )
-        .expect("sidecar");
-    }
 }
 
 #[tokio::test]
@@ -2474,7 +2347,7 @@ async fn live_route_streams_gate_lifecycle_from_waiting_to_answered() {
 }
 
 #[tokio::test]
-async fn live_route_streams_run_segment_upserts_through_the_publisher() {
+async fn live_route_streams_execution_transcript_upserts_through_the_publisher() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path().canonicalize().expect("canonical tempdir");
     let settings = settings(&root);
@@ -2521,26 +2394,28 @@ async fn live_route_streams_run_segment_upserts_through_the_publisher() {
             ..CreateRunRequest::default()
         })
         .expect("seed run");
-    store
-        .append_event(
-            &paths,
-            serde_json::from_value(json!({
-                "type": "CodergenAdapter",
-                "run_id": "run-segment-live",
-                "emitted_at": "2026-07-08T12:00:01.000000000Z",
-                "adapter_event_type": "rust_agent_session_event",
-                "node_id": "implement",
-                "payload": {"turn_stream_event": {
-                    "kind": "content_completed",
-                    "channel": "assistant",
-                    "content_delta": "Streamed answer.",
-                    "message": "Streamed answer.",
-                    "source": {"backend": "rust_unified_llm_adapter"},
-                }},
-            }))
-            .expect("raw event"),
-        )
-        .expect("append adapter event");
+    let execution_root = store
+        .node_execution_root(&paths, "implement", 1, 0)
+        .expect("execution root");
+    fs::create_dir_all(&execution_root).expect("execution directory");
+    let activity = spark_storage::ActivityRepository::new(execution_root);
+    let event = activity
+        .append_event(json!({"type": "content_completed"}), "2026-07-08T12:00:01Z")
+        .expect("execution event");
+    let segment: TranscriptSegment = serde_json::from_value(json!({
+        "id": "assistant-1", "turn_id": "response", "order": 1,
+        "kind": "assistant_message", "role": "assistant", "status": "complete",
+        "timestamp": "2026-07-08T12:00:01Z", "content": "Streamed answer."
+    }))
+    .expect("segment");
+    activity
+        .append_transcript(&spark_storage::TranscriptRecord::SegmentUpsert {
+            revision: 1,
+            committed_at: "2026-07-08T12:00:01Z".to_string(),
+            source_event_sequence: event.sequence,
+            segment,
+        })
+        .expect("execution transcript");
 
     let app = build_app(settings.clone());
     let before_sequence = latest_journal_sequence(&settings, "run-segment-live");
@@ -2580,14 +2455,17 @@ async fn live_route_streams_run_segment_upserts_through_the_publisher() {
             continue;
         }
         let envelope = sse_data_json(&frame);
-        if envelope["type"] == "run.segment_upsert" {
-            assert_eq!(envelope["resource"]["kind"], "run");
-            assert_eq!(envelope["resource"]["id"], "run-segment-live");
-            assert_eq!(envelope["cursor"]["kind"], "run_sequence");
-            let segment = &envelope["payload"]["segment"];
+        if envelope["type"] == "conversation.segment_upsert" {
+            assert_eq!(envelope["resource"]["kind"], "node_execution");
+            assert_eq!(envelope["resource"]["id"], "run-segment-live:implement:1:0");
+            assert_eq!(
+                envelope["cursor"],
+                json!({"kind": "transcript_revision", "value": 1})
+            );
+            let segment = &envelope["payload"]["record"]["segment"];
             assert_eq!(segment["kind"], "assistant_message");
             assert_eq!(segment["content"], "Streamed answer.");
-            assert_eq!(segment["node_id"], "implement");
+            assert_eq!(envelope["payload"]["node_id"], "implement");
             saw_segment_upsert = true;
         }
     }
@@ -2618,7 +2496,7 @@ impl spark_agent_adapter::CodergenBackend for SlowStreamingCodergenBackend {
                 (
                     "turn_stream_event".to_string(),
                     json!({
-                        "kind": "content_delta",
+                        "kind": "content_completed",
                         "channel": "assistant",
                         "content_delta": "Mid-node text",
                         "message": "Mid-node text",
@@ -2697,15 +2575,16 @@ async fn live_route_streams_codergen_segments_while_the_node_executes() {
             continue;
         }
         let envelope = sse_data_json(&frame);
-        if envelope["type"] != "run.segment_upsert" {
+        if envelope["type"] != "conversation.segment_upsert" {
             continue;
         }
-        let segment = &envelope["payload"]["segment"];
+        let segment = &envelope["payload"]["record"]["segment"];
         if segment["content"] != "Mid-node text" {
             continue;
         }
-        assert_eq!(segment["node_id"], "work");
-        assert_eq!(segment["status"], "streaming");
+        assert_eq!(envelope["resource"]["kind"], "node_execution");
+        assert_eq!(envelope["payload"]["node_id"], "work");
+        assert_eq!(segment["status"], "complete");
         // Proof of mid-node delivery: the run record on disk is still running
         // and the stage has not completed.
         let bundle = store

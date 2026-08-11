@@ -129,11 +129,33 @@ impl ConversationRepository {
             .collect();
 
         let snapshot = snapshot_from_record(&record);
-        write_record(&record_paths, &record, &write_plan)?;
+        let activity = crate::ActivityRepository::new(record_paths.root());
+        let mut transcript_revision = activity.read_transcript_records()?.len() as u64 + 1;
         let mut journal_payloads = Vec::with_capacity(journal_entries.len());
         for entry in &journal_entries {
             let line = entry.journal_line_payload(&record.meta);
-            self.append_conversation_event(conversation_id, &record.meta.project_path, &line)?;
+            let event = activity.append_event(line.clone(), now.clone())?;
+            match &entry.kind {
+                JournalEntryKind::TurnUpserted { turn } => {
+                    activity.append_transcript(&crate::TranscriptRecord::TurnUpsert {
+                        revision: transcript_revision,
+                        committed_at: event.committed_at.clone(),
+                        source_event_sequence: event.sequence,
+                        turn: turn.clone(),
+                    })?;
+                    transcript_revision += 1;
+                }
+                JournalEntryKind::SegmentUpserted { segment } => {
+                    activity.append_transcript(&crate::TranscriptRecord::SegmentUpsert {
+                        revision: transcript_revision,
+                        committed_at: event.committed_at.clone(),
+                        source_event_sequence: event.sequence,
+                        segment: segment.clone(),
+                    })?;
+                    transcript_revision += 1;
+                }
+                JournalEntryKind::SnapshotCommitted => {}
+            }
             journal_payloads.push(match entry.kind {
                 JournalEntryKind::SnapshotCommitted => {
                     entry.live_event_payload(&record.meta, &snapshot)
@@ -141,6 +163,10 @@ impl ConversationRepository {
                 _ => line,
             });
         }
+        // conversation.json is the published revision cursor. Append detailed
+        // events and semantic transcript records before advancing it so a
+        // crash cannot acknowledge state that recovery can no longer hydrate.
+        write_record(&record_paths, &record, &write_plan)?;
 
         Ok(ConversationCommit {
             record,

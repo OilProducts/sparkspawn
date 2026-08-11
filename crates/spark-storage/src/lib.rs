@@ -9,6 +9,9 @@
 /// Atomic filesystem operations.
 pub mod atomic;
 
+/// Shared append-only conversation and node-execution activity storage.
+pub mod activity;
+
 /// Typed codecs for persisted files.
 pub mod codecs;
 
@@ -36,6 +39,10 @@ pub mod workspace_flow_catalog;
 /// Workspace trigger definition and route-state repositories.
 pub mod workspace_triggers;
 
+pub use activity::{
+    ActivityEvent, ActivityRepository, TranscriptRecord, ACTIVITY_EVENTS_FILE_NAME,
+    ACTIVITY_TRANSCRIPT_FILE_NAME,
+};
 pub use atomic::{append_jsonl_record, append_line, write_atomic, write_text_atomic};
 pub use codecs::{
     append_jsonl, read_json, read_json_optional, read_jsonl, read_toml, read_toml_optional,

@@ -697,7 +697,18 @@ impl CodergenHandler {
         request: CodergenRequest,
         event_sink: Option<CodergenEventSink>,
     ) -> Result<CodergenExecution, CodergenError> {
-        let stage_dir = ensure_stage_dir(request.logs_root.as_deref(), &request.node_id)?;
+        let stage_dir = if let Some(root) = request
+            .metadata
+            .get("spark.runtime.execution_root")
+            .and_then(Value::as_str)
+        {
+            let root = PathBuf::from(root);
+            fs::create_dir_all(&root)
+                .map_err(|source| CodergenError::Artifact(format!("create {root:?}: {source}")))?;
+            Some(root)
+        } else {
+            ensure_stage_dir(request.logs_root.as_deref(), &request.node_id)?
+        };
         let read_contract = resolve_context_read_contract(&request.node.attrs);
         if !read_contract.parse_error.is_empty() {
             let failure_reason = format!(
@@ -742,6 +753,7 @@ impl CodergenHandler {
             );
         }
         prompt = compose_prompt(&prompt, &request.context, &read_contract.declared_keys);
+        write_stage_file(stage_dir.as_deref(), "prompt.md", &prompt)?;
         let resolution_inputs = resolution_inputs_for_request(&request);
         let mut metadata = request.metadata.clone();
         if let Some(stage_dir) = stage_dir.as_ref() {

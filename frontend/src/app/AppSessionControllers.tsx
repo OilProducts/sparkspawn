@@ -662,9 +662,18 @@ export function WorkspaceLiveEventsController() {
                     }))
                     return
                 }
-                if (envelope.type === 'run.segment_upsert' && envelope.resource?.id) {
+                if (envelope.type === 'activity.segment_upsert' && envelope.resource?.kind === 'node_execution') {
+                    const record = payload.record && typeof payload.record === 'object' && !Array.isArray(payload.record)
+                        ? payload.record as Record<string, unknown> : null
                     window.dispatchEvent(new CustomEvent('spark:run-segment-upsert', {
-                        detail: { runId: envelope.resource.id, segment: payload.segment },
+                        detail: {
+                            runId: payload.presentation_run_id ?? payload.run_id,
+                            segment: record?.segment && typeof record.segment === 'object'
+                                ? { ...(record.segment as Record<string, unknown>), node_id: payload.node_id,
+                                    attempt: payload.attempt, latest_sequence: record.source_event_sequence,
+                                    source_scope: payload.source_scope, source_run_id: payload.run_id }
+                                : null,
+                        },
                     }))
                     return
                 }

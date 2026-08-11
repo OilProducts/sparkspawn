@@ -13,7 +13,6 @@ pub mod events;
 pub mod executor;
 pub mod flow_runtime;
 pub mod handlers;
-pub mod journal_cache;
 pub mod journals;
 mod manager_loop;
 pub mod paths;
@@ -21,10 +20,8 @@ pub mod records;
 pub mod results;
 pub mod retry;
 pub mod routing;
-pub mod segments;
 pub mod store;
 pub mod terminal;
-pub mod transcript;
 pub mod usage;
 
 pub use artifacts::{
@@ -35,7 +32,7 @@ pub use artifacts::{
 pub use checkpoints::{
     normalize_checkpoint_for_write, read_checkpoint, save_checkpoint, CheckpointWriteOptions,
 };
-pub use codergen::{codergen_events_for_journal, codergen_outcome, RuntimeCodergen};
+pub use codergen::{codergen_outcome, RuntimeCodergen};
 pub use context::{
     apply_outcome_context_updates, checkpoint_from_context,
     checkpoint_requests_full_fidelity_degrade, clear_runtime_retry_context,
@@ -80,11 +77,7 @@ pub use handlers::{
     HANDLER_CONDITIONAL, HANDLER_EXIT, HANDLER_FAN_IN, HANDLER_MANAGER_LOOP, HANDLER_PARALLEL,
     HANDLER_START, HANDLER_TOOL, HANDLER_WAIT_HUMAN,
 };
-pub use journal_cache::{combined_journal_window, evict_combined_journal, CombinedJournalWindow};
-pub use journals::{
-    combined_run_journal_entries, journal_entries_from_events, journal_entry_from_event,
-    journal_replay_order, resequence_combined_journal,
-};
+pub use journals::{journal_entries_from_events, journal_entry_from_event};
 pub use paths::{RunRootPaths, RuntimePaths};
 pub use records::{
     mark_record_cancel_requested, mark_record_canceled, mark_record_paused,
@@ -103,9 +96,9 @@ pub use routing::{
     routing_outcome_for_node, routing_outcome_for_node_with_prior, select_next_node,
     select_next_node_with_prior, NextNodeSelection,
 };
-pub use segments::{project_run_segments, RunSegmentProjection, SegmentProjectionState};
 pub use store::{
-    CreateRunRequest, RunArtifactFile, RunBundle, RunEventObserver, RunMeta, RunStore,
+    CreateRunRequest, NodeExecution, RunArtifactFile, RunBundle, RunEventObserver, RunMeta,
+    RunStore,
 };
 pub use terminal::{
     check_goal_gates, invalid_workflow_outcome_reason, is_goal_gate_node,
@@ -113,4 +106,3 @@ pub use terminal::{
     resolve_terminal_workflow_outcome, GoalGateCheck, TerminalWorkflowOutcome,
     GOAL_GATE_NO_RETRY_TARGET_REASON, GOAL_GATE_UNSATISFIED_OUTCOME_CODE,
 };
-pub use transcript::project_run_transcript;

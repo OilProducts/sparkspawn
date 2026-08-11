@@ -79,6 +79,9 @@ pub enum ExecutionStart {
 pub struct NodeExecutionRequest {
     pub node_id: String,
     pub stage_index: u64,
+    /// Retry attempt for this visit, starting at zero. Together with
+    /// `run_id`, `node_id`, and `stage_index` this identifies one execution.
+    pub attempt: u64,
     pub context: ContextMap,
     pub prompt: String,
     pub node: FlowNode,
@@ -476,6 +479,8 @@ where
                     &store,
                     &paths,
                     &current_node,
+                    completed_nodes.len() as u64,
+                    0,
                     &Outcome::new(OutcomeStatus::Success),
                     &mut status_transitions,
                     &mut artifact_node_ids,
@@ -550,6 +555,7 @@ where
                 forced_fidelity,
             )?;
             let stage_index = completed_nodes.len() as u64;
+            let attempt = retry_counts.get(&current_node).copied().unwrap_or(0);
             let prompt = crate::flow_runtime::node_prompt(node);
             let prior_status = context
                 .get(OUTCOME_KEY)
@@ -576,6 +582,7 @@ where
             let execution_request = NodeExecutionRequest {
                 node_id: current_node.clone(),
                 stage_index,
+                attempt,
                 context: context.snapshot(),
                 prompt: prompt.clone(),
                 node: node.clone(),
@@ -615,6 +622,8 @@ where
                 &store,
                 &paths,
                 &current_node,
+                stage_index,
+                attempt,
                 &outcome,
                 &mut status_transitions,
                 &mut artifact_node_ids,
@@ -687,6 +696,8 @@ where
                     &store,
                     &paths,
                     &current_node,
+                    stage_index,
+                    attempt,
                     &outcome,
                     &mut status_transitions,
                     &mut artifact_node_ids,
@@ -1168,17 +1179,27 @@ fn ensure_run_record_defaults(record: &mut RunRecord) -> String {
     record.run_id.clone()
 }
 
-/// Refresh the record's token usage and estimated cost from the journal
-/// projection; a best-effort read that never fails the run.
+/// Refresh usage from independently owned execution activity.
 fn refresh_record_usage(
     store: &RunStore,
     paths: &crate::paths::RunRootPaths,
     record: &mut RunRecord,
 ) {
-    let Ok(entries) = store.read_journal(paths) else {
+    let Ok(executions) = store.list_node_executions(paths) else {
         return;
     };
-    if let Some(breakdown) = crate::usage::project_run_usage(&entries, &record.model) {
+    let mut usage = crate::usage::RunUsageAccumulator::new(&record.model);
+    for execution in executions {
+        if let Ok(Some(events)) = store.read_node_execution_events(
+            paths,
+            &execution.node_id,
+            execution.stage_index,
+            execution.attempt,
+        ) {
+            usage.apply_activity_events(&events);
+        }
+    }
+    if let Some(breakdown) = usage.breakdown() {
         record.token_usage = Some(breakdown.totals.total_tokens);
         record.estimated_model_cost = crate::usage::estimate_model_cost(&breakdown);
         record.token_usage_breakdown = Some(breakdown.to_value());
@@ -1209,6 +1230,8 @@ fn write_stage_artifacts(
     store: &RunStore,
     paths: &crate::paths::RunRootPaths,
     node_id: &str,
+    stage_index: u64,
+    attempt: u64,
     outcome: &Outcome,
     status_transitions: &mut BTreeMap<String, Vec<String>>,
     artifact_node_ids: &mut BTreeSet<String>,
@@ -1230,6 +1253,8 @@ fn write_stage_artifacts(
     store.write_node_artifacts(
         paths,
         node_id,
+        stage_index,
+        attempt,
         &NodeArtifacts {
             prompt: None,
             response: Some(format!("{}\n", response_text_for_outcome(outcome))),
@@ -1360,6 +1385,7 @@ fn run_result_summary<E: NodeExecutor>(
     let request = NodeExecutionRequest {
         node_id: RESULT_SUMMARY_NODE_ID.to_string(),
         stage_index: 0,
+        attempt: 0,
         context: summary_context,
         prompt: prompt.to_string(),
         node,

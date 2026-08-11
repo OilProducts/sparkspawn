@@ -150,14 +150,13 @@ fn commit_conversation_creates_conversations_and_allocates_strictly_increasing_r
         vec![1, 2, 3]
     );
 
-    // A fresh conversation persists only split record files — no legacy
-    // state.json/events.jsonl and no project-level sidecar files.
+    // A fresh conversation uses the shared append-only activity files.
     let root = conversation_dir(&_temp, project_path, "conversation-a");
     for expected in [
         "conversation.json",
-        "transcript.json",
+        "transcript.jsonl",
         "event-log.json",
-        "journal.jsonl",
+        "events.jsonl",
         "artifacts/flow-run-requests.json",
         "artifacts/flow-launches.json",
         "artifacts/run-recoveries.json",
@@ -166,7 +165,8 @@ fn commit_conversation_creates_conversations_and_allocates_strictly_increasing_r
         assert!(root.join(expected).exists(), "missing {expected}");
     }
     assert!(!root.join("state.json").exists());
-    assert!(!root.join("events.jsonl").exists());
+    assert!(!root.join("transcript.json").exists());
+    assert!(!root.join("journal.jsonl").exists());
     let project = ProjectRegistry::new(_temp.path().join("spark-home"))
         .ensure_project_paths(project_path)
         .expect("project paths");
@@ -391,15 +391,16 @@ fn commit_conversation_applies_metadata_patches_and_workflow_events() {
     // Live payload carries full state for connected clients...
     assert_eq!(commit.journal_payloads[0]["type"], "conversation_snapshot");
     assert_eq!(commit.journal_payloads[0]["state"]["chat_mode"], "plan");
-    // ...but the journal file line is a slim ref that never embeds state.
-    let journal = fs::read_to_string(
-        conversation_dir(&_temp, project_path, "conversation-e").join("journal.jsonl"),
-    )
-    .expect("journal");
-    let line: Value = serde_json::from_str(journal.lines().next().expect("line")).expect("json");
-    assert_eq!(line["type"], "conversation_snapshot_ref");
-    assert_eq!(line["revision"], 1);
-    assert!(line.get("state").is_none());
+    // ...while detailed activity stores the slim durable event.
+    let events = spark_storage::ActivityRepository::new(conversation_dir(
+        &_temp,
+        project_path,
+        "conversation-e",
+    ))
+    .read_events()
+    .expect("events");
+    assert_eq!(events[0].event["type"], "conversation_snapshot_ref");
+    assert_eq!(events[0].event["revision"], 1);
 
     let cleared = repo
         .commit_conversation(
@@ -620,9 +621,12 @@ fn transient_stream_events_are_never_appended_to_the_journal() {
     assert_eq!(replay.len(), 1);
     assert_eq!(replay[0]["type"], "turn_upsert");
 
-    let journal_text = fs::read_to_string(
-        conversation_dir(&temp, project_path, "conversation-g").join("journal.jsonl"),
-    )
-    .expect("journal file");
-    assert_eq!(journal_text.lines().count(), 1);
+    let events = spark_storage::ActivityRepository::new(conversation_dir(
+        &temp,
+        project_path,
+        "conversation-g",
+    ))
+    .read_events()
+    .expect("events");
+    assert_eq!(events.len(), 1);
 }

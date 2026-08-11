@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -546,10 +546,7 @@ impl ConversationRepository {
             project_paths.conversations_dir.join(conversation_id),
         );
         if !record_paths.conversation_json().exists() {
-            if !record_paths.legacy_state_json().exists() {
-                return Ok(None);
-            }
-            crate::conversation::migrate_legacy_conversation(&project_paths, conversation_id)?;
+            return Ok(None);
         }
         let Some(record) = crate::conversation::read_record(&record_paths)? else {
             return Ok(None);
@@ -641,11 +638,12 @@ impl ConversationRepository {
             return Ok(());
         }
         let project_paths = self.registry.ensure_project_paths(project_path)?;
-        let path = crate::conversation::ConversationRecordPaths::new(
+        let root = crate::conversation::ConversationRecordPaths::new(
             project_paths.conversations_dir.join(conversation_id),
-        )
-        .journal_jsonl();
-        append_jsonl_record(path, payload)
+        );
+        crate::ActivityRepository::new(root.root())
+            .append_event(payload.clone(), iso_now())
+            .map(|_| ())
     }
 
     pub fn read_conversation_events_after(
@@ -658,24 +656,10 @@ impl ConversationRepository {
         let record_paths = crate::conversation::ConversationRecordPaths::new(
             project_paths.conversations_dir.join(conversation_id),
         );
-        // Committed journal, with a legacy fallback for conversations that
-        // have not been read (and therefore migrated) yet.
-        let journal_path = record_paths.journal_jsonl();
-        let path = if journal_path.exists() {
-            journal_path
-        } else {
-            record_paths.legacy_events_jsonl()
-        };
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => return Err(StorageError::io("read conversation events", &path, source)),
-        };
+        let records = crate::ActivityRepository::new(record_paths.root()).read_events()?;
         let mut events = Vec::new();
-        for line in text.lines() {
-            let Ok(payload) = serde_json::from_str::<Value>(line) else {
-                continue;
-            };
+        for record in records {
+            let payload = record.event;
             let Some(event_revision) = event_revision(&payload) else {
                 continue;
             };
@@ -828,171 +812,6 @@ fn generate_conversation_handle() -> String {
         .unwrap_or("amber");
     let noun = HANDLE_NOUNS.choose(&mut rng).copied().unwrap_or("anchor");
     format!("{adjective}-{noun}")
-}
-
-pub(crate) fn validate_supported_state(path: &Path, payload: &Value) -> Result<()> {
-    let Some(object) = payload.as_object() else {
-        return Err(invalid_conversation_state(
-            path,
-            UNSUPPORTED_CONVERSATION_STATE_SCHEMA,
-        ));
-    };
-    if object.get("schema_version").and_then(Value::as_i64)
-        != Some(CONVERSATION_STATE_SCHEMA_VERSION)
-    {
-        return Err(invalid_conversation_state(
-            path,
-            UNSUPPORTED_CONVERSATION_STATE_SCHEMA,
-        ));
-    }
-    if !matches!(object.get("revision"), Some(Value::Number(number)) if number.as_i64().is_some()) {
-        return Err(invalid_conversation_state(
-            path,
-            UNSUPPORTED_CONVERSATION_STATE_SCHEMA,
-        ));
-    }
-    if !matches!(object.get("segments"), Some(Value::Array(_))) {
-        return Err(invalid_conversation_state(
-            path,
-            UNSUPPORTED_CONVERSATION_STATE_SEGMENTS,
-        ));
-    }
-    Ok(())
-}
-
-fn invalid_conversation_state(path: &Path, reason: &str) -> StorageError {
-    StorageError::InvalidConversationState {
-        path: path.to_path_buf(),
-        reason: reason.to_string(),
-    }
-}
-
-pub(crate) fn merge_sidecars(
-    project_paths: &ProjectPaths,
-    conversation_id: &str,
-    project_path: &str,
-    payload: &mut Value,
-) {
-    let Some(object) = payload.as_object_mut() else {
-        return;
-    };
-    let run_requests = read_json_object_lossy(
-        project_paths
-            .flow_run_requests_dir
-            .join(format!("{conversation_id}.json")),
-    );
-    if let Some(sidecar) = run_requests {
-        let event_log = sidecar
-            .get("event_log")
-            .cloned()
-            .or_else(|| object.get("event_log").cloned())
-            .unwrap_or_else(|| json!([]));
-        object.insert("event_log".to_string(), event_log);
-        object.insert(
-            "flow_run_requests".to_string(),
-            sidecar
-                .get("flow_run_requests")
-                .cloned()
-                .unwrap_or_else(|| json!([])),
-        );
-    }
-    let launches = read_json_object_lossy(
-        project_paths
-            .flow_launches_dir
-            .join(format!("{conversation_id}.json")),
-    );
-    if let Some(sidecar) = launches {
-        object.insert(
-            "flow_launches".to_string(),
-            sidecar
-                .get("flow_launches")
-                .cloned()
-                .unwrap_or_else(|| json!([])),
-        );
-        object.insert(
-            "run_recoveries".to_string(),
-            sidecar
-                .get("run_recoveries")
-                .cloned()
-                .unwrap_or_else(|| json!([])),
-        );
-    }
-    let proposed = read_json_object_lossy(
-        project_paths
-            .proposed_plans_dir
-            .join(format!("{conversation_id}.json")),
-    );
-    if let Some(sidecar) = proposed {
-        object.insert(
-            "proposed_plans".to_string(),
-            sidecar
-                .get("proposed_plans")
-                .cloned()
-                .unwrap_or_else(|| json!([])),
-        );
-    }
-    ensure_snapshot_defaults(payload, conversation_id, project_path);
-}
-
-fn ensure_snapshot_defaults(payload: &mut Value, conversation_id: &str, project_path: &str) {
-    let Some(object) = payload.as_object_mut() else {
-        return;
-    };
-    object
-        .entry("schema_version".to_string())
-        .or_insert_with(|| json!(CONVERSATION_STATE_SCHEMA_VERSION));
-    object
-        .entry("revision".to_string())
-        .or_insert_with(|| json!(0));
-    object
-        .entry("conversation_id".to_string())
-        .or_insert_with(|| json!(conversation_id));
-    object
-        .entry("conversation_handle".to_string())
-        .or_insert_with(|| json!(""));
-    object
-        .entry("project_path".to_string())
-        .or_insert_with(|| json!(project_path));
-    object
-        .entry("chat_mode".to_string())
-        .or_insert_with(|| json!("chat"));
-    object
-        .entry("provider".to_string())
-        .or_insert_with(|| json!("codex"));
-    object.entry("model".to_string()).or_insert(Value::Null);
-    object
-        .entry("llm_profile".to_string())
-        .or_insert(Value::Null);
-    object
-        .entry("reasoning_effort".to_string())
-        .or_insert(Value::Null);
-    object
-        .entry("title".to_string())
-        .or_insert_with(|| json!("New thread"));
-    object
-        .entry("created_at".to_string())
-        .or_insert_with(|| json!(""));
-    object
-        .entry("updated_at".to_string())
-        .or_insert_with(|| json!(""));
-    for key in [
-        "turns",
-        "segments",
-        "event_log",
-        "flow_run_requests",
-        "flow_launches",
-        "run_recoveries",
-        "proposed_plans",
-    ] {
-        object.entry(key.to_string()).or_insert_with(|| json!([]));
-    }
-}
-
-fn read_json_object_lossy(path: impl AsRef<Path>) -> Option<Map<String, Value>> {
-    let text = fs::read_to_string(path).ok()?;
-    serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|value| value.as_object().cloned())
 }
 
 fn event_revision(payload: &Value) -> Option<i64> {

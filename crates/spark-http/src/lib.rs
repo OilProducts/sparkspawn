@@ -3,7 +3,7 @@
 //! Axum HTTP composition for Spark Workspace compatibility routes.
 
 use std::collections::{BTreeSet, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
 use axum::extract::{FromRef, Path, State};
@@ -16,8 +16,9 @@ use serde_json::Value;
 use spark_agent_adapter::{AgentTurnBackend, RustLlmAgentTurnBackend};
 use spark_common::settings::SparkSettings;
 use spark_workspace::live::{
-    full_run_usage_accumulator, latest_run_sequence, run_live_publication,
-    run_upsert_envelope_with_usage, trigger_upsert_envelope, LiveEnvelope, RunUsageAccumulator,
+    execution_transcript_envelopes, full_run_usage_accumulator, latest_run_sequence,
+    run_live_publication, run_upsert_envelope_with_usage, trigger_upsert_envelope,
+    ExecutionTranscriptCursor, LiveEnvelope, RunUsageAccumulator,
 };
 use spark_workspace::{WorkspaceError, WorkspaceTriggerService};
 use tokio::sync::{broadcast, mpsc};
@@ -173,12 +174,16 @@ impl FromRef<HttpAppState> for Arc<dyn AgentTurnBackend> {
 #[derive(Debug)]
 pub(crate) struct WorkspaceLiveHub {
     sender: broadcast::Sender<LiveEnvelope>,
+    execution_cursors: Mutex<HashMap<String, ExecutionTranscriptCursor>>,
 }
 
 impl WorkspaceLiveHub {
     fn new() -> Self {
         let (sender, _receiver) = broadcast::channel(256);
-        Self { sender }
+        Self {
+            sender,
+            execution_cursors: Mutex::new(HashMap::new()),
+        }
     }
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<LiveEnvelope> {
@@ -187,6 +192,18 @@ impl WorkspaceLiveHub {
 
     pub(crate) fn publish(&self, envelope: LiveEnvelope) {
         let _ = self.sender.send(envelope);
+    }
+
+    fn publish_execution_transcripts(&self, settings: &SparkSettings, run_id: &str) {
+        let mut cursors = self
+            .execution_cursors
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Ok(envelopes) = execution_transcript_envelopes(settings, run_id, &mut cursors) {
+            for envelope in envelopes {
+                self.publish(envelope);
+            }
+        }
     }
 }
 
@@ -530,11 +547,8 @@ async fn attractor_dispatch(
     response
 }
 
-/// Publishes journal, segment, upsert, and milestone envelopes for the run.
-/// Returns the journal's newest sequence from the same combined-journal
-/// build (the envelopes already include the cursor window's segment
-/// upserts), so callers advance their cursor without re-deriving the
-/// journal — that rebuild used to double the cost of every publish cycle.
+/// Publishes orchestration envelopes and independently owned execution
+/// transcript upserts. Returns the run journal's newest local sequence.
 pub(crate) fn publish_live_run_after(
     settings: &SparkSettings,
     live_hub: &WorkspaceLiveHub,
@@ -616,6 +630,8 @@ fn publish_live_run_after_incremental_with(
     for envelope in &new_run_envelopes {
         live_hub.publish(envelope.clone());
     }
+    live_hub.publish_execution_transcripts(settings, run_id);
+    *usage = full_run_usage_accumulator(settings, run_id).ok();
     let breakdown = usage.as_ref().and_then(|usage| usage.breakdown());
     if let Ok(Some(envelope)) = run_upsert_envelope_with_usage(settings, run_id, breakdown.as_ref())
     {
@@ -682,6 +698,18 @@ mod incremental_usage_tests {
         }
     }
 
+    fn append_execution_usage(paths: &attractor_runtime::RunRootPaths, event: RawRuntimeEvent) {
+        let root = paths.logs_dir().join("work/executions/1-0");
+        fs::create_dir_all(&root).expect("execution root");
+        fs::write(root.join("status.json"), r#"{"outcome":"running"}"#).expect("status");
+        let event_type = event.payload["adapter_event_type"].clone();
+        let mut payload = event.payload["payload"].clone();
+        payload["node_id"] = event.payload["node_id"].clone();
+        spark_storage::ActivityRepository::new(root)
+            .append_event(json!({"event_type": event_type, "payload": payload}), "now")
+            .expect("execution usage");
+    }
+
     #[test]
     fn real_publisher_overlays_only_new_usage_and_evicts_terminal_state() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -702,12 +730,10 @@ mod incremental_usage_tests {
         let mut receiver = hub.subscribe();
         let mut usage = None;
 
-        store
-            .append_event(
-                &paths,
-                event("live-usage", "work", "codex_app_server_session_event", 10),
-            )
-            .expect("event");
+        append_execution_usage(
+            &paths,
+            event("live-usage", "work", "codex_app_server_session_event", 10),
+        );
         let cursor =
             publish_live_run_after_incremental(&settings, &hub, "live-usage", None, &mut usage);
         let first = upsert(&mut receiver);
@@ -726,12 +752,10 @@ mod incremental_usage_tests {
         // Re-publishing the same cursor applies no entry twice.
         publish_live_run_after_incremental(&settings, &hub, "live-usage", cursor, &mut usage);
         assert_eq!(upsert(&mut receiver)["token_usage"], 10);
-        store
-            .append_event(
-                &paths,
-                event("live-usage", "work", "codex_app_server_session_event", 20),
-            )
-            .expect("event");
+        append_execution_usage(
+            &paths,
+            event("live-usage", "work", "codex_app_server_session_event", 20),
+        );
         let cursor =
             publish_live_run_after_incremental(&settings, &hub, "live-usage", cursor, &mut usage);
         assert_eq!(upsert(&mut receiver)["token_usage"], 20);
@@ -771,12 +795,10 @@ mod incremental_usage_tests {
                 ..Default::default()
             })
             .expect("run");
-        store
-            .append_event(
-                &paths,
-                event("bounded-usage", "work", "codex_app_server_session_event", 7),
-            )
-            .expect("usage");
+        append_execution_usage(
+            &paths,
+            event("bounded-usage", "work", "codex_app_server_session_event", 7),
+        );
         for _ in 0..4097 {
             let mut noise = RawRuntimeEvent::new("Log", "bounded-usage");
             noise.payload.insert("message".into(), json!("noise"));

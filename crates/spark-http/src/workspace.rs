@@ -88,7 +88,7 @@ pub fn router() -> Router<HttpAppState> {
             get(get_workspace_flow_dispatch).put(put_workspace_flow_dispatch),
         )
         .route(
-            "/conversations/{conversation_id}/segments/{segment_id}/tool-output",
+            "/conversations/{conversation_id}/tool-output/{segment_id}",
             get(get_conversation_segment_tool_output),
         )
         .route(

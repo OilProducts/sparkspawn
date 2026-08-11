@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use attractor_core::ContextMap;
 use attractor_core::FlowDefinition;
 use attractor_runtime::{
-    codergen_events_for_journal, flow_runtime::node_attrs_for_handler, outgoing_routing_edges,
-    NodeExecutionRequest, NodeExecutor, RunRootPaths, RuntimeCodergen, RuntimeHandlerRunner,
+    flow_runtime::node_attrs_for_handler, outgoing_routing_edges, NodeExecutionRequest,
+    NodeExecutor, RunRootPaths, RuntimeCodergen, RuntimeHandlerRunner,
 };
 use serde_json::json;
 use spark_agent_adapter::RustLlmCodergenBackend;
@@ -48,17 +48,16 @@ nodes:
         std::fs::read_to_string(logs_root.path().join("task/initial-context.txt")).unwrap(),
         "Plan for docs"
     );
-    assert!(!logs_root.path().join("task/prompt.md").exists());
+    assert_eq!(
+        std::fs::read_to_string(logs_root.path().join("task/prompt.md")).unwrap(),
+        "Plan for docs\n"
+    );
     assert_eq!(
         std::fs::read_to_string(logs_root.path().join("task/response.md"))
             .unwrap()
             .trim(),
         "[Simulated] Response for stage: task"
     );
-
-    let events = codergen_events_for_journal("run-1", "task", &execution);
-    assert_eq!(events[0].event_type, "LLMRequestStarted");
-    assert_eq!(events[0].payload["node_id"], json!("task"));
 }
 
 #[test]
@@ -114,7 +113,10 @@ nodes:
         std::fs::read_to_string(logs_root.path().join("task/initial-context.txt")).unwrap(),
         "Summarize Rust evidence"
     );
-    assert!(!logs_root.path().join("task/prompt.md").exists());
+    assert_eq!(
+        std::fs::read_to_string(logs_root.path().join("task/prompt.md")).unwrap(),
+        "Summarize Rust evidence\n"
+    );
     assert_eq!(
         std::fs::read_to_string(logs_root.path().join("task/response.md"))
             .unwrap()
@@ -144,23 +146,6 @@ nodes:
         json!("openai")
     );
     assert_eq!(request.metadata["test.marker"], json!("runtime-codergen"));
-
-    let journal_events = codergen_events_for_journal("run-text", "task", &execution);
-    assert!(journal_events
-        .iter()
-        .all(|event| event.payload["node_id"] == json!("task")));
-    let request_started = journal_events
-        .iter()
-        .find(|event| event.event_type == "LLMRequestStarted")
-        .expect("request started journal event");
-    assert_eq!(
-        request_started.payload["payload"]["runtime_mode"]["mode"],
-        json!("text_only")
-    );
-    assert!(journal_events.iter().any(|event| {
-        event.event_type == "LLMRequestCompleted"
-            && event.payload["payload"]["runtime_mode"]["mode"] == json!("text_only")
-    }));
 }
 
 #[test]
@@ -303,7 +288,7 @@ nodes:
     assert!(captured.ends_with("Inspect with tools"));
     assert!(!captured.ends_with('\n'));
     assert!(!captured.contains("\n---\n"));
-    assert!(!logs_root.path().join("task/prompt.md").exists());
+    assert!(logs_root.path().join("task/prompt.md").is_file());
     assert_eq!(
         request.metadata["spark.runtime.source"],
         json!("agent_turn")
@@ -320,20 +305,6 @@ nodes:
         request.metadata["spark.runtime.codergen.runtime_mode"]["mode"],
         json!("agent")
     );
-
-    let journal_events = codergen_events_for_journal("run-agent", "task", &execution);
-    assert!(journal_events.iter().any(|event| {
-        event.event_type == "LLMRequestStarted"
-            && event.payload["payload"]["runtime_mode"]["mode"] == json!("agent")
-    }));
-    assert!(journal_events.iter().any(|event| {
-        event.event_type == "LLMTokenUsage"
-            && event.payload["token_usage"]["total_tokens"] == json!(13)
-    }));
-    assert!(journal_events.iter().any(|event| {
-        event.event_type == "LLMRequestCompleted"
-            && event.payload["payload"]["runtime_mode"]["mode"] == json!("agent")
-    }));
 }
 
 struct RecordingProviderAdapter {
@@ -549,6 +520,7 @@ nodes:
         .execute(NodeExecutionRequest {
             node_id: "task".to_string(),
             stage_index: 0,
+            attempt: 0,
             context: ContextMap::new(),
             prompt: "Ship it".to_string(),
             node_attrs: node_attrs_for_handler("task", &node),
@@ -572,5 +544,8 @@ nodes:
         .iter()
         .all(|event| event.payload["node_id"] == json!("task")));
     assert!(!paths.events_jsonl().exists(), "worker must not journal");
-    assert!(paths.logs_dir().join("task/response.md").exists());
+    assert!(paths
+        .logs_dir()
+        .join("task/executions/0-0/response.md")
+        .exists());
 }

@@ -130,6 +130,32 @@ impl RunUsageAccumulator {
         }
     }
 
+    pub fn apply_activity_events(&mut self, events: &[spark_storage::ActivityEvent]) {
+        for event in events {
+            let event_type = event
+                .event
+                .get("event_type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let payload = event.event.get("payload");
+            let node_id = payload
+                .and_then(|value| value.get("node_id"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if SESSION_EVENT_TYPES.contains(&event_type) {
+                if let Some((model, bucket)) = usage_from_payload(payload, &self.fallback_model) {
+                    self.in_flight.insert(node_id.to_string(), (model, bucket));
+                }
+            } else if REQUEST_COMPLETED_EVENT_TYPES.contains(&event_type) {
+                self.in_flight.remove(node_id);
+                if let Some((model, bucket)) = usage_from_payload(payload, &self.fallback_model) {
+                    self.completed.add_for_model(&model, &bucket);
+                    self.completed_has_usage = true;
+                }
+            }
+        }
+    }
+
     pub fn breakdown(&self) -> Option<TokenUsageBreakdown> {
         let mut breakdown = if self.completed_has_usage {
             self.completed.clone()

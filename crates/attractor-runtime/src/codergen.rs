@@ -1,14 +1,10 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use attractor_core::{ContextMap, DotGraph, Outcome, RawRuntimeEvent};
-use serde_json::{json, Value};
+use attractor_core::{ContextMap, DotGraph, Outcome};
+use serde_json::Value;
 use spark_agent_adapter::{
     CodergenBackend, CodergenError, CodergenExecution, CodergenHandler, CodergenRequest,
-};
-
-use crate::events::{
-    llm_request_completed_event, llm_request_started_event, llm_token_usage_event,
 };
 
 pub struct RuntimeCodergen {
@@ -133,87 +129,6 @@ impl RuntimeCodergen {
             event_sink,
         )
     }
-}
-
-pub fn codergen_events_for_journal(
-    run_id: &str,
-    node_id: &str,
-    execution: &CodergenExecution,
-) -> Vec<RawRuntimeEvent> {
-    let mut events = Vec::new();
-    for event in &execution.events {
-        match event.event_type.as_str() {
-            "codergen_backend_request_started" => {
-                events.push(llm_request_started_event(
-                    run_id,
-                    node_id,
-                    low_volume_llm_payload(&event.payload),
-                ));
-            }
-            "rust_llm_adapter_request_completed"
-            | "rust_agent_adapter_request_completed"
-            | "codex_app_server_request_completed"
-            | "claude_code_request_completed"
-            | "simulated_llm_request_completed" => {
-                events.push(llm_request_completed_event(
-                    run_id,
-                    node_id,
-                    low_volume_llm_payload(&event.payload),
-                ));
-            }
-            "rust_agent_session_event"
-            | "codex_app_server_session_event"
-            | "claude_code_session_event" => {
-                if let Some(usage) = event
-                    .payload
-                    .get("token_usage")
-                    .cloned()
-                    .or_else(|| {
-                        event
-                            .payload
-                            .get("turn_stream_event")?
-                            .get("token_usage")
-                            .cloned()
-                    })
-                    .or_else(|| {
-                        event
-                            .payload
-                            .get("session_event")?
-                            .get("data")?
-                            .get("usage")
-                            .cloned()
-                    })
-                {
-                    events.push(llm_token_usage_event(run_id, node_id, usage));
-                }
-            }
-            _ => {}
-        }
-    }
-    events
-}
-
-fn low_volume_llm_payload(payload: &BTreeMap<String, Value>) -> Value {
-    let mut output = serde_json::Map::new();
-    for key in [
-        "node_id",
-        "provider",
-        "provider_selector",
-        "model",
-        "model_selector",
-        "llm_profile",
-        "reasoning_effort",
-        "response_contract",
-        "runtime_mode",
-        "repair_attempts",
-        "token_usage",
-        "context_capture_kind",
-    ] {
-        if let Some(value) = payload.get(key) {
-            output.insert(key.to_string(), value.clone());
-        }
-    }
-    json!(output)
 }
 
 pub fn codergen_outcome(execution: CodergenExecution) -> Outcome {

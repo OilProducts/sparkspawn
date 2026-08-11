@@ -363,7 +363,7 @@ fn waited_and_detached_container_launches_dispatch_through_docker_and_record_pla
                 .iter()
                 .filter(|event| event.event_type == "container_live")
                 .count(),
-            2
+            0
         );
     }
 }

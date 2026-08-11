@@ -26,7 +26,7 @@ use crate::artifacts::{
     append_tool_hook_failure, copy_tool_artifact_matches, write_tool_output_log,
     write_tool_text_artifact, ToolHookFailureRecord,
 };
-use crate::codergen::{codergen_events_for_journal, codergen_outcome, RuntimeCodergen};
+use crate::codergen::{codergen_outcome, RuntimeCodergen};
 use crate::context::{
     clear_runtime_retry_context, seed_builtin_context, set_runtime_fidelity_context,
 };
@@ -51,6 +51,94 @@ pub const HANDLER_PARALLEL: &str = "parallel";
 pub const HANDLER_FAN_IN: &str = "parallel.fan_in";
 pub const HANDLER_TOOL: &str = "tool";
 pub const HANDLER_MANAGER_LOOP: &str = "stack.manager_loop";
+
+fn materialize_execution_suffix(
+    activity: &spark_storage::ActivityRepository,
+) -> spark_storage::Result<()> {
+    let mut revision = activity.read_transcript_records()?.len() as u64 + 1;
+    for stored in activity.uncommitted_event_suffix()? {
+        if stored.event.get("type").and_then(Value::as_str) == Some("prompt_resolved") {
+            let prompt = stored
+                .event
+                .get("prompt")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let turn = serde_json::from_value(json!({
+                "id": "prompt", "role": "user", "kind": "message", "content": prompt,
+                "status": "complete", "timestamp": stored.committed_at,
+            }))
+            .map_err(|source| spark_storage::StorageError::JsonWrite {
+                path: activity.transcript_path(),
+                source,
+            })?;
+            activity.append_transcript(&spark_storage::TranscriptRecord::TurnUpsert {
+                revision,
+                committed_at: stored.committed_at,
+                source_event_sequence: stored.sequence,
+                turn,
+            })?;
+            revision += 1;
+            continue;
+        }
+        let Some(unit) = stored
+            .event
+            .get("payload")
+            .and_then(|payload| payload.get("turn_stream_event"))
+        else {
+            continue;
+        };
+        let kind = unit.get("kind").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(
+            kind,
+            "content_completed"
+                | "tool_call_completed"
+                | "tool_call_failed"
+                | "request_user_input_requested"
+                | "context_compaction_completed"
+                | "agent_event_completed"
+        ) {
+            continue;
+        }
+        let channel = unit
+            .get("channel")
+            .and_then(Value::as_str)
+            .unwrap_or("assistant");
+        let segment_kind = match kind {
+            "tool_call_completed" | "tool_call_failed" => "tool_call",
+            "request_user_input_requested" => "request_user_input",
+            "context_compaction_completed" => "context_compaction",
+            "agent_event_completed" => "agent_event",
+            _ => match channel {
+                "reasoning" => "reasoning",
+                "plan" => "plan",
+                _ => "assistant_message",
+            },
+        };
+        let id = unit
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("event-{}", stored.sequence));
+        let segment = serde_json::from_value(json!({
+            "id": id, "turn_id": "response", "order": revision as i64 - 2,
+            "kind": segment_kind, "role": "assistant",
+            "status": if kind == "tool_call_failed" { "failed" } else { "complete" },
+            "timestamp": stored.committed_at, "updated_at": stored.committed_at,
+            "completed_at": stored.committed_at,
+            "content": unit.get("message").or_else(|| unit.get("content")).and_then(Value::as_str).unwrap_or_default(),
+            "tool_call": unit.get("tool_call"), "request_user_input": unit.get("request_user_input"),
+            "source": unit.get("source"),
+        })).map_err(|source| spark_storage::StorageError::JsonWrite { path: activity.transcript_path(), source })?;
+        activity.append_transcript(&spark_storage::TranscriptRecord::SegmentUpsert {
+            revision,
+            committed_at: stored.committed_at,
+            source_event_sequence: stored.sequence,
+            segment,
+        })?;
+        revision += 1;
+    }
+    Ok(())
+}
 
 pub type RuntimeHandlerFn =
     Box<dyn FnMut(HandlerRuntime) -> std::result::Result<Outcome, RuntimeNodeError> + Send>;
@@ -101,6 +189,7 @@ pub struct HandlerRuntime {
     pub run_workdir: PathBuf,
     pub run_id: String,
     pub stage_index: u64,
+    pub attempt: u64,
     pub run_paths: Option<RunRootPaths>,
     pub fallback_model: Option<String>,
     pub fallback_provider: Option<String>,
@@ -132,6 +221,7 @@ impl HandlerRuntime {
             run_workdir: request.run_workdir,
             run_id: request.run_id,
             stage_index: request.stage_index,
+            attempt: request.attempt,
             run_paths: request.run_paths,
             fallback_model: request.fallback_model,
             fallback_provider: request.fallback_provider,
@@ -489,6 +579,12 @@ impl RuntimeHandlerRunner {
         Ok(event)
     }
 
+    pub fn notify_run_event(&self, run_id: &str) {
+        if let Some(observer) = &self.run_event_observer {
+            observer(run_id);
+        }
+    }
+
     pub(crate) fn run_event_observer(&self) -> Option<crate::store::RunEventObserver> {
         self.run_event_observer.clone()
     }
@@ -743,6 +839,38 @@ impl RuntimeHandlerRunner {
         &self,
         runtime: HandlerRuntime,
     ) -> std::result::Result<Outcome, RuntimeNodeError> {
+        let execution_root = runtime.run_paths.as_ref().map(|paths| {
+            paths
+                .logs_dir()
+                .join(&runtime.node_id)
+                .join("executions")
+                .join(format!("{}-{}", runtime.stage_index, runtime.attempt))
+        });
+        let activity = execution_root
+            .as_ref()
+            .map(spark_storage::ActivityRepository::new);
+        if let Some(activity) = activity.as_ref() {
+            if activity
+                .read_transcript_records()
+                .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?
+                .is_empty()
+            {
+                if activity
+                    .read_events()
+                    .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?
+                    .is_empty()
+                {
+                    activity
+                        .append_event(
+                            json!({"type": "prompt_resolved", "prompt": runtime.prompt}),
+                            crate::events::utc_timestamp(),
+                        )
+                        .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
+                }
+                materialize_execution_suffix(activity)
+                    .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
+            }
+        }
         let root_run_id = runtime
             .context
             .get("internal.root_run_id")
@@ -766,9 +894,8 @@ impl RuntimeHandlerRunner {
             runtime.fallback_profile.clone(),
             runtime.fallback_reasoning_effort.clone(),
         )
-        .with_runtime_context(
-            Some(runtime.run_workdir.clone()),
-            BTreeMap::from([
+        .with_runtime_context(Some(runtime.run_workdir.clone()), {
+            let mut metadata = BTreeMap::from([
                 (
                     "spark.runtime.run_id".to_string(),
                     json!(runtime.run_id.clone()),
@@ -778,17 +905,18 @@ impl RuntimeHandlerRunner {
                     "spark.runtime.run_workdir".to_string(),
                     json!(runtime.run_workdir.to_string_lossy().to_string()),
                 ),
-            ]),
-        );
-        // Journal codergen events as they are produced so transcripts stream
-        // while the node executes; the event-log prefix contract means every
-        // event is sunk exactly once, so no post-hoc pass is needed. The
-        // transcript renders from the journal projection at read time.
+            ]);
+            if let Some(root) = execution_root.as_ref() {
+                metadata.insert("spark.runtime.execution_root".to_string(), json!(root));
+            }
+            metadata
+        });
+        // Persist detailed codergen events in the owning execution while the
+        // node runs, then materialize completed logical units into its transcript.
         let live_sink_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let trace_path = runtime
-            .logs_root
+        let trace_path = execution_root
             .as_ref()
-            .map(|logs_root| logs_root.join(&runtime.node_id).join(AGENT_TRACE_FILE_NAME));
+            .map(|root| root.join(AGENT_TRACE_FILE_NAME));
         let has_event_destination =
             self.external_event_sink.is_some() || runtime.run_paths.is_some();
         let live_sink = has_event_destination.then(|| {
@@ -797,18 +925,50 @@ impl RuntimeHandlerRunner {
             let runner = self.clone();
             let sink_error = Arc::clone(&live_sink_error);
             let trace_path = trace_path.clone();
+            let activity = activity.clone();
             let sink_runtime = runtime.clone();
             Arc::new(move |event: spark_agent_adapter::CodergenEvent| {
                 write_agent_trace_event(trace_path.as_deref(), &event);
-                let raw_event = crate::events::codergen_adapter_event(
-                    &run_id,
-                    &node_id,
-                    &event.event_type,
-                    serde_json::to_value(&event.payload).unwrap_or_else(|_| json!({})),
-                );
-                let append_result = runner.emit(&sink_runtime, raw_event);
-                match append_result {
-                    Ok(()) => {}
+                let value = serde_json::to_value(&event).unwrap_or_else(|_| json!({}));
+                let append_result = if let Some(activity) = activity.as_ref() {
+                    activity
+                        .append_event(value, crate::events::utc_timestamp())
+                        .and_then(|_| materialize_execution_suffix(activity))
+                        .map_err(
+                            |error| crate::error::RuntimeStorageError::InvalidRuntimeGraph {
+                                reason: error.to_string(),
+                            },
+                        )
+                } else {
+                    let raw_event = crate::events::codergen_adapter_event(
+                        &run_id,
+                        &node_id,
+                        &event.event_type,
+                        serde_json::to_value(&event.payload).unwrap_or_else(|_| json!({})),
+                    );
+                    runner.emit(&sink_runtime, raw_event)
+                };
+                let publish_result = if activity.is_some() && runner.external_event_sink.is_some() {
+                    runner.emit(
+                        &sink_runtime,
+                        crate::events::codergen_adapter_event(
+                            &run_id,
+                            &node_id,
+                            &event.event_type,
+                            serde_json::to_value(&event.payload).unwrap_or_else(|_| json!({})),
+                        ),
+                    )
+                } else {
+                    Ok(())
+                };
+                match append_result.and(publish_result) {
+                    Ok(()) => {
+                        if activity.is_some() {
+                            if let Some(observer) = &runner.run_event_observer {
+                                observer(&run_id);
+                            }
+                        }
+                    }
                     Err(error) => {
                         let mut slot = sink_error
                             .lock()
@@ -820,7 +980,6 @@ impl RuntimeHandlerRunner {
                 }
             }) as spark_agent_adapter::CodergenEventSink
         });
-        let journaling_live = live_sink.is_some();
         let execution = codergen
             .execute_with_event_sink(&runtime.node_id, runtime.context.clone(), live_sink)
             .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
@@ -831,15 +990,12 @@ impl RuntimeHandlerRunner {
         {
             return Err(RuntimeNodeError::runtime(error));
         }
-        if has_event_destination && !journaling_live {
-            for event in codergen_events_for_journal(&runtime.run_id, &runtime.node_id, &execution)
-            {
-                self.emit(&runtime, event)
-                    .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
-            }
+        if let Some(activity) = activity.as_ref() {
+            materialize_execution_suffix(activity)
+                .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
         }
         // Text-only completions never stream a content event, so the final
-        // response text would otherwise be invisible to the journal-projected
+        // response text would otherwise be invisible to the execution
         // transcript. Journal a synthetic completion for those.
         let streamed_assistant_content = execution.events.iter().any(|event| {
             event
@@ -853,20 +1009,37 @@ impl RuntimeHandlerRunner {
             && !streamed_assistant_content
             && !execution.response_text.trim().is_empty()
         {
-            self.emit(
-                &runtime,
-                crate::events::codergen_adapter_event(
-                    &runtime.run_id,
-                    &runtime.node_id,
-                    "final_response_text",
-                    json!({"turn_stream_event": {
-                        "kind": "content_completed",
-                        "channel": "assistant",
-                        "message": execution.response_text.clone(),
-                    }}),
-                ),
-            )
-            .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
+            if let Some(activity) = activity.as_ref() {
+                let committed_at = crate::events::utc_timestamp();
+                let event = activity
+                    .append_event(
+                        json!({"event_type": "final_response_text", "payload": {
+                            "turn_stream_event": {"kind": "content_completed", "channel": "assistant",
+                            "message": execution.response_text}
+                        }}),
+                        committed_at.clone(),
+                    )
+                    .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
+                let revision = activity
+                    .read_transcript_records()
+                    .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?
+                    .len() as u64
+                    + 1;
+                activity
+                    .append_transcript(&spark_storage::TranscriptRecord::SegmentUpsert {
+                        revision,
+                        committed_at: committed_at.clone(),
+                        source_event_sequence: event.sequence,
+                        segment: serde_json::from_value(json!({
+                            "id": "final-response", "turn_id": "response", "order": revision as i64,
+                            "kind": "assistant_message", "role": "assistant", "status": "complete",
+                            "timestamp": committed_at, "updated_at": committed_at,
+                            "completed_at": committed_at, "content": execution.response_text,
+                        }))
+                        .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?,
+                    })
+                    .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
+            }
         }
         Ok(codergen_outcome(execution))
     }
@@ -1609,6 +1782,7 @@ impl RuntimeHandlerRunner {
             let request = NodeExecutionRequest {
                 node_id: current_node.clone(),
                 stage_index: completed_nodes.len() as u64,
+                attempt: 0,
                 context: context.snapshot(),
                 prompt,
                 node: node.clone(),

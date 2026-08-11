@@ -286,7 +286,7 @@ fn start_turn_prepares_agent_request_with_persisted_history_and_selectors() {
 }
 
 #[test]
-fn start_turn_agent_history_uses_legacy_complete_turn_defaults() {
+fn start_turn_agent_history_does_not_hydrate_removed_legacy_state_turns() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());
     let project_path = "/projects/legacy-agent-request";
@@ -340,13 +340,7 @@ fn start_turn_agent_history_uses_legacy_complete_turn_defaults() {
         .expect("start turn");
 
     let history = serde_json::to_value(&prepared.agent_turn_request.history).expect("history");
-    assert_eq!(history.as_array().expect("history").len(), 2);
-    assert_eq!(history[0]["role"], "user");
-    assert_eq!(history[0]["content"], "Legacy question");
-    assert_eq!(history[0]["timestamp"], "2026-01-01T00:00:00Z");
-    assert_eq!(history[1]["role"], "assistant");
-    assert_eq!(history[1]["content"], "Legacy answer");
-    assert_eq!(history[1]["timestamp"], "2026-01-01T00:00:01Z");
+    assert!(history.as_array().expect("history").is_empty());
 }
 
 #[test]

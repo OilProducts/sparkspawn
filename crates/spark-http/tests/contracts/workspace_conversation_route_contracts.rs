@@ -59,17 +59,28 @@ async fn conversation_routes_return_snapshot_tool_output_settings_and_delete_con
         }),
     );
     fs::write(
-        project.flow_run_requests_dir.join("conversation-http.json"),
-        serde_json::to_string_pretty(&json!({
-            "conversation_id": "conversation-http",
-            "project_id": project.project_id,
-            "project_path": project_path,
-            "event_log": [],
-            "flow_run_requests": [{"id": "request-http", "created_at": "2026-01-01T00:00:01Z", "updated_at": "2026-01-01T00:00:01Z", "flow_name": "flow.dot", "summary": "Run", "project_path": project_path, "conversation_id": "conversation-http", "source_turn_id": "turn-a"}]
-        }))
+        project
+            .conversations_dir
+            .join("conversation-http/artifacts/flow-run-requests.json"),
+        serde_json::to_string_pretty(&json!([
+            {"id": "request-http", "created_at": "2026-01-01T00:00:01Z", "updated_at": "2026-01-01T00:00:01Z", "flow_name": "flow.dot", "summary": "Run", "project_path": project_path, "conversation_id": "conversation-http", "source_turn_id": "turn-a"}
+        ]))
         .expect("json"),
     )
-    .expect("sidecar");
+    .expect("flow requests");
+    fs::create_dir_all(
+        project
+            .conversations_dir
+            .join("conversation-http/tool-output"),
+    )
+    .expect("tool output directory");
+    fs::write(
+        project
+            .conversations_dir
+            .join("conversation-http/tool-output/segment-tool.txt"),
+        "full output",
+    )
+    .expect("tool output");
     let app = build_app(settings.clone());
 
     let snapshot = request_json(
@@ -87,7 +98,7 @@ async fn conversation_routes_return_snapshot_tool_output_settings_and_delete_con
     let output = request_json(
         app.clone(),
         "GET",
-        "/workspace/api/conversations/conversation-http/segments/segment-tool/tool-output?project_path=/projects/http-app",
+        "/workspace/api/conversations/conversation-http/tool-output/segment-tool?project_path=/projects/http-app",
         None,
     )
     .await;
@@ -333,13 +344,14 @@ async fn request_text(
 }
 
 fn write_state(conversations_dir: &Path, conversation_id: &str, payload: Value) {
-    let state_path = conversations_dir.join(conversation_id).join("state.json");
-    fs::create_dir_all(state_path.parent().expect("state parent")).expect("state parent");
-    fs::write(
-        state_path,
-        serde_json::to_string_pretty(&payload).expect("json"),
-    )
-    .expect("state");
+    assert_eq!(payload["conversation_id"], conversation_id);
+    crate::write_conversation_snapshot(
+        conversations_dir
+            .ancestors()
+            .nth(4)
+            .expect("data directory"),
+        &payload,
+    );
 }
 
 fn settings(root: &Path) -> SparkSettings {

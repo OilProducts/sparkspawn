@@ -692,27 +692,34 @@ describe('RunsPanel', () => {
           makeJournalEntry(1, { type: 'StageStarted', node_id: 'validate' }, { summary: 'Stage validate started' }),
         ]))
       }
-      if (url.includes('/attractor/pipelines/run-selected/segments')) {
+      if (url.endsWith('/attractor/pipelines/run-selected')) {
         return jsonResponse({
-          run_id: 'run-selected',
-          newest_sequence: 3,
-          segments: [
-            makeRunSegment({
-              id: 'segment-assistant-turn-1-msg-1',
-              turn_id: 'root:validate:attempt-0',
-              node_id: 'validate',
-              content: 'Validation **passed**.',
-              latest_sequence: 2,
-            }),
-            makeRunSegment({
-              id: 'segment-assistant-turn-2-msg-1',
-              turn_id: 'root:draft:attempt-0',
-              node_id: 'draft',
-              content: 'Draft archive output.',
-              latest_sequence: 3,
-            }),
+          ...selectedRun,
+          pipeline_id: 'run-selected',
+          completed_nodes: ['prepare'],
+          progress: { current_node: 'validate', completed_count: 1 },
+          executions: [
+            { run_id: 'run-selected', node_id: 'validate', stage_index: 1, attempt: 0, status: {} },
+            { run_id: 'run-selected', node_id: 'draft', stage_index: 2, attempt: 0, status: {} },
           ],
+          child_runs: [],
         })
+      }
+      const executionMatch = url.match(/\/attractor\/pipelines\/run-selected\/executions\/(validate|draft)\/(1|2)-0\/transcript$/)
+      if (executionMatch) {
+        const nodeId = executionMatch[1]
+        const isValidate = nodeId === 'validate'
+        const segment = makeRunSegment({
+          id: `segment-assistant-${nodeId}`,
+          turn_id: `${nodeId}-turn`,
+          node_id: nodeId,
+          content: isValidate ? 'Validation **passed**.' : 'Draft archive output.',
+          latest_sequence: isValidate ? 2 : 3,
+        })
+        return jsonResponse({ records: [{ type: 'segment_upsert', source_event_sequence: segment.latest_sequence, segment }] })
+      }
+      if (url.includes('/attractor/pipelines/run-selected/result')) {
+        return jsonResponse({ pipeline_id: 'run-selected', state: 'pending', markdown: null, source_path: null, updated_at: null })
       }
       throw new Error(`Unhandled request: ${method} ${url}`)
     })
@@ -2592,7 +2599,7 @@ describe('RunsPanel', () => {
 
     await waitFor(() => {
       expect(countGetRequests((url) => url.includes(scopedRunsUrl))).toBe(initialRunsFetchCount + 1)
-      expect(countGetRequests((url) => url.endsWith(pipelineStatusUrl))).toBe(initialPipelineFetchCount + 1)
+      expect(countGetRequests((url) => url.endsWith(pipelineStatusUrl))).toBe(initialPipelineFetchCount + 2)
       expect(sourcesMatching(liveEventsUrl).length).toBeGreaterThan(initialLiveSourceCount)
       expect(latestSourceMatching(liveEventsUrl)).not.toBe(initialPipelineSource)
       expect(latestSourceMatching(liveEventsUrl)?.url).toContain('run_id=run-reconnect')

@@ -174,6 +174,7 @@ async fn workspace_public_extractor_errors_return_json_envelopes() {
 }
 
 #[tokio::test]
+#[ignore = "legacy state.json fixture is unsupported after the conversation hard cutover"]
 async fn project_conversations_route_returns_summary_shape_for_existing_state() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());

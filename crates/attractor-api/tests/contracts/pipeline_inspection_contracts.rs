@@ -7,6 +7,64 @@ use serde_json::{json, Value};
 use spark_common::settings::SparkSettings;
 
 #[test]
+fn execution_inventory_and_scoped_activity_routes_keep_resources_independent() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    let project = temp.path().join("Project Executions");
+    fs::create_dir_all(&project).expect("project");
+    let store = RunStore::for_settings(&settings);
+    let mut record = attractor_core::RunRecord::new("run-executions", project.to_string_lossy());
+    record.status = "running".to_string();
+    let paths = store
+        .create_run(CreateRunRequest {
+            record,
+            ..Default::default()
+        })
+        .expect("run");
+    let root = paths.logs_dir().join("work/executions/2-1");
+    fs::create_dir_all(&root).expect("execution root");
+    fs::write(root.join("status.json"), r#"{"outcome":"success"}"#).expect("status");
+    let activity = spark_storage::ActivityRepository::new(&root);
+    let event = activity
+        .append_event(json!({"type":"completed"}), "2026-08-09T00:00:00Z")
+        .expect("event");
+    activity.append_transcript(&spark_storage::TranscriptRecord::TurnUpsert {
+        revision: 1,
+        committed_at: event.committed_at,
+        source_event_sequence: event.sequence,
+        turn: serde_json::from_value(json!({"id":"prompt","role":"user","kind":"message","content":"Ship it","status":"complete"})).expect("turn"),
+    }).expect("transcript");
+
+    let detail = handle_attractor_request(
+        "GET",
+        "/attractor/pipelines/run-executions",
+        "",
+        settings.clone(),
+    );
+    assert_eq!(detail.status_code, 200);
+    assert_eq!(detail.body["executions"][0]["node_id"], "work");
+    assert_eq!(detail.body["executions"][0]["stage_index"], 2);
+    assert_eq!(detail.body["executions"][0]["attempt"], 1);
+
+    let transcript = handle_attractor_request(
+        "GET",
+        "/attractor/pipelines/run-executions/executions/work/2-1/transcript",
+        "",
+        settings.clone(),
+    );
+    assert_eq!(transcript.status_code, 200);
+    assert_eq!(transcript.body["records"][0]["turn"]["content"], "Ship it");
+    let events = handle_attractor_request(
+        "GET",
+        "/attractor/pipelines/run-executions/executions/work/2-1/events",
+        "",
+        settings,
+    );
+    assert_eq!(events.status_code, 200);
+    assert_eq!(events.body["events"][0]["sequence"], 1);
+}
+
+#[test]
 fn inspection_routes_read_durable_pipeline_state_and_artifacts() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());
@@ -294,23 +352,10 @@ fn journal_events_questions_and_mounted_dispatch_preserve_route_shapes() {
         "",
         settings.clone(),
     );
-    assert_eq!(transcript.status_code, 200);
-    let transcript_entries = transcript.body["entries"].as_array().expect("entries");
-    let request_user_input_segment = transcript_entries
-        .iter()
-        .find(|entry| entry["kind"] == json!("request_user_input"))
-        .expect("request_user_input transcript segment");
     assert_eq!(
-        request_user_input_segment["request_user_input"]["request_id"],
-        json!("question-1")
+        transcript.status_code, 404,
+        "runs no longer expose a transcript"
     );
-    assert_eq!(
-        request_user_input_segment["request_user_input"]["questions"][0]["question"],
-        json!("Approve plan?")
-    );
-    assert!(request_user_input_segment.get("gate").is_none());
-    assert!(request_user_input_segment["turn_id"].as_str().is_some());
-    assert!(request_user_input_segment["order"].as_u64().is_some());
 
     let journal_after_question = handle_attractor_request(
         "GET",
@@ -374,37 +419,7 @@ fn journal_events_questions_and_mounted_dispatch_preserve_route_shapes() {
         "",
         settings.clone(),
     );
-    assert_eq!(answered_transcript.status_code, 200);
-    let answered_transcript_entries = answered_transcript.body["entries"]
-        .as_array()
-        .expect("answered transcript entries");
-    let answered_input_segments = answered_transcript_entries
-        .iter()
-        .filter(|entry| entry["kind"] == json!("request_user_input"))
-        .collect::<Vec<_>>();
-    assert_eq!(answered_input_segments.len(), 1);
-    let answered_input_segment = answered_input_segments[0];
-    assert_eq!(
-        answered_input_segment["id"],
-        request_user_input_segment["id"]
-    );
-    assert_eq!(
-        answered_input_segment["order"],
-        request_user_input_segment["order"]
-    );
-    assert_eq!(answered_input_segment["content"], json!("Approve plan?"));
-    assert_eq!(answered_input_segment["status"], json!("answered"));
-    assert_eq!(
-        answered_input_segment["request_user_input"]["status"],
-        json!("answered")
-    );
-    assert_eq!(
-        answered_input_segment["request_user_input"]["answers"],
-        json!({"question-1": "yes"})
-    );
-    assert!(answered_input_segment["request_user_input"]["submitted_at"]
-        .as_str()
-        .is_some());
+    assert_eq!(answered_transcript.status_code, 404);
 
     service.start_pipeline(PipelineStartRequest {
         wait: Some(true),
@@ -523,7 +538,7 @@ fn run_listing_includes_worktree_child_under_parent_project() {
 }
 
 #[test]
-fn journal_page_uses_combined_sequence_space_when_children_exist() {
+fn journal_page_keeps_parent_and_child_sequence_spaces_independent() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());
     let project_path = temp.path().join("Project Combined");
@@ -558,6 +573,47 @@ fn journal_page_uses_combined_sequence_space_when_children_exist() {
         )
         .expect("child event");
 
+    let parent_paths = store
+        .run_root(&project_path.to_string_lossy(), "run-combined-parent")
+        .expect("parent paths");
+    for (paths, node, content) in [
+        (&parent_paths, "parent-task", "parent output"),
+        (&child_paths, "child-task", "child output"),
+    ] {
+        let root = paths.logs_dir().join(node).join("executions/1-0");
+        fs::create_dir_all(&root).expect("execution root");
+        fs::write(root.join("status.json"), r#"{"outcome":"success"}"#).expect("status");
+        let activity = spark_storage::ActivityRepository::new(root);
+        let event = activity
+            .append_event(json!({"type": "content_completed"}), "now")
+            .expect("execution event");
+        activity
+            .append_transcript(&spark_storage::TranscriptRecord::SegmentUpsert {
+                revision: 1,
+                committed_at: "now".to_string(),
+                source_event_sequence: event.sequence,
+                segment: serde_json::from_value(json!({
+                    "id": "answer", "turn_id": "turn", "kind": "assistant_message",
+                    "status": "complete", "content": content
+                }))
+                .expect("segment"),
+            })
+            .expect("transcript");
+    }
+
+    let parent_detail = service.get_pipeline("run-combined-parent");
+    let child_detail = service.get_pipeline("run-combined-child");
+    assert!(parent_detail.body["executions"]
+        .as_array()
+        .expect("parent executions")
+        .iter()
+        .any(|execution| execution["node_id"] == "parent-task"));
+    assert!(child_detail.body["executions"]
+        .as_array()
+        .expect("child executions")
+        .iter()
+        .any(|execution| execution["node_id"] == "child-task"));
+
     let journal = handle_attractor_request(
         "GET",
         "/attractor/pipelines/run-combined-parent/journal?limit=500",
@@ -567,20 +623,20 @@ fn journal_page_uses_combined_sequence_space_when_children_exist() {
     assert_eq!(journal.status_code, 200);
     let entries = journal.body["entries"].as_array().expect("entries");
 
-    // The page must number entries in the combined (re-sequenced) journal
-    // space the live stream uses for its cursor: newest first, contiguous
-    // down to 1, with the child's entries interleaved.
-    let total = entries.len() as u64;
-    assert_eq!(journal.body["newest_sequence"], json!(total));
-    assert_eq!(journal.body["oldest_sequence"], json!(1));
+    // Only the parent's source-local orchestration journal is returned.
     let sequences = entries
         .iter()
         .map(|entry| entry["sequence"].as_u64().expect("sequence"))
         .collect::<Vec<_>>();
-    assert_eq!(sequences, (1..=total).rev().collect::<Vec<_>>());
+    assert_eq!(journal.body["newest_sequence"], json!(sequences[0]));
+    assert_eq!(
+        journal.body["oldest_sequence"],
+        json!(*sequences.last().unwrap())
+    );
+    assert!(sequences.windows(2).all(|pair| pair[0] >= pair[1]));
     assert!(entries
         .iter()
-        .any(|entry| entry["source_scope"] == json!("child")));
+        .all(|entry| entry["source_scope"] != json!("child")));
 }
 
 fn simple_flow() -> String {
@@ -629,145 +685,4 @@ fn settings(root: &Path) -> SparkSettings {
         ui_dir: None,
         project_roots: Vec::new(),
     }
-}
-
-#[test]
-fn segments_route_projects_combined_run_transcript_with_previews() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let settings = settings(temp.path());
-    let project_path = temp.path().join("Project Segments");
-    fs::create_dir_all(&project_path).expect("project dir");
-    let store = RunStore::for_settings(&settings);
-
-    // Parent run with a streamed tool call whose output exceeds the preview cap.
-    let mut parent = attractor_core::RunRecord::new(
-        "run-segments-route",
-        project_path.to_string_lossy().to_string(),
-    );
-    parent.flow_name = "segments".to_string();
-    parent.status = "running".to_string();
-    let parent_paths = store
-        .create_run(attractor_runtime::CreateRunRequest {
-            record: parent,
-            checkpoint: None,
-            manifest: None,
-            flow_source: None,
-            flow_definition_json: None,
-        })
-        .expect("parent run");
-    let big_output = "x".repeat(9 * 1024);
-    for event in [
-        json!({
-            "type": "CodergenAdapter",
-            "run_id": "run-segments-route",
-            "emitted_at": "2026-07-08T11:00:01.000000000Z",
-            "adapter_event_type": "codex_app_server_session_event",
-            "node_id": "implement",
-            "payload": {"turn_stream_event": {
-                "kind": "tool_call_completed",
-                "tool_call": {"id": "call-1", "name": "shell", "status": "completed", "output": big_output},
-                "source": {"backend": "codex_app_server", "app_turn_id": "t-1", "item_id": "call-1"},
-            }},
-        }),
-        json!({
-            "type": "CodergenAdapter",
-            "run_id": "run-segments-route",
-            "emitted_at": "2026-07-08T11:00:02.000000000Z",
-            "adapter_event_type": "rust_agent_session_event",
-            "node_id": "implement",
-            "payload": {"turn_stream_event": {
-                "kind": "content_completed",
-                "channel": "assistant",
-                "content_delta": "Parent answer.",
-                "message": "Parent answer.",
-                "source": {"backend": "rust_unified_llm_adapter"},
-            }},
-        }),
-    ] {
-        store
-            .append_event(
-                &parent_paths,
-                serde_json::from_value(event).expect("raw event"),
-            )
-            .expect("append parent event");
-    }
-
-    // Child run streaming its own assistant text.
-    let mut child = attractor_core::RunRecord::new(
-        "run-segments-child",
-        project_path.to_string_lossy().to_string(),
-    );
-    child.flow_name = "child-flow".to_string();
-    child.status = "running".to_string();
-    child.parent_run_id = Some("run-segments-route".to_string());
-    child.root_run_id = Some("run-segments-route".to_string());
-    child.parent_node_id = Some("manager".to_string());
-    let child_paths = store
-        .create_run(attractor_runtime::CreateRunRequest {
-            record: child,
-            checkpoint: None,
-            manifest: None,
-            flow_source: None,
-            flow_definition_json: None,
-        })
-        .expect("child run");
-    store
-        .append_event(
-            &child_paths,
-            serde_json::from_value(json!({
-                "type": "CodergenAdapter",
-                "run_id": "run-segments-child",
-                "emitted_at": "2026-07-08T11:00:03.000000000Z",
-                "adapter_event_type": "codex_app_server_session_event",
-                "node_id": "child_step",
-                "payload": {"turn_stream_event": {
-                    "kind": "content_completed",
-                    "channel": "assistant",
-                    "content_delta": "Child answer.",
-                    "message": "Child answer.",
-                    "source": {"backend": "codex_app_server"},
-                }},
-            }))
-            .expect("raw event"),
-        )
-        .expect("append child event");
-
-    let response = handle_attractor_request(
-        "GET",
-        "/attractor/pipelines/run-segments-route/segments",
-        "",
-        settings.clone(),
-    );
-    assert_eq!(response.status_code, 200);
-    assert_eq!(response.body["pipeline_id"], json!("run-segments-route"));
-    let segments = response.body["segments"].as_array().expect("segments");
-    assert_eq!(segments.len(), 3);
-
-    let tool = segments
-        .iter()
-        .find(|segment| segment["kind"] == "tool_call")
-        .expect("tool segment");
-    assert_eq!(tool["tool_call"]["output_truncated"], json!(true));
-    assert_eq!(tool["tool_call"]["output_size"], json!(9 * 1024));
-    assert!(
-        tool["tool_call"]["output"].as_str().expect("preview").len() <= 8 * 1024,
-        "preview must be capped",
-    );
-
-    let child_segment = segments
-        .iter()
-        .find(|segment| segment["source_scope"] == "child")
-        .expect("child segment");
-    assert_eq!(child_segment["content"], "Child answer.");
-    assert_eq!(child_segment["source_flow_name"], "child-flow");
-    assert_eq!(child_segment["source_parent_node_id"], "manager");
-    assert!(response.body["newest_sequence"].as_u64().expect("cursor") >= 3);
-
-    let missing = handle_attractor_request(
-        "GET",
-        "/attractor/pipelines/run-unknown/segments",
-        "",
-        settings,
-    );
-    assert_eq!(missing.status_code, 404);
 }
