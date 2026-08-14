@@ -598,14 +598,24 @@ where
                 fallback_reasoning_effort: llm_fallbacks.reasoning_effort,
             };
 
-            let raw_outcome = match catch_unwind(AssertUnwindSafe(|| {
-                self.node_executor.execute(execution_request)
-            })) {
-                Ok(result) => result.unwrap_or_else(outcome_from_node_error),
-                Err(payload) => outcome_from_node_error(RuntimeNodeError::runtime(
-                    panic_payload_message(payload),
-                )),
-            };
+            // A response is written before the checkpoint advances. On
+            // recovery, consume that durable accepted response instead of
+            // invoking the node a second time in this crash window.
+            let raw_outcome = if resumed {
+                durable_outcome(&store, &paths, &current_node, node, stage_index, attempt)
+            } else {
+                None
+            }
+            .unwrap_or_else(|| {
+                match catch_unwind(AssertUnwindSafe(|| {
+                    self.node_executor.execute(execution_request)
+                })) {
+                    Ok(result) => result.unwrap_or_else(outcome_from_node_error),
+                    Err(payload) => outcome_from_node_error(RuntimeNodeError::runtime(
+                        panic_payload_message(payload),
+                    )),
+                }
+            });
             if let Some(cleanup_error) = self.node_executor.take_cleanup_error() {
                 record.cleanup_error = Some(cleanup_error.clone());
                 write_run_record(&paths, &record)?;
@@ -1245,10 +1255,14 @@ fn write_stage_artifacts(
         "suggested_next_ids": outcome.suggested_next_ids,
         "context_updates": outcome.context_updates,
         "notes": outcome.notes,
+        "failure_reason": outcome.failure_reason,
         "status_transitions": transitions,
     });
     if let Some(failure_kind) = outcome.failure_kind {
         status["failure_kind"] = json!(failure_kind.as_str());
+    }
+    if let Some(retryable) = outcome.retryable {
+        status["retryable"] = json!(retryable);
     }
     store.write_node_artifacts(
         paths,
@@ -1273,6 +1287,48 @@ fn response_text_for_outcome(outcome: &Outcome) -> String {
         return outcome.notes.clone();
     }
     outcome.failure_reason.clone()
+}
+
+pub fn durable_outcome(
+    store: &RunStore,
+    paths: &crate::paths::RunRootPaths,
+    node_id: &str,
+    node: &attractor_core::FlowNode,
+    stage_index: u64,
+    attempt: u64,
+) -> Option<Outcome> {
+    let root = store
+        .node_execution_root(paths, node_id, stage_index, attempt)
+        .ok()?;
+    #[derive(serde::Deserialize)]
+    struct DurableStatus {
+        outcome: OutcomeStatus,
+        preferred_label: String,
+        suggested_next_ids: Vec<String>,
+        context_updates: attractor_core::ContextMap,
+        notes: String,
+        #[serde(default)]
+        failure_reason: String,
+        #[serde(default)]
+        retryable: Option<bool>,
+        #[serde(default)]
+        failure_kind: Option<attractor_core::FailureKind>,
+    }
+    let status: DurableStatus =
+        serde_json::from_str(&std::fs::read_to_string(root.join("status.json")).ok()?).ok()?;
+    let outcome = Outcome {
+        status: status.outcome,
+        preferred_label: status.preferred_label,
+        suggested_next_ids: status.suggested_next_ids,
+        context_updates: status.context_updates,
+        notes: status.notes,
+        failure_reason: status.failure_reason,
+        retryable: status.retryable,
+        failure_kind: status.failure_kind,
+        raw_response_text: std::fs::read_to_string(root.join("response.md")).ok()?,
+    };
+    crate::context::outcome_satisfies_context_contract_for_node(node_id, node, &outcome)
+        .then_some(outcome)
 }
 
 fn select_route_after_outcome(

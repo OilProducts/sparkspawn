@@ -175,6 +175,9 @@ pub enum NodeConfig {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct NodeRuntimeConfig {
+    /// Behavior when this node was started but not checkpointed before a restart.
+    #[serde(default, skip_serializing_if = "RecoveryPolicy::is_default")]
+    pub recovery_policy: RecoveryPolicy,
     #[serde(default, skip_serializing_if = "is_false")]
     pub allow_partial: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -193,6 +196,20 @@ pub struct NodeRuntimeConfig {
     pub retry_target: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_retry_target: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryPolicy {
+    #[default]
+    Rerun,
+    Pause,
+}
+
+impl RecoveryPolicy {
+    fn is_default(&self) -> bool {
+        matches!(self, Self::Rerun)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

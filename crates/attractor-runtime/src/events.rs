@@ -296,6 +296,20 @@ pub fn child_run_started_event(
     )
 }
 
+pub fn recovery_decision_required_event(
+    run_id: impl Into<String>,
+    node_id: impl Into<String>,
+) -> RawRuntimeEvent {
+    event_with_payload(
+        run_id,
+        "RecoveryDecisionRequired",
+        [
+            ("node_id", json!(node_id.into())),
+            ("recovery_policy", json!("pause")),
+        ],
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn child_run_completed_event(
     parent_run_id: impl Into<String>,
@@ -869,7 +883,7 @@ fn path_value_if_exists(path: std::path::PathBuf) -> Value {
     }
 }
 
-pub(crate) fn utc_timestamp() -> String {
+pub fn utc_timestamp() -> String {
     format_utc_timestamp(time::OffsetDateTime::now_utc())
 }
 

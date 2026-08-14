@@ -290,6 +290,9 @@ impl RuntimeControls {
         record.parent_node_id = None;
         record.root_run_id = Some(new_run_id.clone());
         record.last_error.clear();
+        record.token_usage = Some(0);
+        record.token_usage_breakdown = None;
+        record.estimated_model_cost = None;
 
         let checkpoint = CheckpointState {
             timestamp: crate::events::utc_timestamp(),
@@ -336,7 +339,10 @@ impl RuntimeControls {
             .read_run_meta(run_id)?
             .ok_or(RuntimeControlError::UnknownPipeline)?;
         let mut record = bundle.record.ok_or(RuntimeControlError::UnknownPipeline)?;
-        if crate::records::normalize_run_status(&record.status) != "failed" {
+        let status = crate::records::normalize_run_status(&record.status);
+        let recovery_paused = status == "waiting"
+            && record.outcome_reason_code.as_deref() == Some("recovery_decision_required");
+        if status != "failed" && !recovery_paused {
             return Err(RuntimeControlError::Conflict(
                 "Retry requires a failed pipeline".to_string(),
             ));
@@ -361,6 +367,10 @@ impl RuntimeControls {
         }
 
         mark_record_retry_started(&mut record);
+        if recovery_paused {
+            // Durable one-shot authorization consumed by startup recovery.
+            record.outcome_reason_code = Some("recovery_retry_approved".to_string());
+        }
         self.store.write_run_record(&bundle.paths, &record)?;
         self.store.save_checkpoint(
             &bundle.paths,

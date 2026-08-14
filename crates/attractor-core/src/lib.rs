@@ -50,7 +50,7 @@ pub use flow_definition::{
     flow_definition_schema_value, ExecutionConfig, FlowDefaults, FlowDefinition,
     FlowDefinitionError, FlowDiagnostic, FlowEdge, FlowInput, FlowMetadata, FlowNode,
     HumanDecision, ManagerLoopConfig, NodeConfig, NodeContracts, NodeKind, NodeRuntimeConfig,
-    RetryConfig, UiConfig,
+    RecoveryPolicy, RetryConfig, UiConfig,
 };
 pub use graph::{
     attr_bool, attr_i64, attr_string, attr_text, dot_value_text, dot_value_to_json,

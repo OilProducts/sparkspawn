@@ -157,6 +157,24 @@ pub fn apply_outcome_context_updates_for_node(
     Ok(normalized_outcome)
 }
 
+pub(crate) fn outcome_satisfies_context_contract_for_node(
+    node_id: &str,
+    node: &FlowNode,
+    outcome: &Outcome,
+) -> bool {
+    let node_attrs = crate::flow_runtime::node_attrs_for_handler(node_id, node);
+    let updates = normalize_context_updates(&outcome.context_updates);
+    let contract = resolve_context_write_contract(&node_attrs);
+    let exemptions = context_update_contract_exemptions_for_node(node);
+    validate_context_updates_against_contract_with_exemptions(
+        &updates,
+        &contract,
+        exemptions.exact_keys,
+        exemptions.prefixes,
+    )
+    .is_none()
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ContextUpdateContractExemptions {
     exact_keys: &'static [&'static str],

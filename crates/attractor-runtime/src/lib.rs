@@ -61,12 +61,12 @@ pub use events::{
     parallel_completed_event, parallel_started_event, pipeline_completed_event,
     pipeline_completed_event_with_reasons, pipeline_failed_event, pipeline_paused_event,
     pipeline_retry_completed_event, pipeline_retry_started_event, pipeline_started_event,
-    read_raw_events, run_metadata_event, run_metadata_event_with_graph_paths, runtime_status_event,
-    stage_completed_event, stage_failed_event, stage_retrying_event, stage_started_event,
-    state_event,
+    read_raw_events, recovery_decision_required_event, run_metadata_event,
+    run_metadata_event_with_graph_paths, runtime_status_event, stage_completed_event,
+    stage_failed_event, stage_retrying_event, stage_started_event, state_event, utc_timestamp,
 };
 pub use executor::{
-    prepare_fresh_run, ExecuteRunRequest, ExecutionControlAction, ExecutionStart,
+    durable_outcome, prepare_fresh_run, ExecuteRunRequest, ExecutionControlAction, ExecutionStart,
     NodeExecutionRequest, NodeExecutor, PipelineExecutionResult, PipelineExecutor,
     RuntimeNodeError,
 };

@@ -7,6 +7,7 @@ use attractor_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use spark_common::settings::SparkSettings;
 use spark_storage::{write_json_atomic, write_text_atomic, JsonWriteOptions};
 
@@ -248,6 +249,9 @@ impl RunStore {
 
     pub fn create_run(&self, request: CreateRunRequest) -> Result<RunRootPaths> {
         let mut record = request.record;
+        if let Some(source) = request.flow_source.as_deref() {
+            record.effective_flow_hash = Some(format!("{:x}", Sha256::digest(source.as_bytes())));
+        }
         let project_path = if record.project_path.trim().is_empty() {
             record.working_directory.clone()
         } else {

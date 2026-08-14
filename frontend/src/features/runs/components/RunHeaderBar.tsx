@@ -1,13 +1,13 @@
 import { Button } from '@/components/ui/button'
 import type { RunRecord } from '../model/shared'
 import {
-    STATUS_LABELS,
     canCancelRun,
     canContinueRun,
     canRetryRun,
     cancelRunActionLabel,
     cancelRunDisabledReason,
     formatDuration,
+    formatRunStatusLabel,
     formatTimestamp,
 } from '../model/shared'
 import {
@@ -85,7 +85,7 @@ export function RunHeaderBar({
                     data-testid="run-header-status"
                     className={`inline-flex rounded border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${statusChipClass}`}
                 >
-                    {STATUS_LABELS[run.status] || run.status}
+                    {formatRunStatusLabel(run)}
                 </span>
                 {run.status === 'waiting' && onFocusPendingQuestions ? (
                     <button

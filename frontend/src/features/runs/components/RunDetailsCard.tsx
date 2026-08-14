@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { RunRecord } from '../model/shared'
-import { STATUS_LABELS, formatDuration, formatOutcomeLabel, formatTimestamp } from '../model/shared'
+import { formatDuration, formatOutcomeLabel, formatRunStatusLabel, formatTimestamp } from '../model/shared'
 import {
     formatEstimatedCost,
     formatOutcomeReason,
@@ -75,7 +75,7 @@ export function RunDetailsCard({ run, activeProjectPath, now, resumeNode = null 
             <SummarySection testId="run-summary-section-outcome" title="Outcome">
                 <div className="grid gap-x-4 gap-y-2 md:grid-cols-2">
                     <SummaryRow testId="run-summary-status" label="Status">
-                        {STATUS_LABELS[run.status] || run.status}
+                        {formatRunStatusLabel(run)}
                     </SummaryRow>
                     <SummaryRow testId="run-summary-outcome" label="Outcome">
                         {formatOutcomeLabel(run.outcome)}

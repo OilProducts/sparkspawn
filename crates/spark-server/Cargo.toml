@@ -16,6 +16,7 @@ attractor-execution = { path = "../attractor-execution" }
 attractor-runtime = { path = "../attractor-runtime" }
 axum = "0.8"
 serde_json = "1.0"
+sha2 = "0.10"
 spark-assets = { path = "../spark-assets" }
 spark-common = { path = "../spark-common" }
 spark-http = { path = "../spark-http" }

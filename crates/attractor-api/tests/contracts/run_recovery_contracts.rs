@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use attractor_api::AttractorApiService;
 use attractor_core::CheckpointState;
 use attractor_runtime::{
-    human_gate_answered_event, prepare_fresh_run, RunStore, RuntimeHandlerRunner,
+    human_gate_answered_event, prepare_fresh_run, NodeArtifacts, RunStore, RuntimeHandlerRunner,
 };
 use serde_json::json;
 use spark_common::settings::SparkSettings;
@@ -46,6 +46,51 @@ edges:
 - from: review
   to: done
   label: Finish
+"#;
+
+const PAUSED_RECOVERY_FLOW: &str = r#"schema_version: "1"
+id: paused_recovery
+title: Paused Recovery
+nodes:
+  start: { kind: start }
+  review:
+    kind: human_gate
+    runtime: { recovery_policy: pause }
+    config: { kind: human_gate, prompt: Retry me? }
+    contracts:
+      writes_context: [context.accepted]
+  done: { kind: exit }
+edges:
+- { from: start, to: review }
+- { from: review, to: done, label: Finish }
+"#;
+
+const TREE_ROOT_FLOW: &str = r#"schema_version: "1"
+id: tree_root
+title: Tree Root
+nodes:
+  start: { kind: start }
+  branch:
+    kind: subflow
+    runtime: { recovery_policy: pause }
+    config: { kind: subflow, flow_ref: child.yaml }
+    manager: { poll_interval: 0s, max_cycles: 1 }
+  done: { kind: exit }
+edges:
+- { from: start, to: branch }
+- { from: branch, to: done }
+"#;
+
+const TREE_CHILD_FLOW: &str = r#"schema_version: "1"
+id: tree_child
+title: Tree Child
+nodes:
+  start:
+    kind: start
+    runtime: { recovery_policy: pause }
+  done: { kind: exit }
+edges:
+- { from: start, to: done }
 "#;
 
 /// Creates a run whose durable state says "parked at the review gate" with no
@@ -122,6 +167,321 @@ fn wait_for_status(store: &RunStore, run_id: &str, expected: &str) {
 }
 
 #[test]
+fn startup_recovery_resumes_a_linked_orphaned_child_in_place() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    std::fs::create_dir_all(&settings.config_dir).expect("config dir");
+    let workdir = temp.path().join("project");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    let store = RunStore::for_settings(&settings);
+    let root_flow = attractor_dsl::parse_flow_definition(TREE_ROOT_FLOW).expect("root flow");
+    let child_flow = attractor_dsl::parse_flow_definition(TREE_CHILD_FLOW).expect("child flow");
+
+    let mut root = attractor_core::RunRecord::new("tree-root", workdir.to_string_lossy());
+    root.flow_name = "tree-root".to_string();
+    root.root_run_id = Some("tree-root".to_string());
+    root.execution_profile_id = Some("native".to_string());
+    root.execution_profile_capabilities = Some(json!({"network": false}));
+    root.execution_lock = Some(attractor_core::RunExecutionLock {
+        scope: "project".to_string(),
+        key: "tree".to_string(),
+        conflict_policy: "queue".to_string(),
+        identity: "tree-lock".to_string(),
+        state: "acquired".to_string(),
+        queue_position: None,
+    });
+    let root_context = attractor_core::ContextMap::from([
+        ("internal.run_id".to_string(), json!("tree-root")),
+        ("internal.root_run_id".to_string(), json!("tree-root")),
+        (
+            "internal.run_workdir".to_string(),
+            json!(workdir.to_string_lossy().to_string()),
+        ),
+        (
+            "context.stack.child.run_id".to_string(),
+            json!("tree-child"),
+        ),
+        ("context.stack.child.status".to_string(), json!("running")),
+    ]);
+    let root_paths = prepare_fresh_run(
+        &store,
+        &root,
+        &root_flow,
+        Some(TREE_ROOT_FLOW.to_string()),
+        None,
+        &attractor_core::LaunchContext::empty(),
+        &root_context,
+    )
+    .expect("prepare root");
+    store
+        .save_checkpoint(
+            &root_paths,
+            &CheckpointState {
+                timestamp: "2026-08-14T00:00:00Z".to_string(),
+                current_node: "branch".to_string(),
+                completed_nodes: vec!["start".to_string()],
+                context: root_context,
+                retry_counts: Default::default(),
+                logs: Vec::new(),
+            },
+            Default::default(),
+        )
+        .expect("checkpoint root");
+
+    let mut child = attractor_core::RunRecord::new("tree-child", workdir.to_string_lossy());
+    child.flow_name = "tree-child".to_string();
+    child.parent_run_id = Some("tree-root".to_string());
+    child.parent_node_id = Some("branch".to_string());
+    child.root_run_id = Some("tree-root".to_string());
+    child.child_invocation_index = Some(1);
+    // Legacy children did not persist inherited placement metadata.
+    child.execution_profile_id = None;
+    let child_context = attractor_core::ContextMap::from([
+        ("internal.run_id".to_string(), json!("tree-child")),
+        ("internal.parent_run_id".to_string(), json!("tree-root")),
+        ("internal.parent_node_id".to_string(), json!("branch")),
+        ("internal.root_run_id".to_string(), json!("tree-root")),
+        (
+            "internal.run_workdir".to_string(),
+            json!(workdir.to_string_lossy().to_string()),
+        ),
+    ]);
+    let child_paths = prepare_fresh_run(
+        &store,
+        &child,
+        &child_flow,
+        Some(TREE_CHILD_FLOW.to_string()),
+        None,
+        &attractor_core::LaunchContext::empty(),
+        &child_context,
+    )
+    .expect("prepare child");
+    store
+        .save_checkpoint(
+            &child_paths,
+            &CheckpointState {
+                timestamp: "2026-08-14T00:00:01Z".to_string(),
+                current_node: "start".to_string(),
+                completed_nodes: Vec::new(),
+                context: child_context,
+                retry_counts: Default::default(),
+                logs: Vec::new(),
+            },
+            Default::default(),
+        )
+        .expect("checkpoint child");
+
+    store
+        .write_node_artifacts(
+            &child_paths,
+            "start",
+            0,
+            0,
+            &NodeArtifacts {
+                response: Some("accepted before the crash\n".to_string()),
+                status: Some(json!({
+                    "outcome": "success",
+                    "preferred_label": "",
+                    "suggested_next_ids": [],
+                    "context_updates": {},
+                    "notes": ""
+                })),
+                under_logs: true,
+                ..NodeArtifacts::default()
+            },
+        )
+        .expect("durable child response");
+
+    for run_id in ["tree-root", "tree-child"] {
+        store
+            .update_run_record(run_id, |record| {
+                record.status = "failed".to_string();
+                record.outcome = None;
+                record.ended_at = None;
+                record.last_error = "interrupted by restart".to_string();
+            })
+            .expect("mark restart interruption");
+    }
+
+    let recovery = blocking_gate_service(&settings).recover_interrupted_runs();
+    assert_eq!(recovery["resumed"], json!(["tree-root"]), "{recovery:?}");
+    let root_record = store
+        .read_run_bundle("tree-root")
+        .expect("root bundle")
+        .and_then(|bundle| bundle.record)
+        .expect("root record");
+    assert_eq!(root_record.status, "waiting");
+    assert_eq!(
+        root_record.outcome_reason_code.as_deref(),
+        Some("recovery_decision_required")
+    );
+
+    let retry = blocking_gate_service(&settings).retry_pipeline_route("tree-root");
+    assert_eq!(retry.status_code, 200, "{:?}", retry.body);
+    assert_eq!(retry.body["run_id"], json!("tree-root"));
+    wait_for_status(&store, "tree-root", "completed");
+    wait_for_status(&store, "tree-child", "completed");
+    let children = store.list_child_run_bundles("tree-root").expect("children");
+    assert_eq!(children.len(), 1, "recovery must not launch a sibling");
+    assert_eq!(children[0].paths.run_id, "tree-child");
+    let child = children[0].record.as_ref().expect("child record");
+    assert_eq!(child.parent_run_id.as_deref(), Some("tree-root"));
+    assert_eq!(child.parent_node_id.as_deref(), Some("branch"));
+    assert_eq!(child.root_run_id.as_deref(), Some("tree-root"));
+    assert_eq!(child.child_invocation_index, Some(1));
+    assert_eq!(child.execution_profile_id.as_deref(), Some("native"));
+    assert_eq!(
+        child.execution_profile_capabilities,
+        Some(json!({"network": false}))
+    );
+    assert_eq!(child.execution_lock, root.execution_lock);
+    let child_checkpoint = children[0].checkpoint.as_ref().expect("child checkpoint");
+    assert!(child_checkpoint
+        .completed_nodes
+        .contains(&"start".to_string()));
+}
+
+#[test]
+fn recovery_pause_with_checkpoint_lag_consumes_the_durable_response() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    std::fs::create_dir_all(&settings.config_dir).expect("config dir");
+    let workdir = temp.path().join("project");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    let store = RunStore::for_settings(&settings);
+    let flow = attractor_dsl::parse_flow_definition(PAUSED_RECOVERY_FLOW).expect("flow");
+    let mut record = attractor_core::RunRecord::new("pause-answered", workdir.to_string_lossy());
+    record.execution_profile_id = Some("native".to_string());
+    let paths = prepare_fresh_run(
+        &store,
+        &record,
+        &flow,
+        Some(PAUSED_RECOVERY_FLOW.to_string()),
+        None,
+        &attractor_core::LaunchContext::empty(),
+        &attractor_core::ContextMap::default(),
+    )
+    .expect("prepare");
+    store
+        .save_checkpoint(
+            &paths,
+            &CheckpointState {
+                timestamp: "2026-08-14T00:00:00Z".to_string(),
+                current_node: "review".to_string(),
+                completed_nodes: vec!["start".to_string()],
+                context: Default::default(),
+                retry_counts: Default::default(),
+                logs: Vec::new(),
+            },
+            Default::default(),
+        )
+        .expect("checkpoint");
+    store
+        .write_node_artifacts(
+            &paths,
+            "review",
+            1,
+            0,
+            &NodeArtifacts {
+                response: Some("accepted before checkpoint\n".to_string()),
+                status: Some(json!({
+                    "outcome": "success",
+                    "preferred_label": "Finish",
+                    "suggested_next_ids": [],
+                    "context_updates": {},
+                    "notes": ""
+                })),
+                under_logs: true,
+                ..NodeArtifacts::default()
+            },
+        )
+        .expect("durable response");
+
+    let recovery = blocking_gate_service(&settings).recover_interrupted_runs();
+    assert_eq!(recovery["resumed"], json!(["pause-answered"]));
+    wait_for_status(&store, "pause-answered", "completed");
+    let record = store
+        .read_run_bundle("pause-answered")
+        .expect("bundle")
+        .and_then(|bundle| bundle.record)
+        .expect("record");
+    assert_ne!(
+        record.outcome_reason_code.as_deref(),
+        Some("recovery_decision_required")
+    );
+}
+
+#[test]
+fn recovery_rejects_incomplete_malformed_and_contract_invalid_durable_responses() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    let workdir = temp.path().join("project");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    let store = RunStore::for_settings(&settings);
+    let flow = attractor_dsl::parse_flow_definition(PAUSED_RECOVERY_FLOW).expect("flow");
+    let node = flow.nodes.get("review").expect("review node");
+    let record = attractor_core::RunRecord::new("invalid-durable", workdir.to_string_lossy());
+    let paths = prepare_fresh_run(
+        &store,
+        &record,
+        &flow,
+        Some(PAUSED_RECOVERY_FLOW.to_string()),
+        None,
+        &attractor_core::LaunchContext::empty(),
+        &attractor_core::ContextMap::default(),
+    )
+    .expect("prepare");
+
+    let valid_status = json!({
+        "outcome": "success",
+        "preferred_label": "Finish",
+        "suggested_next_ids": [],
+        "context_updates": {},
+        "notes": ""
+    });
+    store
+        .write_node_artifacts(
+            &paths,
+            "review",
+            1,
+            0,
+            &NodeArtifacts {
+                status: Some(valid_status.clone()),
+                under_logs: true,
+                ..NodeArtifacts::default()
+            },
+        )
+        .expect("status without response");
+    assert!(attractor_runtime::durable_outcome(&store, &paths, "review", node, 1, 0).is_none());
+
+    let mut contract_invalid_status = valid_status;
+    contract_invalid_status["context_updates"] = json!({"context.forbidden": true});
+    for (attempt, status) in [
+        (1, json!({"outcome": "success"})),
+        (2, contract_invalid_status),
+    ] {
+        store
+            .write_node_artifacts(
+                &paths,
+                "review",
+                1,
+                attempt,
+                &NodeArtifacts {
+                    response: Some("unaccepted\n".to_string()),
+                    status: Some(status),
+                    under_logs: true,
+                    ..NodeArtifacts::default()
+                },
+            )
+            .expect("invalid durable artifacts");
+        assert!(
+            attractor_runtime::durable_outcome(&store, &paths, "review", node, 1, attempt)
+                .is_none()
+        );
+    }
+}
+
+#[test]
 fn startup_recovery_resumes_orphaned_waiting_run_and_consumes_journaled_answer() {
     let temp = tempfile::tempdir().expect("tempdir");
     let settings = settings(temp.path());
@@ -159,6 +519,88 @@ fn startup_recovery_resumes_orphaned_waiting_run_and_consumes_journaled_answer()
     );
 
     wait_for_status(&store, "run-orphan-answered", "completed");
+}
+
+#[test]
+fn recovery_pause_survives_two_startups_without_retry_authorization() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    std::fs::create_dir_all(&settings.config_dir).expect("config dir");
+    let workdir = temp.path().join("project");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    let store = RunStore::for_settings(&settings);
+    let flow = attractor_dsl::parse_flow_definition(PAUSED_RECOVERY_FLOW).expect("flow");
+    let mut record = attractor_core::RunRecord::new("paused-twice", workdir.to_string_lossy());
+    record.execution_profile_id = Some("native".to_string());
+    let paths = prepare_fresh_run(
+        &store,
+        &record,
+        &flow,
+        Some(PAUSED_RECOVERY_FLOW.to_string()),
+        None,
+        &attractor_core::LaunchContext::empty(),
+        &attractor_core::ContextMap::default(),
+    )
+    .expect("prepare");
+    store
+        .save_checkpoint(
+            &paths,
+            &CheckpointState {
+                timestamp: "2026-08-14T00:00:00Z".to_string(),
+                current_node: "review".to_string(),
+                completed_nodes: vec!["start".to_string()],
+                context: Default::default(),
+                retry_counts: Default::default(),
+                logs: Vec::new(),
+            },
+            Default::default(),
+        )
+        .expect("checkpoint");
+
+    for _ in 0..2 {
+        let result = blocking_gate_service(&settings).recover_interrupted_runs();
+        assert_eq!(result["resumed"], json!(["paused-twice"]), "{result:?}");
+        let record = store
+            .read_run_bundle("paused-twice")
+            .expect("bundle")
+            .and_then(|bundle| bundle.record)
+            .expect("record");
+        assert_eq!(record.status, "waiting");
+        assert_eq!(
+            record.outcome_reason_code.as_deref(),
+            Some("recovery_decision_required")
+        );
+    }
+}
+
+#[test]
+fn parent_node_without_parent_run_is_stably_rejected() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    std::fs::create_dir_all(&settings.config_dir).expect("config dir");
+    let workdir = temp.path().join("project");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    let store = manufacture_orphaned_waiting_run(&settings, &workdir, "broken-lineage");
+    store
+        .update_run_record("broken-lineage", |record| {
+            record.parent_node_id = Some("review".to_string());
+        })
+        .expect("corrupt lineage");
+
+    for _ in 0..2 {
+        let result = blocking_gate_service(&settings).recover_interrupted_runs();
+        assert_eq!(result["resumed"], json!([]), "{result:?}");
+        let record = store
+            .read_run_bundle("broken-lineage")
+            .expect("bundle")
+            .and_then(|bundle| bundle.record)
+            .expect("record");
+        assert_eq!(record.status, "failed");
+        assert_eq!(
+            record.outcome_reason_code.as_deref(),
+            Some("recovery_missing_lineage")
+        );
+    }
 }
 
 #[test]
@@ -296,6 +738,83 @@ fn startup_recovery_marks_orphaned_running_runs_failed() {
                 .contains("interrupted by an earlier restart"),
             "unexpected last_error: {}",
             record.last_error
+        );
+    }
+}
+
+#[test]
+fn ambiguous_child_invocations_leave_parent_terminal_and_never_resume_it() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    std::fs::create_dir_all(&settings.config_dir).expect("config dir");
+    let workdir = temp.path().join("project");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    let store = RunStore::for_settings(&settings);
+    let flow = attractor_dsl::parse_flow_definition(GATE_FLOW).expect("flow parses");
+
+    for (run_id, parent) in [
+        ("ambiguous-parent", None),
+        ("ambiguous-child-a", Some("ambiguous-parent")),
+        ("ambiguous-child-b", Some("ambiguous-parent")),
+    ] {
+        let mut record = attractor_core::RunRecord::new(run_id, workdir.to_string_lossy());
+        record.flow_name = "recovery-gate".to_string();
+        record.execution_profile_id = Some("native".to_string());
+        record.root_run_id = Some("ambiguous-parent".to_string());
+        if let Some(parent) = parent {
+            record.parent_run_id = Some(parent.to_string());
+            record.parent_node_id = Some("review".to_string());
+            record.child_invocation_index = Some(1);
+        }
+        prepare_fresh_run(
+            &store,
+            &record,
+            &flow,
+            Some(GATE_FLOW.to_string()),
+            None,
+            &attractor_core::LaunchContext::empty(),
+            &attractor_core::ContextMap::default(),
+        )
+        .expect("prepare run");
+    }
+
+    let service = blocking_gate_service(&settings);
+    let first = service.recover_interrupted_runs();
+    assert_eq!(first["resumed"], json!([]), "{first:?}");
+    let record = store
+        .read_run_bundle("ambiguous-parent")
+        .expect("bundle")
+        .and_then(|bundle| bundle.record)
+        .expect("record");
+    assert_eq!(record.status, "failed");
+    assert_eq!(
+        record.outcome_reason_code.as_deref(),
+        Some("recovery_ambiguous_child_invocation")
+    );
+    let second = service.recover_interrupted_runs();
+    assert_eq!(second["resumed"], json!([]), "{second:?}");
+    let record = store
+        .read_run_bundle("ambiguous-parent")
+        .expect("bundle")
+        .and_then(|bundle| bundle.record)
+        .expect("record");
+    assert_eq!(record.status, "failed");
+    assert_eq!(
+        record.outcome_reason_code.as_deref(),
+        Some("recovery_ambiguous_child_invocation"),
+        "terminal failure code must be stable"
+    );
+    for child_id in ["ambiguous-child-a", "ambiguous-child-b"] {
+        let child = store
+            .read_run_bundle(child_id)
+            .expect("child bundle")
+            .and_then(|bundle| bundle.record)
+            .expect("child record");
+        assert_eq!(child.status, "failed", "ambiguous child must be terminal");
+        assert_eq!(
+            child.outcome_reason_code.as_deref(),
+            Some("recovery_ambiguous_child_invocation"),
+            "child failure code must be stable"
         );
     }
 }

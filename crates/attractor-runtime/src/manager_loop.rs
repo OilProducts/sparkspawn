@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 use crate::events::{
     child_intervention_requested_event, child_run_completed_event, child_run_started_event,
+    recovery_decision_required_event,
 };
 use crate::executor::{
     ExecuteRunRequest, ExecutionStart, PipelineExecutionResult, PipelineExecutor, RuntimeNodeError,
@@ -174,15 +175,142 @@ fn autostart_child_pipeline(
 
     let linked_child_run_id = context_string(context, "context.stack.child.run_id");
     if !linked_child_run_id.is_empty() {
-        if let Some(child_result) = resolve_child_result(runner, runtime, &linked_child_run_id) {
-            apply_child_run_result(context, &child_result);
-            if child_result.status.trim().eq_ignore_ascii_case("running") {
-                return Ok(None);
+        if let Some(mut child_result) = resolve_child_result(runner, runtime, &linked_child_run_id)
+        {
+            // A linked durable child belongs to this executor. If this manager
+            // is itself resuming, re-enter the child's checkpoint instead of
+            // merely polling metadata left behind by the dead executor. A
+            // custom launcher owns its child's liveness and remains
+            // observation-only.
+            let restart_marked = child_result.status == "failed"
+                && bundle_restart_marked(runtime, &linked_child_run_id);
+            if (matches!(child_result.status.as_str(), "running" | "waiting") || restart_marked)
+                && runner.child_run_launcher().is_none()
+            {
+                let store = runtime
+                    .run_paths
+                    .as_ref()
+                    .map(|paths| RunStore::for_runs_dir(paths.runs_dir.clone()));
+                if let Some(bundle) = store
+                    .as_ref()
+                    .and_then(|store| store.read_run_bundle(&linked_child_run_id).ok().flatten())
+                {
+                    child_result = resume_existing_child(
+                        runner.clone(),
+                        store.expect("store exists when bundle exists"),
+                        bundle,
+                    )
+                    .map_err(RuntimeNodeError::runtime)?;
+                }
             }
+            apply_child_run_result(context, &child_result);
+            return Ok(None);
         }
     }
     if context_string(context, "context.stack.child.status").eq_ignore_ascii_case("running") {
         return Ok(None);
+    }
+
+    // The parent may have died after creating or completing a child but
+    // before its checkpoint captured the child id. Recover the one durable,
+    // unacknowledged invocation rather than manufacturing a sibling.
+    if linked_child_run_id.is_empty() {
+        if let Some(parent_paths) = runtime.run_paths.as_ref() {
+            let store = RunStore::for_runs_dir(parent_paths.runs_dir.clone());
+            let checkpoint_at = store
+                .read_run_bundle(&runtime.run_id)
+                .ok()
+                .flatten()
+                .and_then(|bundle| bundle.checkpoint)
+                .map(|checkpoint| checkpoint.timestamp)
+                .unwrap_or_default();
+            let acknowledged = store
+                .read_raw_events(parent_paths)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|event| {
+                    event.event_type == "ChildRunCompleted"
+                        && !checkpoint_at.is_empty()
+                        && event.emitted_at <= checkpoint_at
+                })
+                .filter_map(|event| {
+                    event
+                        .payload
+                        .get("child_run_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect::<BTreeSet<_>>();
+            let candidates = store
+                .list_child_run_bundles(&runtime.run_id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|bundle| {
+                    bundle.record.as_ref().is_some_and(|record| {
+                        record.parent_node_id.as_deref() == Some(&runtime.node_id)
+                    })
+                })
+                .filter(|bundle| !acknowledged.contains(&bundle.paths.run_id))
+                .collect::<Vec<_>>();
+            let next_index = candidates
+                .iter()
+                .filter_map(|bundle| bundle.record.as_ref()?.child_invocation_index)
+                .min();
+            let mut current = candidates.into_iter().filter(|bundle| {
+                bundle
+                    .record
+                    .as_ref()
+                    .and_then(|record| record.child_invocation_index)
+                    == next_index
+            });
+            let bundle = current.next();
+            if current.next().is_some() {
+                return Ok(Some(fail_outcome("recovery_ambiguous_child_invocation: multiple children claim the current invocation".to_string())));
+            }
+            if let Some(bundle) = bundle {
+                let child_id = bundle.paths.run_id.clone();
+                let child_flow_name = bundle
+                    .record
+                    .as_ref()
+                    .map(|record| record.flow_name.clone())
+                    .unwrap_or_default();
+                let mut result = bundle
+                    .record
+                    .as_ref()
+                    .and_then(|_| store.read_run_meta(&child_id).ok().flatten())
+                    .and_then(child_result_from_meta);
+                if result.as_ref().is_some_and(|value| {
+                    matches!(value.status.as_str(), "running" | "waiting")
+                        || (value.status == "failed"
+                            && bundle.record.as_ref().is_some_and(restart_marked_record))
+                }) {
+                    result = resume_existing_child(runner.clone(), store.clone(), bundle).ok();
+                }
+                if let Some(result) = result {
+                    apply_child_run_result(context, &result);
+                    if !matches!(result.status.as_str(), "running" | "waiting") {
+                        runner
+                            .emit(
+                                runtime,
+                                child_run_completed_event(
+                                    &runtime.run_id,
+                                    &child_id,
+                                    &runtime.node_id,
+                                    context_string(context, "internal.root_run_id"),
+                                    child_flow_name,
+                                    &result.status,
+                                    result.outcome.clone(),
+                                    result.outcome_reason_code.clone(),
+                                    result.outcome_reason_message.clone(),
+                                    non_empty(result.failure_reason.clone()),
+                                ),
+                            )
+                            .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
+                    }
+                    return Ok(None);
+                }
+            }
+        }
     }
 
     clear_child_snapshot(context);
@@ -238,7 +366,7 @@ fn autostart_child_pipeline(
     };
     if let Err(error) = child_flow.validate() {
         return Ok(Some(fail_outcome(format!(
-            "Child flow failed validation: {}",
+            "Child flow is invalid: {}",
             error.detail
         ))));
     }
@@ -339,6 +467,123 @@ fn autostart_child_pipeline(
         )
         .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
     Ok(None)
+}
+
+fn restart_marked_record(record: &RunRecord) -> bool {
+    record.status == "failed"
+        && record.outcome.is_none()
+        && record.ended_at.is_none()
+        && record.last_error.to_ascii_lowercase().contains("restart")
+}
+
+fn bundle_restart_marked(runtime: &HandlerRuntime, run_id: &str) -> bool {
+    runtime
+        .run_paths
+        .as_ref()
+        .map(|paths| RunStore::for_runs_dir(paths.runs_dir.clone()))
+        .and_then(|store| store.read_run_bundle(run_id).ok().flatten())
+        .and_then(|bundle| bundle.record)
+        .is_some_and(|record| restart_marked_record(&record))
+}
+
+fn resume_existing_child(
+    runner: RuntimeHandlerRunner,
+    store: RunStore,
+    bundle: crate::store::RunBundle,
+) -> std::result::Result<ChildRunResult, String> {
+    let mut record = bundle
+        .record
+        .ok_or_else(|| "recovery_missing_lineage: child record unavailable".to_string())?;
+    let checkpoint = bundle
+        .checkpoint
+        .ok_or_else(|| "recovery_missing_lineage: child checkpoint unavailable".to_string())?;
+    let source = store
+        .read_graph_source(&bundle.paths)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "recovery_missing_lineage: captured child flow unavailable".to_string())?;
+    let flow = FlowDefinition::from_yaml_str(&source)
+        .map_err(|e| e.to_string())?
+        .normalize();
+    let child_id = record.run_id.clone();
+    let pause = flow
+        .nodes
+        .get(&checkpoint.current_node)
+        .and_then(|node| node.runtime.as_ref())
+        .is_some_and(|runtime| runtime.recovery_policy == attractor_core::RecoveryPolicy::Pause);
+    let durable_response = crate::executor::durable_outcome(
+        &store,
+        &bundle.paths,
+        &checkpoint.current_node,
+        flow.nodes
+            .get(&checkpoint.current_node)
+            .ok_or_else(|| "recovery_missing_lineage: checkpoint node unavailable".to_string())?,
+        checkpoint.completed_nodes.len() as u64,
+        checkpoint
+            .retry_counts
+            .get(&checkpoint.current_node)
+            .copied()
+            .unwrap_or(0),
+    )
+    .is_some();
+    if pause
+        && !durable_response
+        && record.outcome_reason_code.as_deref() != Some("recovery_retry_approved")
+    {
+        store
+            .update_run_record(&child_id, |record| {
+                record.status = "waiting".to_string();
+                record.outcome_reason_code = Some("recovery_decision_required".to_string());
+                record.outcome_reason_message = Some(format!(
+                    "Explicit retry is required to rerun node '{}'.",
+                    checkpoint.current_node
+                ));
+                record.ended_at = None;
+            })
+            .map_err(|error| error.to_string())?;
+        store
+            .append_event(
+                &bundle.paths,
+                recovery_decision_required_event(&child_id, &checkpoint.current_node),
+            )
+            .map_err(|error| error.to_string())?;
+        return store
+            .read_run_meta(&child_id)
+            .map_err(|error| error.to_string())?
+            .and_then(child_result_from_meta)
+            .ok_or_else(|| {
+                "recovery_missing_lineage: paused child metadata unavailable".to_string()
+            });
+    }
+    if record.outcome_reason_code.as_deref() == Some("recovery_retry_approved") {
+        record.outcome_reason_code = None;
+        record.outcome_reason_message = None;
+        store
+            .write_run_record(&bundle.paths, &record)
+            .map_err(|error| error.to_string())?;
+    }
+    let result = PipelineExecutor::new(runner)
+        .execute(ExecuteRunRequest {
+            store: store.clone(),
+            record,
+            flow,
+            flow_source: None,
+            flow_definition_json: None,
+            launch_context: LaunchContext::empty(),
+            runtime_context: Default::default(),
+            max_steps: None,
+            start: ExecutionStart::Resume {
+                paths: bundle.paths,
+                checkpoint,
+            },
+        })
+        .map(pipeline_result_to_child_result)
+        .map_err(|e| e.to_string())?;
+    Ok(store
+        .read_run_meta(&child_id)
+        .ok()
+        .flatten()
+        .and_then(child_result_from_meta)
+        .unwrap_or(result))
 }
 
 fn launch_default_child_run(
@@ -444,6 +689,13 @@ fn launch_default_child_run(
         &child_context,
         "_attractor.runtime.launch_reasoning_effort",
     ));
+    if let Ok(Some(parent)) = store.read_run_record(parent_paths) {
+        record.execution_mode = parent.execution_mode;
+        record.execution_profile_id = parent.execution_profile_id;
+        record.execution_container_image = parent.execution_container_image;
+        record.execution_profile_capabilities = parent.execution_profile_capabilities;
+        record.execution_lock = parent.execution_lock;
+    }
 
     let checkpoint = CheckpointState {
         timestamp: crate::events::utc_timestamp(),
