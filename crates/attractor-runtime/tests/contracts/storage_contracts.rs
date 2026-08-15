@@ -9,6 +9,7 @@ use attractor_runtime::{
     CheckpointWriteOptions, CreateRunRequest, NodeArtifacts, RunRootPaths, RunStore,
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use spark_storage::{read_json, write_json_atomic, JsonWriteOptions};
 
 fn store(temp: &tempfile::TempDir) -> RunStore {
@@ -58,12 +59,13 @@ fn create_run_writes_current_run_root_layout_and_initial_events() {
         extra: BTreeMap::new(),
     };
 
+    let captured_source = "schema_version: '1'\nid: create\n";
     let paths = store
         .create_run(CreateRunRequest {
             record: record.clone(),
             checkpoint: Some(checkpoint.clone()),
             manifest: Some(manifest),
-            flow_source: Some("schema_version: '1'\nid: create\n".to_string()),
+            flow_source: Some(captured_source.to_string()),
             flow_definition_json: Some(
                 "{\"schema_version\":\"1\",\"id\":\"create\"}\n".to_string(),
             ),
@@ -101,6 +103,11 @@ fn create_run_writes_current_run_root_layout_and_initial_events() {
         .expect("read run record")
         .expect("run record");
     assert_eq!(loaded.run_id, "run-create");
+    assert_eq!(
+        loaded.effective_flow_hash.as_deref(),
+        Some(format!("{:x}", Sha256::digest(captured_source.as_bytes())).as_str()),
+        "the durable hash must describe the exact captured source"
+    );
     assert_eq!(loaded.provider, "codex");
     assert_eq!(loaded.llm_provider, "codex");
 

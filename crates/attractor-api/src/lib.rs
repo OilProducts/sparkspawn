@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use attractor_core::{
     ContextMap, FlowDefinition, FlowDiagnostic, LaunchContext, NodeConfig, RawRuntimeEvent,
-    RunExecutionLock, RunRecord,
+    RecoveryPolicy, RunExecutionLock, RunRecord,
 };
 pub use attractor_dsl::NamedFlowSource;
 use attractor_dsl::{
@@ -25,6 +25,7 @@ use attractor_runtime::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use spark_common::settings::SparkSettings;
 
 pub type RuntimeHandlerRunnerFactory = Arc<dyn Fn() -> RuntimeHandlerRunner + Send + Sync>;
@@ -818,22 +819,239 @@ impl AttractorApiService {
         let mut canceled: Vec<String> = Vec::new();
         let mut interrupted: Vec<String> = Vec::new();
         let mut failed: Vec<Value> = Vec::new();
-        let records = match list_run_records(&self.settings, None) {
+        let mut records = match store.list_run_records() {
             Ok(records) => records,
-            Err(error) => return json!({"error": error}),
+            Err(error) => return json!({"error": error.to_string()}),
         };
-        for record in records {
-            let Some(run_id) = record.get("run_id").and_then(Value::as_str) else {
+        records.sort_by(|left, right| {
+            (
+                &left.parent_run_id,
+                &left.parent_node_id,
+                &left.started_at,
+                &left.run_id,
+            )
+                .cmp(&(
+                    &right.parent_run_id,
+                    &right.parent_node_id,
+                    &right.started_at,
+                    &right.run_id,
+                ))
+        });
+        let mut next_legacy_index = std::collections::HashMap::new();
+        for record in &records {
+            if let (Some(parent), Some(node), Some(index)) = (
+                record.parent_run_id.as_ref(),
+                record.parent_node_id.as_ref(),
+                record.child_invocation_index,
+            ) {
+                next_legacy_index
+                    .entry((parent.clone(), node.clone()))
+                    .and_modify(|next: &mut u64| *next = (*next).max(index + 1))
+                    .or_insert(index + 1);
+            }
+        }
+        let mut missing_legacy_indices = std::collections::HashMap::new();
+        for record in &records {
+            if let (Some(parent), Some(node), None) = (
+                record.parent_run_id.as_ref(),
+                record.parent_node_id.as_ref(),
+                record.child_invocation_index,
+            ) {
+                *missing_legacy_indices
+                    .entry((parent.clone(), node.clone()))
+                    .or_insert(0usize) += 1;
+            }
+        }
+        for record in &mut records {
+            if record.parent_run_id.is_some()
+                && record.parent_node_id.is_some()
+                && record.child_invocation_index.is_none()
+            {
+                let key = (
+                    record.parent_run_id.clone().unwrap_or_default(),
+                    record.parent_node_id.clone().unwrap_or_default(),
+                );
+                if missing_legacy_indices
+                    .get(&key)
+                    .copied()
+                    .unwrap_or_default()
+                    != 1
+                {
+                    continue;
+                }
+                let index = next_legacy_index.entry(key).or_insert(1);
+                record.child_invocation_index = Some(*index);
+                *index += 1;
+                let assigned = record.child_invocation_index;
+                let _ = store.update_run_record(&record.run_id, |durable| {
+                    durable.child_invocation_index = assigned;
+                });
+            }
+        }
+        let by_id = records
+            .iter()
+            .map(|r| (r.run_id.clone(), r))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut invocations = std::collections::HashSet::new();
+        let mut lineage_failures = std::collections::HashSet::new();
+
+        for ((parent_id, node_id), count) in &missing_legacy_indices {
+            if *count > 1 && lineage_failures.insert(parent_id.clone()) {
+                self.fail_recovery(
+                    &store,
+                    parent_id,
+                    "recovery_ambiguous_child_invocation",
+                    "multiple legacy children have no invocation index",
+                );
+                failed.push(json!({
+                    "run_id": parent_id,
+                    "code": "recovery_ambiguous_child_invocation"
+                }));
+                for child in records.iter().filter(|record| {
+                    record.parent_run_id.as_deref() == Some(parent_id)
+                        && record.parent_node_id.as_deref() == Some(node_id)
+                        && record.child_invocation_index.is_none()
+                }) {
+                    self.fail_recovery(
+                        &store,
+                        &child.run_id,
+                        "recovery_ambiguous_child_invocation",
+                        "multiple legacy children have no invocation index",
+                    );
+                    lineage_failures.insert(child.run_id.clone());
+                }
+            }
+        }
+
+        // Check and repair the durable generic lineage before any executor
+        // is attached. This prevents recovery from guessing at ownership.
+        for record in &records {
+            if record.parent_run_id.as_deref().is_none_or(str::is_empty)
+                && (record
+                    .parent_node_id
+                    .as_deref()
+                    .is_some_and(|id| !id.trim().is_empty())
+                    || record.child_invocation_index.is_some())
+            {
+                self.fail_recovery(
+                    &store,
+                    &record.run_id,
+                    "recovery_missing_lineage",
+                    "parent node or invocation index exists without a parent run",
+                );
+                lineage_failures.insert(record.run_id.clone());
+                failed.push(json!({"run_id": record.run_id, "code": "recovery_missing_lineage"}));
+                continue;
+            }
+            let Some(parent_id) = record
+                .parent_run_id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+            else {
                 continue;
             };
+            let Some(parent) = by_id.get(parent_id).copied() else {
+                self.fail_recovery(
+                    &store,
+                    &record.run_id,
+                    "recovery_missing_lineage",
+                    "parent run is missing",
+                );
+                lineage_failures.insert(record.run_id.clone());
+                failed.push(json!({"run_id": record.run_id, "code": "recovery_missing_lineage"}));
+                continue;
+            };
+            if lineage_failures.contains(parent_id) {
+                continue;
+            }
+            let Some(node_id) = record
+                .parent_node_id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+            else {
+                self.fail_recovery(
+                    &store,
+                    &record.run_id,
+                    "recovery_missing_lineage",
+                    "parent node is missing",
+                );
+                lineage_failures.insert(record.run_id.clone());
+                failed.push(json!({"run_id": record.run_id, "code": "recovery_missing_lineage"}));
+                interrupted.push(record.run_id.clone());
+                continue;
+            };
+            let index = record.child_invocation_index.unwrap_or(0);
+            if index == 0
+                || !invocations.insert((parent_id.to_string(), node_id.to_string(), index))
+            {
+                self.fail_recovery(
+                    &store,
+                    parent_id,
+                    "recovery_ambiguous_child_invocation",
+                    "ambiguous child invocation lineage",
+                );
+                lineage_failures.insert(parent_id.to_string());
+                failed.push(
+                    json!({"run_id": parent_id, "code": "recovery_ambiguous_child_invocation"}),
+                );
+                for child in records.iter().filter(|child| {
+                    child.parent_run_id.as_deref() == Some(parent_id)
+                        && child.parent_node_id.as_deref() == Some(node_id)
+                        && child.child_invocation_index.unwrap_or(0) == index
+                }) {
+                    self.fail_recovery(
+                        &store,
+                        &child.run_id,
+                        "recovery_ambiguous_child_invocation",
+                        "ambiguous child invocation lineage",
+                    );
+                    lineage_failures.insert(child.run_id.clone());
+                }
+                continue;
+            }
+            let expected_root = parent.root_run_id.as_deref().unwrap_or(&parent.run_id);
+            if record.root_run_id.as_deref() != Some(expected_root) {
+                self.fail_recovery(
+                    &store,
+                    &record.run_id,
+                    "recovery_corrupt_lineage",
+                    "child root lineage does not match its parent",
+                );
+                lineage_failures.insert(record.run_id.clone());
+                failed.push(json!({"run_id": record.run_id, "code": "recovery_corrupt_lineage"}));
+                continue;
+            }
+            if record
+                .execution_profile_id
+                .as_deref()
+                .is_none_or(str::is_empty)
+            {
+                let _ = store.update_run_record(&record.run_id, |child| {
+                    child.execution_mode = parent.execution_mode.clone();
+                    child.execution_profile_id = parent.execution_profile_id.clone();
+                    child.execution_container_image = parent.execution_container_image.clone();
+                    child.execution_profile_capabilities =
+                        parent.execution_profile_capabilities.clone();
+                    child.execution_lock = parent.execution_lock.clone();
+                });
+            }
+        }
+
+        for record in records {
+            let run_id = record.run_id.as_str();
+            // Lineage repair updates durable records while `records` remains an
+            // intentionally stable snapshot. Never let that stale snapshot
+            // restart a run we just made terminal.
+            if lineage_failures.contains(run_id) {
+                continue;
+            }
             if run_has_live_executor(run_id) {
                 continue;
             }
             let parent_run_id = record
-                .get("parent_run_id")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|parent| !parent.is_empty());
+                .parent_run_id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty());
             let is_child = parent_run_id.is_some();
             // Manager-launched children execute inside their parent's thread
             // and never enter the live-executor registry themselves; a child
@@ -841,36 +1059,37 @@ impl AttractorApiService {
             if parent_run_id.is_some_and(run_has_live_executor) {
                 continue;
             }
-            let status = record
-                .get("status")
-                .and_then(Value::as_str)
-                .map(attractor_runtime::normalize_run_status)
-                .unwrap_or_default();
+            let status = attractor_runtime::normalize_run_status(&record.status);
+            let restart_marked = status == "failed"
+                && record.outcome.is_none()
+                && record.ended_at.is_none()
+                && record.last_error.to_ascii_lowercase().contains("restart");
             match status.as_str() {
-                "waiting" if !is_child => match self.resume_orphaned_run(&store, run_id) {
+                "waiting" | "running" if !is_child => match self.recover_root(&store, run_id) {
                     Ok(()) => resumed.push(run_id.to_string()),
                     Err(error) => {
-                        let _ = store.update_run_record(run_id, |record| {
-                            record.status = "failed".to_string();
-                            record.last_error =
-                                format!("startup recovery could not resume this run: {error}");
-                        });
+                        self.fail_recovery(
+                            &store,
+                            run_id,
+                            "recovery_unrecoverable_placement",
+                            &error,
+                        );
                         failed.push(json!({"run_id": run_id, "error": error}));
+                        interrupted.push(run_id.to_string());
                     }
                 },
+                "failed" if !is_child && restart_marked => {
+                    match self.recover_root(&store, run_id) {
+                        Ok(()) => resumed.push(run_id.to_string()),
+                        Err(error) => failed.push(json!({"run_id": run_id, "error": error})),
+                    }
+                }
                 "cancel_requested" => {
                     let _ = RuntimeControls::new(store.clone()).mark_canceled(
                         run_id,
                         "canceled with no executor attached (interrupted by an earlier restart)",
                     );
                     canceled.push(run_id.to_string());
-                }
-                "running" => {
-                    let _ = store.update_run_record(run_id, |record| {
-                        record.status = "failed".to_string();
-                        record.last_error = "interrupted by an earlier restart; continue this run to resume from its checkpoint".to_string();
-                    });
-                    interrupted.push(run_id.to_string());
                 }
                 _ => {}
             }
@@ -883,22 +1102,110 @@ impl AttractorApiService {
         })
     }
 
-    fn resume_orphaned_run(
-        &self,
-        store: &RunStore,
-        run_id: &str,
-    ) -> std::result::Result<(), String> {
+    fn recover_root(&self, store: &RunStore, run_id: &str) -> std::result::Result<(), String> {
         let bundle = store
             .read_run_bundle(run_id)
-            .map_err(|error| error.to_string())?
+            .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Unknown pipeline: {run_id}"))?;
+        let checkpoint = bundle
+            .checkpoint
+            .as_ref()
+            .ok_or_else(|| "checkpoint unavailable".to_string())?;
         let source = store
             .read_graph_source(&bundle.paths)
-            .map_err(|error| error.to_string())?
+            .map_err(|e| e.to_string())?
             .ok_or_else(|| "captured flow source unavailable".to_string())?;
         let flow = parse_flow_definition(&source)
-            .map_err(|error| format!("captured flow source does not parse: {error}"))?;
+            .map_err(|e| format!("captured flow source does not parse: {e}"))?;
+        let pause = flow
+            .nodes
+            .get(&checkpoint.current_node)
+            .and_then(|node| node.runtime.as_ref())
+            .is_some_and(|runtime| runtime.recovery_policy == RecoveryPolicy::Pause);
+        let durable_response = attractor_runtime::durable_outcome(
+            store,
+            &bundle.paths,
+            &checkpoint.current_node,
+            flow.nodes
+                .get(&checkpoint.current_node)
+                .ok_or_else(|| "checkpoint node unavailable".to_string())?,
+            checkpoint.completed_nodes.len() as u64,
+            checkpoint
+                .retry_counts
+                .get(&checkpoint.current_node)
+                .copied()
+                .unwrap_or(0),
+        )
+        .is_some();
+        if pause
+            && !durable_response
+            && bundle
+                .record
+                .as_ref()
+                .and_then(|r| r.outcome_reason_code.as_deref())
+                != Some("recovery_retry_approved")
+        {
+            store
+                .update_run_record(run_id, |record| {
+                    record.status = "waiting".to_string();
+                    record.outcome_reason_code = Some("recovery_decision_required".to_string());
+                    record.outcome_reason_message = Some(format!(
+                        "Explicit retry is required to rerun node '{}'.",
+                        checkpoint.current_node
+                    ));
+                    record.ended_at = None;
+                })
+                .map_err(|e| e.to_string())?;
+            store
+                .append_event(
+                    &bundle.paths,
+                    attractor_runtime::recovery_decision_required_event(
+                        run_id,
+                        &checkpoint.current_node,
+                    ),
+                )
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        if bundle
+            .record
+            .as_ref()
+            .and_then(|record| record.outcome_reason_code.as_deref())
+            == Some("recovery_retry_approved")
+        {
+            store
+                .update_run_record(run_id, |record| {
+                    record.outcome_reason_code = None;
+                    record.outcome_reason_message = None;
+                })
+                .map_err(|error| error.to_string())?;
+        }
         self.spawn_prepared_resume(run_id, flow)
+    }
+
+    fn fail_recovery(&self, store: &RunStore, run_id: &str, code: &str, message: &str) {
+        if store
+            .read_run_bundle(run_id)
+            .ok()
+            .flatten()
+            .and_then(|bundle| bundle.record)
+            .is_some_and(|record| {
+                record.status == "failed"
+                    && record.outcome_reason_code.as_deref() == Some(code)
+                    && record.ended_at.is_some()
+            })
+        {
+            return;
+        }
+        let diagnostic = format!("interrupted by an earlier restart; {message}");
+        let _ = store.update_run_record(run_id, |record| {
+            record.status = "failed".to_string();
+            record.outcome = Some("failure".to_string());
+            record.outcome_reason_code = Some(code.to_string());
+            record.outcome_reason_message = Some(diagnostic.clone());
+            record.last_error = diagnostic.clone();
+            record.ended_at = Some(attractor_runtime::utc_timestamp());
+        });
     }
 
     /// thread from its persisted record and checkpoint.
@@ -963,11 +1270,44 @@ impl AttractorApiService {
             return;
         };
         if let Err(error) = self.spawn_prepared_resume(run_id, flow) {
-            let _ = self.observed_store().update_run_record(run_id, |record| {
-                record.status = "failed".to_string();
-                record.last_error = error.clone();
-            });
+            Self::finish_launch_failure(&self.observed_store(), run_id, &error);
         }
+    }
+
+    fn finish_launch_failure(store: &RunStore, run_id: &str, error: &str) {
+        let Ok(Some(bundle)) = store.read_run_bundle(run_id) else {
+            return;
+        };
+        let current_node = bundle
+            .checkpoint
+            .as_ref()
+            .map(|checkpoint| checkpoint.current_node.as_str())
+            .unwrap_or_default();
+        let _ = store.update_run_record(run_id, |record| {
+            record.status = "failed".to_string();
+            record.outcome = Some("failure".to_string());
+            record.outcome_reason_code = Some("launch_failed".to_string());
+            record.outcome_reason_message = Some(error.to_string());
+            record.last_error = error.to_string();
+            record.ended_at = Some(attractor_runtime::utc_timestamp());
+        });
+        let _ = store.append_event(
+            &bundle.paths,
+            attractor_runtime::runtime_status_event(
+                run_id,
+                "failed",
+                Some("failure".to_string()),
+                Some("launch_failed".to_string()),
+                Some(error.to_string()),
+                Some(error.to_string()),
+            ),
+        );
+        let _ = store.append_event(
+            &bundle.paths,
+            attractor_runtime::pipeline_failed_event(run_id, current_node, error, 0),
+        );
+        let result = attractor_runtime::failed_run_result(run_id, error, None);
+        let _ = attractor_runtime::write_run_result(&bundle.paths, &result);
     }
 
     /// Runs a prepared pipeline on a dedicated background thread, honoring
@@ -1003,10 +1343,7 @@ impl AttractorApiService {
                 }
                 if let Err(error) = result {
                     let message = error.to_string();
-                    let _ = store.update_run_record(&run_id, |record| {
-                        record.status = "failed".to_string();
-                        record.last_error = message.clone();
-                    });
+                    Self::finish_launch_failure(&store, &run_id, &message);
                 }
             })
             .map(|_handle| ())
@@ -1252,6 +1589,7 @@ impl AttractorApiService {
         record.root_run_id = Some(run_id.clone());
         record.launch_context = Some(launch_context.values().clone());
         record.execution_lock = execution_lock.clone();
+        record.effective_flow_hash = Some(format!("{:x}", Sha256::digest(flow_content.as_bytes())));
         attractor_execution::apply_launch_metadata_to_record(&mut record, &execution_metadata);
 
         let mut runtime_context = requested_context;
@@ -1383,6 +1721,10 @@ impl AttractorApiService {
                 }
                 let _ = store.update_run_record(&run_id, |record| {
                     record.status = "failed".to_string();
+                    record.outcome = Some("failure".to_string());
+                    record.outcome_reason_code = Some("run_launch_failed".to_string());
+                    record.outcome_reason_message = Some(error.clone());
+                    record.ended_at = Some(attractor_runtime::utc_timestamp());
                     record.last_error = error.clone();
                 });
                 return RuntimeRouteResponse::json(500, json!({"detail": error}));
@@ -1832,11 +2174,11 @@ impl AttractorApiService {
             match flow {
                 Some(flow) => self.execute_prepared_route_response(&response, flow),
                 None => {
-                    let _ = store.update_run_record(pipeline_id, |record| {
-                        record.status = "failed".to_string();
-                        record.last_error =
-                            "Retry could not load the stored run graph source.".to_string();
-                    });
+                    Self::finish_launch_failure(
+                        &store,
+                        pipeline_id,
+                        "Retry could not load the stored run graph source.",
+                    );
                 }
             }
         }

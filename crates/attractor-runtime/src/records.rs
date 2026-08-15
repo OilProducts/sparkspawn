@@ -40,6 +40,7 @@ const RUN_RECORD_FIELDS: &[&str] = &[
     "execution_container_image",
     "execution_profile_capabilities",
     "execution_lock",
+    "effective_flow_hash",
     "cleanup_error",
     "last_error",
     "token_usage",

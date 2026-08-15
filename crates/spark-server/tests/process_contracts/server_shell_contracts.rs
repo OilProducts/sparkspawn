@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use spark_assets::ResourceSource;
 use spark_common::debug::ENV_SPARK_DEBUG_CODEX_JSONRPC;
 use spark_common::settings::SettingsOverrides;
@@ -234,6 +235,27 @@ fn init_respects_skip_and_force_counts() {
     let edited_flow = flows_dir.join("examples/simple-linear.yaml");
     fs::write(&edited_flow, "edited: true\n").expect("user edit");
 
+    // Simulate an installed packaged version becoming stale while keeping a
+    // separate local edit. The hash manifest is the durable baseline that
+    // makes those two cases distinguishable on the next ordinary init.
+    let refresh_name = "examples/human-review-loop.yaml";
+    let refresh_flow = flows_dir.join(refresh_name);
+    let old_packaged = b"schema_version: old-packaged\n";
+    fs::write(&refresh_flow, old_packaged).expect("old packaged flow");
+    let manifest_path = flows_dir.join(".packaged-flow-hashes.json");
+    let mut manifest: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("packaged hash manifest"))
+            .expect("hash manifest json");
+    manifest.insert(
+        refresh_name.to_string(),
+        format!("{:x}", Sha256::digest(old_packaged)),
+    );
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).expect("manifest json"),
+    )
+    .expect("updated manifest");
+
     let second = run_with_args_and_env(
         [
             "spark-server",
@@ -248,10 +270,14 @@ fn init_respects_skip_and_force_counts() {
     assert_eq!(second.exit_code, 0);
     assert!(second
         .stdout
-        .ends_with(&format!("created=0 updated=0 skipped={flow_count}\n")));
+        .ends_with(&format!("created=0 updated=1 skipped={}\n", flow_count - 1)));
     assert_eq!(
         fs::read_to_string(&edited_flow).expect("edited flow"),
         "edited: true\n"
+    );
+    assert_ne!(
+        fs::read(&refresh_flow).expect("refreshed flow"),
+        old_packaged
     );
 
     let forced = run_with_args_and_env(

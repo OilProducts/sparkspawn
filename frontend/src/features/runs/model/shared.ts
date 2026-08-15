@@ -310,6 +310,11 @@ export const STATUS_LABELS: Record<string, string> = {
     canceled: 'Canceled',
 }
 
+export const formatRunStatusLabel = (run: Pick<RunRecord, 'status' | 'outcome' | 'outcome_reason_code'>) =>
+    run.status === 'completed' && run.outcome_reason_code === 'blocked'
+        ? 'Blocked'
+        : STATUS_LABELS[run.status] || run.status
+
 export const canCancelRun = (status: string) => status === 'running' || status === 'waiting'
 
 export const canContinueRun = (status: string) => !['queued', 'running', 'waiting', 'cancel_requested', 'abort_requested', 'pause_requested'].includes(status)

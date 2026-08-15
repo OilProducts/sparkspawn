@@ -11,9 +11,9 @@ import {
 import { formatProjectPathLabel } from '@/lib/projectPaths'
 import type { RunRecord } from '../model/shared'
 import {
-    STATUS_LABELS,
     STATUS_STYLES,
     formatDuration,
+    formatRunStatusLabel,
 } from '../model/shared'
 
 const ACTIVE_LIST_STATUSES = new Set([
@@ -165,7 +165,7 @@ export function RunList({
                                     STATUS_STYLES[run.status] || 'bg-muted text-muted-foreground'
                                 }`}
                             >
-                                {STATUS_LABELS[run.status] || run.status}
+                                {formatRunStatusLabel(run)}
                             </span>
                         </div>
                     </div>

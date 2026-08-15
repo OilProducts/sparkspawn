@@ -7,6 +7,8 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+use serde_json::{json, Value};
+
 #[test]
 fn serve_binary_process_exposes_product_shell_and_mount_boundaries() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -98,6 +100,141 @@ fn serve_binary_process_exposes_product_shell_and_mount_boundaries() {
     assert!(!api_missing.body_text().contains("process ui"));
 }
 
+#[test]
+fn serve_binary_recovers_a_recursive_run_tree_after_process_kill() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let ui_dir = temp.path().join("ui");
+    let flows_dir = temp.path().join("flows");
+    let project_dir = temp.path().join("project");
+    fs::create_dir_all(&ui_dir).expect("ui dir");
+    fs::create_dir_all(&flows_dir).expect("flows dir");
+    fs::create_dir_all(&project_dir).expect("project dir");
+    fs::write(ui_dir.join("index.html"), "<!doctype html>\n").expect("ui index");
+    fs::write(
+        flows_dir.join("root.yaml"),
+        nested_flow("root", "branch", "child.yaml"),
+    )
+    .expect("root flow");
+    fs::write(
+        flows_dir.join("child.yaml"),
+        nested_flow("child", "branch", "leaf.yaml"),
+    )
+    .expect("child flow");
+    fs::write(flows_dir.join("leaf.yaml"), gate_flow()).expect("leaf flow");
+
+    let mut server = RunningServer::start(temp.path(), &ui_dir);
+    let launch = http_json(
+        server.port,
+        "POST",
+        "/attractor/pipelines",
+        &json!({
+            "run_id": "process-tree-root",
+            "flow_name": "root.yaml",
+            "working_directory": project_dir,
+        }),
+    );
+    assert_eq!(launch.status, 200, "{}", launch.body_text());
+
+    let data_dir = temp.path().join("spark-home");
+    let before = wait_for_tree(&data_dir, |records| {
+        records.len() == 3 && records.iter().any(|record| record["status"] == "waiting")
+    });
+    let before_ids = lineage_ids(&before);
+    assert_eq!(before_ids.len(), 3, "expected root, child, and grandchild");
+
+    server.stop();
+    server = RunningServer::start(temp.path(), &ui_dir);
+
+    let recovered = wait_for_tree(&data_dir, |records| {
+        records.len() == 3 && records.iter().any(|record| record["status"] == "waiting")
+    });
+    assert_eq!(
+        lineage_ids(&recovered),
+        before_ids,
+        "recovery must be in place"
+    );
+    let leaf_id = recovered
+        .iter()
+        .find(|record| {
+            record["parent_run_id"].as_str().is_some_and(|parent| {
+                recovered.iter().any(|candidate| {
+                    candidate["run_id"] == parent && candidate["parent_run_id"].is_string()
+                })
+            })
+        })
+        .and_then(|record| record["run_id"].as_str())
+        .expect("grandchild run id");
+    let questions = http_get(
+        server.port,
+        &format!("/attractor/pipelines/{leaf_id}/questions"),
+    );
+    let questions: Value = serde_json::from_slice(&questions.body).expect("questions json");
+    let question_id = questions["questions"][0]["question_id"]
+        .as_str()
+        .expect("pending question");
+    let answer = http_json(
+        server.port,
+        "POST",
+        &format!("/attractor/pipelines/{leaf_id}/questions/{question_id}/answer"),
+        &json!({"selected_value": "Finish"}),
+    );
+    assert_eq!(answer.status, 200, "{}", answer.body_text());
+
+    let completed = wait_for_tree(&data_dir, |records| {
+        records.len() == 3 && records.iter().all(|record| record["status"] == "completed")
+    });
+    assert_eq!(lineage_ids(&completed), before_ids);
+}
+
+fn nested_flow(id: &str, node: &str, child: &str) -> String {
+    format!(
+        "schema_version: '1'\nid: {id}\nnodes:\n  start: {{ kind: start }}\n  {node}:\n    kind: subflow\n    config: {{ kind: subflow, flow_ref: {child} }}\n    manager: {{ poll_interval: 10ms, max_cycles: 10000 }}\n  done: {{ kind: exit }}\nedges:\n- {{ from: start, to: {node} }}\n- {{ from: {node}, to: done }}\n"
+    )
+}
+
+fn gate_flow() -> &'static str {
+    "schema_version: '1'\nid: leaf\nnodes:\n  start: { kind: start }\n  hold:\n    kind: human_gate\n    config: { kind: human_gate, prompt: Continue? }\n  done: { kind: exit }\nedges:\n- { from: start, to: hold }\n- { from: hold, to: done, label: Finish }\n"
+}
+
+fn wait_for_tree(data_dir: &Path, ready: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+    for _ in 0..200 {
+        let records = run_records(data_dir);
+        if ready(&records) {
+            return records;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    panic!(
+        "run tree did not reach expected state: {:?}",
+        run_records(data_dir)
+    );
+}
+
+fn run_records(data_dir: &Path) -> Vec<Value> {
+    let runs = data_dir.join("attractor/runs");
+    let Ok(projects) = fs::read_dir(runs) else {
+        return Vec::new();
+    };
+    projects
+        .flatten()
+        .flat_map(|project| fs::read_dir(project.path()).into_iter().flatten().flatten())
+        .filter_map(|run| fs::read(run.path().join("run.json")).ok())
+        .filter_map(|bytes| serde_json::from_slice(&bytes).ok())
+        .collect()
+}
+
+fn lineage_ids(records: &[Value]) -> BTreeMap<String, Option<String>> {
+    records
+        .iter()
+        .map(|record| {
+            (
+                record["run_id"].as_str().expect("run id").to_string(),
+                record["parent_run_id"].as_str().map(str::to_string),
+            )
+        })
+        .collect()
+}
+
 struct RunningServer {
     child: Child,
     port: u16,
@@ -150,6 +287,11 @@ impl RunningServer {
         let _ = child.wait();
         panic!("spark-server did not become ready on port {port}");
     }
+
+    fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl Drop for RunningServer {
@@ -180,6 +322,24 @@ impl HttpResponse {
 
 fn http_get(port: u16, path: &str) -> HttpResponse {
     try_http_get(port, path).expect("http response")
+}
+
+fn http_json(port: u16, method: &str, path: &str, body: &Value) -> HttpResponse {
+    let body = serde_json::to_vec(body).expect("json body");
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("read timeout");
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .expect("request headers");
+    stream.write_all(&body).expect("request body");
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes).expect("response");
+    parse_http_response(&bytes).expect("http response")
 }
 
 fn try_http_get(port: u16, path: &str) -> std::io::Result<HttpResponse> {

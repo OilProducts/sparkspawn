@@ -787,6 +787,16 @@ fn seed_starter_flows(
         )
     })?;
 
+    use sha2::{Digest, Sha256};
+    const HASH_MANIFEST: &str = ".packaged-flow-hashes.json";
+    let manifest_path = flows_dir.join(HASH_MANIFEST);
+    let prior_hashes = fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|text| {
+            serde_json::from_str::<std::collections::BTreeMap<String, String>>(&text).ok()
+        })
+        .unwrap_or_default();
+    let mut next_hashes = std::collections::BTreeMap::new();
     let mut created = Vec::new();
     let mut updated = Vec::new();
     let mut skipped = Vec::new();
@@ -803,10 +813,34 @@ fn seed_starter_flows(
             })?;
         }
 
+        let packaged_hash = format!("{:x}", Sha256::digest(asset.content.as_bytes()));
         let existed = target_path.exists();
         if existed && !force {
-            skipped.push(relative_name);
-            continue;
+            let current_hash = fs::read(&target_path)
+                .map(|content| format!("{:x}", Sha256::digest(content)))
+                .map_err(|source| {
+                    format!(
+                        "Unable to read starter flow {}: {source}",
+                        target_path.display()
+                    )
+                })?;
+            match prior_hashes.get(&relative_name) {
+                Some(old_hash) if current_hash == *old_hash && packaged_hash != *old_hash => {}
+                Some(old_hash) => {
+                    next_hashes.insert(relative_name.clone(), old_hash.clone());
+                    skipped.push(relative_name);
+                    continue;
+                }
+                None => {
+                    // Existing installs predate the manifest. Seed a baseline only
+                    // when the file is byte-for-byte the packaged version.
+                    if current_hash == packaged_hash {
+                        next_hashes.insert(relative_name.clone(), packaged_hash);
+                    }
+                    skipped.push(relative_name);
+                    continue;
+                }
+            }
         }
 
         fs::write(&target_path, asset.content).map_err(|source| {
@@ -816,11 +850,23 @@ fn seed_starter_flows(
             )
         })?;
         if existed {
-            updated.push(relative_name);
+            updated.push(relative_name.clone());
         } else {
-            created.push(relative_name);
+            created.push(relative_name.clone());
         }
+        next_hashes.insert(relative_name, packaged_hash);
     }
+
+    // Retain hashes for preserved local files, so a later force refresh can
+    // establish the new packaged baseline without losing inventory entries.
+    for (name, hash) in prior_hashes {
+        next_hashes.entry(name).or_insert(hash);
+    }
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&next_hashes).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("Unable to write packaged flow hash manifest: {e}"))?;
 
     Ok(SeedStarterFlowsResult {
         flows_dir: flows_dir.to_path_buf(),

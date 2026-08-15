@@ -181,6 +181,8 @@ pub struct RunRecord {
     #[serde(default)]
     pub execution_lock: Option<RunExecutionLock>,
     #[serde(default)]
+    pub effective_flow_hash: Option<String>,
+    #[serde(default)]
     pub cleanup_error: Option<String>,
     #[serde(default)]
     pub last_error: String,
