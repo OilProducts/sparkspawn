@@ -76,22 +76,30 @@ pub fn request_user_input_segment_id(
     format!("segment-request-user-input-{app_turn_id}-{request_id}")
 }
 
+/// Mirrors `spark_common::segments::agent_event_segment_id`: identity comes
+/// only from durable provider facts (app turn + item id, app turn + kind for
+/// singleton lifecycle events, provider-event sequence for repeatable itemless
+/// events) — never from the mutable order counter.
 pub fn agent_event_segment_id(
     turn_scope_key: &str,
     event: &TurnStreamEvent,
-    fallback_sequence: i64,
+    provider_sequence: Option<u64>,
 ) -> String {
     let kind = non_empty(event.source.raw_kind.as_deref())
         .map(str::to_string)
         .unwrap_or_else(|| event.kind.as_str().to_string());
-    match (
-        non_empty(event.source.app_turn_id.as_deref()),
-        non_empty(event.source.item_id.as_deref()),
-    ) {
-        (Some(app_turn_id), Some(item_id)) => {
-            format!("segment-agent-event-{app_turn_id}-{kind}-{item_id}")
-        }
-        _ => format!("segment-agent-event-{turn_scope_key}-{kind}-{fallback_sequence}"),
+    let scope = non_empty(event.source.app_turn_id.as_deref())
+        .map(str::to_string)
+        .unwrap_or_else(|| turn_scope_key.to_string());
+    if let Some(item_id) = non_empty(event.source.item_id.as_deref()) {
+        return format!("segment-agent-event-{scope}-{kind}-{item_id}");
+    }
+    if spark_common::segments::is_singleton_lifecycle_event_kind(&kind) {
+        return format!("segment-agent-event-{scope}-{kind}");
+    }
+    match provider_sequence {
+        Some(sequence) => format!("segment-agent-event-{scope}-{kind}-seq{sequence}"),
+        None => format!("segment-agent-event-{scope}-{kind}"),
     }
 }
 

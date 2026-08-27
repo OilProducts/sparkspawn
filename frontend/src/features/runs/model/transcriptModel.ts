@@ -67,6 +67,7 @@ export function buildRunTranscriptRow(segment: RunTranscriptSegment): RunTranscr
                     id: segment.tool_call.id,
                     kind: segment.tool_call.kind,
                     status: segment.tool_call.status,
+                    completionReason: segment.tool_call.completion_reason ?? null,
                     title: segment.tool_call.title,
                     command: segment.tool_call.command ?? null,
                     output: segment.tool_call.output ?? null,

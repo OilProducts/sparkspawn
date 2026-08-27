@@ -285,6 +285,9 @@ pub fn execution_transcript_envelopes(
                 spark_storage::TranscriptRecord::SegmentUpsert { .. } => {
                     "conversation.segment_upsert"
                 }
+                spark_storage::TranscriptRecord::SegmentTombstone { .. } => {
+                    "conversation.segment_tombstone"
+                }
             };
             envelopes.push(LiveEnvelope {
                 event_type: event_type.to_string(),

@@ -3,6 +3,7 @@ export {
     type ConversationDeleteResponse,
     type ConversationSnapshotResponse,
     type ConversationSegmentResponse,
+    type ConversationSegmentTombstoneEventResponse,
     type ConversationSegmentUpsertEventResponse,
     type ConversationStreamDeltaEventResponse,
     type ConversationSummaryResponse,

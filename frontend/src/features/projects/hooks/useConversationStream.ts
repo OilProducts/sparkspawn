@@ -8,11 +8,15 @@ import {
     type ConversationSnapshotResponse,
     type ConversationStreamDeltaEventResponse,
     type ConversationTurnUpsertEventResponse,
+    type ConversationSegmentTombstoneEventResponse,
     type ConversationSegmentUpsertEventResponse,
 } from '@/lib/workspaceClient'
 import type { ApplyConversationStreamEventResult } from '../model/projectsHomeState'
 
-type ConversationStreamEvent = ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse
+type ConversationStreamEvent =
+    | ConversationTurnUpsertEventResponse
+    | ConversationSegmentUpsertEventResponse
+    | ConversationSegmentTombstoneEventResponse
 
 type UseConversationStreamArgs = {
     activeConversationId: string | null

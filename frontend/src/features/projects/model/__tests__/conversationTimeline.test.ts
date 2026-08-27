@@ -134,6 +134,37 @@ describe('conversation timeline normalization', () => {
     expect(timeline[5]).toMatchObject({ kind: 'final_separator' })
   })
 
+  it('renders yielded tool rows as neutral terminal work before the final answer', () => {
+    const yieldedTool = {
+      ...baseSnapshot.segments[0],
+      id: 'yielded-tool-segment',
+      order: 1,
+      tool_call: {
+        ...baseSnapshot.segments[0].tool_call!,
+        id: 'exec-a',
+        status: 'yielded' as const,
+        completion_reason: 'turn_boundary_yield',
+        output: 'partial output',
+      },
+    }
+    const answer = { ...baseSnapshot.segments[1], order: 2 }
+    const timeline = buildTimeline({
+      ...baseSnapshot,
+      segments: [yieldedTool, answer],
+    })
+
+    expect(timeline.map((entry) => entry.kind)).toEqual(['message', 'tool_call', 'final_separator', 'message'])
+    const toolEntry = timeline[1]
+    expect(toolEntry).toMatchObject({ kind: 'tool_call' })
+    if (toolEntry.kind === 'tool_call') {
+      expect(toolEntry.toolCall.status).toBe('yielded')
+      expect(toolEntry.toolCall.completionReason).toBe('turn_boundary_yield')
+      expect(toolEntry.toolCall.output).toBe('partial output')
+    }
+    // The final answer stays the last visible entry.
+    expect(timeline[timeline.length - 1]).toMatchObject({ kind: 'message', content: 'Done.' })
+  })
+
   it('keeps mode-change entries in chronological order when hydrated from a snapshot', () => {
     const timeline = buildTimeline({
       ...baseSnapshot,

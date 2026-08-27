@@ -46,12 +46,20 @@ function buildAssistantTimelineEntries(
     let hadWorkActivity = false
     let insertedFinalSeparator = false
     const sortedSegments = [...turnSegments].sort((left, right) => left.order - right.order)
+    // The canonical projection guarantees a finished turn's final answer is its
+    // last user-visible segment; only non-rendered lifecycle markers
+    // (agent_event) may follow it. Trust that order instead of scanning
+    // backwards past visible work rows.
     let finalAssistantIndex = -1
     for (let index = sortedSegments.length - 1; index >= 0; index -= 1) {
-        if (sortedSegments[index].kind === 'assistant_message' || sortedSegments[index].kind === 'plan') {
-            finalAssistantIndex = index
-            break
+        const kind: string = sortedSegments[index].kind
+        if (kind === 'agent_event') {
+            continue
         }
+        if (kind === 'assistant_message' || kind === 'plan') {
+            finalAssistantIndex = index
+        }
+        break
     }
 
     sortedSegments.forEach((segment, index) => {
@@ -157,6 +165,7 @@ function buildAssistantTimelineEntries(
                     id: segment.tool_call.id,
                     kind: segment.tool_call.kind,
                     status: segment.tool_call.status,
+                    completionReason: segment.tool_call.completion_reason ?? null,
                     title: segment.tool_call.title,
                     command: segment.tool_call.command ?? null,
                     output: segment.tool_call.output ?? null,

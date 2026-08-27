@@ -17,7 +17,8 @@ export type ConversationSegmentStatus = ConversationSegmentResponse['status']
 export interface ConversationTimelineToolCall {
     id: string
     kind: 'command_execution' | 'file_change' | 'dynamic_tool'
-    status: 'running' | 'completed' | 'failed'
+    status: 'running' | 'completed' | 'failed' | 'yielded'
+    completionReason?: string | null
     title: string
     command?: string | null
     output?: string | null
