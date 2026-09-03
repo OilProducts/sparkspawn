@@ -26,7 +26,11 @@ use crate::agent::{
 use crate::session::SessionSteeringHandle;
 
 pub const CODEX_APP_SERVER_BACKEND: &str = "codex_app_server";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Control-plane requests (initialize, thread/start, turn/start, …) normally
+/// answer in well under a second; the bound only has to catch a wedged
+/// app-server. Fifteen seconds proved too tight once startup work such as MCP
+/// server launch or an OAuth token refresh sits in front of the first reply.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const TURN_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 const CODEX_RUNTIME_ROOT_ENV: &str = "ATTRACTOR_CODEX_RUNTIME_ROOT";
 const CODEX_SEED_DIR_ENV: &str = "ATTRACTOR_CODEX_SEED_DIR";
@@ -1845,12 +1849,21 @@ pub fn build_codex_runtime_environment() -> Result<BTreeMap<String, String>, Cod
         }
     }
     for file_name in ["auth.json", "config.toml"] {
+        let destination = codex_home.join(file_name);
+        // Credentials are seeded once, never re-copied: the runtime home owns
+        // its own OAuth refresh chain after the first launch (or a login run
+        // against CODEX_HOME). Re-copying the host's auth.json on every spawn
+        // shares one refresh token between two codex installs, and whichever
+        // rotates it second is invalidated ("refresh token was already used").
+        if file_name == "auth.json" && destination.is_file() {
+            continue;
+        }
         if let Some(source) = seed_candidates
             .iter()
             .map(|candidate| candidate.join(file_name))
             .find(|candidate| candidate.is_file())
         {
-            let _ = copy_file_if_changed(&source, &codex_home.join(file_name));
+            let _ = copy_file_if_changed(&source, &destination);
         }
     }
     force_standard_service_tier(&codex_home.join("config.toml")).map_err(|error| {

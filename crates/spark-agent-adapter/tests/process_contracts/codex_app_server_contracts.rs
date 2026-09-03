@@ -493,6 +493,44 @@ fn runtime_environment_prepends_first_party_tool_bin_to_path() {
 }
 
 #[test]
+fn runtime_environment_never_overwrites_an_existing_runtime_auth_file() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime_root = temp.path().join("runtime-codex");
+    let isolated_codex_home = runtime_root.join(".codex");
+    let host_codex_home = temp.path().join("host-codex-home");
+    fs::create_dir_all(&host_codex_home).expect("host codex home");
+    fs::create_dir_all(&isolated_codex_home).expect("runtime codex home");
+    // The runtime home already owns its own credentials (a login run against
+    // CODEX_HOME, or a prior refresh); the host's differing copy must not
+    // clobber them, or both installs end up sharing one refresh chain.
+    fs::write(
+        isolated_codex_home.join("auth.json"),
+        r#"{"owner":"runtime"}"#,
+    )
+    .expect("runtime auth");
+    fs::write(host_codex_home.join("auth.json"), r#"{"owner":"host"}"#).expect("host auth");
+    fs::write(
+        host_codex_home.join("config.toml"),
+        "model = \"gpt-5.6-sol\"\n",
+    )
+    .expect("host config");
+    let _runtime_guard = EnvVarGuard::set("ATTRACTOR_CODEX_RUNTIME_ROOT", &runtime_root);
+    let _seed_guard =
+        EnvVarGuard::set("ATTRACTOR_CODEX_SEED_DIR", temp.path().join("missing-seed"));
+    let _codex_home_guard = EnvVarGuard::set("CODEX_HOME", &host_codex_home);
+
+    build_codex_runtime_environment().expect("runtime env");
+
+    assert_eq!(
+        fs::read_to_string(isolated_codex_home.join("auth.json")).expect("runtime auth"),
+        r#"{"owner":"runtime"}"#
+    );
+    // Non-credential config is still seeded.
+    assert!(isolated_codex_home.join("config.toml").is_file());
+}
+
+#[test]
 fn runtime_environment_uses_isolated_codex_home_and_seeds_from_host_home() {
     let _lock = ENV_LOCK.lock().expect("env lock");
     let temp = tempfile::tempdir().expect("tempdir");
