@@ -78,6 +78,7 @@ fn journal_kind(raw_type: &str) -> String {
             | "CancelRequested"
             | "ChildRunStarted"
             | "ChildRunCompleted"
+            | "ChildInvocationReset"
             | "lifecycle"
     ) {
         "lifecycle"
@@ -227,6 +228,13 @@ fn journal_summary(
             string_payload(event, "status")
                 .map(|status| format!("{source_prefix}Child run completed: {label} ({status})"))
                 .unwrap_or_else(|| format!("{source_prefix}Child run completed: {label}"))
+        }
+        "ChildInvocationReset" => {
+            let node =
+                string_payload(event, "parent_node_id").unwrap_or_else(|| "node".to_string());
+            let prior = string_payload(event, "prior_child_run_id")
+                .unwrap_or_else(|| "prior child".to_string());
+            format!("{source_prefix}Child invocation reset at {node}: launching fresh work (prior child {prior})")
         }
         "ChildInterventionRequested" => {
             let child_run_id =

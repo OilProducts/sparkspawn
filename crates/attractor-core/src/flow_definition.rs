@@ -196,6 +196,11 @@ pub struct NodeRuntimeConfig {
     pub retry_target: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_retry_target: Option<String>,
+    /// Maximum number of times routing may enter this node within one run.
+    /// Exceeding it fails the run instead of looping (failure-edge
+    /// convergence guard). Absent means the engine default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_entries: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
