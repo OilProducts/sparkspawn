@@ -1,5 +1,6 @@
 import type {
     ConversationSegmentResponse,
+    ConversationSegmentTombstoneEventResponse,
     ConversationSegmentUpsertEventResponse,
     ConversationSnapshotResponse,
     ConversationSummaryResponse,
@@ -12,7 +13,10 @@ export type PendingConversationTurnState = {
     afterRevision: number
 }
 
-export type ConversationStreamEvent = ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse
+export type ConversationStreamEvent =
+    | ConversationTurnUpsertEventResponse
+    | ConversationSegmentUpsertEventResponse
+    | ConversationSegmentTombstoneEventResponse
 
 export function upsertConversationTurn(
     snapshot: ConversationSnapshotResponse,

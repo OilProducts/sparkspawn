@@ -43,12 +43,24 @@ pub enum TranscriptRecord {
         source_event_sequence: u64,
         segment: TranscriptSegment,
     },
+    /// Removal of one obsolete projected segment (compatibility repair).
+    /// Appended like every other record; hydration applies it in order, so
+    /// raw history is never rewritten.
+    SegmentTombstone {
+        revision: u64,
+        committed_at: String,
+        source_event_sequence: u64,
+        turn_id: String,
+        segment_id: String,
+    },
 }
 
 impl TranscriptRecord {
     pub fn revision(&self) -> u64 {
         match self {
-            Self::TurnUpsert { revision, .. } | Self::SegmentUpsert { revision, .. } => *revision,
+            Self::TurnUpsert { revision, .. }
+            | Self::SegmentUpsert { revision, .. }
+            | Self::SegmentTombstone { revision, .. } => *revision,
         }
     }
 
@@ -59,6 +71,10 @@ impl TranscriptRecord {
                 ..
             }
             | Self::SegmentUpsert {
+                source_event_sequence,
+                ..
+            }
+            | Self::SegmentTombstone {
                 source_event_sequence,
                 ..
             } => *source_event_sequence,
@@ -231,6 +247,9 @@ impl ActivityRepository {
                 TranscriptRecord::TurnUpsert { turn, .. } => transcript.upsert_turn(turn),
                 TranscriptRecord::SegmentUpsert { segment, .. } => {
                     transcript.upsert_segment(segment)
+                }
+                TranscriptRecord::SegmentTombstone { segment_id, .. } => {
+                    transcript.remove_segment(&segment_id);
                 }
             }
         }

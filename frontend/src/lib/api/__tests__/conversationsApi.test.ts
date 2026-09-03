@@ -549,4 +549,64 @@ describe('conversationsApi parsing', () => {
         expect(event.flow_run_requests?.[0]?.id).toBe('request-1')
         expect(event.flow_launches?.[0]?.id).toBe('launch-1')
     })
+
+    it('parses yielded tool calls with their completion reason', () => {
+        const event = parseConversationStreamEventResponse({
+            type: 'segment_upsert',
+            revision: 7,
+            conversation_id: 'conversation-yield',
+            project_path: '/tmp/project-yield',
+            title: 'Yield thread',
+            updated_at: '2026-08-27T12:00:00Z',
+            segment: {
+                id: 'segment-tool-app-1-exec-a',
+                turn_id: 'turn-1',
+                order: 2,
+                kind: 'tool_call',
+                role: 'system',
+                status: 'complete',
+                timestamp: '2026-08-27T11:59:58Z',
+                updated_at: '2026-08-27T12:00:00Z',
+                content: '',
+                tool_call: {
+                    id: 'exec-a',
+                    kind: 'command_execution',
+                    status: 'yielded',
+                    completion_reason: 'turn_boundary_yield',
+                    title: 'Run command',
+                    command: 'sleep 60',
+                    output: 'partial',
+                },
+            },
+        })
+        expect(event?.type).toBe('segment_upsert')
+        if (event?.type !== 'segment_upsert') {
+            return
+        }
+        expect(event.segment.tool_call?.status).toBe('yielded')
+        expect(event.segment.tool_call?.completion_reason).toBe('turn_boundary_yield')
+    })
+
+    it('parses segment tombstone stream events', () => {
+        const event = parseConversationStreamEventResponse({
+            type: 'segment_tombstone',
+            revision: 9,
+            conversation_id: 'conversation-yield',
+            project_path: '/tmp/project-yield',
+            title: 'Yield thread',
+            updated_at: '2026-08-27T12:00:01Z',
+            turn_id: 'turn-1',
+            segment_id: 'segment-agent-event-turn-1-turn_completed-6',
+        })
+        expect(event).toEqual({
+            type: 'segment_tombstone',
+            revision: 9,
+            conversation_id: 'conversation-yield',
+            project_path: '/tmp/project-yield',
+            title: 'Yield thread',
+            updated_at: '2026-08-27T12:00:01Z',
+            turn_id: 'turn-1',
+            segment_id: 'segment-agent-event-turn-1-turn_completed-6',
+        })
+    })
 })

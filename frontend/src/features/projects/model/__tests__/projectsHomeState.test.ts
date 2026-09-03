@@ -535,6 +535,55 @@ describe('applyConversationSnapshotToCache', () => {
     }))
   })
 
+  it('removes tombstoned segments from the timeline', () => {
+    const initialSnapshot = buildSnapshot({
+      segments: [
+        {
+          ...buildSnapshot().segments[0],
+          id: 'assistant-final',
+          kind: 'assistant_message',
+          status: 'complete',
+          content: 'Final answer.',
+          order: 1,
+          tool_call: null,
+        },
+        {
+          ...buildSnapshot().segments[0],
+          id: 'segment-agent-event-turn-1-turn_completed-6',
+          kind: 'tool_call',
+          status: 'running',
+          content: '',
+          order: 2,
+        },
+      ],
+    })
+    const cacheWithInitialSnapshot = applyConversationSnapshotToCache(
+      EMPTY_PROJECT_CONVERSATION_CACHE_STATE,
+      initialSnapshot.project_path,
+      initialSnapshot,
+    ).cache
+
+    const result = applyConversationStreamEventToCache(
+      cacheWithInitialSnapshot,
+      initialSnapshot.project_path,
+      {
+        type: 'segment_tombstone',
+        revision: 2,
+        conversation_id: initialSnapshot.conversation_id,
+        project_path: initialSnapshot.project_path,
+        title: initialSnapshot.title,
+        updated_at: '2026-08-27T12:00:00Z',
+        turn_id: initialSnapshot.segments[0].turn_id,
+        segment_id: 'segment-agent-event-turn-1-turn_completed-6',
+      },
+    )
+
+    expect(result.record.segmentsById['segment-agent-event-turn-1-turn_completed-6']).toBeUndefined()
+    const timelineIds = getConversationTimelineEntries(result.record).map((entry) => entry.id)
+    expect(timelineIds).not.toContain('segment-agent-event-turn-1-turn_completed-6')
+    expect(timelineIds).toContain('assistant-final')
+  })
+
   it('reports stream events for unknown conversations as missing records', () => {
     const result = applyConversationStreamEventToCache(
       EMPTY_PROJECT_CONVERSATION_CACHE_STATE,

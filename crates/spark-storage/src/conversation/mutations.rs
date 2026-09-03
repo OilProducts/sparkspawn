@@ -21,6 +21,13 @@ pub enum ConversationMutation {
         segment: TranscriptSegment,
         source_event_sequence: u64,
     },
+    /// Remove one obsolete projected segment during compatibility repair.
+    /// Append-only at the storage layer: the removal is journaled and written
+    /// as a transcript tombstone record; no history is rewritten.
+    SegmentTombstoned {
+        turn_id: String,
+        segment_id: String,
+    },
     /// Upsert one artifact record (matched by `id`) in a collection.
     ArtifactUpserted {
         collection: ArtifactCollection,

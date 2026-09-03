@@ -108,6 +108,18 @@ impl ConversationRepository {
                     source_event_sequences.push(Some(source_event_sequence));
                     write_plan.transcript = true;
                 }
+                ConversationMutation::SegmentTombstoned {
+                    turn_id,
+                    segment_id,
+                } => {
+                    record.transcript.remove_segment(&segment_id);
+                    entry_kinds.push(JournalEntryKind::SegmentTombstoned {
+                        turn_id,
+                        segment_id,
+                    });
+                    source_event_sequences.push(None);
+                    write_plan.transcript = true;
+                }
                 ConversationMutation::ArtifactUpserted {
                     collection,
                     artifact,
@@ -167,6 +179,19 @@ impl ConversationRepository {
                         committed_at: event.committed_at.clone(),
                         source_event_sequence: source_event_sequence.unwrap_or(event.sequence),
                         segment: segment.clone(),
+                    })?;
+                    transcript_revision += 1;
+                }
+                JournalEntryKind::SegmentTombstoned {
+                    turn_id,
+                    segment_id,
+                } => {
+                    activity.append_transcript(&crate::TranscriptRecord::SegmentTombstone {
+                        revision: transcript_revision,
+                        committed_at: event.committed_at.clone(),
+                        source_event_sequence: source_event_sequence.unwrap_or(event.sequence),
+                        turn_id: turn_id.clone(),
+                        segment_id: segment_id.clone(),
                     })?;
                     transcript_revision += 1;
                 }

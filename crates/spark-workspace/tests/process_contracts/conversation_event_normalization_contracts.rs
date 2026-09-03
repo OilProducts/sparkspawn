@@ -3385,3 +3385,121 @@ fn runtime_session_absent_falls_back_to_transcript_turn_scan() {
     assert_eq!(healed.thread_id.as_deref(), Some("thread-legacy"));
     assert!(!healed.resume_failed);
 }
+
+/// Live ingestion and recovery replay share one deterministic projector with
+/// replay-stable inputs (provider committed_at + append sequence). A reopen
+/// after a live-projected turn — including an unmatched tool start finalized
+/// as `yielded` at the turn boundary — must therefore be a fixed point: zero
+/// new revisions, byte-identical transcript, canonical ordering already in
+/// place.
+#[test]
+fn live_projection_is_a_canonical_fixed_point_for_recovery_replay() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let settings = settings(temp.path());
+    let service = WorkspaceConversationService::new(settings.clone());
+    let conversation_id = "conversation-live-equivalence";
+    let project_path = "/projects/live-equivalence";
+    let (prepared, _) = service
+        .start_turn(
+            conversation_id,
+            ConversationTurnRequest {
+                project_path: project_path.to_string(),
+                message: "Run things".to_string(),
+                ..ConversationTurnRequest::default()
+            },
+        )
+        .expect("start turn");
+
+    let turn_completed = TurnStreamEvent {
+        kind: TurnStreamEventKind::TurnCompleted,
+        channel: None,
+        source: TurnStreamSource {
+            app_turn_id: Some("app-turn".to_string()),
+            raw_kind: Some("turn_completed".to_string()),
+            ..TurnStreamSource::default()
+        },
+        content_delta: None,
+        message: None,
+        tool_call: None,
+        request_user_input: None,
+        token_usage: None,
+        error: None,
+        error_code: None,
+        details: None,
+        phase: None,
+        status: Some("completed".to_string()),
+    };
+    service
+        .ingest_agent_turn_output(
+            conversation_id,
+            project_path,
+            &prepared.assistant_turn_id,
+            "chat",
+            AgentTurnOutput {
+                events: vec![
+                    tool_event("tool_call_started", "exec-a", "running", ""),
+                    content_completed("assistant", "Done.", "app-turn", "answer"),
+                    turn_completed,
+                ],
+                final_assistant_text: Some("Done.".to_string()),
+                ..AgentTurnOutput::default()
+            },
+        )
+        .expect("ingest");
+
+    let repo = ConversationRepository::new(&settings.data_dir);
+    let snapshot = repo
+        .read_snapshot(conversation_id, Some(project_path))
+        .expect("read")
+        .expect("snapshot");
+    let revision = snapshot["revision"].as_i64().expect("revision");
+    let segments: Vec<&serde_json::Value> = snapshot["segments"]
+        .as_array()
+        .expect("segments")
+        .iter()
+        .filter(|segment| segment["turn_id"] == prepared.assistant_turn_id.as_str())
+        .collect();
+
+    let tool = segments
+        .iter()
+        .find(|segment| segment["id"] == "segment-tool-app-turn-exec-a")
+        .expect("yielded tool");
+    assert_eq!(tool["status"], "complete");
+    assert_eq!(tool["tool_call"]["status"], "yielded");
+    assert_eq!(
+        tool["tool_call"]["completion_reason"],
+        "turn_boundary_yield"
+    );
+    let answer = segments
+        .iter()
+        .find(|segment| segment["kind"] == "assistant_message")
+        .expect("answer");
+    assert!(tool["order"].as_i64().expect("order") < answer["order"].as_i64().expect("order"));
+    let lifecycle: Vec<&&serde_json::Value> = segments
+        .iter()
+        .filter(|segment| segment["kind"] == "agent_event")
+        .collect();
+    assert_eq!(lifecycle.len(), 1);
+    assert_eq!(
+        lifecycle[0]["id"],
+        "segment-agent-event-app-turn-turn_completed"
+    );
+
+    let project = ProjectRegistry::new(&settings.data_dir)
+        .ensure_project_paths(project_path)
+        .expect("project paths");
+    let transcript_path = project
+        .conversations_dir
+        .join(conversation_id)
+        .join("transcript.jsonl");
+    let transcript_before = std::fs::read_to_string(&transcript_path).expect("transcript");
+    let reopened = repo
+        .read_snapshot(conversation_id, Some(project_path))
+        .expect("reopen")
+        .expect("snapshot");
+    assert_eq!(reopened["revision"].as_i64().expect("revision"), revision);
+    assert_eq!(
+        std::fs::read_to_string(&transcript_path).expect("transcript after"),
+        transcript_before
+    );
+}

@@ -3,10 +3,8 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useStore } from '@/store'
 import type {
     ConversationSummaryResponse,
-    ConversationSegmentUpsertEventResponse,
     ConversationSnapshotResponse,
     ConversationStreamDeltaEventResponse,
-    ConversationTurnUpsertEventResponse,
 } from '@/lib/workspaceClient'
 import { fetchProjectConversationListValidated } from '@/lib/workspaceClient'
 import {
@@ -144,7 +142,7 @@ export function useProjectConversationCache({
 
     const applyConversationStreamEvent = useCallback((
         projectPath: string,
-        event: ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse,
+        event: ConversationStreamEvent,
         source = 'unknown',
     ) => {
         debugProjectChat('apply conversation stream event', {

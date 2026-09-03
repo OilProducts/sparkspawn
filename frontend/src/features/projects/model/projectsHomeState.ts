@@ -6,6 +6,7 @@ import { isAbsoluteProjectPath, normalizeProjectPath } from '@/lib/projectPaths'
 import {
     ApiHttpError,
     type ConversationSegmentResponse,
+    type ConversationSegmentTombstoneEventResponse,
     type ConversationSegmentUpsertEventResponse,
     type ConversationSnapshotResponse,
     type ConversationStreamDeltaEventResponse,
@@ -30,7 +31,10 @@ export type {
     ConversationSummaryResponse,
 } from '@/lib/workspaceClient'
 
-export type ConversationStreamEvent = ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse
+export type ConversationStreamEvent =
+    | ConversationTurnUpsertEventResponse
+    | ConversationSegmentUpsertEventResponse
+    | ConversationSegmentTombstoneEventResponse
 
 export type ConversationStreamDelta = ConversationStreamDeltaEventResponse
 
@@ -619,6 +623,19 @@ export function applyConversationStreamEventToCache(
             proposedPlansById: proposedPlans.byId,
         }
         mergedRecord = rebuildTurnTimelineEntries(mergedRecord, segment.turn_id)
+    } else if (event.type === 'segment_tombstone') {
+        const remainingSegmentsById = { ...existingRecord.segmentsById }
+        delete remainingSegmentsById[event.segment_id]
+        const turnSegmentIds = existingRecord.orderedSegmentIdsByTurnId[event.turn_id] || []
+        mergedRecord = {
+            ...mergedRecord,
+            segmentsById: remainingSegmentsById,
+            orderedSegmentIdsByTurnId: {
+                ...existingRecord.orderedSegmentIdsByTurnId,
+                [event.turn_id]: turnSegmentIds.filter((id) => id !== event.segment_id),
+            },
+        }
+        mergedRecord = rebuildTurnTimelineEntries(mergedRecord, event.turn_id)
     }
 
     return {

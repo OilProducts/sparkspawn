@@ -25,6 +25,11 @@ pub enum JournalEntryKind {
     SegmentUpserted {
         segment: TranscriptSegment,
     },
+    /// One obsolete projected segment removed by compatibility repair.
+    SegmentTombstoned {
+        turn_id: String,
+        segment_id: String,
+    },
     /// Metadata and/or artifact records changed in this commit. Journaled as a
     /// slim `conversation_snapshot_ref` line; published live as a full
     /// `conversation_snapshot` payload.
@@ -53,6 +58,19 @@ impl JournalEntry {
                 "title": meta.title,
                 "updated_at": self.committed_at,
                 "segment": segment,
+            }),
+            JournalEntryKind::SegmentTombstoned {
+                turn_id,
+                segment_id,
+            } => json!({
+                "type": "segment_tombstone",
+                "revision": self.revision,
+                "conversation_id": meta.conversation_id,
+                "project_path": meta.project_path,
+                "title": meta.title,
+                "updated_at": self.committed_at,
+                "turn_id": turn_id,
+                "segment_id": segment_id,
             }),
             JournalEntryKind::SnapshotCommitted => json!({
                 "type": CONVERSATION_SNAPSHOT_REF_TYPE,

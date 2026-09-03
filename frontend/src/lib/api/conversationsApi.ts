@@ -39,7 +39,8 @@ export interface ConversationSegmentResponse {
     phase?: string | null
     tool_call?: {
         kind: 'command_execution' | 'file_change' | 'dynamic_tool'
-        status: 'running' | 'completed' | 'failed'
+        status: 'running' | 'completed' | 'failed' | 'yielded'
+        completion_reason?: string | null
         id: string
         title: string
         command?: string | null
@@ -210,6 +211,17 @@ export interface ConversationSegmentUpsertEventResponse {
     proposed_plans?: ProposedPlanArtifactResponse[]
 }
 
+export interface ConversationSegmentTombstoneEventResponse {
+    type: 'segment_tombstone'
+    revision: number
+    conversation_id: string
+    project_path: string
+    title: string
+    updated_at: string
+    turn_id: string
+    segment_id: string
+}
+
 export interface ConversationStreamDeltaEventResponse {
     type: 'stream_delta'
     conversation_id: string
@@ -321,7 +333,10 @@ export function parseConversationSegmentResponse(value: unknown): ConversationSe
                     : toolCall.kind === 'dynamic_tool'
                         ? 'dynamic_tool'
                         : 'command_execution',
-                status: toolCall.status === 'running' || toolCall.status === 'failed' ? toolCall.status : 'completed',
+                status: toolCall.status === 'running' || toolCall.status === 'failed' || toolCall.status === 'yielded'
+                    ? toolCall.status
+                    : 'completed',
+                completion_reason: asOptionalNullableString(toolCall.completion_reason),
                 title: toolCall.title,
                 command: asOptionalNullableString(toolCall.command),
                 output: asOptionalNullableString(toolCall.output),
@@ -643,7 +658,7 @@ export function parseConversationSnapshotResponse(
 export function parseConversationStreamEventResponse(
     payload: unknown,
     endpoint = '/workspace/api/live/events',
-): ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse | null {
+): ConversationTurnUpsertEventResponse | ConversationSegmentUpsertEventResponse | ConversationSegmentTombstoneEventResponse | null {
     const record = expectObjectRecord(payload, endpoint)
     const type = typeof record.type === 'string' ? record.type : ''
     const eventRevision = typeof record.revision === 'number' && Number.isFinite(record.revision)
@@ -709,6 +724,29 @@ export function parseConversationStreamEventResponse(
             ...(flow_run_requests ? { flow_run_requests } : {}),
             ...(flow_launches ? { flow_launches } : {}),
             ...(proposed_plans ? { proposed_plans } : {}),
+        }
+    }
+    if (type === 'segment_tombstone') {
+        if (
+            typeof record.conversation_id !== 'string'
+            || typeof record.project_path !== 'string'
+            || typeof record.title !== 'string'
+            || typeof record.updated_at !== 'string'
+            || typeof record.turn_id !== 'string'
+            || typeof record.segment_id !== 'string'
+            || eventRevision === null
+        ) {
+            return null
+        }
+        return {
+            type: 'segment_tombstone',
+            revision: eventRevision,
+            conversation_id: record.conversation_id,
+            project_path: record.project_path,
+            title: record.title,
+            updated_at: record.updated_at,
+            turn_id: record.turn_id,
+            segment_id: record.segment_id,
         }
     }
     return null

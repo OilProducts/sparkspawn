@@ -27,7 +27,8 @@ export const getSurfaceToneClassName = (tone: SurfaceTone) => (
 export interface TranscriptToolCall {
     id: string
     kind: 'command_execution' | 'file_change' | 'dynamic_tool'
-    status: 'running' | 'completed' | 'failed'
+    status: 'running' | 'completed' | 'failed' | 'yielded'
+    completionReason?: string | null
     title: string
     command?: string | null
     output?: string | null
@@ -52,12 +53,15 @@ export interface TranscriptToolCallEntry {
     toolCall: TranscriptToolCall
 }
 
-export const getToolCallStatusPresentation = (status: 'running' | 'completed' | 'failed') => {
+export const getToolCallStatusPresentation = (status: 'running' | 'completed' | 'failed' | 'yielded') => {
     if (status === 'running') {
         return { label: 'Running', tone: 'info' as const }
     }
     if (status === 'failed') {
         return { label: 'Failed', tone: 'danger' as const }
+    }
+    if (status === 'yielded') {
+        return { label: 'Yielded', tone: 'neutral' as const }
     }
     return { label: 'Completed', tone: 'success' as const }
 }

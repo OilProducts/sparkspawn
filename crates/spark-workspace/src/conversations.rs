@@ -939,14 +939,17 @@ impl WorkspaceConversationService {
             );
         }
         for mut event in output.events {
-            if persist_provider_events {
-                repository.append_provider_event(
+            let provenance = if persist_provider_events {
+                Some(repository.append_provider_event(
                     conversation_id,
                     &project_path,
                     assistant_turn_id,
                     &mut event,
-                )?;
-            }
+                )?)
+            } else {
+                None
+            };
+            let provenance = provenance.as_ref();
             ensure_assistant_streaming(&mut snapshot, assistant_turn_id, &mut emitted_payloads);
             match &event.kind {
                 TurnStreamEventKind::TokenUsageUpdated => {
@@ -975,9 +978,13 @@ impl WorkspaceConversationService {
                             emitted_payloads.push(build_turn_upsert_payload(&snapshot, &turn));
                         }
                     }
-                    if let Some(segment) =
-                        materialize_segment_for_event(&mut snapshot, assistant_turn_id, &event)
-                            .filter(|_| should_emit_segment_upsert_for_event(&event))
+                    if let Some(segment) = materialize_segment_for_event(
+                        &mut snapshot,
+                        assistant_turn_id,
+                        &event,
+                        provenance,
+                    )
+                    .filter(|_| should_emit_segment_upsert_for_event(&event))
                     {
                         emitted_payloads.push(build_segment_upsert_payload(&snapshot, &segment));
                     }
@@ -1002,25 +1009,44 @@ impl WorkspaceConversationService {
                         let turn = turn.clone();
                         emitted_payloads.push(build_turn_upsert_payload(&snapshot, &turn));
                     }
-                    if let Some(segment) =
-                        materialize_segment_for_event(&mut snapshot, assistant_turn_id, &event)
-                            .filter(|_| should_emit_segment_upsert_for_event(&event))
+                    if let Some(segment) = materialize_segment_for_event(
+                        &mut snapshot,
+                        assistant_turn_id,
+                        &event,
+                        provenance,
+                    )
+                    .filter(|_| should_emit_segment_upsert_for_event(&event))
                     {
                         emitted_payloads.push(build_segment_upsert_payload(&snapshot, &segment));
                     }
                 }
                 TurnStreamEventKind::TurnCompleted => {
-                    if let Some(segment) =
-                        materialize_segment_for_event(&mut snapshot, assistant_turn_id, &event)
-                            .filter(|_| should_emit_segment_upsert_for_event(&event))
+                    finalize_turn_boundary_segments(
+                        &mut snapshot,
+                        assistant_turn_id,
+                        &event,
+                        provenance.map(|record| record.committed_at.as_str()),
+                        &mut emitted_payloads,
+                    );
+                    if let Some(segment) = materialize_segment_for_event(
+                        &mut snapshot,
+                        assistant_turn_id,
+                        &event,
+                        provenance,
+                    )
+                    .filter(|_| should_emit_segment_upsert_for_event(&event))
                     {
                         emitted_payloads.push(build_segment_upsert_payload(&snapshot, &segment));
                     }
                 }
                 _ => {
-                    if let Some(segment) =
-                        materialize_segment_for_event(&mut snapshot, assistant_turn_id, &event)
-                            .filter(|_| should_emit_segment_upsert_for_event(&event))
+                    if let Some(segment) = materialize_segment_for_event(
+                        &mut snapshot,
+                        assistant_turn_id,
+                        &event,
+                        provenance,
+                    )
+                    .filter(|_| should_emit_segment_upsert_for_event(&event))
                     {
                         emitted_payloads.push(build_segment_upsert_payload(&snapshot, &segment));
                     }
@@ -3200,12 +3226,20 @@ fn materialize_segment_for_event(
     snapshot: &mut Value,
     assistant_turn_id: &str,
     event: &TurnStreamEvent,
+    provenance: Option<&spark_storage::ActivityEvent>,
 ) -> Option<Value> {
+    // Provider provenance (append sequence + committed timestamp) keeps live
+    // projection replay-stable: recovery re-deriving the same segment from the
+    // same activity record produces identical identity and timestamps.
+    let now = provenance
+        .map(|record| record.committed_at.clone())
+        .unwrap_or_else(iso_now);
     spark_common::segments::materialize_segment_for_event(
         snapshot,
         assistant_turn_id,
         event,
-        &iso_now(),
+        &now,
+        provenance.map(|record| record.sequence),
     )
 }
 
@@ -3597,7 +3631,7 @@ struct LiveConversationTurnState {
 
 impl LiveConversationTurnState {
     fn ingest_event(&mut self, mut event: TurnStreamEvent) -> spark_storage::Result<()> {
-        self.repository.append_provider_event(
+        let provenance = self.repository.append_provider_event(
             &self.conversation_id,
             &self.project_path,
             &self.assistant_turn_id,
@@ -3657,7 +3691,7 @@ impl LiveConversationTurnState {
                         emitted_payloads.push(build_turn_upsert_payload(&self.snapshot, &turn));
                     }
                 }
-                self.emit_materialized_segment(&event, &mut emitted_payloads);
+                self.emit_materialized_segment(&event, &provenance, &mut emitted_payloads);
             }
             TurnStreamEventKind::ContentCompleted
                 if event.channel == Some(TurnStreamChannel::Assistant) =>
@@ -3678,7 +3712,7 @@ impl LiveConversationTurnState {
                         emitted_payloads.push(build_turn_upsert_payload(&self.snapshot, &turn));
                     }
                 }
-                self.emit_materialized_segment(&event, &mut emitted_payloads);
+                self.emit_materialized_segment(&event, &provenance, &mut emitted_payloads);
             }
             TurnStreamEventKind::Error => {
                 let message = event
@@ -3699,9 +3733,19 @@ impl LiveConversationTurnState {
                     let turn = turn.clone();
                     emitted_payloads.push(build_turn_upsert_payload(&self.snapshot, &turn));
                 }
-                self.emit_materialized_segment(&event, &mut emitted_payloads);
+                self.emit_materialized_segment(&event, &provenance, &mut emitted_payloads);
             }
-            _ => self.emit_materialized_segment(&event, &mut emitted_payloads),
+            TurnStreamEventKind::TurnCompleted => {
+                finalize_turn_boundary_segments(
+                    &mut self.snapshot,
+                    &self.assistant_turn_id,
+                    &event,
+                    Some(provenance.committed_at.as_str()),
+                    &mut emitted_payloads,
+                );
+                self.emit_materialized_segment(&event, &provenance, &mut emitted_payloads);
+            }
+            _ => self.emit_materialized_segment(&event, &provenance, &mut emitted_payloads),
         }
         if event.kind == TurnStreamEventKind::RequestUserInputRequested {
             // Pending user input must survive a restart, so everything the
@@ -3781,11 +3825,15 @@ impl LiveConversationTurnState {
     fn emit_materialized_segment(
         &mut self,
         event: &TurnStreamEvent,
+        provenance: &spark_storage::ActivityEvent,
         emitted_payloads: &mut Vec<Value>,
     ) {
-        if let Some(segment) =
-            materialize_segment_for_event(&mut self.snapshot, &self.assistant_turn_id, event)
-        {
+        if let Some(segment) = materialize_segment_for_event(
+            &mut self.snapshot,
+            &self.assistant_turn_id,
+            event,
+            Some(provenance),
+        ) {
             emitted_payloads.push(build_segment_upsert_payload(&self.snapshot, &segment));
         }
     }
@@ -3799,6 +3847,32 @@ fn append_turn_content(turn: &mut Value, delta: &str) {
         .to_string();
     content.push_str(delta);
     set_string_value(turn, "content", &content);
+}
+
+fn finalize_turn_boundary_segments(
+    snapshot: &mut Value,
+    turn_id: &str,
+    event: &TurnStreamEvent,
+    boundary_committed_at: Option<&str>,
+    emitted_payloads: &mut Vec<Value>,
+) {
+    let successful = !matches!(
+        event.status.as_deref(),
+        Some("failed" | "canceled" | "cancelled")
+    ) && find_turn(snapshot, turn_id)
+        .and_then(|turn| turn.get("status"))
+        .and_then(Value::as_str)
+        != Some("failed");
+    // The provider's turn-boundary timestamp keeps finalization replay-stable;
+    // recovery finalizing from the same activity record writes the same value.
+    let now = boundary_committed_at
+        .map(str::to_string)
+        .unwrap_or_else(iso_now);
+    for segment in
+        spark_common::segments::finalize_turn_segments(snapshot, turn_id, successful, &now)
+    {
+        emitted_payloads.push(build_segment_upsert_payload(snapshot, &segment));
+    }
 }
 
 fn is_final_answer_phase(phase: Option<&str>) -> bool {

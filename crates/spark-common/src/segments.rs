@@ -116,6 +116,7 @@ pub fn materialize_segment_for_event(
     assistant_turn_id: &str,
     event: &TurnStreamEvent,
     now: &str,
+    provider_sequence: Option<u64>,
 ) -> Option<Value> {
     match &event.kind {
         TurnStreamEventKind::ContentDelta
@@ -445,16 +446,20 @@ pub fn materialize_segment_for_event(
             Some(segment)
         }
         TurnStreamEventKind::TurnCompleted => {
-            let segment_id = agent_event_segment_id(snapshot, assistant_turn_id, event);
-            let mut segment = agent_event_segment_shell(
-                &segment_id,
-                assistant_turn_id,
-                next_turn_segment_order(snapshot, assistant_turn_id),
-                "processing",
-                "complete",
-                now,
-                event,
-            );
+            let segment_id = agent_event_segment_id(assistant_turn_id, event, provider_sequence);
+            let mut segment = find_segment(snapshot, &segment_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    agent_event_segment_shell(
+                        &segment_id,
+                        assistant_turn_id,
+                        next_turn_segment_order(snapshot, assistant_turn_id),
+                        "processing",
+                        "complete",
+                        now,
+                        event,
+                    )
+                });
             if let Some(status) = event.status.as_deref().and_then(non_empty_string) {
                 set_string_value(&mut segment, "event_status", &status);
             }
@@ -465,22 +470,26 @@ pub fn materialize_segment_for_event(
             Some(segment)
         }
         TurnStreamEventKind::Other(kind) if is_agent_event_kind(kind) => {
-            let segment_id = agent_event_segment_id(snapshot, assistant_turn_id, event);
+            let segment_id = agent_event_segment_id(assistant_turn_id, event, provider_sequence);
             let (category, status) = match kind.as_str() {
                 "session_start" => ("lifecycle", "running"),
                 "session_end" => ("lifecycle", "complete"),
                 "warning" => ("warning", "complete"),
                 _ => ("session", "complete"),
             };
-            let mut segment = agent_event_segment_shell(
-                &segment_id,
-                assistant_turn_id,
-                next_turn_segment_order(snapshot, assistant_turn_id),
-                category,
-                status,
-                now,
-                event,
-            );
+            let mut segment = find_segment(snapshot, &segment_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    agent_event_segment_shell(
+                        &segment_id,
+                        assistant_turn_id,
+                        next_turn_segment_order(snapshot, assistant_turn_id),
+                        category,
+                        status,
+                        now,
+                        event,
+                    )
+                });
             if let Some(event_status) = event.status.as_deref().and_then(non_empty_string) {
                 set_string_value(&mut segment, "event_status", &event_status);
             }
@@ -537,6 +546,57 @@ pub fn should_emit_segment_upsert_for_event(event: &TurnStreamEvent) -> bool {
         TurnStreamEventKind::Other(kind) if kind == "model_tool_call_delta" => false,
         _ => true,
     }
+}
+
+/// Finalize every still-transient segment at the provider's authoritative
+/// turn boundary. The returned values are the corrective upserts; applying
+/// this function again to the same projection is a no-op.
+pub fn finalize_turn_segments(
+    snapshot: &mut Value,
+    turn_id: &str,
+    successful: bool,
+    now: &str,
+) -> Vec<Value> {
+    let Some(segments) = snapshot.get_mut("segments").and_then(Value::as_array_mut) else {
+        return Vec::new();
+    };
+    let mut changed = Vec::new();
+    for segment in segments
+        .iter_mut()
+        .filter(|segment| segment.get("turn_id").and_then(Value::as_str) == Some(turn_id))
+    {
+        let status = segment.get("status").and_then(Value::as_str).unwrap_or("");
+        if !matches!(status, "streaming" | "running" | "pending") {
+            continue;
+        }
+        let is_tool = matches!(
+            segment.get("kind").and_then(Value::as_str),
+            Some("tool_call" | "model_tool_call")
+        );
+        if successful {
+            set_string_value(segment, "status", "complete");
+            if is_tool {
+                set_string_value(segment, "completion_reason", "turn_boundary_yield");
+                if let Some(tool) = segment.get_mut("tool_call") {
+                    set_string_value(tool, "status", "yielded");
+                    set_string_value(tool, "completion_reason", "turn_boundary_yield");
+                }
+            }
+        } else {
+            set_string_value(segment, "status", "failed");
+            if is_tool {
+                set_string_value(segment, "error_code", "tool_completion_missing");
+                if let Some(tool) = segment.get_mut("tool_call") {
+                    set_string_value(tool, "status", "failed");
+                    set_string_value(tool, "error_code", "tool_completion_missing");
+                }
+            }
+        }
+        set_string_value(segment, "updated_at", now);
+        set_string_value(segment, "completed_at", now);
+        changed.push(segment.clone());
+    }
+    changed
 }
 
 fn append_tool_call_output(segment: &mut Value, delta: &str) {
@@ -751,26 +811,57 @@ pub fn plan_segment_id(turn_id: &str, event: &TurnStreamEvent) -> String {
     }
 }
 
-pub fn agent_event_segment_id(snapshot: &Value, turn_id: &str, event: &TurnStreamEvent) -> String {
+/// Lifecycle event kinds that occur at most once per turn; their segment
+/// identity needs no discriminator beyond the turn scope and kind, so any
+/// replay converges on the same segment.
+const SINGLETON_LIFECYCLE_EVENT_KINDS: &[&str] = &[
+    "turn_completed",
+    "turn_failed",
+    "turn_started",
+    "session_start",
+    "session_end",
+    "session_configured",
+];
+
+pub fn is_singleton_lifecycle_event_kind(kind: &str) -> bool {
+    SINGLETON_LIFECYCLE_EVENT_KINDS.contains(&kind)
+}
+
+pub fn singleton_lifecycle_event_kinds() -> &'static [&'static str] {
+    SINGLETON_LIFECYCLE_EVENT_KINDS
+}
+
+/// Identity is derived only from durable provider facts: app turn + item id
+/// when item-backed, app turn + kind for once-per-turn lifecycle events, and
+/// the appended provider-event sequence for repeatable itemless events. The
+/// mutable order counter must never leak into identity — an id minted from it
+/// can never dedupe on replay.
+pub fn agent_event_segment_id(
+    turn_id: &str,
+    event: &TurnStreamEvent,
+    provider_sequence: Option<u64>,
+) -> String {
     let kind = event
         .source
         .raw_kind
         .as_deref()
         .and_then(non_empty_string)
         .unwrap_or_else(|| event.kind.as_str().to_string());
-    let sequence = next_turn_segment_order(snapshot, turn_id);
-    match (
-        event
-            .source
-            .app_turn_id
-            .as_deref()
-            .and_then(non_empty_string),
-        event.source.item_id.as_deref().and_then(non_empty_string),
-    ) {
-        (Some(app_turn_id), Some(item_id)) => {
-            format!("segment-agent-event-{app_turn_id}-{kind}-{item_id}")
-        }
-        _ => format!("segment-agent-event-{turn_id}-{kind}-{sequence}"),
+    let scope = event
+        .source
+        .app_turn_id
+        .as_deref()
+        .and_then(non_empty_string)
+        .unwrap_or_else(|| turn_id.to_string());
+    if let Some(item_id) = event.source.item_id.as_deref().and_then(non_empty_string) {
+        return format!("segment-agent-event-{scope}-{kind}-{item_id}");
+    }
+    if is_singleton_lifecycle_event_kind(&kind) {
+        return format!("segment-agent-event-{scope}-{kind}");
+    }
+    match provider_sequence {
+        Some(sequence) => format!("segment-agent-event-{scope}-{kind}-seq{sequence}"),
+        None => format!("segment-agent-event-{scope}-{kind}"),
     }
 }
 
@@ -1241,7 +1332,7 @@ mod tests {
             let mut container = serde_json::json!({});
             for (index, event) in events.iter().enumerate() {
                 let now = format!("2026-07-08T10:00:{:02}Z", index);
-                materialize_segment_for_event(&mut container, "turn-1", event, &now);
+                materialize_segment_for_event(&mut container, "turn-1", event, &now, None);
             }
             container
         };
@@ -1256,12 +1347,14 @@ mod tests {
             "turn-a",
             &assistant_delta("a", Some("item-a")),
             "2026-07-08T10:00:00Z",
+            None,
         );
         materialize_segment_for_event(
             &mut container,
             "turn-b",
             &assistant_delta("b", Some("item-b")),
             "2026-07-08T10:00:01Z",
+            None,
         );
         let segments = container["segments"].as_array().expect("segments");
         assert_eq!(segments.len(), 2);
@@ -1286,6 +1379,7 @@ mod tests {
                 "turn-1",
                 event,
                 &format!("2026-07-08T10:00:0{index}Z"),
+                None,
             );
         }
 
@@ -1322,7 +1416,13 @@ mod tests {
         final_answer.phase = Some("final_answer".to_string());
 
         for event in [delta, completed, final_answer] {
-            materialize_segment_for_event(&mut container, "turn-1", &event, "2026-07-08T10:00:00Z");
+            materialize_segment_for_event(
+                &mut container,
+                "turn-1",
+                &event,
+                "2026-07-08T10:00:00Z",
+                None,
+            );
         }
 
         let segments = container["segments"].as_array().expect("segments");
@@ -1346,6 +1446,7 @@ mod tests {
                 "turn-1",
                 event,
                 &format!("2026-07-08T10:00:0{index}Z"),
+                None,
             );
         }
         assert_eq!(container["segments"].as_array().unwrap().len(), 2);
@@ -1359,12 +1460,14 @@ mod tests {
             "turn-1",
             &command_started("cmd-1"),
             "2026-07-08T10:00:00Z",
+            None,
         );
         let delta_segment = materialize_segment_for_event(
             &mut container,
             "turn-1",
             &command_output_delta("cmd-1", "running output\n"),
             "2026-07-08T10:00:01Z",
+            None,
         )
         .expect("delta updates existing command segment");
 
@@ -1377,5 +1480,195 @@ mod tests {
         let segments = container["segments"].as_array().expect("segments");
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0]["tool_call"]["output"], "running output\n");
+    }
+
+    #[test]
+    fn turn_boundary_yields_unmatched_tools_without_losing_output_and_is_idempotent() {
+        let mut container = serde_json::json!({});
+        materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &command_started("cmd-1"),
+            "2026-07-08T10:00:00Z",
+            None,
+        );
+        materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &command_output_delta("cmd-1", "captured"),
+            "2026-07-08T10:00:01Z",
+            None,
+        );
+
+        let changed =
+            finalize_turn_segments(&mut container, "turn-1", true, "2026-07-08T10:00:02Z");
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0]["status"], "complete");
+        assert_eq!(changed[0]["tool_call"]["status"], "yielded");
+        assert_eq!(changed[0]["tool_call"]["output"], "captured");
+        assert_eq!(
+            changed[0]["tool_call"]["completion_reason"],
+            "turn_boundary_yield"
+        );
+        assert!(
+            finalize_turn_segments(&mut container, "turn-1", true, "2026-07-08T10:00:02Z")
+                .is_empty()
+        );
+    }
+
+    fn turn_completed_event(app_turn_id: Option<&str>) -> TurnStreamEvent {
+        TurnStreamEvent {
+            kind: TurnStreamEventKind::TurnCompleted,
+            channel: None,
+            source: crate::events::TurnStreamSource {
+                app_turn_id: app_turn_id.map(str::to_string),
+                raw_kind: Some("turn_completed".to_string()),
+                ..crate::events::TurnStreamSource::default()
+            },
+            content_delta: None,
+            message: None,
+            tool_call: None,
+            request_user_input: None,
+            token_usage: None,
+            error: None,
+            error_code: None,
+            details: None,
+            phase: None,
+            status: Some("completed".to_string()),
+        }
+    }
+
+    fn warning_event() -> TurnStreamEvent {
+        TurnStreamEvent {
+            kind: TurnStreamEventKind::Other("warning".to_string()),
+            channel: None,
+            source: crate::events::TurnStreamSource {
+                raw_kind: Some("warning".to_string()),
+                ..crate::events::TurnStreamSource::default()
+            },
+            content_delta: None,
+            message: Some("careful".to_string()),
+            tool_call: None,
+            request_user_input: None,
+            token_usage: None,
+            error: None,
+            error_code: None,
+            details: None,
+            phase: None,
+            status: None,
+        }
+    }
+
+    #[test]
+    fn turn_completed_replay_converges_on_one_stable_lifecycle_segment() {
+        let mut container = serde_json::json!({});
+        let event = turn_completed_event(Some("app-turn"));
+        let first = materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &event,
+            "2026-07-08T10:00:00Z",
+            Some(41),
+        )
+        .expect("first");
+        let second = materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &event,
+            "2026-07-08T10:00:05Z",
+            Some(77),
+        )
+        .expect("replay");
+        assert_eq!(first["id"], "segment-agent-event-app-turn-turn_completed");
+        assert_eq!(first["id"], second["id"]);
+        assert_eq!(second["order"], first["order"]);
+        assert_eq!(container["segments"].as_array().expect("segments").len(), 1);
+    }
+
+    #[test]
+    fn repeatable_itemless_events_derive_identity_from_provider_sequence() {
+        let mut container = serde_json::json!({});
+        let first = materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &warning_event(),
+            "2026-07-08T10:00:00Z",
+            Some(7),
+        )
+        .expect("first warning");
+        let second = materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &warning_event(),
+            "2026-07-08T10:00:01Z",
+            Some(9),
+        )
+        .expect("second warning");
+        assert_eq!(first["id"], "segment-agent-event-turn-1-warning-seq7");
+        assert_eq!(second["id"], "segment-agent-event-turn-1-warning-seq9");
+        // Replaying the same durable event converges instead of duplicating.
+        materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &warning_event(),
+            "2026-07-08T10:00:02Z",
+            Some(7),
+        )
+        .expect("replay");
+        assert_eq!(container["segments"].as_array().expect("segments").len(), 2);
+    }
+
+    #[test]
+    fn failed_turn_finalization_marks_unmatched_starts_with_missing_completion() {
+        let mut container = serde_json::json!({});
+        materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &command_started("cmd-1"),
+            "2026-07-08T10:00:00Z",
+            None,
+        );
+        let changed =
+            finalize_turn_segments(&mut container, "turn-1", false, "2026-07-08T10:00:02Z");
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0]["status"], "failed");
+        assert_eq!(changed[0]["error_code"], "tool_completion_missing");
+        assert_eq!(changed[0]["tool_call"]["status"], "failed");
+        assert_eq!(
+            changed[0]["tool_call"]["error_code"],
+            "tool_completion_missing"
+        );
+    }
+
+    #[test]
+    fn normal_terminal_tools_are_untouched_by_finalization() {
+        let mut container = serde_json::json!({});
+        materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &command_started("cmd-1"),
+            "2026-07-08T10:00:00Z",
+            None,
+        );
+        let mut completed = command_started("cmd-1");
+        completed.kind = TurnStreamEventKind::ToolCallCompleted;
+        completed.source.raw_kind = Some("tool_item_completed".to_string());
+        if let Some(tool_call) = completed.tool_call.as_mut() {
+            set_string_value(tool_call, "status", "completed");
+        }
+        materialize_segment_for_event(
+            &mut container,
+            "turn-1",
+            &completed,
+            "2026-07-08T10:00:01Z",
+            None,
+        );
+        assert!(
+            finalize_turn_segments(&mut container, "turn-1", true, "2026-07-08T10:00:02Z")
+                .is_empty()
+        );
+        let segment = &container["segments"][0];
+        assert_eq!(segment["tool_call"]["status"], "completed");
+        assert!(segment["tool_call"].get("completion_reason").is_none());
     }
 }
