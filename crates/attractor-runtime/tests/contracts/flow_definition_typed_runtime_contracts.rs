@@ -1228,3 +1228,400 @@ fn tool_output_map_with_missing_json_path_fails() {
         outcome.failure_reason
     );
 }
+
+// ---------------------------------------------------------------------------
+// Manager-loop child invocation reset (CR-2026-0102)
+// ---------------------------------------------------------------------------
+
+fn reentry_parent_flow() -> FlowDefinition {
+    FlowDefinition {
+        schema_version: "1".to_string(),
+        id: "parent_reentry".to_string(),
+        title: "Parent Reentry".to_string(),
+        nodes: [(
+            "run_child".to_string(),
+            FlowNode {
+                kind: NodeKind::Subflow,
+                config: Some(NodeConfig::Subflow {
+                    flow_ref: "child.yaml".to_string(),
+                    input_map: Default::default(),
+                }),
+                manager: Some(ManagerLoopConfig {
+                    max_cycles: Some(1),
+                    child_autostart: Some(true),
+                    ..ManagerLoopConfig::default()
+                }),
+                ..FlowNode::default()
+            },
+        )]
+        .into_iter()
+        .collect(),
+        ..FlowDefinition::default()
+    }
+}
+
+fn reentry_context(temp: &std::path::Path, run_id: &str) -> ContextMap {
+    ContextMap::from([
+        ("internal.run_id".to_string(), json!(run_id)),
+        ("internal.root_run_id".to_string(), json!(run_id)),
+        (
+            "internal.flow_source_dir".to_string(),
+            json!(temp.to_string_lossy().to_string()),
+        ),
+        (
+            "internal.run_workdir".to_string(),
+            json!(temp.to_string_lossy().to_string()),
+        ),
+    ])
+}
+
+fn with_outcome_updates(mut base: ContextMap, outcome: &Outcome) -> ContextMap {
+    for (key, value) in outcome.context_updates.iter() {
+        base.insert(key.clone(), value.clone());
+    }
+    base
+}
+
+fn execute_reentry_node(
+    runner: &mut RuntimeHandlerRunner,
+    flow: &FlowDefinition,
+    run_id: &str,
+    paths: &attractor_runtime::RunRootPaths,
+    temp: &std::path::Path,
+    context: ContextMap,
+) -> Outcome {
+    runner
+        .execute(NodeExecutionRequest {
+            node_id: "run_child".to_string(),
+            stage_index: 0,
+            attempt: 0,
+            context,
+            prompt: String::new(),
+            node: flow.nodes["run_child"].clone(),
+            node_attrs: attractor_runtime::flow_runtime::node_attrs_for_handler(
+                "run_child",
+                &flow.nodes["run_child"],
+            ),
+            flow: flow.clone(),
+            outgoing_edges: Vec::new(),
+            run_paths: Some(paths.clone()),
+            run_workdir: temp.to_path_buf(),
+            run_id: run_id.to_string(),
+            fallback_model: None,
+            fallback_provider: None,
+            fallback_profile: None,
+            fallback_reasoning_effort: None,
+        })
+        .expect("subflow outcome")
+}
+
+fn linked_child_id(outcome: &Outcome) -> String {
+    outcome
+        .context_updates
+        .get("context.stack.child.run_id")
+        .and_then(|value| value.as_str())
+        .expect("linked child id")
+        .to_string()
+}
+
+fn create_parent_run(
+    store: &RunStore,
+    run_id: &str,
+    temp: &std::path::Path,
+) -> attractor_runtime::RunRootPaths {
+    store
+        .create_run(CreateRunRequest {
+            record: RunRecord::new(run_id, temp.to_string_lossy()),
+            checkpoint: None,
+            manifest: None,
+            flow_source: None,
+            flow_definition_json: None,
+        })
+        .expect("create parent run")
+}
+
+/// Re-entry after the node already completed on its child (the executor
+/// checkpointed past it) is a new attempt: the stale completed child is
+/// history and a fresh invocation launches with an advanced index.
+#[test]
+fn manager_reentry_after_acknowledged_completion_launches_fresh_child() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("child.yaml"), CHILD_FLOW_SOURCE).expect("write child flow");
+    let flow = reentry_parent_flow();
+    let store = RunStore::for_runs_dir(temp.path().join("runs"));
+    let paths = create_parent_run(&store, "parent-run", temp.path());
+    let mut runner = RuntimeHandlerRunner::new();
+
+    let first = execute_reentry_node(
+        &mut runner,
+        &flow,
+        "parent-run",
+        &paths,
+        temp.path(),
+        reentry_context(temp.path(), "parent-run"),
+    );
+    assert_eq!(first.status, OutcomeStatus::Success);
+    let first_child = linked_child_id(&first);
+
+    // The executor completed this node and checkpointed past it, so the
+    // child's completion is acknowledged.
+    store
+        .save_checkpoint(
+            &paths,
+            &attractor_core::CheckpointState {
+                timestamp: attractor_runtime::events::utc_timestamp(),
+                current_node: "evaluate".to_string(),
+                completed_nodes: vec!["run_child".to_string()],
+                context: Default::default(),
+                retry_counts: Default::default(),
+                logs: Vec::new(),
+            },
+            Default::default(),
+        )
+        .expect("checkpoint past the node");
+
+    let second = execute_reentry_node(
+        &mut runner,
+        &flow,
+        "parent-run",
+        &paths,
+        temp.path(),
+        with_outcome_updates(reentry_context(temp.path(), "parent-run"), &first),
+    );
+    assert_eq!(second.status, OutcomeStatus::Success);
+    let second_child = linked_child_id(&second);
+    assert_ne!(
+        first_child, second_child,
+        "re-entry must launch a fresh child"
+    );
+
+    let children = store
+        .list_child_run_bundles("parent-run")
+        .expect("child bundles");
+    let mut indices: Vec<u64> = children
+        .iter()
+        .filter_map(|bundle| bundle.record.as_ref()?.child_invocation_index)
+        .collect();
+    indices.sort_unstable();
+    assert_eq!(indices, vec![1, 2]);
+
+    let events = store.read_raw_events(&paths).expect("events");
+    assert!(events.iter().any(|event| {
+        event.event_type == "ChildInvocationReset"
+            && event
+                .payload
+                .get("prior_child_run_id")
+                .and_then(|value| value.as_str())
+                == Some(first_child.as_str())
+    }));
+}
+
+/// A completed child the executor never checkpointed past is the one durable,
+/// unacknowledged invocation a dead executor left behind: crash recovery
+/// adopts it and must not manufacture a sibling.
+#[test]
+fn manager_reentry_with_unacknowledged_completed_child_adopts_it() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("child.yaml"), CHILD_FLOW_SOURCE).expect("write child flow");
+    let flow = reentry_parent_flow();
+    let store = RunStore::for_runs_dir(temp.path().join("runs"));
+    let paths = create_parent_run(&store, "parent-run", temp.path());
+    let mut runner = RuntimeHandlerRunner::new();
+
+    let first = execute_reentry_node(
+        &mut runner,
+        &flow,
+        "parent-run",
+        &paths,
+        temp.path(),
+        reentry_context(temp.path(), "parent-run"),
+    );
+    let first_child = linked_child_id(&first);
+
+    let second = execute_reentry_node(
+        &mut runner,
+        &flow,
+        "parent-run",
+        &paths,
+        temp.path(),
+        with_outcome_updates(reentry_context(temp.path(), "parent-run"), &first),
+    );
+    assert_eq!(second.status, OutcomeStatus::Success);
+    // The adopted child is unchanged, so it is absent from the context diff;
+    // it must never be replaced by a different child.
+    let relinked = second
+        .context_updates
+        .get("context.stack.child.run_id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    assert!(
+        relinked.as_deref().is_none_or(|id| id == first_child),
+        "adopted child was replaced: {relinked:?}"
+    );
+    assert_eq!(
+        store
+            .list_child_run_bundles("parent-run")
+            .expect("child bundles")
+            .len(),
+        1
+    );
+    let events = store.read_raw_events(&paths).expect("events");
+    assert!(!events
+        .iter()
+        .any(|event| event.event_type == "ChildInvocationReset"));
+}
+
+/// A continuation restores another run's context, including its completed
+/// child link. That child belongs to the source run; the continuation must
+/// invoke afresh rather than adopt it.
+#[test]
+fn manager_reentry_with_foreign_completed_child_launches_fresh_child() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("child.yaml"), CHILD_FLOW_SOURCE).expect("write child flow");
+    let flow = reentry_parent_flow();
+    let store = RunStore::for_runs_dir(temp.path().join("runs"));
+    let source_paths = create_parent_run(&store, "source-run", temp.path());
+    let mut runner = RuntimeHandlerRunner::new();
+    let source = execute_reentry_node(
+        &mut runner,
+        &flow,
+        "source-run",
+        &source_paths,
+        temp.path(),
+        reentry_context(temp.path(), "source-run"),
+    );
+    let source_child = linked_child_id(&source);
+
+    let continuation_paths = create_parent_run(&store, "continuation-run", temp.path());
+    let continued = execute_reentry_node(
+        &mut runner,
+        &flow,
+        "continuation-run",
+        &continuation_paths,
+        temp.path(),
+        with_outcome_updates(reentry_context(temp.path(), "continuation-run"), &source),
+    );
+    assert_eq!(continued.status, OutcomeStatus::Success);
+    assert_ne!(linked_child_id(&continued), source_child);
+    assert_eq!(
+        store
+            .list_child_run_bundles("continuation-run")
+            .expect("continuation children")
+            .len(),
+        1
+    );
+}
+
+/// Failure routing that never converges fails the run at the node's entry
+/// limit with an explicit reason instead of looping forever.
+#[test]
+fn executor_fails_run_when_failure_routing_exceeds_node_entry_limit() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = RunStore::for_runs_dir(temp.path().join("runs"));
+    let agent = |prompt: &str, max_entries: Option<u64>| FlowNode {
+        kind: NodeKind::AgentTask,
+        config: Some(NodeConfig::AgentTask {
+            prompt: prompt.to_string(),
+        }),
+        runtime: max_entries.map(|max_entries| NodeRuntimeConfig {
+            max_entries: Some(max_entries),
+            ..NodeRuntimeConfig::default()
+        }),
+        ..FlowNode::default()
+    };
+    let flow = FlowDefinition {
+        schema_version: "1".to_string(),
+        id: "retry-loop".to_string(),
+        title: "Retry Loop".to_string(),
+        nodes: [
+            (
+                "start".to_string(),
+                FlowNode {
+                    kind: NodeKind::Start,
+                    config: Some(NodeConfig::Start {}),
+                    ..FlowNode::default()
+                },
+            ),
+            ("implement".to_string(), agent("implement", None)),
+            ("evaluate".to_string(), agent("evaluate", Some(3))),
+            (
+                "done".to_string(),
+                FlowNode {
+                    kind: NodeKind::Exit,
+                    config: Some(NodeConfig::Exit {
+                        result_summary: false,
+                        result_summary_prompt: None,
+                    }),
+                    ..FlowNode::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        edges: vec![
+            FlowEdge {
+                from: "start".to_string(),
+                to: "implement".to_string(),
+                ..FlowEdge::default()
+            },
+            FlowEdge {
+                from: "implement".to_string(),
+                to: "evaluate".to_string(),
+                condition: "outcome=success".to_string(),
+                ..FlowEdge::default()
+            },
+            FlowEdge {
+                from: "evaluate".to_string(),
+                to: "done".to_string(),
+                label: "Ready".to_string(),
+                condition: "outcome=success".to_string(),
+                ..FlowEdge::default()
+            },
+            FlowEdge {
+                from: "evaluate".to_string(),
+                to: "implement".to_string(),
+                label: "Fix".to_string(),
+                condition: "outcome=fail".to_string(),
+                ..FlowEdge::default()
+            },
+        ],
+        ..FlowDefinition::default()
+    };
+    let mut executor = PipelineExecutor::new(|request: NodeExecutionRequest| {
+        if request.node_id == "evaluate" {
+            return Ok(Outcome {
+                status: OutcomeStatus::Fail,
+                failure_reason: "not good enough".to_string(),
+                ..Outcome::new(OutcomeStatus::Fail)
+            });
+        }
+        Ok(Outcome::new(OutcomeStatus::Success))
+    });
+    let result = executor
+        .execute(ExecuteRunRequest {
+            store,
+            record: RunRecord::new("run-retry-loop", temp.path().to_string_lossy()),
+            flow,
+            flow_source: None,
+            flow_definition_json: None,
+            launch_context: LaunchContext::empty(),
+            runtime_context: ContextMap::new(),
+            max_steps: None,
+            start: Default::default(),
+        })
+        .expect("execute retry loop");
+    assert_eq!(result.status, "failed");
+    assert!(
+        result.failure_reason.contains("node_entry_limit_exceeded"),
+        "unexpected failure reason: {}",
+        result.failure_reason
+    );
+    assert_eq!(
+        result
+            .route_trace
+            .iter()
+            .filter(|node| node.as_str() == "evaluate")
+            .count(),
+        4
+    );
+}

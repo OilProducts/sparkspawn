@@ -527,6 +527,45 @@ where
                 );
             }
 
+            // Failure routing must converge. A node re-entered more times than
+            // its entry limit fails the run with an explicit reason instead of
+            // spinning (the original incident looped 3,400 cycles).
+            let entry_count = route_trace
+                .iter()
+                .filter(|visited| visited.as_str() == current_node)
+                .count() as u64;
+            let entry_limit = node_entry_limit(&flow, &current_node);
+            if entry_count > entry_limit {
+                let reason = format!(
+                    "node_entry_limit_exceeded: node `{current_node}` entered {entry_count} times (limit {entry_limit}); failure routing is not converging"
+                );
+                save_checkpoint_event(
+                    &store,
+                    &paths,
+                    &run_id,
+                    &current_node,
+                    &completed_nodes,
+                    &context,
+                    &retry_counts,
+                )?;
+                return finalize_failed(
+                    &store,
+                    &paths,
+                    &run_id,
+                    &mut record,
+                    &mut self.node_executor,
+                    &flow,
+                    &current_node,
+                    &completed_nodes,
+                    &context,
+                    &retry_counts,
+                    &node_outcomes,
+                    &route_trace,
+                    reason,
+                    artifact_node_ids.len(),
+                );
+            }
+
             let node = flow.nodes.get(&current_node).ok_or_else(|| {
                 RuntimeStorageError::InvalidRuntimeGraph {
                     reason: format!("Unknown runtime node: {current_node}"),
@@ -1743,4 +1782,19 @@ fn stage_failure_reason(outcome: &Outcome) -> String {
     } else {
         reason.to_string()
     }
+}
+
+/// Engine default for how many times routing may enter one node in a run
+/// before the run fails as non-converging. CR-0100's own implement-change run
+/// legitimately needed eleven implement entries; the default leaves ample
+/// headroom while ruling out unbounded spins.
+pub const DEFAULT_NODE_ENTRY_LIMIT: u64 = 32;
+
+fn node_entry_limit(flow: &FlowDefinition, node_id: &str) -> u64 {
+    flow.nodes
+        .get(node_id)
+        .and_then(|node| node.runtime.as_ref())
+        .and_then(|runtime| runtime.max_entries)
+        .filter(|limit| *limit > 0)
+        .unwrap_or(DEFAULT_NODE_ENTRY_LIMIT)
 }

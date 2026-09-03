@@ -240,6 +240,9 @@ pub fn node_attrs_for_handler(node_id: &str, node: &FlowNode) -> BTreeMap<String
         if let Some(value) = runtime.fallback_retry_target.as_deref() {
             insert_string_attr(&mut attrs, "fallback_retry_target", value);
         }
+        if let Some(value) = runtime.max_entries {
+            insert_i64_attr(&mut attrs, "max_entries", value as i64);
+        }
     }
     if let Some(contracts) = node.contracts.as_ref() {
         if !contracts.reads_context.is_empty() {
@@ -461,6 +464,11 @@ fn typed_node_attr_text(node: &FlowNode, key: &str) -> Option<String> {
         "class" => node.runtime.as_ref()?.class.clone(),
         "retry_target" => node.runtime.as_ref()?.retry_target.clone(),
         "fallback_retry_target" => node.runtime.as_ref()?.fallback_retry_target.clone(),
+        "max_entries" => node
+            .runtime
+            .as_ref()?
+            .max_entries
+            .map(|value| value.to_string()),
         "retry_policy" => node.retry.as_ref()?.policy.clone(),
         "max_retries" => node
             .retry

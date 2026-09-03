@@ -275,6 +275,30 @@ pub fn human_gate_answered_event(
     )
 }
 
+/// A manager node re-entered with a linked child it had already consumed (or
+/// that belongs to another run) discarded that link and launched a fresh
+/// invocation. Makes retry attempts first-class in the run timeline.
+pub fn child_invocation_reset_event(
+    parent_run_id: impl Into<String>,
+    parent_node_id: impl Into<String>,
+    prior_child_run_id: impl Into<String>,
+    root_run_id: impl Into<String>,
+    reason: impl Into<String>,
+) -> RawRuntimeEvent {
+    let parent_run_id = parent_run_id.into();
+    event_with_payload(
+        parent_run_id.clone(),
+        "ChildInvocationReset",
+        [
+            ("parent_run_id", json!(parent_run_id)),
+            ("parent_node_id", json!(parent_node_id.into())),
+            ("prior_child_run_id", json!(prior_child_run_id.into())),
+            ("root_run_id", json!(root_run_id.into())),
+            ("reason", json!(reason.into())),
+        ],
+    )
+}
+
 pub fn child_run_started_event(
     parent_run_id: impl Into<String>,
     child_run_id: impl Into<String>,

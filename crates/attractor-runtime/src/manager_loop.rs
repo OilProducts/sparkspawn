@@ -11,8 +11,8 @@ use attractor_core::{
 use serde_json::{json, Value};
 
 use crate::events::{
-    child_intervention_requested_event, child_run_completed_event, child_run_started_event,
-    recovery_decision_required_event,
+    child_intervention_requested_event, child_invocation_reset_event, child_run_completed_event,
+    child_run_started_event, recovery_decision_required_event,
 };
 use crate::executor::{
     ExecuteRunRequest, ExecutionStart, PipelineExecutionResult, PipelineExecutor, RuntimeNodeError,
@@ -174,6 +174,7 @@ fn autostart_child_pipeline(
     }
 
     let linked_child_run_id = context_string(context, "context.stack.child.run_id");
+    let mut invocation_reset: Option<String> = None;
     if !linked_child_run_id.is_empty() {
         if let Some(mut child_result) = resolve_child_result(runner, runtime, &linked_child_run_id)
         {
@@ -184,9 +185,21 @@ fn autostart_child_pipeline(
             // observation-only.
             let restart_marked = child_result.status == "failed"
                 && bundle_restart_marked(runtime, &linked_child_run_id);
-            if (matches!(child_result.status.as_str(), "running" | "waiting") || restart_marked)
-                && runner.child_run_launcher().is_none()
-            {
+            let live_child =
+                matches!(child_result.status.as_str(), "running" | "waiting") || restart_marked;
+            // A terminal linked child is one of two things: the single durable
+            // invocation a dead executor never consumed (crash recovery must
+            // adopt it, never manufacture a sibling), or an invocation this
+            // node already completed on — restored by failure-edge re-entry or
+            // by a continuation (a fresh invocation must launch, or the retry
+            // edge loops on stale work forever). Acknowledgement of the
+            // child's completion before the checkpoint tells them apart.
+            if !live_child {
+                if let Some(reason) = linked_child_is_history(runtime, &linked_child_run_id) {
+                    invocation_reset = Some(reason);
+                }
+            }
+            if invocation_reset.is_none() && live_child && runner.child_run_launcher().is_none() {
                 let store = runtime
                     .run_paths
                     .as_ref()
@@ -203,11 +216,27 @@ fn autostart_child_pipeline(
                     .map_err(RuntimeNodeError::runtime)?;
                 }
             }
-            apply_child_run_result(context, &child_result);
-            return Ok(None);
+            if invocation_reset.is_none() {
+                apply_child_run_result(context, &child_result);
+                return Ok(None);
+            }
         }
     }
-    if context_string(context, "context.stack.child.status").eq_ignore_ascii_case("running") {
+    if let Some(reason) = invocation_reset.as_deref() {
+        runner
+            .emit(
+                runtime,
+                child_invocation_reset_event(
+                    &runtime.run_id,
+                    &runtime.node_id,
+                    &linked_child_run_id,
+                    context_string(context, "internal.root_run_id"),
+                    reason,
+                ),
+            )
+            .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
+    } else if context_string(context, "context.stack.child.status").eq_ignore_ascii_case("running")
+    {
         return Ok(None);
     }
 
@@ -467,6 +496,51 @@ fn autostart_child_pipeline(
         )
         .map_err(|error| RuntimeNodeError::runtime(error.to_string()))?;
     Ok(None)
+}
+
+/// Why a terminal linked child must not be adopted on this entry, if so:
+/// it belongs to a different run (a continuation restored the context), or
+/// its `ChildRunCompleted` was acknowledged at or before this run's checkpoint
+/// — meaning a prior completion of this node already consumed it. `None`
+/// means the child is the unconsumed durable invocation crash recovery adopts.
+fn linked_child_is_history(runtime: &HandlerRuntime, child_run_id: &str) -> Option<String> {
+    let parent_paths = runtime.run_paths.as_ref()?;
+    let store = RunStore::for_runs_dir(parent_paths.runs_dir.clone());
+    let child_bundle = store.read_run_bundle(child_run_id).ok().flatten()?;
+    let owner = child_bundle
+        .record
+        .as_ref()
+        .and_then(|record| record.parent_run_id.clone())
+        .unwrap_or_default();
+    if !owner.is_empty() && owner != runtime.run_id {
+        return Some(format!(
+            "linked child {child_run_id} belongs to run {owner}; this run restored its context and invokes afresh"
+        ));
+    }
+    let checkpoint_at = store
+        .read_run_bundle(&runtime.run_id)
+        .ok()
+        .flatten()
+        .and_then(|bundle| bundle.checkpoint)
+        .map(|checkpoint| checkpoint.timestamp)
+        .unwrap_or_default();
+    if checkpoint_at.is_empty() {
+        return None;
+    }
+    let acknowledged = store
+        .read_raw_events(parent_paths)
+        .unwrap_or_default()
+        .into_iter()
+        .any(|event| {
+            event.event_type == "ChildRunCompleted"
+                && event.emitted_at <= checkpoint_at
+                && event.payload.get("child_run_id").and_then(Value::as_str) == Some(child_run_id)
+        });
+    acknowledged.then(|| {
+        format!(
+            "linked child {child_run_id} completed and was acknowledged before checkpoint {checkpoint_at}; re-entry launches a fresh invocation"
+        )
+    })
 }
 
 fn restart_marked_record(record: &RunRecord) -> bool {
